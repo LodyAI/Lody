@@ -59,7 +59,8 @@ function fixture(
   leases = new SimulatorControlLeases(),
   boot = async () => {},
   tunnelGate: Promise<void> | (() => Promise<void>) = Promise.resolve(),
-  stopCapture: () => Promise<void> = async () => {}
+  stopCapture: () => Promise<void> = async () => {},
+  shutdown: (id: string, signal?: AbortSignal) => Promise<void> = async () => {}
 ) {
   const onAgentPreviewStarted = vi.fn(async (_sessionId: string, _operationId: string) => {});
   const remoteReady = deferred<void>();
@@ -86,6 +87,7 @@ function fixture(
     authorize: async () => {},
     list: async () => [device],
     boot,
+    shutdown,
     binary: async () => '/managed/Baguette',
     process: async (_binary, signal) => {
       starts++;
@@ -699,4 +701,42 @@ it('retains only the unsafe device lease when capture shutdown cannot be confirm
     success: false,
     error: 'occupied',
   });
+});
+
+it('shuts down the simulator only on explicit user stop with shutdownDevice while holding the lease', async () => {
+  const leases = new SimulatorControlLeases();
+  let leaseHeldDuringShutdown = false;
+  const shutdown = vi.fn(async (id: string) => {
+    expect(id).toBe(udid);
+    leaseHeldDuringShutdown = leases.occupancy('ios:' + udid, 'other') === 'other-session';
+  });
+  const a = fixture('w', leases, undefined, undefined, undefined, shutdown);
+
+  // Normal stop never shuts down the simulator.
+  const first = await a.call({ action: 'start', udid });
+  await a.ready.promise;
+  const normalStop = await a.call({ action: 'stop', operationId: first.preview!.operationId });
+  expect(normalStop.success).toBe(true);
+  expect(shutdown).not.toHaveBeenCalled();
+
+  // Agents cannot request device shutdown.
+  const second = await a.agentCall({ action: 'start', udid });
+  const agentDenied = await a.agentCall({
+    action: 'stop',
+    operationId: second.preview!.operationId,
+    shutdownDevice: true,
+  });
+  expect(agentDenied).toMatchObject({ success: false, error: 'denied' });
+  expect(shutdown).not.toHaveBeenCalled();
+
+  // Explicit user stop with shutdownDevice shuts down the simulator before releasing the lease.
+  const fullStop = await a.call({
+    action: 'stop',
+    operationId: second.preview!.operationId,
+    shutdownDevice: true,
+  });
+  expect(fullStop.success).toBe(true);
+  expect(shutdown).toHaveBeenCalledTimes(1);
+  expect(leaseHeldDuringShutdown).toBe(true);
+  expect(leases.occupancy('ios:' + udid, 'other')).toBe('available');
 });

@@ -163,10 +163,7 @@ export function buildProjectBoard(options: {
     if (session.parentSessionId) continue;
     if (session.id === coordinatorSessionId) continue;
     if (!isSessionInMyScope(session, options.currentUserId)) continue;
-    // Another coordinator of the same project is a conversation of its own, not a task.
     if (isCoordinatorSession(session)) continue;
-    // Only the coordinator's own tasks: conversations started by hand in the
-    // same project stay in the ordinary sidebar (the owner's choice).
     if (!isOpenedBy(session, coordinatorSessionId)) continue;
     const isAcceptedArchive =
       Boolean(session.isArchived) && typeof session.coordinatorTaskAcceptedAt === 'number';

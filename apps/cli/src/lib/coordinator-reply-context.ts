@@ -250,8 +250,6 @@ export async function resolveCoordinatorOperationOriginThreadId(args: {
       if (roots.length === 1) return roots[0];
     }
   }
-  // When continuing an existing child session (`session_chat`) without an
-  // explicit thread on the current turn, inherit the single thread that created it.
   if (args.targetSessionId) {
     const total = await args.history.count();
     const directory = await args.history.readDirectory(0, total);

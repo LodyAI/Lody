@@ -304,7 +304,6 @@ describe('MachineDocument ACP capabilities', () => {
     await write(true);
     expect(stored()?.systemPrompt).toBe(true);
     expect(canStartCoordinatorSession(currentDaemon, stored())).toBe(true);
-    // A daemon that does not advertise coordinators would drop the prompt.
     expect(canStartCoordinatorSession({ protocolCapabilities: {} }, stored())).toBe(false);
 
     await write(false);

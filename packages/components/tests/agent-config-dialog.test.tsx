@@ -1131,7 +1131,7 @@ describe('AgentConfigDialog', () => {
     expect(onManagedRuntimeSelected).not.toHaveBeenCalled();
     expect(onCheckBinaryStatus).not.toHaveBeenCalled();
     expect(getTabByName('DeepSeek official').getAttribute('aria-selected')).toBe('true');
-    expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('false');
+    expect(getTabByName('Custom endpoint').getAttribute('aria-selected')).toBe('false');
     expect(getVisibleDeepSeekEndpointInput()).toBeNull();
     expect(document.body.querySelector('label[for="deepseek-api-key"]')?.textContent).toBe(
       'DeepSeek API Key'
@@ -1219,8 +1219,8 @@ describe('AgentConfigDialog', () => {
     const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekCreate(onSubmit);
 
-    await selectTab('Custom Endpoint');
-    expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('true');
+    await selectTab('Custom endpoint');
+    expect(getTabByName('Custom endpoint').getAttribute('aria-selected')).toBe('true');
     expect(document.body.querySelector('label[for="deepseek-api-key"]')?.textContent).toBe(
       'API Key'
     );
@@ -1348,7 +1348,7 @@ describe('AgentConfigDialog', () => {
       'sk-updated'
     );
 
-    await selectTab('Custom Endpoint');
+    await selectTab('Custom endpoint');
     expect(getVisibleDeepSeekEndpointInput()?.value).toBe('https://llm.example.com/open/v1');
 
     await selectTab('DeepSeek official');

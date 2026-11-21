@@ -289,7 +289,6 @@ describe('session input attachment preparation', () => {
       ],
     });
 
-    // Materialized user-uploaded file in caller workspace `.lody/attachments/`
     const userDocBytes = Buffer.from('# Spec Document\n');
     const userDocSha = crypto.createHash('sha256').update(userDocBytes).digest('hex');
     const userFileId = 'file-spec-999';
@@ -394,7 +393,6 @@ describe('session input attachment preparation', () => {
       },
     ]);
 
-    // Unknown attachment references outside caller history / delegated receipts are rejected.
     await expect(
       resolveOrPrepareSessionAttachments({
         inputs: ['image:unknown-session-image'],

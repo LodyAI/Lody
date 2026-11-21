@@ -46,7 +46,6 @@ export const disclosureSurface = stylex.create({
     outlineStyle: 'none',
   },
 
-  // ── The strip ────────────────────────────────────────────────────────────
   /** The strip and the panel under it: two blocks, one gap. */
   tabs: {
     display: 'flex',
@@ -159,7 +158,6 @@ export const disclosureSurface = stylex.create({
     cornerShape: corner.round,
   },
 
-  // ── The stack ────────────────────────────────────────────────────────────
   /** The accordion: rows, and nothing around them. */
   stack: { display: 'flex', flexDirection: 'column', minWidth: 0 },
   /**
@@ -234,7 +232,6 @@ export const disclosureSurface = stylex.create({
   },
   chevronOpen: { transform: 'rotate(180deg)' },
 
-  // ── The reveal ───────────────────────────────────────────────────────────
   /**
    * The panel, mid-reveal. Base UI names the height it measured per component,
    * so the two read different variables: one style shared between them would

@@ -90,14 +90,26 @@ export function isPointOverSessionMentionDropLayer(x: number, y: number): boolea
   return Boolean(node?.closest(`[${SESSION_MENTION_DROP_LAYER_ATTR}]`));
 }
 
+let stopPointerHover: (() => void) | null = null;
+
 /**
  * Lights up drop surfaces without an HTML5 transfer.
  *
- * Used by the tab strip's pointer drag (dnd-kit). The caller must clear
- * (`clearSessionMentionDrag`) on drag end/cancel — there is no `dragend`.
+ * Used by pointer drags (dnd-kit: tab strip, Pinned, Focus rows). Until the
+ * drag clears, pointer moves are reported to the surface under the pointer
+ * (`hoverSessionMentionAtPoint`), so every source shows Today's drop line. The
+ * caller must clear (`clearSessionMentionDrag`) on drag end/cancel — there is
+ * no `dragend`.
  */
 export function armSessionMentionDrag(sessionId: string): void {
   setInFlightSessionId(sessionId);
+  if (stopPointerHover || typeof window === 'undefined') return;
+  const move = (event: PointerEvent) => {
+    if (inFlightSessionId)
+      hoverSessionMentionAtPoint(event.clientX, event.clientY, inFlightSessionId);
+  };
+  window.addEventListener('pointermove', move, true);
+  stopPointerHover = () => window.removeEventListener('pointermove', move, true);
 }
 
 export function subscribeSessionMentionDrag(onStoreChange: () => void): () => void {
@@ -109,6 +121,10 @@ export function subscribeSessionMentionDrag(onStoreChange: () => void): () => vo
 
 /** Ends the in-flight drag. Tests call this between cases. */
 export function clearSessionMentionDrag(): void {
+  stopPointerHover?.();
+  stopPointerHover = null;
+  hoveredPointerTarget?.leave?.();
+  hoveredPointerTarget = null;
   unbindWindowDragEnd();
   setInFlightSessionId(null);
 }
@@ -183,17 +199,49 @@ export function readSessionMentionDragSessionId(
   return dataTransfer.getData(SESSION_MENTION_DRAG_TYPE) || null;
 }
 
-// ---------------------------------------------------------------------------
 // Pointer drops. Pointer-driven drags (dnd-kit: pinned sidebar rows) carry no
 // `dataTransfer`, so a mention surface also registers its element here and a
 // release over it is delivered like a native drop.
 
 type PointerMentionTarget = {
   accepts: (sessionId: string) => boolean;
-  drop: (sessionId: string) => void;
+  drop: (sessionId: string, point?: { x: number; y: number }) => void;
+  /** Optional: where the drag hovers, for surfaces that show a drop position. */
+  hover?: (x: number, y: number, sessionId: string) => void;
+  /** Optional: the drag left this surface or ended. */
+  leave?: () => void;
 };
 
 const pointerTargets = new Map<Element, PointerMentionTarget>();
+let hoveredPointerTarget: PointerMentionTarget | null = null;
+
+function pointerTargetAt(x: number, y: number): PointerMentionTarget | null {
+  if (typeof document === 'undefined') return null;
+  // The dragged copy follows the pointer and sits on top: look through it.
+  const stack =
+    typeof document.elementsFromPoint === 'function'
+      ? document.elementsFromPoint(x, y)
+      : [document.elementFromPoint(x, y)];
+  for (const top of stack) {
+    for (let node: Element | null = top; node; node = node.parentElement) {
+      const target = pointerTargets.get(node);
+      if (target) return target;
+    }
+  }
+  return null;
+}
+
+/**
+ * Report a pointer drag's position to the surface under it (and `leave` to the
+ * one it left), so a surface such as Today can draw where a drop would land.
+ */
+function hoverSessionMentionAtPoint(x: number, y: number, sessionId: string): void {
+  const target = pointerTargetAt(x, y);
+  const hovered = target?.accepts(sessionId) ? target : null;
+  if (hoveredPointerTarget && hoveredPointerTarget !== hovered) hoveredPointerTarget.leave?.();
+  hoveredPointerTarget = hovered;
+  hovered?.hover?.(x, y, sessionId);
+}
 
 /** Register `element` as a pointer-drop mention surface; returns the release. */
 export function registerSessionMentionPointerTarget(
@@ -211,20 +259,8 @@ export function registerSessionMentionPointerTarget(
  * under it. Returns whether a surface took the mention.
  */
 export function dropSessionMentionAtPoint(x: number, y: number, sessionId: string): boolean {
-  if (typeof document === 'undefined') return false;
-  // The dragged copy follows the pointer and sits on top: look through it.
-  const stack =
-    typeof document.elementsFromPoint === 'function'
-      ? document.elementsFromPoint(x, y)
-      : [document.elementFromPoint(x, y)];
-  for (const top of stack) {
-    for (let node: Element | null = top; node; node = node.parentElement) {
-      const target = pointerTargets.get(node);
-      if (!target) continue;
-      if (!target.accepts(sessionId)) return false;
-      target.drop(sessionId);
-      return true;
-    }
-  }
-  return false;
+  const target = pointerTargetAt(x, y);
+  if (!target || !target.accepts(sessionId)) return false;
+  target.drop(sessionId, { x, y });
+  return true;
 }

@@ -80,7 +80,7 @@ export function agentRoleWriteCommand(action: 'create' | 'update'): Command {
           : { action, requestId, roleId: values[0], patch: data }
       );
       const { action: _, ...args } = input;
-      const name = `lody_agent_role_${action}`;
+      const name = 'lody_agent_role';
       let machineId: string;
       let workspaceId: string;
       if (getCliPlatformKind() === 'local') {
@@ -109,7 +109,11 @@ export function agentRoleWriteCommand(action: 'create' | 'update'): Command {
             machineId,
             workspaceId,
             ownerSessionId: sessionId,
-            params: { sessionId: sessionId as SessionId, name, arguments: args },
+            params: {
+              sessionId: sessionId as SessionId,
+              name,
+              arguments: { action, arguments: args },
+            },
           })
           .pipe(Effect.result)
       );

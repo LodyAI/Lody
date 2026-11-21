@@ -30,7 +30,6 @@ import { jsonValueEqual } from '@/lib/json-value-equal';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
 import { describeErrorType } from '@/lib/workspace-data-scope';
 
-// ---------------------------------------------------------------------------
 // Runtime guard for metadata entering the cache.
 //
 // The CRDT metadata store may not always include the `id` field — it can be
@@ -41,7 +40,6 @@ import { describeErrorType } from '@/lib/workspace-data-scope';
 //
 // When the data is not even a valid object, the entry is dropped and an async
 // error is reported so it surfaces in monitoring without crashing the render.
-// ---------------------------------------------------------------------------
 
 function stringifyForReport(data: unknown): string {
   try {

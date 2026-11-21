@@ -1,3 +1,4 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Effect } from 'effect';
 import * as localIpc from '@lody/shared/node/local-ipc';
@@ -5,7 +6,6 @@ import { LoroDoc } from 'loro-crdt';
 import { withHistoryPort } from '../../../tests/history-port-fixture';
 import {
   ScheduleCommandSchema,
-  ScheduleRepository,
   ScheduleDefinitionSchema,
   nextScheduleSlot,
   scheduleProposalRuleToTrigger,

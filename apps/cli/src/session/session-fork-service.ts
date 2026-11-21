@@ -863,7 +863,6 @@ export class SessionForkService {
       isWorktree: source.isWorktree,
       parentSessionId,
       ...(spec.targetPlacement ? { childSessionPlacement: spec.targetPlacement } : {}),
-      // A fork continues the source transcript, so it keeps the source's system prompt.
       ...(source.coordinator ? { coordinator: source.coordinator } : {}),
     };
 

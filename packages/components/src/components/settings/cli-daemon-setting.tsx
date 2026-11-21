@@ -82,10 +82,15 @@ export function CliDaemonSetting() {
                 'settings.general.cliDaemon.hostAccessDenied',
                 'Another Lody process with different privileges (started as administrator, as another user, or as a service) holds the local agent, and this app is not allowed to connect. Quit that process, or open Lody with the same privileges, then restart.'
               )
-            : t(
+            : undefined
+        }
+        info={
+          !hostAccessDenied
+            ? t(
                 'settings.general.cliDaemon.helper',
                 'The background process that runs local agents and terminals.'
               )
+            : undefined
         }
         alignTop
       >

@@ -28,7 +28,6 @@ import {
   getSessionRoomId,
   ScheduleAgentSchema,
   ScheduleDefinitionSchema,
-  sessionDocSchema,
   type AcpCapabilityCacheEntry,
   type AgentConfigMeta,
   type MachineMeta,
@@ -40,6 +39,7 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 
 import { prepareSessionInput, resolveTurnDispatchConfig } from '@/commands/session';
 import type { AuthContext } from '../command-runtime';

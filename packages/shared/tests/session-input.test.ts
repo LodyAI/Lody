@@ -16,7 +16,8 @@ import {
 import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
 import { turnExecutionDigest } from '../src/e2ee-execution-intent';
 import { buildInitialHistoryEntry, buildInitialSessionMetaPatch } from '../src/session-bootstrap';
-import { sessionDocSchema, type SessionDoc, type SessionHistoryInput } from '../src/schema';
+import { sessionDocSchema } from '../src/session-doc-schemas';
+import type { SessionDoc, SessionHistoryInput } from '../src/schema';
 import type {
   CommentReferencePayload,
   MachineId,

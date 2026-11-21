@@ -33,6 +33,20 @@ export function resolveRevealFileLabel(
   return t('sessions.fileActions.revealInFileManager', 'Reveal in file manager');
 }
 
+/**
+ * Open the session directory in the OS file manager (`shell.openPath`), so the
+ * window shows that folder's contents. Distinct from reveal, which selects the
+ * path in its parent.
+ */
+export function resolveOpenFolderInFileManagerLabel(
+  platform: SessionFileActionPlatform,
+  t: Translation
+): string {
+  if (platform === 'darwin') return t('sessions.openFolder.finder', 'Open in Finder');
+  if (platform === 'win32') return t('sessions.openFolder.explorer', 'Open in File Explorer');
+  return t('sessions.openFolder.fileManager', 'Open in file manager');
+}
+
 const HTML_PATH = /\.(?:html|htm)$/iu;
 
 /**

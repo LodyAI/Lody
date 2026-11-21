@@ -52,6 +52,8 @@ reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../
 
 Only the latest edit operation may change the local editor or pending state;
 an earlier blur-save acknowledgement must preserve the next row's draft and focus.
+Starting, saving and cancelling an edit complete after the local write, including
+for the first row; remote synchronization must never gate the editor or confirmation.
 [Decision](../../../../../../.agents/notes/implemented/bug-fix/2026-10-13-queued-edit-operation-ownership.md).
 
 The queue disclosure is local display state, initially expanded, never shared or

@@ -7,6 +7,8 @@ import { OrchestrationConnection } from '../orchestration/platform/database';
 import { classifyCapacityFailure } from '@/session/acp-error-classification';
 import type { RateLimitsSnapshot } from 'acp-extension-core';
 import { retainsAutomationGrant } from './actions/authorization';
+import { deliveryRequest } from './actions/session-actions-legacy';
+import en from '../../../../locales/en.json';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchAutomationContext } from './context/fetch';
 import { execAutomationCommand } from './context/exec';
@@ -21,7 +23,17 @@ import type {
   CapacityObservation,
 } from '@lody/shared/automations';
 import { AutomationLedger, automationIdentity } from './storage/ledger';
-import { configureSessionPolicies, internalPolicy } from './policies/session';
+import {
+  configureSessionPolicies,
+  internalPolicy,
+  sessionPolicySettings,
+} from './policies/session';
+import {
+  advanceDelivery,
+  deliveryStepCurrent,
+  startDeliveryEpoch,
+  DELIVERY_PR_CREATION_GRACE_MS,
+} from './policies/delivery';
 import { evaluateCapacity } from './runtime/capacity';
 import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateAutomationProgram as evaluateProgram } from './programs/codemode';
@@ -1591,5 +1603,189 @@ describe('Scoped observations and admission evidence', () => {
       intent: { notBefore: 500 },
     });
     expect(recovered.capacity('binding')).toBeUndefined();
+  });
+});
+
+describe('Auto delivery', () => {
+  const prUrl = 'https://github.com/owner/project/pull/42';
+  const sessionMeta = (pullRequests: SessionMeta['pullRequests'] = []) =>
+    ({ id: 'session', userId: 'user', machineId: 'machine', pullRequests }) as SessionMeta;
+  const linked = sessionMeta([{ url: prUrl, status: 'open' }]);
+  const pr = (
+    headSha: string,
+    ciState: 's' | 'f' | 'p' | null,
+    mergeState: 'c' | 'b' | 'd' | 'u' | null
+  ) => ({
+    number: 42,
+    url: prUrl,
+    status: 'open' as const,
+    headRefName: 'feature',
+    headSha,
+    headRepository: 'owner/project',
+    updatedAt: new Date(100).toISOString(),
+    ciState,
+    mergeState,
+  });
+  const options = { fixCi: true, resolveConflicts: true, merge: true };
+
+  function enabled(settings = options) {
+    const { ledger } = fixture();
+    startDeliveryEpoch(ledger, 'session', 1);
+    configureSessionPolicies(ledger, 'session', 'user', { autoDeliver: settings }, 1);
+    return ledger;
+  }
+  /** Runs the policy for every pending delivery, as the engine does, and returns new receipts. */
+  function deliver(ledger: AutomationLedger, now: number) {
+    return ledger.deliveries().flatMap((delivery) => {
+      const receipts = internalPolicy(delivery).map((intent) =>
+        ledger.accept(delivery, intent, now)
+      );
+      ledger.finishDelivery(delivery, undefined, now);
+      return receipts;
+    });
+  }
+  function settleAll(ledger: AutomationLedger, now: number) {
+    for (const receipt of ledger.pending(Number.MAX_SAFE_INTEGER, 100))
+      ledger.update(receipt.id, receipt.state, { state: 'settled' }, now);
+  }
+  const requested = (receipts: ReturnType<typeof deliver>) =>
+    receipts.map((receipt) => {
+      const input = (receipt.intent.action.parameters as { input: { kind: string; ref: string } })
+        .input;
+      return `${input.kind}:${input.ref}`;
+    });
+
+  it('round-trips the setting and asks for a pull request once when none exists', () => {
+    const ledger = enabled({ fixCi: true, resolveConflicts: false, merge: false });
+    expect(sessionPolicySettings(ledger, 'session').autoDeliver).toEqual({
+      fixCi: true,
+      resolveConflicts: false,
+      merge: false,
+    });
+    expect(advanceDelivery({ ledger, meta: sessionMeta(), options, now: 10 }).status).toEqual({
+      state: 'pr',
+    });
+    advanceDelivery({ ledger, meta: sessionMeta(), options, now: 20 });
+    const receipts = deliver(ledger, 20);
+    expect(requested(receipts)).toEqual(['delivery:create_pr']);
+    // The request waits for the Session group to be idle before it is sent.
+    expect(receipts[0]?.intent.condition).toEqual({
+      kind: 'session.group.settled',
+      parameters: { rootId: 'session' },
+    });
+    settleAll(ledger, 30);
+    expect(advanceDelivery({ ledger, meta: sessionMeta(), options, now: 40 }).status.state).toBe(
+      'pr'
+    );
+    expect(
+      advanceDelivery({
+        ledger,
+        meta: sessionMeta(),
+        options,
+        now: 31 + DELIVERY_PR_CREATION_GRACE_MS,
+      }).status
+    ).toEqual({ state: 'stalled', reason: 'pr_not_created' });
+  });
+
+  it('requests a CI fix per failing head, stops on an unchanged head and after the limit', () => {
+    const ledger = enabled();
+    let now = 100;
+    const heads = ['a', 'b', 'c', 'd'].map((c) => c.repeat(40));
+    for (const [index, head] of heads.slice(0, 3).entries()) {
+      observePullRequests(ledger, linked, 'owner/project', [pr(head, 'f', 'u')], ++now);
+      const decision = advanceDelivery({ ledger, meta: linked, options, now: ++now });
+      expect(decision.status).toEqual({ state: 'fix', attempt: index + 1, prUrl });
+      expect(requested(deliver(ledger, now))).toEqual(['delivery:fix_ci']);
+      // Still outstanding: no second request for the same head.
+      expect(advanceDelivery({ ledger, meta: linked, options, now: ++now }).status.state).toBe(
+        'fix'
+      );
+      settleAll(ledger, ++now);
+    }
+    // A poll after the third repair still shows its head failing: nothing was pushed.
+    observePullRequests(ledger, linked, 'owner/project', [pr(required(heads[2]), 'f', 'u')], ++now);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: ++now }).status).toEqual({
+      state: 'stalled',
+      reason: 'no_new_commit',
+      prUrl,
+    });
+    observePullRequests(ledger, linked, 'owner/project', [pr(required(heads[3]), 'f', 'u')], ++now);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: ++now }).status).toEqual({
+      state: 'stalled',
+      reason: 'ci_limit',
+      prUrl,
+    });
+    expect(deliver(ledger, now)).toEqual([]);
+  });
+
+  it('merges a green head once, drops a request whose head moved and ends after the merge', () => {
+    const ledger = enabled();
+    const first = 'a'.repeat(40);
+    observePullRequests(ledger, linked, 'owner/project', [pr(first, 'p', null)], 100);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 101 }).status.state).toBe('ci');
+    // Unpushed work means the PR head is not the latest work yet.
+    observePullRequests(ledger, linked, 'owner/project', [pr(first, 's', 'c')], 102);
+    expect(
+      advanceDelivery({
+        ledger,
+        meta: { ...linked, workspaceUnpushed: true },
+        options,
+        now: 103,
+      }).status.state
+    ).toBe('ci');
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 104 }).status.state).toBe('merge');
+    const receipts = deliver(ledger, 104);
+    expect(requested(receipts)).toEqual(['delivery:merge']);
+    const merge = required(receipts[0]);
+    expect(deliveryStepCurrent(ledger, 'session', merge.event.id).value).toBe('yes');
+    // The user pushed before the request was admitted: it is now obsolete.
+    observePullRequests(ledger, linked, 'owner/project', [pr('b'.repeat(40), 'p', null)], 105);
+    expect(deliveryStepCurrent(ledger, 'session', merge.event.id).value).toBe('no');
+    settleAll(ledger, 106);
+    observePullRequests(
+      ledger,
+      linked,
+      'owner/project',
+      [{ ...pr('b'.repeat(40), 's', 'c'), status: 'merged' as const }],
+      107
+    );
+    const done = advanceDelivery({ ledger, meta: linked, options, now: 108 });
+    expect(done).toMatchObject({ finished: true, status: { state: 'merged' } });
+  });
+
+  it('leaves merging to the user unless chosen and stops when GitHub blocks the merge', () => {
+    const ledger = enabled({ fixCi: true, resolveConflicts: true, merge: false });
+    observePullRequests(ledger, linked, 'owner/project', [pr('a'.repeat(40), 's', 'c')], 100);
+    expect(
+      advanceDelivery({ ledger, meta: linked, options: { ...options, merge: false }, now: 101 })
+        .status.state
+    ).toBe('ready');
+    observePullRequests(ledger, linked, 'owner/project', [pr('a'.repeat(40), 's', 'b')], 102);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 103 }).status).toEqual({
+      state: 'stalled',
+      reason: 'merge_blocked',
+      prUrl,
+    });
+    expect(deliver(ledger, 103)).toEqual([]);
+  });
+
+  it('sends the Info Bar request text after its origin line, plus the merged head', () => {
+    const values = { repoFullName: 'owner/project', prNumber: 42, prUrl, headSha: 'a'.repeat(40) };
+    const button = (key: 'sessions.prompts.fixCiErrors' | 'sessions.prompts.resolveConflicts') =>
+      en[key]
+        .replace('{{repoFullName}}', values.repoFullName)
+        .replace('{{prLabel}}', '#42')
+        .replace('{{prUrl}}', prUrl);
+    const origin =
+      '(Sent by **Auto delivery** in Lody, which the user turned on for this pull request.)';
+    expect(deliveryRequest('fix_ci', values)).toBe(
+      `${origin}\n\n${button('sessions.prompts.fixCiErrors')}`
+    );
+    expect(deliveryRequest('resolve_conflicts', values)).toBe(
+      `${origin}\n\n${button('sessions.prompts.resolveConflicts')}`
+    );
+    expect(deliveryRequest('merge', values)).toContain(`head commit ${values.headSha}`);
+    expect(deliveryRequest('merge', { ...values, headSha: undefined })).toBeUndefined();
+    expect(deliveryRequest('create_pr', {})).toContain(en['sessions.prompts.prBranchUpkeep']);
   });
 });

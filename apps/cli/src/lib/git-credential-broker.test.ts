@@ -11,6 +11,10 @@ import {
   type GitCredentialBrokerSessionContext,
 } from './git-credential-broker';
 import type { GitHubTokenManager } from './github-token-manager';
+import {
+  createSessionPullRequestLinks,
+  type SessionPullRequestLinkStore,
+} from './session-pr-links';
 import type { Logger } from '../utils/logger';
 
 describe('GitCredentialBroker', () => {
@@ -314,3 +318,121 @@ const makeRes = (): any => {
     },
   };
 };
+
+describe('pull request report endpoint', () => {
+  const machineId = 'machine-1';
+  function store(metas: Record<string, Record<string, unknown> | { deleted: true }>) {
+    const writes: Array<{ roomId: string; patch: Record<string, unknown> }> = [];
+    const value: SessionPullRequestLinkStore = {
+      getDocMeta: async (roomId) => {
+        const meta = metas[roomId];
+        if (!meta) return undefined;
+        return 'deleted' in meta ? { meta: {}, exists: false } : { meta };
+      },
+      upsertDocMeta: async (roomId, patch) => {
+        writes.push({ roomId, patch });
+        metas[roomId] = { ...(metas[roomId] as Record<string, unknown>), ...patch };
+      },
+    };
+    return { value, writes, metas };
+  }
+  function handler(
+    links: ReturnType<typeof createSessionPullRequestLinks>,
+    contexts: Record<string, GitCredentialBrokerSessionContext>
+  ) {
+    return createGitCredentialBrokerHandler({
+      authToken: 'bearer',
+      logger: { debug: vi.fn() } as unknown as Logger,
+      tokenManager: {} as GitHubTokenManager,
+      resolveContext: (token) => contexts[token] ?? null,
+      reportPullRequest: (context, url) => links.link(context.sessionId, url, 'shim'),
+    });
+  }
+  async function report(h: http.RequestListener, body: Record<string, unknown>) {
+    const res = makeRes();
+    h(makeReq({ url: '/pull-request/report', auth: 'Bearer bearer', body }), res);
+    await res.finished;
+    return {
+      status: res.statusCode as number,
+      body: JSON.parse(res.body) as Record<string, unknown>,
+    };
+  }
+
+  it("links the PR to the reporting context's owner Session, never to an environment-chosen one", async () => {
+    const s = store({
+      'session-owner': { machineId, userId: 'u' },
+      'session-child': { machineId, userId: 'u', parentSessionId: 'owner' },
+      'session-other': { machineId, userId: 'u' },
+    });
+    const links = createSessionPullRequestLinks({ store: s.value, machineId, nowMs: () => 5_000 });
+    const h = handler(links, { ctx: { sessionId: 'child', requesterUserId: 'u', machineId } });
+    const url = 'https://github.com/LodyAI/Lody/pull/3019';
+    expect(await report(h, { contextToken: 'ctx', url, sessionId: 'other' })).toEqual({
+      status: 200,
+      body: { linked: true, sessionId: 'owner', url },
+    });
+    expect(s.metas['session-owner']?.['prLink:https://github.com/lodyai/lody/pull/3019']).toEqual({
+      k: 'l',
+      o: 's',
+      t: 5_000,
+    });
+    expect(s.writes.map((write) => write.roomId)).toEqual(['session-owner']);
+    expect(await links.list('child')).toMatchObject([
+      { kind: 'pending', url: 'https://github.com/lodyai/lody/pull/3019', reason: 'checking' },
+    ]);
+  });
+
+  it('refuses unknown contexts, other machines, deleted Sessions and unsupported URLs without writing', async () => {
+    const s = store({
+      'session-moved': { machineId: 'machine-2', userId: 'u' },
+      'session-gone': { deleted: true },
+      'session-ok': { machineId, userId: 'u' },
+      'session-archived': { machineId, userId: 'u', isArchived: true },
+    });
+    const links = createSessionPullRequestLinks({ store: s.value, machineId, nowMs: () => 1 });
+    const contexts = Object.fromEntries(
+      ['moved', 'gone', 'ok', 'archived'].map((id) => [
+        id,
+        { sessionId: id, requesterUserId: 'u', machineId },
+      ])
+    );
+    const h = handler(links, contexts);
+    const url = 'https://github.com/o/r/pull/1';
+    expect((await report(h, { contextToken: 'nope', url })).body).toEqual({
+      linked: false,
+      reason: 'invalid_context',
+    });
+    expect((await report(h, { contextToken: 'moved', url })).body).toEqual({
+      linked: false,
+      reason: 'not_this_machine',
+    });
+    expect((await report(h, { contextToken: 'gone', url })).body).toEqual({
+      linked: false,
+      reason: 'session_not_found',
+    });
+    expect((await report(h, { contextToken: 'archived', url })).body).toEqual({
+      linked: false,
+      reason: 'session_archived',
+    });
+    expect(
+      (await report(h, { contextToken: 'ok', url: 'https://gitlab.com/o/r/-/merge_requests/1' }))
+        .body
+    ).toEqual({ linked: false, reason: 'unsupported' });
+    expect(s.writes).toEqual([]);
+  });
+
+  it('unlinks and relinks for one Session', async () => {
+    const s = store({ 'session-ok': { machineId, userId: 'u' } });
+    let now = 10;
+    const links = createSessionPullRequestLinks({ store: s.value, machineId, nowMs: () => now });
+    const url = 'https://github.com/o/r/pull/1';
+    expect(await links.unlink('ok', url, 'agent')).toMatchObject({ linked: false, unlinked: true });
+    now = 5; // An earlier clock never lets the newer intent lose.
+    expect(await links.link('ok', url, 'agent')).toMatchObject({ linked: true });
+    expect(s.metas['session-ok']?.['prLink:https://github.com/o/r/pull/1']).toEqual({
+      k: 'l',
+      o: 'a',
+      t: 11,
+    });
+  });
+});

@@ -96,7 +96,6 @@ export function filterThreadStreamItems(
     if (item.type !== 'message') continue;
     const msg = item.message;
 
-    // 1. Root turn itself
     if (msg.id === rootAnchor.turnId) {
       if (rootAnchor.kind === 'user_turn' && msg.role === 'user') {
         filtered.push(item);
@@ -121,7 +120,6 @@ export function filterThreadStreamItems(
       }
     }
 
-    // 2. Subsequent user turns
     if (msg.role === 'user') {
       const config = normalizeSessionTurnInputConfig(msg.inputConfig);
       const roots = parseThreadRootsScalar(msg.threadRoots);
@@ -131,7 +129,6 @@ export function filterThreadStreamItems(
       continue;
     }
 
-    // 3. Subsequent assistant turns (keep only bubbles belonging to this thread)
     if (msg.role === 'assistant') {
       const roots = parseThreadRootsScalar(msg.threadRoots);
       const isLiveThreadTurn =
@@ -155,7 +152,6 @@ export function filterThreadStreamItems(
       continue;
     }
 
-    // 4. System turns (`operation_progress`, `operation_completion`, `operation_completion_batch`)
     if (msg.role === 'system') {
       const keptSystemItems: MessageContent[] = [];
       for (const entry of msg.items) {

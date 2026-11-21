@@ -6,12 +6,14 @@ import { ElectronMenuHandler } from '@/components/electron-menu-handler';
 import { AppCommands } from '@/components/app-commands';
 import { CommandPalette } from '@/components/commands/command-palette';
 import { SessionSubConversationConfirmationDialog } from '@/components/sessions/session-sub-conversation-confirmation';
+import { useObserveWindowReadEngagement } from '@/lib/window-read-engagement';
 
 export function AuthenticatedWorkspaceContent({
   showWorkspaceCheckout = false,
 }: {
   showWorkspaceCheckout?: boolean;
 }) {
+  useObserveWindowReadEngagement();
   return (
     <>
       <Outlet />

@@ -285,7 +285,6 @@ describe('coordinator conversation bubbles and search', () => {
       coordinatorBubbles: true,
     });
 
-    // Turn without coordinator_message emits zero rows so Virtua never receives a null DOM row.
     expect(rows).toHaveLength(3);
     expect(rows.map((row) => row.key)).toEqual([
       'assistant:coord-turn-1:bubble:b1',
@@ -318,7 +317,6 @@ describe('coordinator conversation bubbles and search', () => {
     const defaultWorkingLabel = '正在看…';
     const userTurn = wrap(makeMessage('u-1', 'user', [text('帮我看看 PR 状态')], true));
 
-    // 1. Optimistic send / empty history / trailing user turn -> immediate fallback pill
     expect(
       resolveActiveCoordinatorStatus({
         items: [],
@@ -335,7 +333,6 @@ describe('coordinator conversation bubbles and search', () => {
       })
     ).toEqual({ label: '正在看…', tone: 'primary' });
 
-    // 2. Assistant turn started (thinking / lookup tools) before first bubble or status -> fallback pill
     const thinkingTurn = wrap(
       makeMessage('a-1', 'assistant', [{ type: 'thought', text: 'Planning' }, toolCall()], false)
     );
@@ -347,7 +344,6 @@ describe('coordinator conversation bubbles and search', () => {
       })
     ).toEqual({ label: '正在看…', tone: 'primary' });
 
-    // 3. Explicit status + opening bubble, even with a trailing `operation_progress` system row -> explicit phrase
     const dispatchingTurn = wrap(
       makeMessage(
         'a-1',
@@ -387,7 +383,6 @@ describe('coordinator conversation bubbles and search', () => {
       })
     ).toEqual({ label: '正在派发子对话…', tone: 'primary' });
 
-    // 4. Direct bubble reply with no explicit status -> hides pill while turn wraps up
     const directReplyTurn = wrap(
       makeMessage(
         'a-1',
@@ -404,7 +399,6 @@ describe('coordinator conversation bubbles and search', () => {
       })
     ).toBeNull();
 
-    // 5. Finished assistant turn + trailing passive `operation_progress` while presence drains -> no flash
     const finishedTurn = wrap(
       makeMessage(
         'a-1',
@@ -424,7 +418,6 @@ describe('coordinator conversation bubbles and search', () => {
       })
     ).toBeNull();
 
-    // 6. Async completion receipt wakes coordinator before new assistant row arrives -> fallback pill
     const completionReceiptRow = wrap(
       makeMessage(
         'sys-complete',
@@ -449,7 +442,6 @@ describe('coordinator conversation bubbles and search', () => {
       })
     ).toEqual({ label: '正在看…', tone: 'primary' });
 
-    // 7. Crashed/idle daemon (`agentActivityLabel: null`) with unfinished turn in history -> never sticks
     expect(
       resolveActiveCoordinatorStatus({
         items: [userTurn, dispatchingTurn],
@@ -458,7 +450,6 @@ describe('coordinator conversation bubbles and search', () => {
       })
     ).toBeNull();
 
-    // 8. Permission / question warnings always surface with warning tone
     expect(
       resolveActiveCoordinatorStatus({
         items: [userTurn, directReplyTurn],

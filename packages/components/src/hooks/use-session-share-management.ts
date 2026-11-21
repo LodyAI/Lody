@@ -1,7 +1,7 @@
 import { useWorkspaceFeature } from './use-workspace-feature';
 import { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useStore } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import type { SessionShareView, SessionShareManagement } from '@lody/cloud-api';
@@ -30,6 +30,7 @@ import {
 } from '@/lib/session-share-secrets';
 import type { SessionPublicShareStatus } from '@/lib/session-sharing';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const operations = cloudOperations.sessionSharing;
 class ShareCredentialStorageError extends Error {}
@@ -186,7 +187,7 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
       return run(async () => {
         const link = linkFor(entry);
         if (!link) throw new Error('Share credential unavailable');
-        await navigator.clipboard.writeText(link);
+        await copyTextToClipboard(link);
         capturePostHogEvent(postHog, 'share/link_copied');
         if (current()) setNotice(t('settings.shares.copied', 'Share link copied'));
       }, 'copy');
@@ -590,7 +591,7 @@ export function useSessionShareManagement(
     let copied = false;
     if (url) {
       try {
-        await navigator.clipboard.writeText(url);
+        await copyTextToClipboard(url);
         copied = true;
       } catch {
         copied = false;
@@ -693,7 +694,7 @@ export function useSessionShareManagement(
       result
         ? actions.run(async () => {
             if (!result.url) throw new Error('Share credential unavailable');
-            await navigator.clipboard.writeText(result.url);
+            await copyTextToClipboard(result.url);
             capturePostHogEvent(postHog, 'share/link_copied');
             setResult((value) => (value ? { ...value, copied: true } : value));
           }, 'copy')

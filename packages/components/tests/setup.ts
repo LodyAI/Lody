@@ -76,6 +76,16 @@ function installStorage(name: 'localStorage' | 'sessionStorage'): void {
 installStorage('localStorage');
 installStorage('sessionStorage');
 
+if (typeof document !== 'undefined' && typeof document.elementFromPoint !== 'function') {
+  // jsdom has no layout or hit testing. Tests with drop targets provide their
+  // own hit results; ordinary pointer movement hits no target.
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    writable: true,
+    value: (): Element | null => null,
+  });
+}
+
 if (typeof Element !== 'undefined' && typeof Element.prototype.getAnimations !== 'function') {
   // jsdom does not run Web Animations. Base UI waits for subtree animations
   // before measuring scroll areas, so expose the empty animation set here.

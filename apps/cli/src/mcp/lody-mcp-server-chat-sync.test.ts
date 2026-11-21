@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -5,7 +6,6 @@ import path from 'node:path';
 import { LoroDoc } from 'loro-crdt';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import {
-  createHistoryWriter,
   getSessionRoomId,
   type LodyOperationCompletion,
   type LodyOperationItemResult,
@@ -241,7 +241,7 @@ it('returns an explicit Inbox error before opening storage, then accepts calls a
   let available = false;
   const handlers: SessionToolHandlers = new Map();
   const server = buildSessionToolServer(handlers);
-  const handler = handlers.get('lody_operation_get');
+  const handler = handlers.get('lody_operation');
   if (!handler) throw new Error('operation_get handler missing');
   const call = () =>
     runWithMcpSessionContext(
@@ -260,7 +260,7 @@ it('returns an explicit Inbox error before opening storage, then accepts calls a
             );
         },
       },
-      () => handler({ operationId: 'startup-test' })
+      () => handler({ action: 'get', arguments: { operationId: 'startup-test' } })
     );
   try {
     const degraded = await call();
@@ -1404,13 +1404,18 @@ describe('scoped completed work batch reader', () => {
       store.inbox.accept(input);
       const batch = store.inbox.prepare(input, 'owner')!;
       mocks.operationInbox.mockReturnValue(store.inbox);
-      const handler = handlers.get('lody_operation_batch_get')!;
+      const handler = handlers.get('lody_operation')!;
       const decode = (result: Awaited<ReturnType<typeof handler>>) =>
         JSON.parse((result.content[0] as { text: string }).text);
-      const first = decode(await handler({ batchId: batch.batchId, limit: 1 }));
+      const first = decode(
+        await handler({ action: 'batch', arguments: { batchId: batch.batchId, limit: 1 } })
+      );
       expect(first.items.map((i: { operationId: string }) => i.operationId)).toEqual(['read-0']);
       const second = decode(
-        await handler({ batchId: batch.batchId, limit: 1, cursor: first.nextCursor })
+        await handler({
+          action: 'batch',
+          arguments: { batchId: batch.batchId, limit: 1, cursor: first.nextCursor },
+        })
       );
       expect(second.items.map((i: { operationId: string }) => i.operationId)).toEqual(['read-1']);
       store.inbox.abandonInput(input.workspaceId, input.sessionId, input.inputId);
@@ -1418,7 +1423,10 @@ describe('scoped completed work batch reader', () => {
       store.inbox.accept(nextInput);
       const nextBatch = store.inbox.prepare(nextInput, 'owner')!;
       const invalid = decode(
-        await handler({ batchId: nextBatch.batchId, limit: 1, cursor: first.nextCursor })
+        await handler({
+          action: 'batch',
+          arguments: { batchId: nextBatch.batchId, limit: 1, cursor: first.nextCursor },
+        })
       );
       expect(invalid.ok).toBe(false);
       expect(JSON.stringify(invalid)).toContain('CURSOR_INVALID');
@@ -1430,7 +1438,9 @@ describe('scoped completed work batch reader', () => {
         sourceTurnId: input.inputId,
         inputConfig: {},
       });
-      expect(decode(await handler({ batchId: batch.batchId }))).toMatchObject({
+      expect(
+        decode(await handler({ action: 'batch', arguments: { batchId: batch.batchId } }))
+      ).toMatchObject({
         ok: false,
         error: { code: 'BATCH_NOT_FOUND' },
       });

@@ -269,7 +269,6 @@ export function CoordinatorThreadPanel({
   const viewVersion = useConversationVersion(conversationView);
   const structureVersion = conversationView?.structureVersion ?? 0;
 
-  // Collect all turn IDs belonging to this thread (root turn + indexed reply turns + any brand-new tail turns).
   const targetTurnIds = useMemo(() => {
     const seen = new Set<string>();
     const list: string[] = [];
@@ -297,7 +296,6 @@ export function CoordinatorThreadPanel({
 
   const targetTurnIdsKey = targetTurnIds.join('\n');
 
-  // Lease the exact turns needed for this thread; content updates reuse existing leases.
   useEffect(() => {
     if (!conversationView || targetTurnIds.length === 0) return undefined;
     const leases: Array<{ release(): void }> = [];
@@ -468,7 +466,6 @@ export function CoordinatorThreadPanel({
     [handleSend]
   );
 
-  // Show the bottom working indicator in this thread only when the latest turn in this thread is active.
   const threadIsActivelyWorking = useMemo(() => {
     const lastMsg = threadMessages.at(-1);
     if (!lastMsg) return false;
@@ -499,7 +496,6 @@ export function CoordinatorThreadPanel({
     [canonicalRootId, handleReplyInsideThread, onOpenExternalLink, onOpenTask, onSendReply, tasks]
   );
 
-  // Give the thread panel its own scroll-memory key so scrolling a thread never mutates the main stream's saved anchor.
   const threadStreamSessionId = `${coordinatorSessionId}#thread:${canonicalRootId}` as SessionId;
 
   const emptyStateNode = useMemo(

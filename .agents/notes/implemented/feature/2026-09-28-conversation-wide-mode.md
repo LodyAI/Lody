@@ -14,7 +14,7 @@ desktop windows mostly empty on either side of the transcript. A per-device
 "Full width" toggle now drops that cap so the column spans the pane, keeping
 only the shared side gutter. Two entries write the same atom: a Settings >
 Appearance switch, and a trailing `Switch` row at the top of the session `⋯`
-menu (after the identity block), so a user can flip it without leaving the
+menu (right after "Session info…"), so a user can flip it without leaving the
 page. No SessionMeta change — view preference is not session state and must
 not sync across devices or teammates.
 

@@ -45,7 +45,7 @@ daemon 实例。OS 决定入口，机器协议能力版本决定兼容性。公�
 三指及以上、实体键盘转发与高级设备配置留待后续。每次新操作先确认原生竖屏基线；同一操作重连保留方向。
 准备完成/传输就绪与首帧成功应分别表达。
 
-Agent 通过独立工具 `lody_ios_simulator_preview` 预览原生应用；网页内容继续使用
+Agent 通过独立工具 `lody_simulator_preview`（`platform: "ios"`，仅 macOS 机器提供）预览原生应用；网页内容继续使用
 `lody_report_preview_candidate`。动作包括 `list`、`start {udid}`、
 `status {operationId?}` 和 `stop {operationId}`。机器和会话来自调用上下文，daemon
 从活动 turn 获取请求用户并校验会话归属。工具输出不含观看凭据，也不负责构建或安装应用。

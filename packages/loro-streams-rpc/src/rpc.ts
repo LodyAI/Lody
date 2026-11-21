@@ -829,6 +829,7 @@ export const LoroSessionPreviewRevokeRpcRequestSchema = BaseRpcRequestSchema.ext
       requestedByUserId: z.string().trim().min(1),
       proof: PreviewControlProofSchema,
       reason: z.string().trim().min(1).optional(),
+      stopProcess: z.boolean().optional(),
     })
     .strict(),
 }).strict();
@@ -3896,6 +3897,7 @@ export class LoroStreamsMachineRpcClient {
     requestedByUserId: string;
     proof: PreviewControlProof;
     reason?: string;
+    stopProcess?: boolean;
     timeoutMs?: number;
   }): Promise<SessionPreviewRevokeResponse | null> {
     return (await this.sendRequest({
@@ -3906,6 +3908,7 @@ export class LoroStreamsMachineRpcClient {
         requestedByUserId: options.requestedByUserId,
         proof: options.proof,
         reason: options.reason,
+        ...(options.stopProcess ? { stopProcess: true } : {}),
       },
     })) as SessionPreviewRevokeResponse | null;
   }

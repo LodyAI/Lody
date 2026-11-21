@@ -1,13 +1,14 @@
 ---
 name: lody-cli
-description: Drive Lody from a terminal with the `lody` CLI (installed globally or run as `npx lody`) — sessions, schedules, agent configs, Roles, MCP servers, projects, machines, the background runtime, sync/export and review rendering. Use when any agent, inside a Lody session or an external coding agent, needs to hand work to Lody agents, chat with or watch Lody sessions, inspect workspace resources, or manage the Lody runtime on a machine.
+description: Drive Lody from a terminal with the `lody` CLI (installed globally or run as `npx lody`) — sessions, schedules, automations, agent configs, Roles, MCP servers, projects, machines, the background runtime, sync/export and review rendering. Use when any agent, inside a Lody session or an external coding agent, needs to hand work to Lody agents, chat with or watch Lody sessions, inspect workspace resources, or manage the Lody runtime on a machine.
 ---
 
 # Lody CLI
 
-This guide covers the cloud edition of Lody, including its account sign-in and shared
-workspaces. The open-source local edition is outside this guide's scope; do not apply
-these sign-in prerequisites to it.
+This guide covers the cloud edition of Lody (distributed via `npm i -g lody` and
+`npx lody`), including its account sign-in and shared workspaces. The open-source local
+edition (the default when building from the public repository) is outside this guide's
+scope; do not apply these sign-in prerequisites to it.
 
 ## How to call it
 
@@ -15,14 +16,14 @@ these sign-in prerequisites to it.
 - Without installing: run `npx lody …`. Every `lody` command in this guide works the same
   way with the `npx` prefix. Inside scripts, use `npx -y lody …` to skip the install
   prompt.
-- Requires Node.js 22.14+ (22.x) or 23.6+.
+- Requires Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x) on x64/arm64.
 - Check which one is available with `lody --version` or `npx -y lody --version`, and stick
   to that form for the whole task.
 
 `lody` does two jobs. It runs the Lody runtime that executes agents on this machine
 (`start`, `daemon`). It also works as a one-shot client for workspace resources: sessions,
-schedules, agent configs, Roles, MCP servers and projects. Exact flags come from
-built-in help: `lody <group> [<sub>] --help`. This guide covers what help leaves out:
+schedules, automations, agent configs, Roles, MCP servers and projects. Exact flags come
+from built-in help: `lody <group> [<sub>] --help`. This guide covers what help leaves out:
 prerequisites, shared conventions, business rules and the actions to confirm first.
 
 ## Before running anything
@@ -43,11 +44,13 @@ prerequisites, shared conventions, business rules and the actions to confirm fir
      expected: the CLI uses the app's runtime.
 3. **Where you are calling from.**
    - **Inside a Lody session**, the agent's environment has `LODY_SESSION_ID`, and usually
-     `LODY_WORKSPACE_ID` and `LODY_AGENT_CONFIG_ID`. Many commands use these when you leave
-     the matching argument out:
+     `LODY_WORKSPACE_ID` and `LODY_AGENT_CONFIG_ID` (plus `LODY_AGENT_SESSION_ID` for
+     agent children). Many commands use `LODY_SESSION_ID` when you leave the matching
+     argument out:
      - the session commands' `sessionId`
      - `operation list --session`
      - `agent-role create/update --session`
+     - `automation register/list/activities/settings/configure --session`
      - `--use-current-session-as-parent` and `--opened-by-current`
 
      If `LODY_WORKSPACE_ID` or `LODY_AGENT_CONFIG_ID` is absent, pass `--workspace` or
@@ -55,24 +58,31 @@ prerequisites, shared conventions, business rules and the actions to confirm fir
 
      To act on a _different_ session, pass its ID explicitly.
 
+     When `LODY_AGENT_SESSION_ID` is set, `lody schedule` allows only `list`, `show` and
+     `pause`; creating or changing schedules requires a human action (use Lody's built-in
+     MCP tool `lody_schedule` action `propose` to post a confirmation card). For batch session
+     orchestration or automatic completion callbacks inside a Lody session, prefer Lody's
+     built-in MCP tools (`lody session` operates on one session per command).
+
    - **From an external agent** (any coding agent or script outside Lody), none of these
      variables are set. Pass everything explicitly:
      - session ids
      - `--workspace`, when you have more than one workspace
      - the target `--machine` and `--agent-config`, or an `--agent-role`
 
-     Commands that propose to "the current session" (`agent-role create/update`) need
-     `--session <id>`.
+     Commands that target a session (`agent-role create/update`, `automation *`,
+     `operation list`) need `--session <id>`.
 
 ## Choose the command from the request
 
 | User intent | First action and next step |
 | ----------- | -------------------------- |
-| Give a named Role a new task | Find it with `agent-role list --json`, inspect it with `agent-role get <id>`, then use `session create --agent-role <id>`. |
+| Give a named Role a new task | Find it with `agent-role list --json`, inspect it with `agent-role get <id>`, then use `session create --agent-role <id>` (add `--machine <machineId>` if the Role targets several machines). |
 | Start a new task with a particular agent | Resolve the workspace, machine and agent config, then use `session create`. |
 | Continue earlier work | Find the existing session with `session list --query <text> --json`, check `show`/`history`, then use `session chat <id>`. |
 | Check progress or read a result | Use `session status`, `observe` or `history`; reading does not require sending another prompt. |
-| Run later or repeatedly | Resolve the target and time zone, then use `schedule create --file <draft.json>`. |
+| Run later or repeatedly | Resolve the target and time zone, then use `schedule create --file <draft.json>` (outside a Lody Agent session; inside one, propose via Lody MCP). |
+| Wait for a condition or configure session recovery/maintenance | Use `automation register --file <check.js>` or `automation configure --file <settings.json>` (or Lody MCP `lody_automation` inside a session). |
 
 Reuse IDs returned by discovery commands. If several candidates still fit the request,
 ask which one the user means before dispatching. For repository work, resolve the repo
@@ -109,8 +119,9 @@ machine's only config; a Role supplies its own. With several configs and no Role
 and asks for one. `--parent` and `--use-current-session-as-parent` already carry the
 parent's project, branch and machine; do not combine them with `--repo`, `--local-project`,
 `--worktree` or `--branch`. `--worktree` requires `--local-project`; `--branch` requires
-`--repo` or `--local-project`. With `--agent-role`, omit `--machine` and `--agent-config`;
-the Role supplies them.
+`--repo` or `--local-project`. With a single-machine `--agent-role`, omit `--machine` and
+`--agent-config`; the Role supplies them. If the Role targets multiple machines, pass
+`--machine <machineId>` (or pass a target alias to `--agent-role`).
 
 ## When something fails
 
@@ -164,8 +175,8 @@ needed.
 ## Conventions
 
 - **Workspace.** `--workspace <selector>` takes an id, slug or name; get them from
-  `lody workspace list --json`. `schedule` and the `agent-role` write commands also accept
-  `-w`.
+  `lody workspace list --json`. `schedule`, `automation` and the `agent-role` write
+  commands also accept `-w`.
 - **Other selectors.** `--agent-config`, `--machine`, `--agent-role` and MCP server names
   take an id or a name. An ambiguous name is rejected; retry with the id.
 - **Output.** For automation prefer `--json`; streaming commands also have `--jsonl`.
@@ -188,20 +199,24 @@ needed.
     attachment fails, nothing is sent.
   - Running the command again sends another message; it does not deduplicate.
 - **`feedback`**: put options before the text. If the text starts with `-`, put `--` before
-  it.
+  it, or pipe the text with `--stdin`.
 
 ## What each command needs
 
 | Also needs the Lody runtime on this machine | Needs only sign-in |
 | ------------------------------------------- | ------------------ |
 | `session create`, `session chat`, `session cancel` **targeting this machine** | The same commands **targeting another machine** (that machine must be online); `session list/history/show/status/observe/rename/archive/restore/delete` |
-| `agent-config refresh-capabilities` (this machine only) | `workspace list`, `github list`, `machine list` |
+| `agent-config refresh-capabilities` (this machine only) | `workspace list/export/import`, `github list`, `machine list` |
 | `project add/delete`, plain `project list` | `project list --workspace/--machine/--catalog`, `schedule *` |
-| `operation list` (operations recorded on this machine) | `agent-config` CRUD, `agent-role list/get`, `mcp *`, `sync`, `export` |
+| `agent-role create/update`, `automation *` | `agent-config` CRUD, `agent-role list/get`, `mcp *`, `sync`, `export` |
+| `operation list` (operations recorded on this machine), `workspace reset-identity`, `dsh plugin` | `feedback` |
 
 `app reset-cache`, `review` and `review prompt` need neither sign-in nor the runtime.
-Targeting another machine for `session create`, `session chat` or `session cancel` still
-requires that machine online; it does not require a local runtime.
+`machine pair --offer <cmd>` and `start --paired-workspace <account/workspace>` pair and
+run a single encrypted workspace without account sign-in. Targeting another machine for
+`session create`, `session chat` or `session cancel` still requires that machine online;
+it does not require a local runtime. `agent-config import-magpie` requires sign-in and
+this machine to be registered and online.
 
 ## Command reference
 
@@ -211,26 +226,37 @@ requires that machine online; it does not require a local runtime.
   - With no options it signs in through the browser (device flow).
   - `--auth` takes a CLI API key or a machine connection token, for headless machines.
   - `logout` clears the saved sign-in.
-- `start [--auth] [--machine-name] [--cli-types kimi grok claude codex] [--heartbeat-log]`
-  runs the runtime in the foreground. Use it to watch live output.
+- `start [--auth] [--machine-name] [--cli-types kimi grok claude codex] [--heartbeat-log] [--paired-workspace <account/workspace>]`
+  runs the runtime in the foreground. Use it to watch live output, or pass
+  `--paired-workspace` to run an already paired encrypted workspace without account login.
 - `daemon start [--auth] [--machine-name] [--skip-auth-check]` runs the runtime in the
   background.
   - It first checks connectivity and sign-in. It asks you to sign in only in an
     interactive terminal.
   - `daemon stop|status|restart` manage it.
   - `daemon logs [-n 50]` shows recent logs; the files are under `~/.lody/logs`.
+  - `daemon upgrade [--target-version <v>] [--channel stable|next|nightly] [--immediate] [--allow-channel-change] [--allow-downgrade]`
+    prepares a checksummed managed daemon update and waits for idle by default; check
+    progress with `daemon update-status [--request-id <id>]`.
+  - `daemon install [--auth] [--start] [--autostart] [--replace]` installs the standalone
+    SEA binary as a fixed managed service entry (not used by npm installations).
   - `daemon-runner` and other hidden commands exist only for the runtime's own use. Never
     run them.
 
 ### Sessions (`lody session …`)
 
+`lody session` operates on one session per command (no batch subcommands; inside a Lody
+session, use Lody's built-in MCP tools for batch creation, chat or status checks).
+
 - `create [prompt]` starts a new session.
   - **Who runs it:** omit `--machine`/`--agent-config` to use this machine and the
     current session's config (or the machine's only config); otherwise pass
     `--machine` plus `--agent`/`--agent-config`, or an `--agent-role`.
-    - A Role brings its own machine, agent, mode, model and options. With `--agent-role`,
-      the flags `--machine`, `--agent(-config)`, `--mode`, `--model` and `--config-option`
-      are ignored, with a warning.
+    - A Role brings its own agent, mode, model and options (and its machine when it has a
+      single target). With a single-target `--agent-role`, `--machine`, `--agent(-config)`,
+      `--mode`, `--model` and `--config-option` are ignored with a warning. If the Role
+      targets multiple machines, pass `--machine <machineId>` (or a target alias as
+      `--agent-role`); `--machine` is required there and is not ignored.
   - **What it works on:** a GitHub repo `--repo owner/repo` _or_ a local project
     `--local-project <id|name|path>`, not both.
     - `--branch` picks the branch.
@@ -241,8 +267,8 @@ requires that machine online; it does not require a local runtime.
   - **Per-turn options:**
     - `--mode` and `--model`
     - `--config-option k=v`, repeatable
-    - `--mcp-server-ids '<json array>'`; `[]` turns off every MCP server. Older
-      published CLIs may not have this flag; check `session create --help`.
+    - `--mcp-server-ids '<json array>'`; `[]` turns off every MCP server (check
+      `session create --help` on older CLIs).
   - `--title` fixes the title instead of letting Lody generate one.
   - `--env` is deprecated; set environment variables on the agent config.
   - **Waiting:** by default the command returns as soon as the message is sent.
@@ -278,6 +304,11 @@ requires that machine online; it does not require a local runtime.
 
 A schedule sends a prompt to an agent on a set trigger. It always runs on the machine it
 names, whichever machine created it.
+
+Inside a Lody Agent session (`LODY_AGENT_SESSION_ID` set), `lody schedule` allows only
+`list`, `show` and `pause`; `create`, `edit`, `resume`, `run` and `delete` fail because
+schedule enablement requires a human action. From inside a session, use the Lody MCP tool
+`lody_schedule` action `propose` to post a human confirmation card instead.
 
 - `list [--query] [--limit 30] [--offset 0]` lists schedules.
 - `show|pause|resume|run|delete <id>` act on one schedule. `run` starts it now.
@@ -327,6 +358,21 @@ Draft format (unknown fields are rejected):
   - `own_session {epoch}`: one session reused by this schedule
   - `existing_session {sessionId}`
 
+### Automations (`lody automation …`)
+
+Automations run on this machine's daemon to wait for a JavaScript condition and resume a
+session when it matches, or to configure per-session maintenance/recovery features. All
+subcommands accept `-w/--workspace`, `--session` (defaults to `LODY_SESSION_ID`), `--json`
+and `--debug`, and require the local runtime.
+
+- `register --file <check.js> [--reason <text>] [--interval 30000] [--expires-at <iso|epochMs>]`
+  registers a background condition check (`--interval` in ms, 1000–86400000).
+- `list`, `show <id>`, `cancel <id>` inspect or cancel waits.
+- `activities [--limit 50] [--before <cursorJson>]` lists delivery, recovery and
+  maintenance activity.
+- `settings` reads and `configure --file <settings.json>` updates per-session features
+  (`recoverCapacity`, `archiveAfterMerge`, `compactWhenIdle`).
+
 ### Agent configs, Roles, MCP servers
 
 - **Agent configs** say which agent runs, on which machine, with what environment and
@@ -349,11 +395,14 @@ Draft format (unknown fields are rejected):
     modes, models and options.
     - Run it after installing or upgrading an agent CLI, or after changing its environment.
     - It works only for this machine, and the machine must be online.
+  - `agent-config import-magpie [--gateway <url> | --link <url>] [--targets <types>]`
+    imports Magpie providers on this machine without a desktop confirmation dialog
+    (requires this machine to be registered and online).
 - **Roles** are reusable presets that combine an agent config with instructions.
   - `agent-role list|get <id>` read them.
-  - `agent-role create|update` only **propose** a change. They post a review card into the
-    session (`--session` or the current session), and nothing is saved until a person
-    clicks Save there.
+  - `agent-role create|update` only **propose** a change. They require the local runtime,
+    post a review card into the session (`--session` or the current session), and save
+    nothing until a person clicks Save there.
   - `create` needs `--name`, `--machine-id` and `--agent-config-id`.
   - `update` needs at least one of `--name`, `--description`, `--prompt-prefix`. `""`
     clears a field.
@@ -364,31 +413,49 @@ Draft format (unknown fields are rejected):
   `mcp set <server>`, `mcp remove <server>`.
   - **Command servers (run as a process on the machine):**
     - `--command`, plus `--arg…` for its arguments
-    - `--env NAME=value…` for environment variables
+    - `--env NAME=${VAR}…` for environment variable references
     - `--env-passthrough NAME…` copies variables from the runtime's own environment on the
       target machine
   - **HTTP servers:**
-    - `--url`
-    - `--bearer-token`, which supports `${VAR}`
-    - `--header Name:value…`
+    - `--url` (must not contain embedded username/password, fragment, or secret query keys)
+    - `--bearer-token '${VAR}'`
+    - `--header 'Name:${VAR}'…`
   - `--description` adds a note. `--default/--no-default` sets whether new sessions select
     the server automatically. `set --name` renames.
-  - Prefer `${VAR}` or passthrough to typing secrets literally.
+  - **No literal secrets in shared catalog entries:** `mcp add` and `mcp set` reject
+    literal values in `--env`, `--bearer-token`, `--header` and credentialed URLs. Values
+    must be exact `${VAR}` references (or use `--env-passthrough`); configure local
+    secrets or OAuth credentials on the target machine in Lody settings.
 
 ### Workspace, machines, projects
 
 - `workspace list` lists your workspaces.
+  - `workspace export --out <file> [--workspace] [--offline]` exports a complete,
+    re-importable workspace bundle (owners/admins; plaintext containing every conversation
+    and attachment). `workspace import <file> [--workspace] [--dry-run] [--yes]` merges a
+    bundle back into a workspace (owners/admins; `--yes` required when non-interactive).
+    Both commands are on `main` and not yet in `lody@0.113.1`; check
+    `lody workspace --help`.
+  - `workspace reset-identity <workspace-id> --confirm [--reset-id <uuid>]` archives this
+    machine's identity for an encrypted workspace and requires fresh approved pairing
+    (needs the local runtime; reuse `--reset-id` on retry).
 - `github list` lists the repositories linked to the workspace. That is not every
   repository the GitHub App can see.
 - `machine list` lists machines. Filter by status with `--online-only` or
   `--online-status online|offline|unknown`; `unknown` does not mean offline.
   - `--include-acp-capabilities` and `--include-agents` are older detailed views and do not
     combine with paging or filter flags.
+  - `machine pair --offer <command>` pairs this machine with one encrypted workspace using
+    an expiring offer from the desktop app, then starts it with `--paired-workspace`. Do
+    not echo offers in conversation or reuse an offer already claimed by another machine.
 - **Projects** are directories Lody can open sessions in.
   - `project add [path=.] [--workspace | --all-workspaces]` registers one.
   - `project delete` works only in an interactive terminal, where you pick from a list.
   - `project list` shows this machine's projects.
     `--workspace/--machine/--kind local|github/--catalog` browses the workspace catalog.
+- `dsh plugin <args...> [--agent-config <id>]` runs native `dsh plugin` commands in a
+  local DSH Provider's profile (needs the local runtime; pass `--agent-config` when
+  non-interactive; do not pass `--profile`).
 - `operation list [--session] [--state active|finished]` shows operations recorded on this
   machine, such as git and PR actions.
 - `sync [--workspace | --all-workspace] [--concurrency 4] [--json|--jsonl]` downloads
@@ -412,12 +479,17 @@ Confirm before running any of these:
 
 - `session delete`, `agent-config delete`, `mcp remove`, `schedule delete`
 - `mcp set`, which can replace a server's command, URL or credentials
-- `agent-config update`, which changes a shared agent configuration
+- `agent-config update`, which changes a shared agent configuration, and
+  `agent-config import-magpie`, which imports providers without a desktop prompt
 - `project delete`, which removes a registered project
-- `schedule edit`, which changes live automation
+- `schedule edit`, which changes live automation, and `automation configure`/`cancel`,
+  which change session automation state
+- `workspace import`, `workspace export` (writes plaintext conversations and attachments),
+  and `workspace reset-identity` (archives local encrypted-workspace identity)
 - `app reset-cache --hard`
 - `logout`
-- `daemon stop` and `daemon restart`, which interrupt running sessions
+- `daemon stop`, `daemon restart`, `daemon upgrade --immediate`, and
+  `daemon install --replace`, which interrupt running sessions or hosts
 
 `session create`/`chat`, `schedule run` and `feedback` do real work or send data. None of
 them is a dry run.

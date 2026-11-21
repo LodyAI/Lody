@@ -926,9 +926,7 @@ export class InboxSqlite {
         if (typeof parsed.originThreadId === 'string' && parsed.originThreadId.trim().length > 0) {
           originThreadId = parsed.originThreadId.trim();
         }
-      } catch {
-        // Ignore malformed optional metadata; core Inbox delivery proceeds.
-      }
+      } catch {}
     }
     return {
       sequence: r.sequence,

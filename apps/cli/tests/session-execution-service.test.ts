@@ -1,3 +1,4 @@
+import { nativeSessionCredentials } from '@/session/session-credentials';
 import { MessageHandler } from '../src/lib/message-handler';
 import { lazyExecutionJournal, makeEncryptedAgentExecution } from '../src/lib/e2ee/agent-execution';
 import {
@@ -102,6 +103,7 @@ describe('SessionExecutionService', () => {
       acpSessionId: 'acp-collaboration' as ACPSessionId,
       agentClient,
       getWorkdir: () => '/tmp',
+      getGitHubCredentials: () => nativeSessionCredentials,
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
       exec: async () => '',
@@ -521,6 +523,7 @@ describe('SessionExecutionService', () => {
         agentClient,
         terminalManager: {} as unknown,
         getWorkdir: () => '/tmp',
+        getGitHubCredentials: () => nativeSessionCredentials,
         getHostWorkdir: () => '/tmp',
         getParentSessionId: () => undefined,
         exec: vi.fn(async () => ''),
@@ -747,6 +750,7 @@ describe('SessionExecutionService', () => {
         agentClient,
         terminalManager: {} as unknown,
         getWorkdir: () => '/tmp',
+        getGitHubCredentials: () => nativeSessionCredentials,
         getHostWorkdir: () => '/tmp',
         getParentSessionId: () => undefined,
         exec: vi.fn(async () => ''),
@@ -1346,6 +1350,7 @@ describe('SessionExecutionService', () => {
         agentClient,
         terminalManager: {} as unknown,
         getWorkdir: () => '/tmp',
+        getGitHubCredentials: () => nativeSessionCredentials,
         getHostWorkdir: () => '/tmp',
         getParentSessionId: () => undefined,
         exec: vi.fn(async () => ''),
@@ -2130,6 +2135,7 @@ describe('SessionExecutionService', () => {
       agentClient,
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
+      getGitHubCredentials: () => nativeSessionCredentials,
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
       exec: vi.fn(async () => ''),
@@ -2209,6 +2215,7 @@ describe('SessionExecutionService', () => {
       },
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
+      getGitHubCredentials: () => nativeSessionCredentials,
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
       exec: vi.fn(async () => ''),

@@ -1,7 +1,8 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createSessionMirror, type SessionHistoryInput } from '@lody/shared';
+import { type SessionHistoryInput } from '@lody/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createBundleWriter, openBundle } from './bundle-file';
 import { exportWorkspaceBundle } from './export';

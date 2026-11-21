@@ -135,3 +135,22 @@ export async function bootAndroidDevice(name: string, signal: AbortSignal): Prom
     await delay(500, undefined, { signal: deadline });
   }
 }
+export async function shutdownAndroidDevice(name: string, signal?: AbortSignal): Promise<void> {
+  if (!validAvd.test(name)) throw Error('Invalid AVD');
+  const { adb } = await androidTools();
+  const serial = matchAvdSerial(name, await runningAvds(signal));
+  if (!serial) return;
+  if (!/^emulator-\d+$/.test(serial)) throw Error('Refusing to shut down non-emulator target');
+  await command(adb, ['-s', serial, 'emu', 'kill'], signal, 15000);
+  const deadline = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
+    : AbortSignal.timeout(10000);
+  while (!deadline.aborted) {
+    if (!matchAvdSerial(name, await runningAvds(deadline))) return;
+    try {
+      await delay(300, undefined, { signal: deadline });
+    } catch {
+      return;
+    }
+  }
+}

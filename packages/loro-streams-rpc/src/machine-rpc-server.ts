@@ -632,6 +632,7 @@ type RpcServerDeps = {
     requestedByUserId: string;
     proof: PreviewControlProof;
     reason?: string;
+    stopProcess?: boolean;
   }) => Promise<SessionPreviewRevokeResponse>;
   probeLocalProjectMember?: (args: {
     localProjectId: LocalProjectId;
@@ -2375,6 +2376,7 @@ export class LoroStreamsMachineRpcServer {
             requestedByUserId: request.params.requestedByUserId,
             proof: request.params.proof,
             reason: request.params.reason,
+            ...(request.params.stopProcess ? { stopProcess: true } : {}),
           });
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;

@@ -61,7 +61,8 @@ this page is the full text of the rules summarised there.
 
 - Desktop direct HTML preview is the one exception to the `srcdoc` path. It applies when the
   file is on this desktop's machine and `useSessionFileActions().resolveHostPath` yields its
-  absolute path. Each entry into rendered mode first shows a consent dialog. Its "Allow
+  absolute path. Large HTML files keep a paged, read-only source view and open the complete
+  file from disk through the same preview protocol. Each entry into rendered mode first shows a consent dialog. Its "Allow
   JavaScript" checkbox starts unchecked. Electron main (`machineRpc.openHtmlPreview`) then serves
   the file's folder by default. For a nested page the user can authorize the displayed workspace
   folder for that preview, preserving the page’s workspace-relative URL and asset paths. Both
@@ -72,7 +73,7 @@ this page is the full text of the rules summarised there.
   cross-origin to the renderer. Main's `will-frame-navigate` guard keeps a preview frame on
   `lody-html-preview:` URLs, and the default session refuses every permission a preview requests. The renderer CSP admits the scheme only in `frame-src`. Main
   refuses dot-files and paths outside the folder, judged after resolving symlinks, and other machines; a
-  null answer falls back to the `srcdoc` preview. This mode has no annotation or script toggle,
+  null answer falls back to `srcdoc` for complete text or to the paged source for large files. This mode has no annotation or script toggle,
   shows the saved file rather than unsaved editor text, and with scripts allowed the page can
   reach the network. Remote and Web sessions keep the `srcdoc` path.
   The standalone mobile project browser treats repository HTML as untrusted: it opens the

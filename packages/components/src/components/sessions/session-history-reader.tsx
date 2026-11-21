@@ -44,6 +44,7 @@ import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const styles = stylex.create({
   page: {
@@ -344,7 +345,7 @@ export function SessionHistoryReader({
       });
       await admitOutput();
       assertCurrent();
-      await navigator.clipboard.writeText(markdown);
+      await copyTextToClipboard(markdown);
       assertCurrent();
       toast.success(describeCopiedConversation(stats, t));
     }).catch(() => toast.error(t('sessions.copyConversationHistoryFailed')));

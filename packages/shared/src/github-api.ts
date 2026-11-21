@@ -36,10 +36,6 @@ import {
   type ProjectSkillsResult,
 } from './acp/skills';
 
-// ============================================================================
-// Schemas
-// ============================================================================
-
 const GithubRepoDefaultBranchSchema = z.object({ default_branch: z.string() }).passthrough();
 
 const GithubBranchItemSchema = z.object({ name: z.string() }).passthrough();
@@ -316,10 +312,6 @@ const GithubReviewSchema = z
 
 const GithubReviewsResponseSchema = z.array(GithubReviewSchema);
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export type GitHubIssueOrPR = {
   number: number;
   url: string;
@@ -373,10 +365,6 @@ export type GitHubCreateReviewCommentInput = {
   startLine?: number | null;
   startSide?: 'LEFT' | 'RIGHT' | null;
 };
-
-// ============================================================================
-// Errors
-// ============================================================================
 
 /**
  * Thrown when the GitHub API returns 401 (token expired/revoked).
@@ -459,10 +447,6 @@ export class GitHubFileTooLargeError extends Error {
     this.maxBytes = options.maxBytes;
   }
 }
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 const GITHUB_API_HEADERS = {
   accept: 'application/vnd.github+json',
@@ -1357,10 +1341,6 @@ export function lodyAnchorToGitHubParams(
   };
 }
 
-// ============================================================================
-// API Functions
-// ============================================================================
-
 /**
  * Fetch a file's content at a specific commit.
  * Falls back to raw.githubusercontent.com for large files.
@@ -1920,10 +1900,6 @@ export async function githubFetchPullRequestReviews(
     .sort((a, b) => (a.submittedAt ?? '').localeCompare(b.submittedAt ?? ''));
   return submitted.slice(Math.max(0, submitted.length - 200));
 }
-
-// ============================================================================
-// Pull Request details / issue comments / check runs
-// ============================================================================
 
 const MERGEABLE_STATES = new Set<GitHubMergeableState>([
   'clean',

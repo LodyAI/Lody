@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
-import { sessionDocSchema } from '@lody/shared';
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import { createConversationSession, type ConversationView } from '@/lib/conversation-view';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import type { Meta, StoryObj } from '@storybook/react';
@@ -196,14 +196,12 @@ export const HiddenBelowTwoRounds: Story = {
   render: () => <RailFrame entries={[entry(0, 'Only one round', 'Nothing to navigate.')]} />,
 };
 
-// ---------------------------------------------------------------------------
 // Integration: the rail inside the REAL virtualized stream.
 //
 // The isolated stories above cannot catch the wiring that actually matters —
 // deriving the outline from `items`, mapping rounds to Virtua rows, and
 // tracking the reader from Virtua's offsets. This one renders the production
 // `SessionChatStreamView` so scrolling and jumping exercise the real path.
-// ---------------------------------------------------------------------------
 
 const integrationSessionId = 'session-outline-rail-storybook' as SessionId;
 
@@ -293,14 +291,12 @@ export const InsideTheConversationStream: Story = {
   ),
 };
 
-// ---------------------------------------------------------------------------
 // The extreme case, in the real stream.
 //
 // Everything above is comfortable. This is the shape that actually breaks
 // things: a session long enough that the rail must scroll internally, turns
 // long enough that Virtua is estimating most of the offsets a far jump lands
 // on, and rounds whose titles and previews stress the summary extraction.
-// ---------------------------------------------------------------------------
 
 const extremeSessionId = 'session-outline-rail-extreme-storybook' as SessionId;
 

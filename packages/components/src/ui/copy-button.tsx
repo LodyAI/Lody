@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export const CopyButton = ({
   value,
@@ -19,7 +20,7 @@ export const CopyButton = ({
   const handleCopy = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!value) return;
     e.stopPropagation();
-    void navigator.clipboard.writeText(value);
+    void copyTextToClipboard(value);
     setCopied(true);
     setTimeout(() => {
       setCopied(false);

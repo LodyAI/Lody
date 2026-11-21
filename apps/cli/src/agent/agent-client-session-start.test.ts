@@ -1012,7 +1012,6 @@ describe('AgentClient session startup', () => {
       mcpServers: [],
       systemPrompt: expected,
     });
-    // Edit-and-resend forks the provider session inside the same conversation.
     await client.prepareReplacementSession('provider-turn-1');
     expect(connectionMocks.unstable_forkSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'acp-session-1', systemPrompt: expected })
@@ -1040,10 +1039,8 @@ describe('AgentClient session startup', () => {
     await expect(client.startSession({} as never, '/workdir')).rejects.toThrow(
       '[ACP_SYSTEM_PROMPT_UNSUPPORTED]'
     );
-    // No session starts, and the prompt never becomes a user message instead.
     expect(connectionMocks.newSession).not.toHaveBeenCalled();
     expect(client.supportsSystemPrompt()).toBe(false);
-    // A coordinator marker this build does not understand fails the same way.
     expect(() => resolveSessionSystemPrompt('unsupported')).toThrow('[COORDINATOR_UNSUPPORTED]');
     expect(resolveSessionSystemPrompt('none')).toBeUndefined();
   });

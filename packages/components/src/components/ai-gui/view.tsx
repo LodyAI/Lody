@@ -67,7 +67,7 @@ import {
   hasTextContentFromMessageItems,
 } from './message-copy';
 import { useAtomValue, useStore } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
@@ -374,7 +374,6 @@ function useSessionCopyWorkspaceId(): string | undefined {
   return readonlyPresentation ? undefined : (workspaceId ?? undefined);
 }
 
-// ── Expand/collapse state cache ──────────────────────────────────────────────
 // Survives virtual-scroll unmount/remount so expand/collapse state is not lost
 // when the user scrolls a message out of the VList buffer and back.
 interface BubbleExpandState {
@@ -1336,7 +1335,6 @@ export const buildChatVirtualRows = ({
           });
         }
       });
-      // Never emit a row that renders null: Virtua requires a DOM node on every virtual row.
       coordinatorEntries.forEach((entry, index) => {
         const isLast = index === coordinatorEntries.length - 1;
         rows.push({
@@ -1993,7 +1991,6 @@ export const SessionChatStreamView = forwardRef<
 
     const copyContextAvailable = onCopyContext !== undefined;
     const selectionLayouts = selectionLayoutsRef.current;
-    // Coordinator conversations render only explicit `coordinator_message` bubbles and live status.
     const coordinatorBubbles = isMetaCoordinator || useCoordinatorConversation() !== null;
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
@@ -3004,7 +3001,6 @@ const SystemMessageRowView = ({
     />
   );
   if (coordinator) {
-    // Project mode: a row about child conversations becomes one "changes" line.
     const targets = collectOperationTaskTargets(message);
     if (targets.size > 0) {
       return (

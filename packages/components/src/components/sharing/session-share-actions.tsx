@@ -9,6 +9,7 @@ import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { shareSurface } from './surface';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const styles = stylex.create({
   foot: {
@@ -64,7 +65,7 @@ export function SessionShareActions({
     try {
       const prompt = await createAgentPrompt();
       try {
-        await navigator.clipboard.writeText(prompt);
+        await copyTextToClipboard(prompt);
         toast.success(t('sharing.agentPromptCopied', 'Prompt copied. Paste it into your agent.'));
       } catch {
         setManualPrompt(prompt);

@@ -232,7 +232,7 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
 /**
  * ③ The 14px status mark, rendered at the row's TRAILING edge inside
  * {@link SidebarRowEndSlot}. Single-mark priority:
- * `sendFailed > waitingPermission > isWorking > sending > hasUnread`. A failed
+ * `sendFailed > waitingPermission > needsAttention > isWorking > sending > hasUnread`. A failed
  * local send outranks everything because nothing else will retry it; an upload
  * in progress yields to the agent's own activity. Returns `null` when the
  * session is idle and read, which is what lets the end slot fall back to its
@@ -246,6 +246,7 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
  */
 export function SessionRowStatusIndicator({
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   sendState,
@@ -253,6 +254,8 @@ export function SessionRowStatusIndicator({
   sendLabel,
 }: {
   isWaitingPermission?: boolean;
+  /** Something Lody ran for this session stopped and needs the person (Auto delivery). */
+  needsAttention?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   /** Renderer-local state of this session's held (in-memory) sends. */
@@ -270,6 +273,8 @@ export function SessionRowStatusIndicator({
     label = sendLabel;
   } else if (isWaitingPermission === true) {
     icon = <Hand className="h-3 w-3 text-primary" />;
+  } else if (needsAttention === true && isWorking !== true) {
+    icon = <CircleAlert className="h-3 w-3 text-status-warning" strokeWidth={2.25} />;
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
@@ -303,11 +308,14 @@ export function SessionRowStatusIndicator({
 /** True when {@link SessionRowStatusIndicator} would draw a mark for this row. */
 function hasSessionRowStatus({
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   sendState,
-}: SessionRowStatusFlags): boolean {
-  return Boolean(isWaitingPermission || isWorking || hasUnreadMessages || sendState);
+}: SessionRowStatusFlags & { needsAttention?: boolean }): boolean {
+  return Boolean(
+    isWaitingPermission || needsAttention || isWorking || hasUnreadMessages || sendState
+  );
 }
 
 /**
@@ -434,11 +442,11 @@ export function SessionPrIcon({
       />
     );
 
-  // Sidebar rows park this mark in `SidebarRowEndSlot`, which centers anything
-  // narrower than its 20px reserve (`min-w-5`, the archive target). A Mergeable
-  // pill widens that cluster past 20px, the centering inset disappears, and the
-  // mark slides to the trailing edge. Hold the compact mark in a box the same
-  // size as the reserve so the pill grows to the left and the mark stays put.
+  // Sidebar rows park this mark in `SidebarRowEndSlot`, which right-aligns
+  // anything narrower than its reserve (the archive target). A Mergeable
+  // pill widens that cluster past the reserve and the mark keeps the trailing
+  // edge. Hold the compact mark in a box the same size as the reserve so the
+  // pill grows to the left and the mark stays put.
   if (!compact) return mark;
   return (
     <span
@@ -632,8 +640,12 @@ export function SessionOpenedByTreeRow({
 /**
  * ③ The hover-revealed ⋯ action. It opens the row's ordinary right-click menu from
  * a left click by re-dispatching `contextmenu` at its own corner, so the button and
- * the right-click gesture can never diverge. `SidebarRowEndSlot` parks it one 20px
- * column left of Archive (or at the right edge itself on a menu-only row).
+ * the right-click gesture can never diverge. `SidebarRowEndSlot` reserves its own
+ * 20px column left of Archive and paints its revealed-action area with the row's
+ * fill, so the trigger sits on the same opaque `--sidebar-hover` /
+ * `--sidebar-selection` as the row beneath it. The pressed tint shades that fill
+ * as an inset shadow rather than a translucent background-color that would let
+ * content through again.
  */
 export function SessionRowMenuButton({
   label,
@@ -663,12 +675,13 @@ export function SessionRowMenuButton({
       }}
       className={cn(
         'flex h-5 w-5 items-center justify-center rounded-sm opacity-0 pointer-events-none',
-        'text-sidebar-foreground-muted/80 transition-[opacity,color,background-color] duration-100',
-        'hover:bg-sidebar-foreground/15 hover:text-sidebar-foreground',
+        'text-sidebar-foreground-muted/80 transition-[opacity,color,box-shadow] duration-100',
+        'hover:text-sidebar-foreground hover:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
         'focus-visible:outline-hidden',
         // The trigger itself stays pressed-looking while its menu is open,
         // not just the row around it.
-        'group-data-[menu-open]:bg-sidebar-foreground/15 group-data-[menu-open]:text-sidebar-foreground',
+        'group-data-[menu-open]:text-sidebar-foreground group-data-[menu-open]:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
+        'group-data-[menu-open]/row:text-sidebar-foreground group-data-[menu-open]/row:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
         revealClassName
       )}
     >
@@ -766,6 +779,19 @@ export function SidebarRowActionButton({
   );
 }
 
+// Revealed end-slot fills, one per row group scope. Each set names only its
+// own scope so an unrelated ancestor `group` can never reveal the fill.
+const PLAIN_ROW_GROUP_FILL = cn(
+  'group-hover:bg-sidebar-hover group-data-[menu-open]:bg-sidebar-hover',
+  '[.group:hover[aria-current=page]_&]:bg-sidebar-selection',
+  '[.group[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
+);
+const NAMED_ROW_GROUP_FILL = cn(
+  'group-hover/row:bg-sidebar-hover group-data-[menu-open]/row:bg-sidebar-hover',
+  '[.group\\/row:hover[aria-current=page]_&]:bg-sidebar-selection',
+  '[.group\\/row[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
+);
+
 /**
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
  *
@@ -777,13 +803,17 @@ export function SidebarRowActionButton({
  * instead of a cluster that competes with it and eats the title.
  *
  * The hover actions (the ⋯ menu, then Archive) are absolutely overlaid on hover, so a
- * wide rest cluster never causes layout movement. When the rest content is absent but
- * an action is available, the slot still reserves its 20px hit target.
+ * wide rest cluster never causes layout movement. The slot reserves one 20px
+ * column per action even when no rest content shows, so the ⋯ stays inside the
+ * row's trailing edge instead of overlaying the title, and while its actions
+ * are revealed the slot paints itself with the row's own fill — every end-slot
+ * action, present or added later, is opaque over its column.
  */
 export function SidebarRowEndSlot({
   sessionId,
   selected = false,
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   restIcon,
@@ -791,6 +821,7 @@ export function SidebarRowEndSlot({
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
   fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
+  rowGroup = 'group',
 }: {
   /**
    * Reads this session's local send status here, in the leaf, so upload
@@ -800,6 +831,7 @@ export function SidebarRowEndSlot({
   /** Whether the hosting row is currently selected, used to tune pill contrast. */
   selected?: boolean;
   isWaitingPermission?: boolean;
+  needsAttention?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   restIcon?: ReactNode;
@@ -807,22 +839,34 @@ export function SidebarRowEndSlot({
   menu?: ReactNode;
   archive?: ReactNode;
   fadeClassName?: string;
+  /**
+   * The row's own Tailwind group: plain `group`, or the named `group/row` used
+   * where the row sits inside an outer plain `group` (a section list). The
+   * revealed fill must key off the row only — matching any ancestor `group`
+   * would paint every row's slot whenever the pointer is over the list.
+   */
+  rowGroup?: 'group' | 'row';
 }) {
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
   const shortcut = useSidebarRowShortcut(sessionId);
   const sendLabel = useSessionSendLabel(sendStatus);
-  const restContent = shortcut ? (
-    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
-  ) : hasSessionRowStatus({
+  const showStatus =
+    !shortcut &&
+    hasSessionRowStatus({
       isWaitingPermission,
+      needsAttention,
       isWorking: drawWorking,
       hasUnreadMessages,
       sendState: sendStatus?.state,
-    }) ? (
+    });
+  const restContent = shortcut ? (
+    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
+  ) : showStatus ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
+      needsAttention={needsAttention}
       isWorking={drawWorking}
       hasUnreadMessages={hasUnreadMessages}
       sendState={sendStatus?.state}
@@ -835,22 +879,40 @@ export function SidebarRowEndSlot({
   const hasRest = Boolean(restContent);
   const showActions = !shortcut && (Boolean(menu) || Boolean(archive));
   // Reserve the action hit target whenever something can occupy it; otherwise the
-  // slot sizes to its resting content (for example, a PR icon).
+  // slot sizes to its resting content (for example, a PR icon). Each revealed
+  // action owns one 20px column: ⋯ parks left of Archive, so a pair needs two —
+  // one column would leave the ⋯ absolutely positioned over the title's tail.
+  const actionColumns = showActions ? (menu ? 1 : 0) + (archive ? 1 : 0) : 0;
   const reserve = hasRest || showActions;
   return (
     // pointer-events-none so the resting PR icon area still passes clicks through to
     // the row's navigation; the hover action buttons re-enable pointer events on hover.
+    // justify-end keeps a narrower resting mark's right edge exactly where the
+    // revealed action lands, so the row's rightmost mark never shifts on hover.
+    // The revealed fill keeps the same color the row paints under these states:
+    // --sidebar-hover on hover and menu-open alike. aria-current lives on the
+    // same group element, so the selection overrides compound the state into
+    // one ancestor selector to win over the plain hover fill.
     <div
       data-session-row-end-slot=""
       className={cn(
-        'relative flex h-5 shrink-0 items-center justify-center pointer-events-none',
-        reserve ? 'min-w-5' : 'w-0'
+        'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
+        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0',
+        showActions &&
+          cn(
+            'transition-colors duration-100',
+            rowGroup === 'row' ? NAMED_ROW_GROUP_FILL : PLAIN_ROW_GROUP_FILL
+          )
       )}
     >
       {hasRest ? (
+        // A status mark centres in one 20px column, the same column the revealed
+        // actions and a folded group's mark centre their 14px icons in, so it
+        // lines up with both instead of sitting 3px right of them.
         <span
           className={cn(
             'flex',
+            showStatus && 'w-5 justify-center',
             showActions && cn('transition-opacity duration-100', fadeClassName)
           )}
         >

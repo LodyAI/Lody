@@ -72,7 +72,10 @@ import {
   type ValidatedUploadFile,
   type UploadedSessionFile,
 } from './session-attachment-transfer';
-import { handleMemoryProviderRequest } from './memory-providers';
+import {
+  handleMemoryProviderRequest,
+  handleRelayedMemoryProviderRequest,
+} from './memory-providers';
 import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
@@ -669,6 +672,18 @@ export interface MessageHandlerConfig {
       providerId: string,
       signal?: AbortSignal
     ) => Promise<void>;
+    refreshProviders: (
+      configId: AgentConfigId,
+      providerId?: string,
+      signal?: AbortSignal
+    ) => Promise<void>;
+    listModels: (
+      configId: AgentConfigId,
+      providerId?: string,
+      signal?: AbortSignal
+    ) => Promise<
+      Array<{ selector: string; providerId: string; modelId: string; displayName: string }>
+    >;
   };
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
@@ -3963,7 +3978,7 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             agentType,
           }),
-        memoryProvider: handleMemoryProviderRequest,
+        memoryProvider: handleRelayedMemoryProviderRequest,
         listMachinePiExtensions: async ({ configId }) =>
           await this.executionService.listMachinePiExtensions(configId),
         installMachineAcpBinary: async ({ agentType, onAcpBinaryProgress }) =>
@@ -4198,7 +4213,7 @@ export class MessageHandler {
           await this.previewService.authorizeRemoteControl(
             request.sessionId,
             request.requestedByUserId,
-            { action: 'revoke' },
+            { action: 'revoke', ...(request.stopProcess ? { stopProcess: true } : {}) },
             proof
           );
           return this.previewService.revokePreview({
@@ -7985,7 +8000,9 @@ export class MessageHandler {
       case 'sorbet/credentials-logout':
       case 'sorbet/providers-list':
       case 'sorbet/providers-create':
-      case 'sorbet/providers-delete': {
+      case 'sorbet/providers-delete':
+      case 'sorbet/providers-refresh':
+      case 'sorbet/models-list': {
         if (
           request.workspaceId !== this.workspaceId ||
           request.machineId !== this.machineId ||
@@ -8034,8 +8051,30 @@ export class MessageHandler {
               ),
             });
           }
-          await this.sorbetCredentials.deleteProvider(configId, request.params.providerId, signal);
-          return { type: 'sorbet/providers-delete' };
+          if (request.method === 'sorbet/providers-delete') {
+            await this.sorbetCredentials.deleteProvider(
+              configId,
+              request.params.providerId,
+              signal
+            );
+            return { type: 'sorbet/providers-delete' };
+          }
+          if (request.method === 'sorbet/providers-refresh') {
+            await this.sorbetCredentials.refreshProviders(
+              configId,
+              request.params.providerId,
+              signal
+            );
+            return { type: 'sorbet/providers-refresh' };
+          }
+          return SorbetProvidersResultSchema.parse({
+            type: 'sorbet/models-list',
+            models: await this.sorbetCredentials.listModels(
+              configId,
+              request.params.providerId,
+              signal
+            ),
+          });
         } catch {
           throw new Error('Sorbet provider operation failed');
         }
@@ -9452,7 +9491,7 @@ export class MessageHandler {
       return;
     }
 
-    // This channel is agent-facing (MCP lody_upload_files): paths MUST stay
+    // This channel is agent-facing (MCP lody_upload, kind=files): paths MUST stay
     // inside the session workspace, or the tool would let a prompt-injected
     // agent exfiltrate arbitrary host files past its own read-approval gate.
     const workspaceRoot = this.resolveSessionWorkspaceRoot(sessionId);
@@ -12279,9 +12318,6 @@ export class MessageHandler {
     void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
   }
 
-  // =====================================================================
-  // GC-related public methods
-  // =====================================================================
   /**
    * Check if a session has pending ACP updates that haven't been flushed yet.
    */

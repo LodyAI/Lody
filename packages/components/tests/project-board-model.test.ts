@@ -61,7 +61,6 @@ describe('project board', () => {
           lastReadAt: 9,
           coordinatorTaskAcceptedAt: 6,
         }),
-        // New activity after acceptance sends a task back to review.
         session('reopened', {
           openedBySessionId: coordinator.id as never,
           lastMessageAt: 30,
@@ -74,7 +73,6 @@ describe('project board', () => {
 
     expect(ids(result.needsYou).sort()).toEqual(['asks', 'permission']);
     expect(ids(result.working)).toEqual(['running']);
-    // Read or not, a finished task waits for the user's review until accepted.
     expect(ids(result.review)).toEqual(['reopened', 'finished']);
     expect(ids(result.accepted)).toEqual(['accepted']);
   });
@@ -95,12 +93,10 @@ describe('project board', () => {
     const rows = Object.values(result).flat();
     const numberOf = (id: string) => rows.find((row) => row.session.id === id)?.taskNumber;
 
-    // The archived first task keeps T1, so the others never renumber.
     expect(numberOf('second')).toBe(2);
     expect(numberOf('third')).toBe(3);
     expect(numberOf('manual')).toBeUndefined();
 
-    // Accepted tasks auto-archive their session while staying in the board's `accepted` group.
     const acceptedArchived = board([
       coordinator,
       session('accepted-archived', {
@@ -133,7 +129,6 @@ describe('project board', () => {
       readiness: 'y',
     });
 
-    // Coordinator history strips include non-accepted archived tasks too so chips retain their title and T1.
     const allSessions = [
       coordinator,
       session('first-archived', {
@@ -173,7 +168,6 @@ describe('project board', () => {
       session('archived', { isArchived: true }),
       session('tab', { parentSessionId: 'manual' as never }),
       session('second-coordinator', { coordinator: { version: 1 } }),
-      // A teammate's conversation, even one this coordinator opened, is not listed.
       session('teammate', { userId: 'user-2' }),
       session('teammate-dispatched', {
         userId: 'user-2',
@@ -182,7 +176,6 @@ describe('project board', () => {
     ]);
     const rows = Object.values(result).flat();
 
-    // A conversation started by hand in the same project stays out of the board.
     expect(ids(rows)).toEqual(['dispatched-elsewhere']);
   });
 
@@ -216,7 +209,6 @@ describe('project board', () => {
     });
     const plain = session('plain', { createdAt: created(7) });
 
-    // Activity in the older coordinator does not move the binding.
     expect(
       findProjectCoordinatorSession(
         [original, replacement, theirs, archived, plain],
@@ -224,7 +216,6 @@ describe('project board', () => {
         'user-1'
       )?.id
     ).toBe('replacement');
-    // Until "Change coordinator" creates the replacement, the original stays bound.
     expect(findProjectCoordinatorSession([original, theirs], project, 'user-1')?.id).toBe(
       'original'
     );

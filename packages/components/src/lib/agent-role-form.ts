@@ -22,6 +22,7 @@ import {
   type MemoryBinding,
 } from '@lody/shared';
 import {
+  coerceFastModeConfigOptionValue,
   isConfigOptionValueValid,
   type AcpConfigOptionSelector,
   type AcpSelectorOptions,
@@ -441,18 +442,22 @@ export const carryAgentRoleOptionsToModel = (
   values: AgentRoleTargetFormValue['configOptionValues'],
   outgoing: readonly AcpConfigOptionSelector[],
   incoming: readonly AcpConfigOptionSelector[]
-): AgentRoleTargetFormValue['configOptionValues'] =>
-  Object.fromEntries(
-    Object.entries(values).filter(([configId, value]) => {
-      if (!outgoing.some((selector) => selector.configId === configId)) return true;
-      const next = incoming.find((selector) => selector.configId === configId);
-      return next !== undefined && isConfigOptionValueValid(next, value);
-    })
-  );
-
-// ---------------------------------------------------------------------------
-// Capability compatibility
-// ---------------------------------------------------------------------------
+): AgentRoleTargetFormValue['configOptionValues'] => {
+  const carried: AgentRoleTargetFormValue['configOptionValues'] = {};
+  for (const [configId, value] of Object.entries(values)) {
+    if (!outgoing.some((selector) => selector.configId === configId)) {
+      carried[configId] = value;
+      continue;
+    }
+    const next = incoming.find((selector) => selector.configId === configId);
+    if (!next) continue;
+    const coerced = coerceFastModeConfigOptionValue(next, value);
+    if (isConfigOptionValueValid(next, coerced)) {
+      carried[configId] = coerced;
+    }
+  }
+  return carried;
+};
 
 export type AgentRoleRunConfigIssue =
   /** The agent's capabilities are unknown, so nothing can be judged compatible. */
@@ -502,7 +507,7 @@ export const findAgentRoleRunConfigIssues = (
       issues.push({ kind: 'option_unsupported', configId });
       continue;
     }
-    if (!isConfigOptionValueValid(selector, value)) {
+    if (!isConfigOptionValueValid(selector, coerceFastModeConfigOptionValue(selector, value))) {
       issues.push({ kind: 'option_value_unsupported', configId, value: String(value) });
     }
   }
@@ -518,10 +523,6 @@ export const findAgentRoleRunConfigIssues = (
 export const selectAuthorableAgentRoleConfigOptions = <T extends { configId: string }>(
   selectors: readonly T[]
 ): T[] => selectors.filter((selector) => !isSensitiveAgentRoleConfigOptionKey(selector.configId));
-
-// ---------------------------------------------------------------------------
-// Row summary
-// ---------------------------------------------------------------------------
 
 /**
  * What a Role's row says it will run, in reading order: model, reasoning, then

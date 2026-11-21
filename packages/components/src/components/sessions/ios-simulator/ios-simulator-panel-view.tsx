@@ -38,6 +38,7 @@ import {
 import { IosSimulatorControls, type IosSimulatorControlsProps } from './ios-simulator-controls';
 import { IosSimulatorDeviceFrame } from './ios-simulator-device-frame';
 import { IosSimulatorDevicePicker } from './ios-simulator-device-picker';
+import { PreviewDisconnectButton } from '../preview-disconnect-button';
 import { IosSimulatorViewer, type IosSimulatorViewerHandle } from './ios-simulator-viewer';
 import {
   getIosSimulatorHardware,
@@ -72,6 +73,8 @@ export type IosSimulatorPanelViewProps = {
   pendingAction?: IosSimulatorPendingAction;
   /** Whether this start has to boot the device, so the steps list it. */
   bootExpected?: boolean;
+  /** Cache key for keeping the live viewer iframe alive across session switches. */
+  cacheKey?: string;
   /** The panel is on screen; the viewer is told when it is not. */
   active?: boolean;
   leadingSlot?: ReactNode;
@@ -81,6 +84,7 @@ export type IosSimulatorPanelViewProps = {
   onStart: (device: IosSimulatorDeviceEntry) => void;
   onCancel: () => void;
   onStop: () => void;
+  onStopAndShutdown?: () => void;
   onRestore: () => void;
   onRetry: () => void;
   onCopyDiagnostics: () => void;
@@ -384,6 +388,7 @@ export function IosSimulatorPanelView({
   viewerReloadKey = 0,
   pendingAction = null,
   bootExpected = false,
+  cacheKey,
   active = true,
   leadingSlot,
   onSelectDevice,
@@ -392,6 +397,7 @@ export function IosSimulatorPanelView({
   onStart,
   onCancel,
   onStop,
+  onStopAndShutdown,
   quality,
   onRestore,
   onRetry,
@@ -531,6 +537,8 @@ export function IosSimulatorPanelView({
           <IosSimulatorViewer
             key={`${status.operationId}:${viewerReloadKey}:${controlsLayout}`}
             ref={viewerRef}
+            cacheKey={cacheKey}
+            alreadyReady={viewerState === 'ready'}
             viewerUrl={status.viewerUrl}
             viewerOrigin={status.viewerOrigin}
             operationId={status.operationId}
@@ -735,15 +743,37 @@ export function IosSimulatorPanelView({
               onRestore={onRestore}
               onCancel={onCancel}
               onStop={onStop}
+              onStopAndShutdown={onStopAndShutdown}
               hasError={catalog.phase === 'error'}
               onCopyDiagnostics={onCopyDiagnostics}
             />
           </div>
         ) : null}
         {status.phase === 'ready' && blocker === null ? (
-          <Button type="button" variant="secondary" size="small" disabled={busy} onClick={onStop}>
-            {t('sessions.iosSimulator.action.stop', 'Stop preview')}
-          </Button>
+          <PreviewDisconnectButton
+            size="small"
+            primaryLabel={t('sessions.iosSimulator.action.stop', 'Stop preview')}
+            menuAriaLabel={t('sessions.iosSimulator.action.stopOptions', 'Stop preview options')}
+            disconnectOnlyLabel={t(
+              'sessions.iosSimulator.action.stopPreviewOnly',
+              'Stop preview only'
+            )}
+            disconnectAndTerminateLabel={
+              platform === 'android'
+                ? t(
+                    'sessions.androidEmulator.action.stopAndShutdown',
+                    'Stop preview and shut down emulator'
+                  )
+                : t(
+                    'sessions.iosSimulator.action.stopAndShutdown',
+                    'Stop preview and shut down simulator'
+                  )
+            }
+            disabled={busy}
+            onDisconnectOnly={onStop}
+            onDisconnectAndTerminate={onStopAndShutdown}
+            testId="device-preview-disconnect-button"
+          />
         ) : null}
         {controlsWithQuality && controlsLayout === 'menu' ? (
           <IosSimulatorControls layout="menu" {...controlsWithQuality} />

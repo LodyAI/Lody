@@ -209,11 +209,15 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     run: () => Promise<T>,
     duringWait?: () => Promise<void>
   ): Promise<T> {
-    const started = testSignal();
+    let started = testSignal();
+    let waiterTimeout = 0;
     const ready = manager.catalogBaselineReady.bind(manager);
     const observer = vi.spyOn(manager, 'catalogBaselineReady').mockImplementation((id, timeout) => {
       const result = ready(id, timeout);
-      if (timeout > 0) started.resolve();
+      if (timeout > 0) {
+        waiterTimeout = timeout;
+        started.resolve();
+      }
       return result;
     });
     const outcome = run().then(
@@ -223,14 +227,14 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       }
     );
     try {
-      const waiting = await Promise.race([
-        started.promise.then(() => true),
-        outcome.then(() => false),
-      ]);
-      // A batch validates its items sequentially; each owns a one-second waiter.
-      if (waiting) {
-        await duringWait?.();
-        await vi.advanceTimersByTimeAsync(duringWait ? 0 : 3_000);
+      let onWait = duringWait;
+      while (await Promise.race([started.promise.then(() => true), outcome.then(() => false)])) {
+        started = testSignal();
+        // Each batch item starts its own waiter, potentially after real storage I/O.
+        // Advance that waiter's deadline only after it starts.
+        await onWait?.();
+        onWait = undefined;
+        await vi.advanceTimersByTimeAsync(duringWait ? 0 : waiterTimeout);
       }
       return (await outcome)();
     } finally {
@@ -328,9 +332,9 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
 
   it.each([
     ['lody_session_create', false],
-    ['lody_session_create_many', false],
+    ['lody_session_create', false],
     ['lody_session_create', true],
-    ['lody_session_create_many', true],
+    ['lody_session_create', true],
   ] as const)(
     'accepts %s from persisted defaults before any Streams baseline (configured=%s)',
     async (tool, configured) => {
@@ -440,7 +444,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     }
   );
 
-  it.each(['lody_session_create', 'lody_session_create_many'] as const)(
+  it.each(['lody_session_create', 'lody_session_create'] as const)(
     'rejects %s with no remote history before acceptance and recovers the same request after catch-up',
     async (tool) => {
       const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
@@ -482,7 +486,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         error: { code: 'SYNC_UNAVAILABLE', retryable: true },
       });
       const operations = await runWithSessionCommandEnvironment(environment, () =>
-        executeDaemonSessionTool(context(), 'lody_operation_list', {})
+        executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })
       );
       expect(JSON.parse(operations.content[0]?.text ?? '{}')).toMatchObject({ items: [] });
       const localAgent = await manager.getAgentConfigById(agentConfigId);
@@ -619,13 +623,17 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         new Error('Flock sync unavailable')
       );
       for (const [name, args, expected] of [
-        ['lody_agent_role_list', {}, { items: [{ id: 'synthetic-collaborator', machineId }] }],
         [
-          'lody_agent_role_get',
-          { id: 'synthetic-collaborator' },
+          'lody_catalog',
+          { action: 'agent_roles' },
+          { items: [{ id: 'synthetic-collaborator', machineId }] },
+        ],
+        [
+          'lody_catalog',
+          { action: 'agent_roles', arguments: { id: 'synthetic-collaborator' } },
           { item: { promptPrefix: 'Review carefully.' } },
         ],
-        ['lody_agent_config_list', {}, { items: [{ id: agentConfigId }] }],
+        ['lody_catalog', { action: 'agent_configs' }, { items: [{ id: agentConfigId }] }],
       ] as const) {
         const result = await runWithDaemonWorkspace(daemon, () =>
           executeDaemonSessionTool(context(), name, args)
@@ -799,6 +807,62 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
   });
 
+  it('links, lists and unlinks pull requests of the calling Session only, as agent records', async () => {
+    const call = (args: unknown) =>
+      runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(context(), 'lody_session_manage', args)
+      );
+    const decode = (result: { content: Array<{ text?: string }> }) =>
+      JSON.parse(result.content[0]?.text ?? '{}');
+    const readLinks = async () =>
+      Object.entries(
+        ((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta ?? {}) as Record<
+          string,
+          unknown
+        >
+      ).filter(([key]) => key.startsWith('prLink:'));
+    const url = 'https://github.com/owner/repo/pull/7';
+
+    const linked = await call({ action: 'pr_link', arguments: { url } });
+    expect(linked.isError, JSON.stringify(linked)).not.toBe(true);
+    expect(decode(linked)).toEqual({ linked: true, sessionId, url });
+    expect(await readLinks()).toEqual([
+      [`prLink:${url}`, expect.objectContaining({ k: 'l', o: 'a' })],
+    ]);
+    expect(decode(await call({ action: 'pr_list' })).items).toEqual([
+      expect.objectContaining({ kind: 'pending', url }),
+    ]);
+
+    // The target is always the calling Session: no argument can name another one.
+    await expect(
+      call({ action: 'pr_link', arguments: { url, sessionId: 'another-session' } })
+    ).rejects.toThrow();
+    const unsupported = await call({
+      action: 'pr_link',
+      arguments: { url: 'https://example.test/owner/repo/merge_requests/1' },
+    });
+    expect(unsupported.isError).toBe(true);
+    expect(decode(unsupported)).toEqual({ linked: false, reason: 'unsupported' });
+
+    const unlinked = await call({ action: 'pr_unlink', arguments: { url } });
+    expect(decode(unlinked)).toEqual({ linked: false, unlinked: true, sessionId, url });
+    expect(await readLinks()).toEqual([
+      [`prLink:${url}`, expect.objectContaining({ k: 'u', o: 'a' })],
+    ]);
+    expect(decode(await call({ action: 'pr_list' })).items).toEqual([]);
+  });
+
+  it('never runs a Session share over daemon IPC; it stays in the MCP process', async () => {
+    await expect(
+      runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(context(), 'lody_session_manage', {
+          action: 'share',
+          arguments: { requestId: 'share-1', purpose: 'Show the result' },
+        })
+      )
+    ).rejects.toThrow('Unsupported daemon Session tool call: lody_session_manage');
+  });
+
   it('does not report an older failure after the newest user Turn succeeds', async () => {
     stubCreateOptionsReaders();
     const doc = await manager.getOrCreateSessionDoc(sessionId);
@@ -884,13 +948,19 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(read.content[0]?.text).toContain('owner local history');
     const authorized = daemon.readAccess;
     daemon.readAccess = () => ({ status: 'revoked' });
-    const revoked = await call('lody_session_archive', { sessionId });
+    const revoked = await call('lody_session_manage', {
+      action: 'archive',
+      arguments: { sessionId },
+    });
     expect(revoked.isError).toBe(true);
     expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta.isArchived).toBe(
       false
     );
     daemon.readAccess = authorized;
-    const archived = await call('lody_session_archive', { sessionId });
+    const archived = await call('lody_session_manage', {
+      action: 'archive',
+      arguments: { sessionId },
+    });
     expect(archived.isError, JSON.stringify(archived)).not.toBe(true);
     expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta.isArchived).toBe(
       true
@@ -912,6 +982,43 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(remote.isError).toBe(true);
     expect(remote.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
     expect(remote.content[0]?.text).not.toContain('owner local history');
+  });
+
+  it('reads the first history page when an agent runtime that forces every field fills cursor with null or blank text', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
+    await backend.appendHistoryTurn({
+      id: 'first-page-context',
+      role: 'user',
+      timestamp: '2026-11-10T00:00:00Z',
+      items: [{ type: 'text', text: 'first page context' }],
+      fileDiff: [],
+    } as never);
+    const call = async (args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), 'lody_session_history', { sessionId, ...args })
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+
+    const omitted = await call({});
+    expect(omitted.isError, omitted.text).toBe(false);
+    expect(omitted.text).toContain('first page context');
+    for (const direction of ['backward', 'forward'] as const) {
+      for (const cursor of [null, '', '   ']) {
+        const read = await call({ direction, cursor });
+        expect(read.isError, `${direction} ${JSON.stringify(cursor)}: ${read.text}`).toBe(false);
+        expect(JSON.parse(read.text).items).toEqual(JSON.parse(omitted.text).items);
+      }
+    }
+    const placeholder = await call({ cursor: 'none' });
+    expect(placeholder.isError).toBe(true);
+    expect(placeholder.text).toContain('CURSOR_INVALID');
   });
 
   it('reports the latest failed turn and marks its history entry', async () => {
@@ -1388,7 +1495,10 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
       const archive = () => {
         const execute = () =>
-          executeDaemonSessionTool(context(), 'lody_session_archive', { sessionId });
+          executeDaemonSessionTool(context(), 'lody_session_manage', {
+            action: 'archive',
+            arguments: { sessionId },
+          });
         return composition === 'local'
           ? runWithSessionCommandEnvironment(environment, execute)
           : runWithDaemonWorkspace(daemon, execute);
@@ -1446,7 +1556,11 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         });
       }
       const run = (args: unknown) => {
-        const execute = () => executeDaemonSessionTool(context(), 'lody_session_archive', args);
+        const execute = () =>
+          executeDaemonSessionTool(context(), 'lody_session_manage', {
+            action: 'archive',
+            arguments: args,
+          });
         return composition === 'local'
           ? runWithSessionCommandEnvironment(createEnvironment(), execute)
           : runWithDaemonWorkspace(daemon, execute);
@@ -1534,7 +1648,10 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
 
     // A confirmed revocation denies; it never falls back to cache or discovery.
     access = { status: 'revoked' };
-    const denied = await call('lody_session_archive', { sessionId });
+    const denied = await call('lody_session_manage', {
+      action: 'archive',
+      arguments: { sessionId },
+    });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain('Workspace access was revoked');
     expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta).toMatchObject({
@@ -1543,7 +1660,10 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
 
     // Restored access is used by the next call without restarting the daemon.
     access = authorized;
-    const archived = await call('lody_session_archive', { sessionId });
+    const archived = await call('lody_session_manage', {
+      action: 'archive',
+      arguments: { sessionId },
+    });
     expect(archived.isError, text(archived)).not.toBe(true);
     expect(list).not.toHaveBeenCalled();
 
@@ -1738,7 +1858,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
 
   it('executes a Session tool for another requester against the daemon replica', async () => {
     const result = await runWithDaemonWorkspace(daemon, () =>
-      executeDaemonSessionTool(context(), 'lody_operation_list', {})
+      executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })
     );
     expect(result.isError).not.toBe(true);
     expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({ items: [] });
@@ -1869,11 +1989,14 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       });
       vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
       const result = await runWithDaemonWorkspace(daemon, () =>
-        executeDaemonSessionTool(context(), 'lody_agent_role_create', {
-          requestId: 'cold-target',
-          name: 'Remote Role',
-          machineId: remoteMachineId,
-          agentConfigId: 'remote-role-config',
+        executeDaemonSessionTool(context(), 'lody_agent_role', {
+          action: 'create',
+          arguments: {
+            requestId: 'cold-target',
+            name: 'Remote Role',
+            machineId: remoteMachineId,
+            agentConfigId: 'remote-role-config',
+          },
         })
       );
       expect(result.isError, JSON.stringify(result)).not.toBe(true);
@@ -1884,11 +2007,14 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         docId === id ? Promise.reject(originalFailure) : originalSync(docId, options)
       );
       const retry = await runWithDaemonWorkspace(daemon, () =>
-        executeDaemonSessionTool(context(), 'lody_agent_role_create', {
-          requestId: 'cold-retry',
-          name: 'Retry Role',
-          machineId: remoteMachineId,
-          agentConfigId: 'remote-role-config',
+        executeDaemonSessionTool(context(), 'lody_agent_role', {
+          action: 'create',
+          arguments: {
+            requestId: 'cold-retry',
+            name: 'Retry Role',
+            machineId: remoteMachineId,
+            agentConfigId: 'remote-role-config',
+          },
         })
       );
       expect(retry.isError).toBe(true);
@@ -1945,7 +2071,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
           : { requestId, roleId: 'synthetic-collaborator', patch: { description: 'Updated' } };
       const propose = () =>
         runWithDaemonWorkspace(daemon, () =>
-          executeDaemonSessionTool(context(), `lody_agent_role_${action}`, args)
+          executeDaemonSessionTool(context(), 'lody_agent_role', { action, arguments: args })
         );
       const failed = await propose();
       expect(failed.isError).toBe(true);
@@ -2045,15 +2171,18 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
       const list = () =>
         runWithDaemonWorkspace(daemon, () =>
-          executeDaemonSessionTool(context(), 'lody_agent_role_list', {})
+          executeDaemonSessionTool(context(), 'lody_catalog', { action: 'agent_roles' })
         );
       expect(JSON.parse((await list()).content[0]?.text ?? '{}').items).toMatchObject([
         { id: 'remote-role', revision: 1 },
       ]);
       const configs = () =>
         runWithDaemonWorkspace(daemon, () =>
-          executeDaemonSessionTool(context(), 'lody_agent_config_list', {
-            machineId: remoteMachineId,
+          executeDaemonSessionTool(context(), 'lody_catalog', {
+            action: 'agent_configs',
+            arguments: {
+              machineId: remoteMachineId,
+            },
           })
         );
       // A first read admits background reader interest; it never waits for catch-up.
@@ -2160,10 +2289,10 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       await client.connect(clientTransport);
       const result = await runWithMcpSessionContext(
         { ...context(), localControlSocketPath: socketPath },
-        () => client.callTool({ name: 'lody_operation_list', arguments: {} })
+        () => client.callTool({ name: 'lody_operation', arguments: { action: 'list' } })
       );
       expect(result.isError, JSON.stringify(result)).not.toBe(true);
-      expect(handled).toEqual(['lody_operation_list']);
+      expect(handled).toEqual(['lody_operation']);
     } finally {
       await client.close();
       await mcpServer.close();
@@ -2206,15 +2335,15 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
   });
 
   it('rejects calls outside the daemon workspace scope', async () => {
-    await expect(executeDaemonSessionTool(context(), 'lody_operation_list', {})).rejects.toThrow(
-      'Session tool scope mismatch'
-    );
+    await expect(
+      executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })
+    ).rejects.toThrow('Session tool scope mismatch');
     await expect(
       runWithDaemonWorkspace(daemon, () =>
         executeDaemonSessionTool(
           { ...context(), workspaceId: 'other-workspace' },
-          'lody_operation_list',
-          {}
+          'lody_operation',
+          { action: 'list' }
         )
       )
     ).rejects.toThrow('Session tool scope mismatch');
@@ -2222,8 +2351,8 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       runWithDaemonWorkspace(daemon, () =>
         executeDaemonSessionTool(
           { ...context(), sessionId: 'missing-session' as SessionId },
-          'lody_operation_list',
-          {}
+          'lody_operation',
+          { action: 'list' }
         )
       )
     ).rejects.toThrow('Requester Session does not belong to this machine');
@@ -2238,7 +2367,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
             active: false,
           }),
         },
-        () => executeDaemonSessionTool(context(), 'lody_operation_list', {})
+        () => executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })
       )
     ).rejects.toThrow('Session tool requires an active Turn');
   });
@@ -2368,7 +2497,6 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     const afterClear = await backend.readTurn('coord-turn-1');
     expect(afterClear.state === 'ready' ? afterClear.turn.items : []).toHaveLength(2);
 
-    // Zero-copy forwarding of child-produced image & file via completion receipt.
     const childSessionId = 'child-media-session' as SessionId;
     const childDoc = await manager.getOrCreateSessionDoc(childSessionId);
     const childBackend = await createSessionBackend(childDoc);
@@ -2467,7 +2595,6 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       createdAt: expect.any(Number),
     });
 
-    // Bubble-level reply context dereferencing + automatic thread inheritance + explicit threadId routing.
     await backend.appendHistoryTurn({
       id: 'coord-root-turn',
       role: 'assistant',

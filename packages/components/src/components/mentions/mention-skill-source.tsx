@@ -463,10 +463,6 @@ export function useMentionProjectSkills(
   return { skillState, skillItems, knownSkillTokens };
 }
 
-// ============================================================================
-// Hydrator
-// ============================================================================
-
 export function SkillMentionHydrator({
   text,
   knownTokens,

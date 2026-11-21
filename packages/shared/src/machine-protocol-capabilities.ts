@@ -50,11 +50,14 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   markdownFileLinks: 'markdownFileLinks',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
+  previewStopProcess: 'previewStopProcess',
   androidEmulator: 'androidEmulator',
   androidEmulatorQuality: 'androidEmulatorQuality',
+  androidEmulatorShutdown: 'androidEmulatorShutdown',
   iosSimulator: 'iosSimulator',
   iosSimulatorControls: 'iosSimulatorControls',
   iosSimulatorExterior: 'iosSimulatorExterior',
+  iosSimulatorShutdown: 'iosSimulatorShutdown',
   piExtensions: 'piExtensions',
   antigravitySkipPermissions: 'antigravitySkipPermissions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
@@ -86,12 +89,15 @@ export const E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION = 1;
 export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
 
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
-export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
+// v1 serves identity providers (Nowledge Mem). v2 adds account providers
+// (EverMe): sign-in, install and agent connect/disconnect requests.
+export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 2;
+const MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION = 1;
-export const SORBET_PROVIDERS_PROTOCOL_VERSION = 1;
+export const SORBET_PROVIDERS_PROTOCOL_VERSION = 2;
 export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
@@ -135,9 +141,10 @@ export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 /** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
 export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
-/** The daemon delivers the coordinator system prompt for `SessionMeta.coordinator` v1. */
-// v2 adds coordinator message/status MCP tools and structured turn items.
-// v3 adds structured bubble replies, thread roots, and originThreadId propagation.
+/**
+ * Coordinator session protocol: v1 delivers the coordinator system prompt, v2 adds
+ * coordinator message/status MCP tools, and v3 adds structured bubble replies and thread roots.
+ */
 export const COORDINATOR_SESSIONS_MIN_PROTOCOL_VERSION = 2;
 export const COORDINATOR_SESSIONS_PROTOCOL_VERSION = 3;
 
@@ -162,6 +169,17 @@ export function machineSupportsProtocolCapability(
 }
 
 export function machineSupportsMemoryProviders(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.memoryProviders,
+    MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the daemon understands account providers' sign-in, install and connect requests. */
+export function machineSupportsAccountMemoryProviders(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
   return machineSupportsProtocolCapability(
@@ -244,11 +262,14 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.markdownFileLinks]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.previewStopProcess]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.androidEmulator]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorShutdown]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulator]: IOS_SIMULATOR_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls]: IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorShutdown]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpModelOptionsRead]: ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION,
@@ -707,6 +728,36 @@ export function machineSupportsAndroidEmulatorQuality(
   return machineSupportsProtocolCapability(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality,
+    1
+  );
+}
+
+export function machineSupportsPreviewStopProcess(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.previewStopProcess,
+    1
+  );
+}
+
+export function machineSupportsIosSimulatorShutdown(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorShutdown,
+    1
+  );
+}
+
+export function machineSupportsAndroidEmulatorShutdown(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorShutdown,
     1
   );
 }

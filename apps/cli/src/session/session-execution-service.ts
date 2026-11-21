@@ -173,6 +173,8 @@ import {
 import { findProgressMessageId } from '@lody/shared/session-data';
 import { Cause, Clock, Data, Effect, Exit, Fiber, Random, Scope } from 'effect';
 import { createHash, randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { join as joinPath } from 'node:path';
 import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
 import {
   getACPErrorUserMessage,
@@ -1840,8 +1842,6 @@ export class SessionExecutionService {
           ...this.baseSessionAnalyticsProps(sessionId),
           turn_id: turnId,
           ...(typeof totalTurnMs === 'number' ? { total_turn_ms: totalTurnMs } : {}),
-          // TODO(analytics): permission_wait_ms is accumulated in MessageHandler's
-          // SessionTransientStore (state.permissionWaitMs); plumb it here to populate it.
           pr_detected: prDetected,
           diff_file_count: diffFileCount,
           ...(analytics?.dispatchMode ? { dispatch_mode: analytics.dispatchMode } : {}),
@@ -8431,6 +8431,14 @@ export class SessionExecutionService {
                   (id) => self.deps.sessionManager.resolveLocalProjectRootPath(id)
                 )
               : undefined;
+            // A file stat, not a git process: `.git` is a directory in a clone and a file in
+            // a worktree. Failure only omits the PR-link sentence.
+            const gitRepository =
+              project?.kind === 'github' ||
+              (await stat(joinPath(session.getWorkdir(), '.git')).then(
+                () => true,
+                () => false
+              ));
             const sessionInputBlocks = resolveSessionExecutionInputBlocks({
               ...agentConfig,
               prompt: buildPrompt(
@@ -8442,6 +8450,9 @@ export class SessionExecutionService {
                   branchToRename,
                   projectRun,
                   projectFileRoots,
+                  gitRepository,
+                  // The same fact that puts the shim on PATH: managed broker credentials.
+                  managedGhShim: session.getGitHubCredentials().mode === 'managed',
                 }
               ),
             });

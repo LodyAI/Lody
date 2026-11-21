@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import type { MachineId, MemoryCreateInput, MemoryProviderResponse } from '@lody/shared';
+import type {
+  MachineId,
+  MemoryCreateInput,
+  MemoryProviderRequest,
+  MemoryProviderResponse,
+} from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+
+/** A request minus the provider the hook is already bound to. */
+type MemoryProviderCommand =
+  | { action: 'create' | 'update'; input: MemoryCreateInput }
+  | { action: 'connect' | 'disconnect'; targets: string[] }
+  | { action: 'signIn' | 'signInPoll' | 'install' | 'installPoll' | 'connectPoll' };
 
 /** Results belong to one runtime/machine/provider; late replies cannot retarget the UI. */
 export function useMemoryProvider(
@@ -11,7 +22,11 @@ export function useMemoryProvider(
   refreshToken = 0
 ) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  // `generation` keeps the newest reply on screen; `scope` only moves when the
+  // hook is retargeted or unmounted. A poll that overtakes the click it watches
+  // must not strip that click of its own reply, or the click reads as failed.
   const generation = useRef(0);
+  const scope = useRef(0);
   const pending = useRef(0);
   const [state, setState] = useState<{
     runtime: typeof runtime;
@@ -21,9 +36,10 @@ export function useMemoryProvider(
     busy: boolean;
   }>();
   const request = useCallback(
-    async (input?: MemoryCreateInput, action: 'create' | 'update' = 'create') => {
+    async (command?: MemoryProviderCommand) => {
       if (!runtime || !machineId || !enabled) return undefined;
       const current = ++generation.current;
+      const owner = scope.current;
       setState((previous) => ({
         runtime,
         machineId,
@@ -37,12 +53,16 @@ export function useMemoryProvider(
             : undefined,
       }));
       pending.current++;
+      const params: MemoryProviderRequest = !command
+        ? { action: 'list', providerId }
+        : 'input' in command
+          ? { action: command.action, providerId, input: command.input }
+          : 'targets' in command
+            ? { action: command.action, providerId, targets: command.targets }
+            : { action: command.action, providerId };
       let result: MemoryProviderResponse;
       try {
-        result = await runtime.requestMemoryProvider(
-          machineId,
-          input ? { action, providerId, input } : { action: 'list', providerId }
-        );
+        result = await runtime.requestMemoryProvider(machineId, params);
       } catch {
         result = { type: 'machine/memory', status: 'error', memories: [] };
       } finally {
@@ -50,13 +70,19 @@ export function useMemoryProvider(
       }
       if (generation.current === current)
         setState({ runtime, machineId, providerId, result, busy: false });
-      return generation.current === current ? result : undefined;
+      return scope.current === owner ? result : undefined;
     },
     [runtime, machineId, providerId, enabled]
   );
   const invalidate = useCallback(() => {
     generation.current++;
   }, []);
+  useEffect(
+    () => () => {
+      scope.current++;
+    },
+    [runtime, machineId, providerId, enabled]
+  );
   useEffect(() => {
     void request();
     if (!enabled) return invalidate;
@@ -81,7 +107,19 @@ export function useMemoryProvider(
   return {
     result: current ? state.result : undefined,
     busy: current ? state.busy : false,
-    create: request,
-    update: (input: MemoryCreateInput) => request(input, 'update'),
+    /** Reads the provider again, the way the page's refresh button does. */
+    refresh: () => request(),
+    create: (input?: MemoryCreateInput) => request(input ? { action: 'create', input } : undefined),
+    update: (input: MemoryCreateInput) => request({ action: 'update', input }),
+    /** Agent-connect providers only; `connectPoll` watches the job these start. */
+    connect: (targets: string[]) => request({ action: 'connect', targets }),
+    disconnect: (targets: string[]) => request({ action: 'disconnect', targets }),
+    connectPoll: () => request({ action: 'connectPoll' }),
+    /** Opens a browser sign-in; `signInPoll` asks whether it has been approved. */
+    signIn: () => request({ action: 'signIn' }),
+    signInPoll: () => request({ action: 'signInPoll' }),
+    /** Puts the provider on the machine; `installPoll` watches the job land. */
+    install: () => request({ action: 'install' }),
+    installPoll: () => request({ action: 'installPoll' }),
   };
 }

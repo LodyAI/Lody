@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
+import { setAppLanguage } from '@/i18n';
 import { Moon, Sun, PanelLeft, Languages } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -53,6 +54,7 @@ import {
   resolveShareAppOrigin,
   type ShareViewer,
 } from './session-share-identity';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** Wide enough for the tree to sit beside the transcript rather than over it. */
 const WIDE = '@media (min-width: 640px)';
@@ -252,7 +254,7 @@ function ShareLanguageToggle() {
       aria-label={label}
       title={label}
       onClick={() => {
-        void i18n.changeLanguage(nextLanguage);
+        void setAppLanguage(nextLanguage);
         try {
           window.localStorage.setItem('lody-language', JSON.stringify(nextLanguage));
         } catch {
@@ -367,7 +369,7 @@ function ShareConversationPane({
               )
             : undefined,
       });
-      await navigator.clipboard.writeText(markdown);
+      await copyTextToClipboard(markdown);
       toast.success(describeCopiedConversation(stats, t));
     } catch {
       toast.error(

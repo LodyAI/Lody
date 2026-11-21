@@ -67,10 +67,6 @@ export type AgentRoleMentionItem = {
   machine?: Pick<MachineViewMeta, 'acpCapabilities' | 'name'> | null;
 };
 
-// ---------------------------------------------------------------------------
-// Candidates
-// ---------------------------------------------------------------------------
-
 /** Available matches precede disabled matches, even when the latter score higher. */
 export const selectAgentRoleMentionCandidates = (
   items: readonly AgentRoleMentionItem[],
@@ -85,10 +81,6 @@ export const selectAgentRoleMentionCandidates = (
     );
   return [...rank(true), ...rank(false)].slice(0, limit);
 };
-
-// ---------------------------------------------------------------------------
-// Items
-// ---------------------------------------------------------------------------
 
 /**
  * One item per machine a Role runs on. A single-target Role is one item, named
@@ -176,10 +168,6 @@ export function useAgentRoleMentionItems(
     );
   }, [agentConfigs, machines, preferredMachineId, resolve, roles]);
 }
-
-// ---------------------------------------------------------------------------
-// Text: hydration and before-send expansion
-// ---------------------------------------------------------------------------
 
 /**
  * The reference the current agent receives in place of the chip. It names the

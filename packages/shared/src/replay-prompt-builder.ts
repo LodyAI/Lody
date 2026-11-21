@@ -139,17 +139,10 @@ interface CollectedPath {
 export function redactSensitiveTokens(text: string): string {
   let output = text;
 
-  // GitHub tokens (classic + fine-grained)
   output = output.replace(/\bghp_[A-Za-z0-9]{20,}\b/g, 'ghp_***');
   output = output.replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, 'github_pat_***');
-
-  // Generic bearer tokens
   output = output.replace(/\bBearer\s+[A-Za-z0-9\-_.=]{20,}\b/gi, 'Bearer ***');
-
-  // OpenAI-style API keys
   output = output.replace(/\bsk-[A-Za-z0-9]{20,}\b/g, 'sk-***');
-
-  // Basic URL auth redaction: https://user:pass@host -> https://***@host
   output = output.replace(/(https?:\/\/)[^@\s]+@/gi, '$1***@');
 
   return output;
@@ -201,7 +194,6 @@ function extractTextFromItem(item: MessageContent, pass: GenerationPass): string
       return extractTextFromToolCall(item, pass);
 
     case 'plan':
-      // Summarize plan entries
       if (!item.entries?.length) return null;
       const planLines = item.entries.map((e) => `- [${e.status}] ${e.content}`);
       return `[Plan]\n${planLines.join('\n')}`;
@@ -211,7 +203,6 @@ function extractTextFromItem(item: MessageContent, pass: GenerationPass): string
     case 'available_commands':
     case 'system_notice':
     case 'worktree_script':
-      // Skip these in replay prompt
       return null;
 
     default:
@@ -228,14 +219,12 @@ function extractTextFromToolCall(
 ): string | null {
   const parts: string[] = [];
 
-  // Add title if available
   if (item.title) {
     parts.push(`[Tool: ${item.title}]`);
   } else if (item.kind) {
     parts.push(`[Tool: ${item.kind}]`);
   }
 
-  // Process content blocks - always iterate, let extractTextFromToolContent decide what to include
   if (item.content) {
     for (const block of item.content) {
       const blockText = extractTextFromToolContent(block, pass);
@@ -269,11 +258,9 @@ function extractTextFromToolContent(block: ToolCallContent, pass: GenerationPass
       return `[Command] ${cmdParts.join(' ')}`;
 
     case 'diff':
-      // Include file path info for diffs but not the full content
       return `[Diff: ${block.path}]`;
 
     case 'content':
-      // Standard tool content - extract text if available
       if ('content' in block && block.content && 'type' in block.content) {
         if (block.content.type === 'text' && 'text' in block.content) {
           return block.content.text;
@@ -302,7 +289,6 @@ function collectPathsFromToolCall(
     }
   }
 
-  // Also extract paths from diff content
   if (item.content) {
     for (const block of item.content) {
       if (block.type === 'diff' && block.path) {
@@ -326,17 +312,14 @@ function generatePrompt(
   const allPaths: CollectedPath[] = [];
   let messagesIncluded = 0;
 
-  // Add header
   lines.push('=== Previous Conversation Context ===');
   lines.push('');
 
   for (const entry of history) {
-    // Skip the current message if specified
     if (isReplayEntryExcluded(entry, excludeTurnId)) {
       continue;
     }
 
-    // Skip system messages in replay
     if (entry.role === 'system') {
       continue;
     }
@@ -346,13 +329,11 @@ function generatePrompt(
 
     if (entry.items) {
       for (const item of entry.items as MessageContent[]) {
-        // Collect paths from tool calls
         if (item.type === 'tool_call') {
           const paths = collectPathsFromToolCall(item);
           allPaths.push(...paths);
         }
 
-        // Extract text content
         const text = extractTextFromItem(item, pass);
         if (text) {
           entryParts.push(text);
@@ -368,11 +349,9 @@ function generatePrompt(
     }
   }
 
-  // Add files referenced section
   if (allPaths.length > 0) {
     const uniquePaths = new Map<string, 'read' | 'edit' | 'other'>();
     for (const p of allPaths) {
-      // Keep the "strongest" kind (edit > read > other)
       const existing = uniquePaths.get(p.path);
       if (!existing || p.kind === 'edit' || (p.kind === 'read' && existing === 'other')) {
         uniquePaths.set(p.path, p.kind);
@@ -414,21 +393,18 @@ function truncatePrompt(text: string, maxChars: number): { text: string; truncat
     return { text, truncated: false };
   }
 
-  // Find a good breaking point (after === End of Previous Context ===)
   const endMarker = '=== End of Previous Context ===';
   const endIndex = text.lastIndexOf(endMarker);
 
   if (endIndex === -1) {
-    // No marker found, just truncate from the start
     return {
       text: '... [Earlier context truncated] ...\n\n' + text.slice(-maxChars + 50),
       truncated: true,
     };
   }
 
-  // Keep the end marker and files section
   const suffix = text.slice(endIndex);
-  const budgetForContent = maxChars - suffix.length - 50; // 50 for truncation notice
+  const budgetForContent = maxChars - suffix.length - 50;
 
   if (budgetForContent <= 0) {
     return {
@@ -465,7 +441,6 @@ export function buildReplayPromptFromHistory(
     terminalTailChars = DEFAULT_TERMINAL_TAIL_CHARS,
   } = options;
 
-  // Pass A: Full content with terminal tail
   const passA: GenerationPass = {
     includeTerminal: true,
     includeThinking: true,
@@ -476,10 +451,9 @@ export function buildReplayPromptFromHistory(
   let terminalOmitted = false;
   let thinkingOmitted = false;
   let truncated = false;
-  let terminalTailApplied = true; // We always apply tail when including terminal
+  let terminalTailApplied = true;
 
   if (result.text.length <= maxChars) {
-    // Fits in Pass A
     return {
       promptText: result.text,
       stats: {
@@ -495,7 +469,6 @@ export function buildReplayPromptFromHistory(
     };
   }
 
-  // Pass B: Omit terminal output
   const passB: GenerationPass = {
     includeTerminal: false,
     includeThinking: true,
@@ -522,7 +495,6 @@ export function buildReplayPromptFromHistory(
     };
   }
 
-  // Pass C: Omit terminal and thinking
   const passC: GenerationPass = {
     includeTerminal: false,
     includeThinking: false,
@@ -682,7 +654,6 @@ export function hasRecentResumeNotice(
   history: SessionHistoryInput[],
   _lookbackCount = 5 // deprecated, kept for API compatibility
 ): boolean {
-  // Find the last user message index
   let lastUserIndex = -1;
   for (let i = history.length - 1; i >= 0; i--) {
     const entry = history[i];
@@ -692,7 +663,6 @@ export function hasRecentResumeNotice(
     }
   }
 
-  // Check if the entry immediately before the last user message is a resume notice
   if (lastUserIndex > 0) {
     const prevEntry = history[lastUserIndex - 1];
     if (prevEntry && prevEntry.role === 'system' && prevEntry.items) {

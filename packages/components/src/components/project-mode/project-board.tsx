@@ -93,7 +93,6 @@ const styles = stylex.create({
     minWidth: 0,
     paddingInlineEnd: space[3],
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
-    // Ruled rows: the separator sits between rows, never around the card.
     boxShadow: { default: 'none', ':not(:first-child)': `inset 0 0.5px 0 ${colors.separator}` },
   },
   rowLink: {
@@ -199,7 +198,6 @@ function useProjectBoardDataInternal(
   const sendStates = useAtomValue(sessionSendStatesAtom);
   const allSessionsIncludingArchived = useAtomValue(allSessionsIncludingArchivedAtom);
 
-  // Rebuilt on each presence tick; keep the previous map while no status changed.
   const liveRef = useRef<Map<string, SessionStatus> | null>(null);
   const liveSessionStatuses = useMemo(() => {
     const next = new Map<string, SessionStatus>();
@@ -233,7 +231,6 @@ function useProjectBoardDataInternal(
         sessions: allSessionsIncludingArchived,
         childSessionsByParent,
         project,
-        // The start page has no coordinator of its own; it shows the one the project is still bound to.
         coordinatorSessionId:
           coordinatorSessionId ??
           (project
@@ -378,7 +375,6 @@ export function ProjectBoardView({
       )}
       {PROJECT_BOARD_BUCKETS.map((bucket) => {
         const rows = board[bucket];
-        // "In progress" shows only when busy; "Accepted" shows once at least one task is accepted.
         if ((bucket === 'working' || bucket === 'accepted') && rows.length === 0) return null;
         const [key, fallback] = BUCKET_LABELS[bucket];
         const collapsed = collapsedByBucket[bucket];
@@ -453,7 +449,6 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
 }) {
   const { t, i18n } = useTranslation();
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    // Modified clicks keep the browser's own behaviour (new tab or window).
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     event.preventDefault();
     onOpen(row.session.id);
@@ -471,7 +466,6 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
       <a href={href} onClick={handleClick} {...stylex.props(styles.rowLink)}>
         <span {...stylex.props(styles.mark)}>
           <SessionRowStatusIndicator
-            // A pending question waits on the user exactly like a permission request.
             isWaitingPermission={row.bucket === 'needsYou' && row.sendState !== 'failed'}
             isWorking={row.isWorking}
             hasUnreadMessages={row.bucket !== 'accepted' && row.hasUnreadMessages}

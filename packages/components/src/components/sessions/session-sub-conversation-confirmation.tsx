@@ -15,13 +15,13 @@ import { AlertDialog } from '@/ui/dialog';
 /**
  * Confirmation for actions that optionally include opened sub-conversations.
  *
- * Archive takes only contained Tabs and Settle only the target Session: an
- * opened Session is independent work. When the conversation has opened active
- * sub-conversations, the user decides whether they go too; the dialog says how
- * many there are and how many are still working, because archiving stops them.
- * Archive's always-confirm callers (the easy-to-fire keyboard shortcut) reuse
- * the same dialog for the plain "Archive chat?" question, so no flow stacks
- * two confirmations.
+ * Archive, Settle, Snooze and Move to Focus take only the target Session (plus
+ * contained Tabs for Archive): an opened Session is independent work. When the
+ * conversation has opened active sub-conversations, the user decides whether
+ * they go too; the dialog says how many there are and how many are still
+ * working, because archiving stops them. Archive's always-confirm callers (the
+ * easy-to-fire keyboard shortcut) reuse the same dialog for the plain
+ * "Archive chat?" question, so no flow stacks two confirmations.
  */
 
 export type OpenedSubConversationSummary = {
@@ -31,7 +31,7 @@ export type OpenedSubConversationSummary = {
   workingCount: number;
 };
 
-export type SubConversationAction = 'archive' | 'settle';
+export type SubConversationAction = 'archive' | 'settle' | 'snooze' | 'focus';
 
 export type SubConversationChoice = 'tree' | 'session' | null;
 
@@ -100,14 +100,14 @@ export function useArchiveConfirmationRequest(): (
  * `run` directly when there is nothing to ask about, unless `confirm` forces
  * the question anyway.
  */
-function useConfirmedSessionAction(
+function useConfirmedSessionAction<Args extends unknown[]>(
   action: SubConversationAction,
-  run: (sessionId: SessionId, includeOpenedSessions: boolean) => Promise<void>
-): (sessionId: SessionId, confirm?: boolean) => Promise<boolean> {
+  run: (sessionId: SessionId, includeOpenedSessions: boolean, ...args: Args) => Promise<void>
+): (sessionId: SessionId, confirm: boolean, ...args: Args) => Promise<boolean> {
   const store = useStore();
   const requestConfirmation = useConfirmationRequest(action);
   return useCallback(
-    async (sessionId: SessionId, confirm = false) => {
+    async (sessionId: SessionId, confirm: boolean, ...args: Args) => {
       const runtime = store.get(activeWorkspaceRuntimeAtom);
       // A held creation has no metadata yet, so nothing can have been opened from it.
       const summary =
@@ -118,12 +118,12 @@ function useConfirmedSessionAction(
               isSessionWorking(store.get(lodyPresenceStatesAtom), store.get(lodyPresenceNowMsAtom))
             );
       if (summary.count === 0 && !confirm) {
-        await run(sessionId, false);
+        await run(sessionId, false, ...args);
         return true;
       }
       const choice = await requestConfirmation(summary);
       if (choice === null) return false;
-      await run(sessionId, choice === 'tree');
+      await run(sessionId, choice === 'tree', ...args);
       return true;
     },
     [run, requestConfirmation, store]
@@ -160,7 +160,39 @@ export function useSettleSessionWithConfirmation(
   const confirmed = useConfirmedSessionAction('settle', (sessionId, includeOpenedSessions) =>
     settleSession(sessionId, { includeOpenedSessions })
   );
-  return useCallback((sessionId) => confirmed(sessionId), [confirmed]);
+  return useCallback((sessionId) => confirmed(sessionId, false), [confirmed]);
+}
+
+/** Resolves `true` once snoozed, `false` when the user cancelled. */
+export function useSnoozeSessionWithConfirmation(
+  snoozeSession: (
+    sessionId: SessionId,
+    snoozedUntil: number,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>
+): (sessionId: SessionId, snoozedUntil: number) => Promise<boolean> {
+  const confirmed = useConfirmedSessionAction(
+    'snooze',
+    (sessionId, includeOpenedSessions, snoozedUntil: number) =>
+      snoozeSession(sessionId, snoozedUntil, { includeOpenedSessions })
+  );
+  return useCallback(
+    (sessionId, snoozedUntil) => confirmed(sessionId, false, snoozedUntil),
+    [confirmed]
+  );
+}
+
+/** Resolves `true` once moved to Focus, `false` when the user cancelled. */
+export function useMoveToFocusWithConfirmation(
+  moveSessionToFocus: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>
+): (sessionId: SessionId) => Promise<boolean> {
+  const confirmed = useConfirmedSessionAction('focus', (sessionId, includeOpenedSessions) =>
+    moveSessionToFocus(sessionId, { includeOpenedSessions })
+  );
+  return useCallback((sessionId) => confirmed(sessionId, false), [confirmed]);
 }
 
 /** Mounted once per workspace; renders only while a request is pending. */
@@ -191,6 +223,18 @@ const DIALOG_COPY = {
     working: '{{count}} are still working.',
     onlyThis: 'Mark this only',
     all: 'Mark all as completed',
+  },
+  snooze: {
+    title: 'Snooze sub-conversations too?',
+    working: '{{count}} are still working.',
+    onlyThis: 'Snooze this only',
+    all: 'Snooze all',
+  },
+  focus: {
+    title: 'Move sub-conversations to Focus too?',
+    working: '{{count}} are still working.',
+    onlyThis: 'Move this only',
+    all: 'Move all to Focus',
   },
 } as const;
 

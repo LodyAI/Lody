@@ -1,0 +1,331 @@
+name: Publish Android
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full commit SHA at the selected branch tip
+        required: true
+        type: string
+      expected_version:
+        description: Exact package version at that commit
+        required: true
+        type: string
+      source_run_id:
+        description: 'Production recovery: original failed release-clients run ID'
+        required: false
+        type: string
+permissions:
+  actions: read
+  contents: read
+env:
+  NODE_VERSION: 22.23.4
+  NODE_OPTIONS: --max-old-space-size=8192
+jobs:
+  validate-target:
+    if:
+      github.repository == 'LodyAI/Lody' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release') &&
+      vars.CLIENT_RELEASES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      checkout_sha: ${{ steps.target.outputs.checkout_sha }}
+      build_number: ${{ steps.target.outputs.build_number }}
+      target_environment: ${{ steps.target.outputs.target_environment }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        id: target
+        env:
+          TARGET_INPUTS: ${{ toJSON(inputs) }}
+          COMPONENT: android
+        with:
+          script: >
+            const { validateManualTarget } = await
+            import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/client-release-target.mjs`);
+
+            const target = await validateManualTarget({github, context, inputs: JSON.parse(process.env.TARGET_INPUTS),
+            component: process.env.COMPONENT});
+
+            for (const [key, value] of Object.entries(target)) core.setOutput(key, value);
+  publish-android:
+    needs:
+      - validate-target
+    if: needs.validate-target.result == 'success'
+    runs-on: macos-15
+    environment: ${{ github.ref == 'refs/heads/release' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      LODY_ENV: ${{ github.ref == 'refs/heads/release' && 'production' || 'staging' }}
+      MOBILE_VITE_MODE: ${{ github.ref == 'refs/heads/release' && 'prod' || 'staging' }}
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
+      VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL }}
+      VITE_SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SESSION_SHARE_ORIGIN: ${{ vars.VITE_SESSION_SHARE_ORIGIN }}
+      VITE_GITHUB_APP_NAME: ${{ vars.VITE_GITHUB_APP_NAME }}
+      VITE_ONESIGNAL_APP_ID: ${{ vars.VITE_ONESIGNAL_APP_ID || vars.ONESIGNAL_APP_ID }}
+      VITE_ONESIGNAL_SAFARI_WEB_ID: ${{ vars.VITE_ONESIGNAL_SAFARI_WEB_ID || vars.ONESIGNAL_SAFARI_WEB_ID }}
+      VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
+      VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
+      VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      R2_MOBILE_ANDROID_PREFIX: |-
+        ${{
+          github.ref == 'refs/heads/release' &&
+          vars.R2_MOBILE_ANDROID_PREFIX_PRODUCTION ||
+          vars.R2_MOBILE_ANDROID_PREFIX_STAGING
+        }}
+      MOBILE_ANDROID_DOWNLOAD_BASE_URL: |-
+        ${{
+          github.ref == 'refs/heads/release' &&
+          vars.MOBILE_ANDROID_DOWNLOAD_BASE_URL_PRODUCTION ||
+          vars.MOBILE_ANDROID_DOWNLOAD_BASE_URL_STAGING
+        }}
+      MOBILE_VERSION_CODE: ${{ needs.validate-target.outputs.build_number }}
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.validate-target.outputs.checkout_sha }}
+          submodules: recursive
+      - name: Checkout guarded workflow helper
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .release-workflow
+          submodules: recursive
+      - name: Revalidate production recovery after acquiring release lock
+        if: github.ref == 'refs/heads/release'
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          release_tag="lody-mobile-v${EXPECTED_VERSION}"
+          latest_release_tag=""
+          while IFS= read -r tag; do
+            if [[ "${tag}" =~ ^lody-mobile-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              latest_release_tag="${tag}"
+              break
+            fi
+          done < <(git tag --list 'lody-mobile-v*' --sort=-version:refname)
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" || "${release_tag}" != "${latest_release_tag}" ]]; then
+            echo "Production recovery target is no longer the latest stable release"
+            exit 1
+          fi
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Verify public daemon installation before client publication
+        run:
+          node .release-workflow/apps/cli/check-installer.mjs . ${{ github.ref == 'refs/heads/release' && 'stable' || 'next'
+          }} "$EXPECTED_VERSION"
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+      - name: Setup Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            apps/mobile-capacitor/android/**/*.gradle*
+            apps/mobile-capacitor/android/gradle/wrapper/gradle-wrapper.properties
+      - name: Install dependencies
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+      - name: Normalize mobile auth base URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_site_url="${VITE_CONVEX_SITE_URL:-${VITE_CONVEX_DEPLOY_URL:-}}"
+          if [[ -z "${raw_site_url}" ]]; then
+            echo "VITE_CONVEX_SITE_URL=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          normalized_site_url="${raw_site_url%/}"
+          if [[ "${normalized_site_url}" == *".convex.cloud" ]]; then
+            normalized_site_url="${normalized_site_url/.convex.cloud/.convex.site}"
+          fi
+
+          echo "VITE_CONVEX_SITE_URL=${normalized_site_url}" >> "$GITHUB_ENV"
+      - name: Resolve shared Android version code
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANDROID_SOURCE_RUN_ID: ${{ inputs.source_run_id || github.run_id }}
+        run: |
+          set -euo pipefail
+          # The checked-out source defines the numbering scheme. Historical
+          # recovery predating this helper retains its original workflow counter.
+          if [[ -f .github/scripts/android-version-code.mjs ]]; then
+            node .github/scripts/android-version-code.mjs
+          fi
+      - name: Resolve mobile version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/mobile-capacitor/package.json').version")"
+          if [[ -z "${version}" ]]; then
+            echo "Could not resolve mobile package version"
+            exit 1
+          fi
+          echo "MOBILE_VERSION_NAME=${version}" >> "$GITHUB_ENV"
+          echo "MOBILE_BUILD_NUMBER=${MOBILE_VERSION_CODE}" >> "$GITHUB_ENV"
+      - name: Validate Android release configuration
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_envs=(
+            "VITE_SERVER_URL"
+            "VITE_CONVEX_SITE_URL"
+            "VITE_CONVEX_DEPLOY_URL"
+            "VITE_SITE_URL"
+            "R2_ACCOUNT_ID"
+            "R2_BUCKET"
+            "R2_MOBILE_ANDROID_PREFIX"
+            "MOBILE_ANDROID_DOWNLOAD_BASE_URL"
+            "ANDROID_KEYSTORE_BASE64"
+            "ANDROID_KEYSTORE_PASSWORD"
+            "ANDROID_KEY_ALIAS"
+            "ANDROID_KEY_PASSWORD"
+            "MOBILE_VERSION_NAME"
+            "MOBILE_VERSION_CODE"
+          )
+          for key in "${required_envs[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required Android release env: ${key}"
+              exit 1
+            fi
+          done
+      - name: Prepare Android signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          keystore_path="${RUNNER_TEMP}/lody-mobile-release.keystore"
+
+          decode_base64_secret() {
+            local secret_name="$1"
+            local secret_value="$2"
+            local output_path="$3"
+            local encoded_path="${output_path}.base64"
+
+            printf '%s' "${secret_value}" |
+              sed -e 's/\\n//g' -e 's/\\r//g' |
+              tr -d '[:space:]' > "${encoded_path}"
+            if [[ ! -s "${encoded_path}" ]]; then
+              echo "${secret_name} is empty after removing whitespace"
+              exit 1
+            fi
+
+            if ! openssl base64 -A -d -in "${encoded_path}" -out "${output_path}"; then
+              rm -f "${encoded_path}" "${output_path}"
+              echo "${secret_name} must contain base64-encoded file contents."
+              echo "Regenerate it with: openssl base64 -A -in <file>"
+              exit 1
+            fi
+            rm -f "${encoded_path}"
+          }
+
+          decode_base64_secret "ANDROID_KEYSTORE_BASE64" "${ANDROID_KEYSTORE_BASE64}" "${keystore_path}"
+          chmod 600 "${keystore_path}"
+          echo "ANDROID_KEYSTORE_PATH=${keystore_path}" >> "$GITHUB_ENV"
+      - name: Sync Android project
+        env:
+          PUSH_ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.PUSH_ANDROID_GOOGLE_SERVICES_JSON }}
+        shell: bash
+        run: >
+          set -euo pipefail
+
+          test -n "${PUSH_ANDROID_GOOGLE_SERVICES_JSON}" || { echo "Missing PUSH_ANDROID_GOOGLE_SERVICES_JSON" >&2; exit
+          1; }
+
+          pnpm --filter @lody/mobile-capacitor run configure:push
+
+          pnpm --filter @lody/mobile-capacitor exec vite build --mode "${MOBILE_VITE_MODE}"
+
+          pnpm --filter @lody/mobile-capacitor exec cap sync android
+      - name: Build signed Android APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: apps/mobile-capacitor/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease \
+            -PmobileVersionName="${MOBILE_VERSION_NAME}" \
+            -PmobileVersionCode="${MOBILE_VERSION_CODE}"
+      - name: Collect Android APK
+        shell: bash
+        run: >
+          set -euo pipefail
+
+          mkdir -p mobile-android-release
+
+          apk_path="$(find apps/mobile-capacitor/android/app/build/outputs/apk/release -type f -name '*.apk' | head -n
+          1)"
+
+          if [[ -z "${apk_path}" || ! -f "${apk_path}" ]]; then
+            echo "No Android APK found"
+            exit 1
+          fi
+
+          cp "${apk_path}" mobile-android-release/app.apk
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mobile-android-apk
+          path: mobile-android-release/app.apk
+          if-no-files-found: error
+      - name: Ensure AWS CLI
+        shell: bash
+        run: bash .github/scripts/setup-aws-cli.sh
+      - name: Upload Android APK and metadata to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        shell: bash
+        run: bash .github/scripts/upload-android-release.sh
+      - name: Remove Android signing material
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/lody-mobile-release.keystore" "${RUNNER_TEMP}/lody-mobile-release.keystore.base64"
+concurrency:
+  group: ${{ github.ref == 'refs/heads/release' && 'lody-production-release' || 'lody-staging-release' }}
+  cancel-in-progress: false

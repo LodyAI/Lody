@@ -1,5 +1,4 @@
 import type { SessionCoordinatorKind } from '@lody/shared';
-// The owner edits the Markdown file directly; it is sent verbatim.
 import coordinatorSystemPrompt from './coordinator-system-prompt.md?raw';
 
 /** System prompt of a coordinator conversation (`SessionMeta.coordinator` v1). */

@@ -53,17 +53,16 @@ context/message-flow.md "Upstream".
   Builtin Devin is a bundled proxy over the pinned official runtime; discovery hides duplicate
   registry Devin, Dimcode and Kimi entries while saved configurations keep their launch
   contracts ([decision and ablations](../../../../.agents/notes/implemented/feature/2026-09-30-builtin-devin.md)).
-  [Sorbet authentication](../../../../.agents/notes/proposed/feature/2026-11-02-sorbet-acp-authentication.md)
-  uses the existing protected ACP interaction path. Its `sorbet.dev` credentials v1
-  extension runs in a separate bounded builtin Sorbet ACP process, with no session or
-  terminal; the daemon verifies the local Provider identity and does not use stored
-  launch overrides. Socket disconnect cancels the operation. Authentication and logout
-  share a daemon-wide mutation owner across workspaces; unconfirmed process cleanup is
-  retried before a later mutation. Account management is also available through signed E2EE
-  owned execution when the target advertises `sorbetCredentialsRemote`: the target verifies
-  the signer belongs to its owner's membership. List and logout use the execution journal;
-  an interrupted logout can have an unknown result. Metadata lists saved credential types,
-  not account identities, remote validity or environment-provided credentials.
+  [Sorbet authentication and control](../../../../.agents/notes/implemented/feature/2026-11-02-sorbet-acp-authentication.md)
+  sends interactive sign-in, credential metadata, logout, Provider mutations, model refresh,
+  and model catalog reads directly through `@sorbetai/control@alpha` against the same
+  `<LodyDataDir>/sorbet` directory. The existing protected Machine RPC interaction stream carries
+  prompts and progress, but no temporary ACP process or duplicate management abstraction sits
+  between the handler and Sorbet. The daemon still verifies the local Provider identity and
+  ignores stored launch overrides. Account management is also available through signed E2EE
+  owned execution when the target advertises `sorbetCredentialsRemote`; the target verifies the
+  signer belongs to its owner's membership. Metadata lists saved credential types, not account
+  identities, remote validity or environment-provided credentials.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
   a supported standalone Node from the final launch PATH in the target working directory.
@@ -271,7 +270,11 @@ and capability cache key, and takes effect when the next agy process starts.
 Older daemons reject the field in their strict session schema, so the dialog
 offers it only when the machine advertises `antigravitySkipPermissions` v1.
 Authentication
-uses methods returned by ACP initialize, not a native terminal login command.
+uses the official `agy acp --login --disable-telemetry` command. Lody opens
+the Google authorization link and forwards the returned code or callback URL to
+that command through the existing encrypted remote authentication-input channel.
+The command uses the selected managed runtime or `antigravityPath`, keeps its
+normal credential store, and disables auto-update.
 
 New Provider discovery omits `registry/antigravity-acp`. Persisted Providers retain
 the old fixed binary launch definition and show a Legacy label; neither Provider
@@ -282,7 +285,9 @@ Quota refresh runs the selected agy executable with `--print /usage
 --output-format json` and its launch environment. This command reports zero model
 turns; its model-group weekly and five-hour fractions become the existing Provider
 quota windows. The ACP `/usage` prompt belongs only to the legacy server reader:
-agy does not advertise it and would send that text to the model.
+agy does not advertise it and would send that text to the model. The legacy reader
+deletes its scratch `/usage` session when the server advertises `session/delete`, within
+three seconds and without affecting the reading.
 
 Capability probes and real new/load/resume session snapshots use the same
 normalizer to project the builtin and legacy Antigravity quota readers. Session
@@ -377,7 +382,10 @@ Which authentication path runs is decided by the provider, not the caller: a man
 runs its pinned login command; registry, custom ACP, and builtin Devin and Sorbet open a
 temporary standard ACP connection in the same bounded lifecycle. The authentication connection
 advertises credential form version 1; forms support text, secret and single-select fields.
-Kimi runs `acp --login`;
+Kimi runs `acp --login`; Antigravity runs `acp --login --disable-telemetry`
+and accepts a Google authorization code or callback URL through stdin. Its raw
+terminal output is not forwarded to progress; only its Google authorization URL
+is exposed.
 Grok runs the official `login --device-auth`; Claude Code runs the official
 `auth login --claudeai` subscription flow. Codex ChatGPT runs official
 `login --device-auth`; managed API profiles use the existing secret-input interaction
@@ -500,6 +508,13 @@ sending task text through native default credentials.
 Other isolated title sessions retain the Provider's current model unless a title model
 was explicitly saved. Catalog order does not define a model preference; inferred safe
 mode and reasoning options remain independent of the model choice.
+
+Isolated title sessions are never resumed. Shutdown sends ACP `session/delete` when the
+agent advertises `sessionCapabilities.delete`, so the scratch conversation leaves the
+agent's native history; otherwise it sends `session/close` as before. Delete failure only
+logs: the title and process termination proceed. What delete removes is agent-defined
+(builtin Codex archives the thread for a non-AIR client). Normal sessions never use this
+path, because Lody archive is reversible.
 
 Title output accepts normal assistant text with an absent message phase, as Codex
 providers do not all emit that optional field. Explicit `commentary` is excluded;

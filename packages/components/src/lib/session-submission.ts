@@ -112,7 +112,6 @@ function buildSessionCreateResult(
   if (payload.parentSessionId) {
     sessionMeta.parentSessionId = payload.parentSessionId;
   }
-  // Written once at creation; the owning daemon delivers the coordinator system prompt.
   if (payload.coordinator) {
     sessionMeta.coordinator = payload.coordinator;
   }

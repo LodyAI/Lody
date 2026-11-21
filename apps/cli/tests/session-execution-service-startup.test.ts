@@ -1,3 +1,4 @@
+import { nativeSessionCredentials } from '@/session/session-credentials';
 import { type ContentBlock } from '@agentclientprotocol/sdk';
 import {
   getMachineRoomId,
@@ -791,6 +792,7 @@ describe('SessionExecutionService', () => {
       agentClient,
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
+      getGitHubCredentials: () => nativeSessionCredentials,
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
       exec: vi.fn(async () => ''),
@@ -1051,6 +1053,7 @@ describe('SessionExecutionService', () => {
       agentClient,
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
+      getGitHubCredentials: () => nativeSessionCredentials,
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
       exec: vi.fn(async () => ''),
@@ -1158,6 +1161,7 @@ describe('SessionExecutionService', () => {
       agentClient,
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
+      getGitHubCredentials: () => nativeSessionCredentials,
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
       exec: vi.fn(async () => ''),
@@ -1295,6 +1299,7 @@ describe('SessionExecutionService', () => {
         agentClient,
         terminalManager: {} as unknown,
         getWorkdir: () => '/tmp',
+        getGitHubCredentials: () => nativeSessionCredentials,
         getHostWorkdir: () => '/tmp',
         getParentSessionId: () => undefined,
         exec,
@@ -1385,6 +1390,7 @@ describe('SessionExecutionService', () => {
       agentClient,
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
+      getGitHubCredentials: () => nativeSessionCredentials,
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
       exec,
@@ -1469,6 +1475,7 @@ describe('SessionExecutionService', () => {
           agentClient,
           terminalManager: {} as unknown,
           getWorkdir: () => '/tmp',
+          getGitHubCredentials: () => nativeSessionCredentials,
           getHostWorkdir: () => '/tmp',
           getParentSessionId: () => undefined,
           exec,
@@ -1708,6 +1715,7 @@ describe('SessionExecutionService', () => {
         }),
         terminalManager: {} as unknown,
         getWorkdir: () => '/local/repo',
+        getGitHubCredentials: () => nativeSessionCredentials,
         getHostWorkdir: () => '/local/repo',
         getParentSessionId: () => parentSessionId,
         exec: vi.fn(async (_command: string, args: string[]) => {
@@ -1897,6 +1905,7 @@ describe('SessionExecutionService', () => {
       agentClient,
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
+      getGitHubCredentials: () => nativeSessionCredentials,
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
       exec: vi.fn(async () => ''),

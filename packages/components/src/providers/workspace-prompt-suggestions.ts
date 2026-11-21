@@ -1,12 +1,10 @@
 import { EphemeralStore } from 'loro-crdt';
+import { base64ToBytes, type MachineId, type SessionId } from '@lody/shared';
 import {
   PROMPT_SUGGESTION_TTL_MS,
-  base64ToBytes,
   readPromptSuggestion,
   toPromptSuggestionStreamUrl,
-  type MachineId,
-  type SessionId,
-} from '@lody/shared';
+} from '@lody/shared/prompt-suggestions';
 import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
 import { EphemeralRoomTransport, type EphemeralRoomBaseOptions } from './ephemeral-room-transport';
 

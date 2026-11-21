@@ -72,7 +72,6 @@ function ChatRoute() {
       onSelectionUrlSync={handleSelectionUrlSync}
     />
   );
-  // Project mode prototype: starting a coordinator already shows the project's conversations.
   const boardProject =
     developerMode && search.coordinator ? coordinatorProjectFromSearch(search) : null;
   return (

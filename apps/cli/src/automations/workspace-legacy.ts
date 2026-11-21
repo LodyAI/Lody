@@ -1,5 +1,11 @@
 import { readAutomationContext } from './context/reads-legacy';
-import { execAutomationCommand } from './context/exec';
+import {
+  automationCommandEnvironment,
+  execAutomationCommand,
+  resolveAutomationCwd,
+} from './context/exec';
+import { makeManagedRuns, managedRunResult, type ManagedRuns } from './runtime/managed-runs';
+import { getCachedLoginShellEnvSyncLegacy } from '@/agent/login-shell-env';
 import { platformLayer } from '@/platform/process-options';
 import { observeWorkflows, checkWorkflowEvidence } from './sources/workflows';
 import { publicActivity, actionActivity, workActivity } from './control/activities';
@@ -8,6 +14,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
+  autoDeliverOptionsSchema,
   automationCommandSchema,
   remoteAutomationOperationSchema,
   remoteAutomationIntentSchema,
@@ -17,6 +24,7 @@ import {
   type AutomationEvent,
   type AutomationReceipt,
   type AutomationWait,
+  type AutomationRunExit,
   type AutomationProgramContext,
   type ConditionObservation,
   type RemoteAutomationIntent,
@@ -26,6 +34,7 @@ import {
 import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
+  type SessionAutoDelivery,
   type SessionMeta,
   type SessionId,
   type AgentConfigId,
@@ -35,6 +44,7 @@ import {
   sessionPolicySettings,
   upgradeCapacityPolicies,
 } from './policies/session';
+import { advanceDelivery, deliveryStepCurrent, startDeliveryEpoch } from './policies/delivery';
 import type { Lody } from '@/lib/lody';
 import type { AuthContext } from '@/lib/command-runtime';
 import type { WorkspaceSummary } from '@/lib/workspace';
@@ -54,6 +64,24 @@ import type { PrPollerWorkspaceHandle } from '@/lib/pr-poller/pr-poller-workspac
 import { dispatchQuotaSchedule } from './compat/quota-schedule';
 import type { ScheduleRun } from '@/lib/schedules/schedule-store';
 import type { PreparedSessionInput } from '@/lib/prepared-session-input';
+
+/** Tool lookup follows the login shell, as the Agent's own commands do; nothing else is inherited. */
+const managedRunEnvironment = (): NodeJS.ProcessEnv => {
+  let shellPath: string | undefined;
+  try {
+    shellPath = getCachedLoginShellEnvSyncLegacy().PATH;
+  } catch {
+    shellPath = undefined;
+  }
+  const entries = [
+    ...new Set(
+      [shellPath, process.env.PATH]
+        .flatMap((value) => value?.split(path.delimiter) ?? [])
+        .filter(Boolean)
+    ),
+  ];
+  return automationCommandEnvironment(entries.length ? entries.join(path.delimiter) : undefined);
+};
 
 export type AutomationWorkspaceHandle = Awaited<ReturnType<typeof createAutomationWorkspaceLegacy>>;
 
@@ -83,6 +111,7 @@ export async function createAutomationWorkspaceLegacy(options: {
   );
   try {
     upgradeCapacityPolicies(ledger, auth.userId, Date.now());
+    ledger.orphanStartedRuns(Date.now());
   } catch (error) {
     ledger.close();
     throw error;
@@ -143,6 +172,10 @@ export async function createAutomationWorkspaceLegacy(options: {
           reason: 'turn_finalization',
         };
       }
+      case 'session.delivery.current':
+        if (typeof parameters.sessionId !== 'string' || typeof parameters.eventId !== 'string')
+          throw new Error('AUTOMATION_CONDITION_INVALID');
+        return deliveryStepCurrent(ledger, parameters.sessionId, parameters.eventId);
       case 'github.pr.is_merged':
         if (typeof parameters.prUrl !== 'string') throw new Error('AUTOMATION_CONDITION_INVALID');
         return actions.currentPr(receipt, parameters.prUrl);
@@ -253,12 +286,83 @@ export async function createAutomationWorkspaceLegacy(options: {
     if (meta.isArchived) throw new Error('AUTOMATION_SESSION_ARCHIVED');
     return { sessionId, workspaceId: workspace.id, now: Date.now() };
   };
+  let managedRuns: ManagedRuns | undefined;
+  let wakeEngine: Effect.Effect<void> = Effect.void;
+  const reportRun = (cause: unknown) =>
+    Effect.sync(() => logger.warn('Managed automation run did not settle', cause));
+  const managedRunLogs = path.join(
+    getLodyDataDir(),
+    'automations',
+    'runs',
+    automationIdentity(auth.machineId, workspace.id)
+  );
   const evaluateWait = (wait: AutomationWait) =>
+    wait.run ? evaluateRun(wait) : evaluateProgram(wait);
+  const evaluateRun = Effect.fn('Automations.evaluateRun')(function* (claimed: AutomationWait) {
+    const wait = ledger.wait(claimed.id) ?? claimed;
+    const run = wait.run;
+    if (!run || !managedRuns) return yield* Effect.fail(new Error('AUTOMATION_RUN_UNAVAILABLE'));
+    if (run.exit) return managedRunResult(wait, run.exit);
+    if (managedRuns.has(wait.id)) return false as const;
+    const now = yield* Clock.currentTimeMillis;
+    if (run.startedAt !== undefined) {
+      // The owner that started it is gone without observing its exit. Never start it again.
+      const exit: AutomationRunExit = {
+        endedAt: now,
+        outcome: 'interrupted',
+        exitCode: null,
+        signal: null,
+        tail: '',
+        logTruncated: false,
+      };
+      ledger.recordRunExit(wait.id, exit, now);
+      return managedRunResult(wait, exit);
+    }
+    const owner = managedRuns;
+    return yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        if (!ledger.claimRunStart(wait.id, now)) return false as const;
+        const cwd = yield* Effect.tryPromise(() => sessionContext(wait.sessionId)).pipe(
+          Effect.andThen(
+            Effect.tryPromise(() => lody.resolveAutomationWorkdir(wait.sessionId as SessionId))
+          ),
+          Effect.flatMap((root) =>
+            root
+              ? resolveAutomationCwd(root, run.cwd)
+              : Effect.fail(new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'))
+          ),
+          Effect.result
+        );
+        if (cwd._tag === 'Failure') {
+          const exit: AutomationRunExit = {
+            endedAt: now,
+            outcome: 'spawn_failed',
+            exitCode: null,
+            signal: null,
+            error: cwd.failure instanceof Error ? cwd.failure.message : 'Run could not start',
+            tail: '',
+            logTruncated: false,
+          };
+          ledger.recordRunExit(wait.id, exit, now);
+          return managedRunResult(wait, exit);
+        }
+        yield* owner.start(wait.id, {
+          command: run.command,
+          args: run.args,
+          cwd: cwd.success,
+          env: { ...managedRunEnvironment(), ...run.env },
+          logPath: run.logPath,
+        });
+        return false as const;
+      })
+    );
+  });
+  const evaluateProgram = (wait: AutomationWait) =>
     Effect.tryPromise(() => sessionContext(wait.sessionId)).pipe(
       Effect.uninterruptible,
       Effect.flatMap((context) =>
         evaluateAutomationProgram(
-          wait.program,
+          wait.program ?? '',
           context,
           (input) =>
             Effect.tryPromise(() =>
@@ -279,25 +383,68 @@ export async function createAutomationWorkspaceLegacy(options: {
             }).pipe(
               Effect.flatMap((root) =>
                 root
-                  ? execAutomationCommand(input, root, {
-                      PATH: process.env.PATH,
-                      HOME: process.env.HOME,
-                      USERPROFILE: process.env.USERPROFILE,
-                      SystemRoot: process.env.SystemRoot,
-                      TMPDIR: process.env.TMPDIR,
-                      TEMP: process.env.TEMP,
-                      TMP: process.env.TMP,
-                    }).pipe(Effect.provide(platformLayer({ logger })))
+                  ? execAutomationCommand(input, root, automationCommandEnvironment()).pipe(
+                      Effect.provide(platformLayer({ logger }))
+                    )
                   : Effect.fail(new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'))
               )
             )
         )
       )
     );
+  const deliveryStatusKey = (status: Omit<SessionAutoDelivery, 'updatedAt'> | null | undefined) =>
+    status ? JSON.stringify([status.state, status.attempt, status.reason, status.prUrl]) : '';
+  /** Auto delivery reads observations already in this ledger and the Session metadata. */
+  const advanceDeliveries = async () => {
+    for (const rule of ledger.rules()) {
+      const sessionId = rule.scope.sessionId;
+      if (
+        !rule.enabled ||
+        !sessionId ||
+        rule.handler.kind !== 'policy' ||
+        rule.handler.policy !== 'auto-deliver' ||
+        rule.ownerUserId !== auth.userId ||
+        rule.ownerMachineId !== auth.machineId
+      )
+        continue;
+      try {
+        const options = autoDeliverOptionsSchema.parse(rule.handler.options);
+        const roomId = getSessionRoomId(sessionId as SessionId);
+        const record = await lody.documentManager.repo.getDocMeta(roomId);
+        const meta = record?.meta as SessionMeta | undefined;
+        if (!record || !meta || isLoroRepoDocDeleted(record) || meta.isArchived) continue;
+        const now = Date.now();
+        const decision = advanceDelivery({ ledger, meta, options, now });
+        if (decision.finished)
+          configureSessionPolicies(ledger, sessionId, auth.userId, { autoDeliver: false }, now);
+        if (deliveryStatusKey(meta.autoDelivery) !== deliveryStatusKey(decision.status))
+          await lody.documentManager.repo.upsertDocMeta(roomId, {
+            autoDelivery: { ...decision.status, updatedAt: now },
+          });
+      } catch (cause) {
+        // One Session's failure leaves the others' delivery running.
+        logger.warn(`Auto delivery pass failed for ${sessionId}`, cause);
+      }
+    }
+  };
   const host = Layer.effect(
     AutomationHost,
     Effect.gen(function* () {
       yield* Effect.addFinalizer(() => Effect.sync(() => ledger.close()));
+      // Acquired after the ledger finalizer, so runs are terminated before the ledger closes.
+      managedRuns = yield* makeManagedRuns({
+        onStarted: (id, pid) =>
+          Clock.currentTimeMillis.pipe(
+            Effect.flatMap((now) => Effect.try(() => ledger.recordRunPid(id, pid, now))),
+            Effect.catchCause((cause) => reportRun(cause))
+          ),
+        onExit: (id, exit) =>
+          Effect.try(() => ledger.recordRunExit(id, exit, exit.endedAt)).pipe(
+            Effect.andThen(Effect.suspend(() => wakeEngine)),
+            Effect.catchCause((cause) => reportRun(cause))
+          ),
+        report: (cause) => reportRun(cause),
+      });
       // These unfinished Session APIs do not cancel raw I/O. Keep their owner until it settles.
       const sessionCall = <A>(body: () => Promise<A>) =>
         Effect.tryPromise(body).pipe(Effect.uninterruptible);
@@ -309,6 +456,7 @@ export async function createAutomationWorkspaceLegacy(options: {
             (fact) => authority.executionRelease(fact.sessionId, fact.assistantTurnId, fact.userId),
             (cause) => logger.warn('Automation turn observation awaiting reconciliation', cause)
           );
+          await advanceDeliveries();
         }),
         authorize: (receipt) => sessionCall(() => actions.authorize(receipt)),
         condition: (spec, receipt) => sessionCall(() => condition(spec, receipt)),
@@ -322,10 +470,13 @@ export async function createAutomationWorkspaceLegacy(options: {
       });
     })
   );
-  const runtime = ManagedRuntime.make(Automations.layer(ledger).pipe(Layer.provide(host)));
+  const runtime = ManagedRuntime.make(
+    Automations.layer(ledger).pipe(Layer.provide(host), Layer.provide(platformLayer({ logger })))
+  );
   let close: Promise<void> | undefined;
   try {
     const service = await runtime.runPromise(Automations);
+    wakeEngine = service.wake;
     const canSubmit = (
       sessionId: SessionId,
       turnId: string,
@@ -518,6 +669,19 @@ export async function createAutomationWorkspaceLegacy(options: {
               await runtime.runPromise(service.wake);
               return publicWait(wait);
             }
+            case 'run': {
+              const sessionId = command.sessionId ?? requesterSessionId;
+              if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
+              await sessionContext(sessionId);
+              const root = await lody.resolveAutomationWorkdir(sessionId as SessionId);
+              if (!root) throw new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE');
+              await runtime.runPromise(resolveAutomationCwd(root, command.cwd));
+              if (closing) throw new Error('AUTOMATION_OWNER_CLOSING');
+              const { type: _type, sessionId: _session, ...run } = command;
+              const wait = ledger.registerRun(run, sessionId, auth.userId, managedRunLogs, now);
+              await runtime.runPromise(service.wake);
+              return publicWait(wait);
+            }
             case 'settings':
             case 'configure': {
               const sessionId = command.sessionId ?? requesterSessionId;
@@ -537,16 +701,30 @@ export async function createAutomationWorkspaceLegacy(options: {
                   !isLoroRepoDocDeleted(record)
                     ? meta.latestUserMsgId
                     : undefined;
-                const wasEnabled =
-                  sessionPolicySettings(ledger, sessionId).recoverCapacity === true;
+                const previous = sessionPolicySettings(ledger, sessionId);
+                const wasEnabled = previous.recoverCapacity === true;
+                const enablesDelivery =
+                  typeof command.settings.autoDeliver === 'object' &&
+                  typeof previous.autoDeliver !== 'object';
+                // Encrypted workspaces do not run the PR poller that Auto delivery reads.
+                if (enablesDelivery && workspace.contentMode === 'e2ee')
+                  throw new Error('AUTOMATION_AUTO_DELIVER_UNAVAILABLE_ENCRYPTED');
                 ledger.configureSession(
-                  () =>
-                    configureSessionPolicies(ledger, sessionId, auth.userId, command.settings, now),
+                  () => {
+                    if (enablesDelivery) startDeliveryEpoch(ledger, sessionId, now);
+                    configureSessionPolicies(ledger, sessionId, auth.userId, command.settings, now);
+                  },
                   sessionId,
                   auth.userId,
                   !wasEnabled ? currentTurn : undefined,
                   now
                 );
+                // Turning it off, or dismissing a finished status, clears the shown status.
+                if (command.settings.autoDeliver === false)
+                  await lody.documentManager.repo.upsertDocMeta(
+                    getSessionRoomId(sessionId as SessionId),
+                    { autoDelivery: null }
+                  );
               }
               await runtime.runPromise(service.wake);
               return sessionPolicySettings(ledger, sessionId);
@@ -576,6 +754,8 @@ export async function createAutomationWorkspaceLegacy(options: {
               if (wait) {
                 assertReadable(wait);
                 await runtime.runPromise(service.cancel(wait.id));
+                const owner = managedRuns;
+                if (wait.run && owner) await runtime.runPromise(owner.stop(wait.id));
                 const current = ledger.wait(wait.id);
                 return current && publicWait(current);
               }

@@ -11,6 +11,7 @@ import {
   currentWorkspaceSlugAtom,
 } from '@/atoms';
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { developerModeEnabledAtom, lodyAgentBetaEnabledAtom } from '@/atoms/settings';
 import { installCloudHttpPort } from '@/lib/cloud-http-port';
 import {
   AGENT_ROLE_VERSION,
@@ -337,6 +338,15 @@ function MachinesCatalogFixture({ allPrivate = false }: { allPrivate?: boolean }
   );
 }
 
+/** The Lody Agent page only exists while the Lody Agent feature is on. */
+function LodyAgentEnabled({ children }: { children: ReactNode }) {
+  useHydrateAtoms([
+    [developerModeEnabledAtom, true],
+    [lodyAgentBetaEnabledAtom, true],
+  ]);
+  return <>{children}</>;
+}
+
 function SettingsModalStory({
   tab,
   roles = [storyRole],
@@ -367,6 +377,10 @@ function SettingsModalStory({
                 <RolesCatalogFixture roles={roles}>
                   <DesktopSettingsModal />
                 </RolesCatalogFixture>
+              ) : tab === 'lody-agent' ? (
+                <LodyAgentEnabled>
+                  <DesktopSettingsModal />
+                </LodyAgentEnabled>
               ) : (
                 <DesktopSettingsModal />
               )}
@@ -414,6 +428,11 @@ export const AgentRolesTab: Story = {
 /** No Roles yet: the list names what is missing, what a Role is for, and the add action. */
 export const AgentRolesEmptyTab: Story = {
   render: () => <SettingsModalStory tab="agent-roles" roles={[]} />,
+};
+
+/** Settings → Lody Agent, drawn with the Harness controls. */
+export const LodyAgentTab: Story = {
+  render: () => <SettingsModalStory tab="lody-agent" />,
 };
 
 export const DarkModePreferencesTab: Story = {

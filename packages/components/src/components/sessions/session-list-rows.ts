@@ -351,6 +351,7 @@ export function mapSessionMetaToSessionListRow(
     isOffline,
     isWaitingPermission: liveStatus?.type === 'requestPermission',
     hasFailedTurn: hasFailedLatestTurn(session),
+    deliveryStalled: session.autoDelivery?.state === 'stalled',
     isPinned: Boolean(session.isPinned),
     isWorktree: Boolean(session.isWorktree),
     externalHistoryProvider,

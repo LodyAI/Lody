@@ -287,7 +287,7 @@ export function ProviderRow({
             compact ? styles.main : styles.mainList,
             hasUsageSummary && styles.mainWithUsage
           )}
-          aria-label={t('agents.editConfig', 'Edit config')}
+          aria-label={t('agents.editConfig', 'Edit Config')}
         >
           <div {...stylex.props(styles.icon, !compact && styles.iconList)}>
             <AgentIcon

@@ -1,7 +1,7 @@
 import type { MessageContent, SessionHistory } from '@lody/shared';
 import { normalizeMessageContent } from '../../components/ai-gui/message-content-guards';
 import { firstTextOf, proseLengthOf } from '../conversation-outline';
-import { isContainer, type LoroList, type LoroMap, type LoroText } from 'loro-crdt';
+import type { LoroList, LoroMap, LoroText } from 'loro-crdt';
 import { TURN_SUMMARY_HEAD_CHARS, type TurnSummary } from './types';
 
 /**
@@ -28,6 +28,17 @@ export function summarizeTurn(entry: Pick<SessionHistory, 'items'>): TurnSummary
     toolCalls,
     thoughts,
   };
+}
+
+// Inline of loro-crdt's isContainer: importing it pulls the WASM-glue module
+// into the boot chunk, while the check itself is pure JavaScript.
+const LORO_CONTAINER_TYPES = new Set(['Map', 'Text', 'List', 'Tree', 'MovableList', 'Counter']);
+function isContainer(value: unknown): value is LoroList | LoroMap | LoroText {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto: unknown = Object.getPrototypeOf(value);
+  if (proto === null || typeof proto !== 'object') return false;
+  if (typeof (proto as { kind?: unknown }).kind !== 'function') return false;
+  return LORO_CONTAINER_TYPES.has(String((value as { kind: () => string }).kind()));
 }
 
 const textLength = (value: unknown): number => {

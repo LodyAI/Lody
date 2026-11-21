@@ -1,6 +1,8 @@
+import * as stylex from '@stylexjs/stylex';
 import type { SessionFileErrorActions } from '@/lib/session-file-actions';
-import { memo } from 'react';
+import { lazy, memo, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Spinner } from '@lody/ui/spinner';
 import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { isPdfFilePath } from '@/lib/pdf-file-preview';
 import { getOfficePreviewKind } from '@/lib/session-file-office-source';
@@ -8,10 +10,28 @@ import { getVideoMimeTypeForPath } from '@/lib/video-file-preview';
 import { SessionFileVideoPreview } from './session-file-video-preview';
 import { SessionFileImagePreview } from './session-file-image-preview';
 import { SessionFileOfficePreview } from './session-file-office-preview';
-import { SessionFilePdfPreview } from './session-file-pdf-preview';
 import { SessionFileNoticeCard } from './session-file-error-state';
 import { DocumentSelectionSurface } from './document-selection-surface';
 import type { DocumentSelection } from '@/lib/document-selection';
+
+// `pdfjs-dist` (JS + viewer CSS + worker URL) stays out of the eager
+// file-viewer chunk; it loads only when a PDF preview actually mounts,
+// matching how `SessionFileOfficePreview` lazy-loads its renderers.
+const LazySessionFilePdfPreview = lazy(() =>
+  import('./session-file-pdf-preview').then((module) => ({
+    default: module.SessionFilePdfPreview,
+  }))
+);
+
+const styles = stylex.create({
+  loading: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
 
 interface SessionFileBinaryPreviewProps {
   readonly path: string;
@@ -73,12 +93,21 @@ function BinaryPreviewContent({
 
   if (isPdfFilePath(path) && (url || bytes !== undefined)) {
     return (
-      <SessionFilePdfPreview
-        key={url ?? `${path}:${bytes?.byteLength ?? 0}`}
-        bytes={bytes}
-        url={url}
-        fileActions={fileActions}
-      />
+      <Suspense
+        fallback={
+          <div {...stylex.props(styles.loading)} role="status">
+            <Spinner label={null} />
+            <span>{t('sessions.fileViewer.pdf.loading', 'Loading PDF…')}</span>
+          </div>
+        }
+      >
+        <LazySessionFilePdfPreview
+          key={url ?? `${path}:${bytes?.byteLength ?? 0}`}
+          bytes={bytes}
+          url={url}
+          fileActions={fileActions}
+        />
+      </Suspense>
     );
   }
 

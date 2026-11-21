@@ -2,7 +2,7 @@ import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
-import { writeTextToClipboard } from '@/lib/clipboard';
+import { copyTextToClipboard, writeTextToClipboard } from '@/lib/clipboard';
 import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
@@ -37,12 +37,13 @@ import {
   SquareArrowOutUpRight,
 } from 'lucide-react';
 import { CuidaSidebarExpandOutline } from '@lody/ui';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { useRouter } from '@tanstack/react-router';
 import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   getProjectRefBranch,
   getServerNow,
@@ -117,7 +118,7 @@ import {
 } from '@/ui/window-drag-region';
 import {
   getZenAwarePanelToggleState,
-  navigationSidebarVisibleAtom,
+  mainPageAtWindowEdgeAtom,
   showNavigationSidebarAtom,
   zenLayoutModeAtom,
   zenRightPanelAtom,
@@ -1343,7 +1344,8 @@ const SessionDetail = ({
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const pendingSessionLink = useAtomValue(pendingSessionLinkAtom);
   const clearPendingSessionLink = useSetAtom(pendingSessionLinkAtom);
-  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
+  // Hidden sidebar and no pinned Today in front: this page owns the window's left edge.
+  const isLeftSidebarHidden = useAtomValue(mainPageAtWindowEdgeAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const exportAllowed = useWorkspaceFeature('export');
   const previewAllowed = useWorkspaceFeature('remote-preview');
@@ -1647,8 +1649,6 @@ const SessionDetail = ({
     () => sideSessions.filter((sideSession) => !requestingForkTargetIds.has(sideSession.id)),
     [requestingForkTargetIds, sideSessions]
   );
-  // Project mode (Developer mode): a coordinator keeps its board as a resident
-  // right-panel tab and opens its conversations there as tabs.
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
   const isProjectCoordinator = Boolean(
     developerModeEnabled && activeSession && isCoordinatorSession(activeSession)
@@ -3359,7 +3359,7 @@ const SessionDetail = ({
         if (!currentWorkspaceId || !workspaceSlug || !activeSessionTabId) {
           throw new Error('Session is not ready');
         }
-        await navigator.clipboard.writeText(
+        await copyTextToClipboard(
           linkFormat === 'deeplink'
             ? buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
             : buildAppSessionUrl(workspaceSlug, activeSessionTabId)
@@ -3423,8 +3423,7 @@ const SessionDetail = ({
 
   const handleCopyText = useCallback(
     (text: string, successMessage?: string) => {
-      void navigator.clipboard
-        .writeText(text)
+      void copyTextToClipboard(text)
         .then(() => {
           if (successMessage) toast.success(successMessage);
         })
@@ -5268,7 +5267,6 @@ const SessionDetail = ({
         : activeTabSessionId;
     writeStoredLastActiveTabState(sessionId, {
       sessionTabId: persistedSessionTabId,
-      // Project-mode tabs are rebuilt on entry, never restored.
       viewerTab:
         !activeViewerTab ||
         (activeViewerTab.type === 'file' && activeViewerTab.ownerSessionId) ||
@@ -5427,7 +5425,6 @@ const SessionDetail = ({
       }
       const sideSessionId = parseSideSessionPanelTabId(tabId) as SessionId | null;
       if (sideSessionId && panelSessionIdSet.has(sideSessionId)) {
-        // A board conversation is independent: closing its tab only hides it here.
         const { fallbackTabId } = getSidePanelTabStateAfterClose(sidePanelTabIds, tabId);
         setPanelSessionIds((current) => current.filter((id) => id !== sideSessionId));
         if (activeSideSessionId === sideSessionId) selectSidePanelTab(fallbackTabId);
@@ -5461,9 +5458,6 @@ const SessionDetail = ({
       ? getSideSessionPanelTabId(effectiveActiveSideSessionId)
       : activeSidebarTab);
 
-  // A coordinator's board is resident: entering one opens the panel on the board
-  // unless something else in the panel is already selected. A restored panel
-  // state must not animate, so the open bumps the restore sequence.
   const boardEntrySessionRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isProjectCoordinator || isMobile) return;
@@ -7383,6 +7377,11 @@ const SessionDetail = ({
   const hasMacOSTitlebarInset =
     !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;
 
+  // Viewers and side chats render their own absolutely positioned surfaces on
+  // top; the fixed-panel body only shows when neither owns the panel.
+  const showFixedSidePanelBody =
+    effectiveActiveViewerTabId === null && effectiveActiveSideSessionId === null;
+
   const nonBrowserSidebarContent =
     activeSidebarTab === 'files' ? (
       <FileTreeView
@@ -7408,7 +7407,7 @@ const SessionDetail = ({
         className={stylex.props(detailStyles.background).className}
         // The side panel stays mounted while collapsed, so GitHub polling has
         // to be paused explicitly — same signal SessionBrowserPanel takes.
-        visible={isSidebarVisible}
+        visible={showFixedSidePanelBody && isSidebarVisible}
       />
     ) : activeSidebarTab === 'changes' ? (
       <SessionChangesSidebar
@@ -7443,9 +7442,10 @@ const SessionDetail = ({
       placement === 'hidden' && detailStyles.invisibleFill
     ).className;
 
-  // Keep the browser mounted while another sidebar tab is selected. Managed
-  // pages retain DOM state and Electron's native view is only hidden, so tab
-  // switching behaves like a browser rather than rebuilding the page.
+  // Keep the browser and device previews mounted while another sidebar tab,
+  // file viewer, or side chat is selected. Managed pages and device streams
+  // stay alive in memory and Electron's native view is only hidden, so tab
+  // switching never reconnects an active preview.
   const sidebarContent = (
     <div
       {...stylex.props(detailStyles.sidebarContentRoot)}
@@ -7471,7 +7471,7 @@ const SessionDetail = ({
         >
           <SessionBrowserPanel
             session={activeBrowserSession}
-            active={activeSidebarTab === 'browser' && isSidebarVisible}
+            active={showFixedSidePanelBody && activeSidebarTab === 'browser' && isSidebarVisible}
             candidateNavigationRequestId={
               browserCandidateNavigationRequest?.sessionId === activeBrowserSession.id
                 ? browserCandidateNavigationRequest.id
@@ -7498,7 +7498,9 @@ const SessionDetail = ({
         >
           <SessionIosSimulatorPanel
             session={activeIosSimulatorSession}
-            active={iosSimulatorPlacement !== 'hidden' && isSidebarVisible}
+            active={
+              showFixedSidePanelBody && iosSimulatorPlacement !== 'hidden' && isSidebarVisible
+            }
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
             }
@@ -7513,45 +7515,34 @@ const SessionDetail = ({
           <SessionDevicePreviewPanel
             platform="android"
             session={activeAndroidEmulatorSession}
-            active={androidEmulatorPlacement !== 'hidden' && isSidebarVisible}
+            active={
+              showFixedSidePanelBody && androidEmulatorPlacement !== 'hidden' && isSidebarVisible
+            }
             onAttachScreenshot={(file) =>
               handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
             }
           />
         </div>
       ) : null}
-      {activeSidebarTab !== 'browser' &&
+      {showFixedSidePanelBody &&
+      activeSidebarTab !== 'browser' &&
       activeSidebarTab !== 'ios-simulator' &&
       activeSidebarTab !== 'android-emulator' ? (
         <div {...stylex.props(detailStyles.absoluteFill)}>{nonBrowserSidebarContent}</div>
       ) : null}
     </div>
   );
-
-  // Viewers and side chats render their own absolutely positioned surfaces on
-  // top; the fixed-panel body only shows when neither owns the panel.
   const activeCoordinatorThreadRootId = activeSidebarTab
     ? parseCoordinatorThreadPanelTabId(activeSidebarTab as string)
     : null;
-  const showFixedSidePanelBody =
-    effectiveActiveViewerTabId === null && effectiveActiveSideSessionId === null;
   const defaultSizes =
     showFixedSidePanelBody && activeCoordinatorThreadRootId === null
       ? { main: 75, sidebar: 25 }
       : { main: 60, sidebar: 40 };
 
+  // The hidden sidebar's own header controls: Toggle, Back and Forward.
   const leftSidebarExpandButton = isLeftSidebarHidden ? (
-    <Button
-      type="button"
-      variant="ghost"
-      size="small"
-      icon
-      onClick={() => showNavigationSidebar()}
-      aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-      className={stylex.props(detailStyles.shrink).className}
-    >
-      <CuidaSidebarExpandOutline {...stylex.props(detailStyles.icon16)} aria-hidden="true" />
-    </Button>
+    <SidebarHistoryControls onToggleSidebar={() => showNavigationSidebar()} />
   ) : null;
 
   const desktopHeaderToolbar = <div ref={setDesktopToolbarContainer} />;
@@ -7809,8 +7800,6 @@ const SessionDetail = ({
             isChildTab
             {...(panelSessionIdSet.has(sideSession.id)
               ? {
-                  // An independent conversation: its own workspace, and its files
-                  // open as panel tabs on that workspace, not the coordinator's.
                   workspaceSession: sideSession,
                   onFilePathClick: (filePath: string) =>
                     handleOpenOwnedFile(sideSession.id, filePath),
@@ -7875,12 +7864,28 @@ const SessionDetail = ({
         )}
       />
       <div {...stylex.props(detailStyles.sidebarBody)}>
-        {showFixedSidePanelBody &&
-        activeSidebarTab !== null &&
-        (activeSidebarTab as string) !== PROJECT_BOARD_PANEL_TAB_ID &&
-        activeCoordinatorThreadRootId === null
-          ? sidebarContent
-          : null}
+        {openedSidebarTabs.length > 0 ? (
+          <div
+            className={
+              stylex.props(
+                detailStyles.absoluteFill,
+                (!showFixedSidePanelBody ||
+                  activeSidebarTab === null ||
+                  (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ||
+                  activeCoordinatorThreadRootId !== null) &&
+                  detailStyles.invisibleFill
+              ).className
+            }
+            aria-hidden={
+              !showFixedSidePanelBody ||
+              activeSidebarTab === null ||
+              (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ||
+              activeCoordinatorThreadRootId !== null
+            }
+          >
+            {sidebarContent}
+          </div>
+        ) : null}
         {isProjectCoordinator && activeSession ? (
           <>
             <div

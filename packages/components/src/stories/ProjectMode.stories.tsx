@@ -102,7 +102,6 @@ const sessions: SessionMeta[] = [
     },
   }),
   session('done-1', '整理协调者提示词的中英文版本', {
-    // Accepted after its last reply, so it sits under Accepted (collapsed by default).
     coordinatorTaskAcceptedAt: minutesAgo(55),
     isArchived: true,
     createdAt: new Date(minutesAgo(80)).toISOString(),
@@ -219,7 +218,6 @@ const STORY_REPLY_TO_USER = createCoordinatorReplyRef({
 const streamItems: ChatStreamItem[] = [
   turnItem('turn-0', 'user', 30, [{ type: 'text', text: turns[0]!.text }]),
   turnItem('turn-1', 'assistant', 29, [
-    // Plain assistant text, thoughts and tool calls stay hidden; only coordinator_message bubbles show.
     { type: 'thought', text: '三件事互不依赖，可以并行开三个对话。' },
     { type: 'text', text: 'Let me check available Agent Roles first.' },
     {
@@ -675,7 +673,6 @@ const meta = {
   title: 'Project mode/Coordinator page',
   component: ProjectModePage,
   parameters: { layout: 'fullscreen' },
-  // The composer's add menu reads cloud queries, which need a platform.
   decorators: [
     (Story) => (
       <SettingsStoryProviders>

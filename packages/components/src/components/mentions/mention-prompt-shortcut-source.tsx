@@ -5,9 +5,9 @@ import { compareSlashMatchRanks, rankSlashMatch } from '@/lib/command-slash-sear
 import {
   getShortcutEmoji,
   resolveShortcutAvailability,
-  type PromptShortcutIndexEntry,
   type ShortcutAvailability,
-} from '@lody/shared/prompt-shortcuts';
+} from '@lody/shared/prompt-shortcuts/model';
+import type { PromptShortcutIndexEntry } from '@lody/shared/prompt-shortcuts/catalog';
 import type { MentionCandidate, MentionCategorySources } from './mention-registry';
 
 export type ShortcutMentionContext = Parameters<typeof resolveShortcutAvailability>[0]['context'];
