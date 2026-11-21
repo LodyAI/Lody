@@ -48,8 +48,10 @@ const styles = stylex.create({
   },
   // 12px wide and flush against the bullet box (the negative end margin takes
   // back the row gap), so its centre is 14px left of the dot's. Its hit area
-  // reaches 6px further left into the empty margin; only the glyph rotates, so
-  // an open toggle's box never turns sideways over the bullet. It shows only
+  // (the `::before`) reaches 6px further left into the empty margin and stops
+  // 2px short of the bullet, whose own hit area is inset 1px: a 3px dead gap
+  // between the two. Only the glyph rotates, so an open toggle's box never
+  // turns sideways over the bullet. It shows only
   // while its line is hovered, focused from the keyboard or being edited; a
   // folded node keeps its ringed dot as the resting cue.
   fold: {
@@ -73,19 +75,32 @@ const styles = stylex.create({
     },
     transitionProperty: 'opacity',
     transitionDuration: '100ms',
+    pointerEvents: 'none',
     '::before': {
       content: '""',
       position: 'absolute',
       top: 0,
       bottom: 0,
       left: -6,
-      right: 0,
+      right: 2,
+      pointerEvents: 'auto',
     },
   },
   foldShown: { opacity: 1 },
   foldHidden: { visibility: 'hidden' },
   foldOpen: { transform: 'rotate(90deg)' },
   bullet: {
+    position: 'relative',
+    pointerEvents: 'none',
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: 1,
+      right: 1,
+      pointerEvents: 'auto',
+    },
     width: 16,
     height: 28,
     display: 'inline-flex',
@@ -243,6 +258,10 @@ function TodayRow(props: {
       aria-selected={selected || undefined}
       aria-expanded={node?.hasChildren ? !node.collapsed : undefined}
       data-today-node={node?.id}
+      onPointerDown={(event) => {
+        // The gaps between controls are inert: they must not take focus from the editor.
+        if (event.target === event.currentTarget) event.preventDefault();
+      }}
     >
       <button
         type="button"
