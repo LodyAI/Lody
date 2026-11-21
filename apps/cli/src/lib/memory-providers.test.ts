@@ -369,6 +369,8 @@ describe('EverMe browser sign-in', () => {
     expect(result.signIn).toEqual({ status: 'approved' });
     expect(result.status).toBe('ready');
     expect(result.agents?.length).toBeGreaterThan(0);
+    // The first connection right after signing in names the account it uploads to.
+    expect(result.account).toBe('test-account');
   });
 
   it('stops polling once the code has outlived its own deadline', async () => {

@@ -170,6 +170,28 @@ export async function handleRelayedMemoryProviderRequest(
   return handleMemoryProviderRequest(input, registry);
 }
 
+/**
+ * The reply for a provider whose probe already ran. Built from that probe
+ * rather than a second one, so every action that lands on a ready provider —
+ * a finished sign-in or install as much as a list — answers with the same
+ * inventory and account.
+ */
+async function settledReply(
+  provider: MemoryProvider,
+  status: MemoryProviderResponse['status']
+): Promise<MemoryProviderResponse> {
+  if (status !== 'ready') return { type: 'machine/memory', status, memories: [] };
+  const agents = provider.agents ? await provider.agents() : undefined;
+  const account = provider.account?.();
+  return {
+    type: 'machine/memory',
+    status: 'ready',
+    memories: await provider.list(),
+    ...(agents ? { agents } : {}),
+    ...(account ? { account } : {}),
+  };
+}
+
 export async function handleMemoryProviderRequest(
   input: MemoryProviderRequest,
   registry: readonly MemoryProvider[] = providers
@@ -191,14 +213,7 @@ export async function handleMemoryProviderRequest(
       // down and abandoned the device code the daemon was holding — the exact
       // failure this flow is built to survive.
       const settled = signIn.status === 'pending' ? 'not_running' : await provider.probe();
-      const agents = settled === 'ready' && provider.agents ? await provider.agents() : undefined;
-      return {
-        type: 'machine/memory',
-        status: settled,
-        memories: settled === 'ready' ? await provider.list() : [],
-        signIn,
-        ...(agents ? { agents } : {}),
-      };
+      return { ...(await settledReply(provider, settled)), signIn };
     }
     // Installing is asked for because the provider is absent, so it too runs
     // ahead of the gate — and reports the probe beside the job, since the
@@ -210,15 +225,7 @@ export async function handleMemoryProviderRequest(
       // A machine that was already signed in is ready the moment the binary
       // lands. Answering without its agents would have the panel assert, for
       // one whole refresh interval, that the provider adapts none of them.
-      const settled = await provider.probe();
-      const agents = settled === 'ready' && provider.agents ? await provider.agents() : undefined;
-      return {
-        type: 'machine/memory',
-        status: settled,
-        memories: [],
-        install,
-        ...(agents ? { agents } : {}),
-      };
+      return { ...(await settledReply(provider, await provider.probe())), install };
     }
     // Asking after a job reads what the job left; the probe that gated the
     // click already ran, and probing again on every tick is the slow part.
@@ -235,15 +242,7 @@ export async function handleMemoryProviderRequest(
     }
     if (request.action === 'create') await provider.create(request.input);
     if (request.action === 'update') await provider.update(request.input);
-    const agents = provider.agents ? await provider.agents() : undefined;
-    const account = provider.account?.();
-    return {
-      type: 'machine/memory',
-      status: 'ready',
-      memories: await provider.list(),
-      ...(agents ? { agents } : {}),
-      ...(account ? { account } : {}),
-    };
+    return await settledReply(provider, status);
   } catch {
     return {
       type: 'machine/memory',

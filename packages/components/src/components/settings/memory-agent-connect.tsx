@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
@@ -13,6 +13,7 @@ import { settingsCatalog as catalog, settingsSurface as surface } from './surfac
 import { settingsType as type } from './type.stylex';
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { MemoryProviderHeading } from './memory-provider-heading';
+import { useMemoryJobPoll } from './use-memory-job-poll';
 
 const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
@@ -89,53 +90,35 @@ export function MemoryAgentConnectList({
   // ambient refresh, which would grey every control out every thirty seconds.
   const busy = pending.length > 0;
   // The click starts a job on the machine and returns; the rows stay pending
-  // until the job reports back, read through a ref so the interval is not
-  // rebuilt on every render.
+  // until the job reports back.
   const [watching, setWatching] = useState(false);
-  const poll = useRef(state.connectPoll);
-  poll.current = state.connectPoll;
-  const refresh = useRef(state.refresh);
-  refresh.current = state.refresh;
-  const endsAt = useRef(0);
-  useEffect(() => {
-    if (!watching) return undefined;
-    let cancelled = false;
-    let asking = false;
-    const finish = () => {
-      setWatching(false);
-      setPending([]);
-    };
-    const timer = window.setInterval(() => {
-      if (Date.now() > endsAt.current) {
-        finish();
-        void refresh.current();
-        return;
-      }
-      if (asking) return;
-      asking = true;
-      void poll
-        .current()
-        .finally(() => {
-          asking = false;
-        })
-        .then((result) => {
-          if (cancelled || result?.agentsJob?.status === 'running') return;
-          finish();
-          // A job that failed, or that a restart forgot, left no inventory.
-          if (result?.agentsJob?.status !== 'done') void refresh.current();
-        });
-    }, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [watching]);
+  const [endsAt, setEndsAt] = useState(0);
+  const finish = () => {
+    setWatching(false);
+    setPending([]);
+  };
+  useMemoryJobPoll({
+    active: watching,
+    intervalMs: POLL_INTERVAL_MS,
+    endsAt,
+    ask: state.connectPoll,
+    onReply: (result) => {
+      if (result?.agentsJob?.status === 'running') return;
+      finish();
+      // A job that failed, or that a restart forgot, left no inventory.
+      if (result?.agentsJob?.status !== 'done') void state.refresh();
+    },
+    onExpire: () => {
+      finish();
+      void state.refresh();
+    },
+  });
   const run = async (action: 'connect' | 'disconnect', targets: readonly string[]) => {
     if (busy || disabled || !targets.length) return;
     setPending(targets);
     const reply = await (action === 'connect' ? state.connect : state.disconnect)([...targets]);
     if (reply?.agentsJob?.status === 'running') {
-      endsAt.current = Date.now() + JOB_BUDGET_MS;
+      setEndsAt(Date.now() + JOB_BUDGET_MS);
       setWatching(true);
     } else setPending([]);
   };

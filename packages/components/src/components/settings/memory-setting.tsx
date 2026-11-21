@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -581,67 +581,6 @@ export function MemorySetting() {
 
 type Editor = { providerId: string; entry?: MemoryAssociation };
 
-/**
- * Where one provider's block has got to on first load: its machine answered,
- * a request is still out, or nothing was asked (offline, out of date, another
- * person's machine).
- */
-type ProviderLoad = 'answered' | 'waiting' | 'idle';
-/** How long the blocks wait for a request that is still out before showing anyway. */
-const REVEAL_WAIT_MS = 4_000;
-/**
- * How long they wait when nothing is out. Presence and capabilities arrive a
- * moment after the page mounts, so "offline" on the first frame is usually not
- * yet true, and saying it only to take it back is the flicker this avoids.
- */
-const REVEAL_GRACE_MS = 800;
-
-/**
- * The providers answer at different speeds, and each block used to fill in as
- * its own reply landed: a sentence here, a card there, some replaced a moment
- * later. The blocks now hold their bodies until every provider has answered,
- * within a bound, and then show them together. Latched: later refreshes update
- * in place.
- */
-function useRevealTogether(loads: readonly ProviderLoad[]): boolean {
-  const [revealed, setRevealed] = useState(false);
-  const [mountedAt] = useState(() => Date.now());
-  const answered = loads.every((load) => load === 'answered');
-  const waiting = loads.some((load) => load === 'waiting');
-  useEffect(() => {
-    if (revealed) return undefined;
-    if (answered) {
-      setRevealed(true);
-      return undefined;
-    }
-    const budget = waiting ? REVEAL_WAIT_MS : REVEAL_GRACE_MS;
-    const timer = window.setTimeout(
-      () => setRevealed(true),
-      Math.max(0, mountedAt + budget - Date.now())
-    );
-    return () => window.clearTimeout(timer);
-  }, [revealed, answered, waiting, mountedAt]);
-  return revealed || answered;
-}
-
-/**
- * Showing together is worth a moment, not a slow provider's whole wait: a
- * block that has answered stops waiting on the others once the short grace is
- * over, so one provider still taking inventory never hides another's memories.
- */
-function useRevealedBlocks(
-  loads: Readonly<Record<string, ProviderLoad>>,
-  ids: readonly string[]
-): (id: string) => boolean {
-  const together = useRevealTogether(ids.map((id) => loads[id] ?? 'waiting'));
-  const [graceOver, setGraceOver] = useState(false);
-  useEffect(() => {
-    if (together || graceOver) return undefined;
-    const timer = window.setTimeout(() => setGraceOver(true), REVEAL_GRACE_MS);
-    return () => window.clearTimeout(timer);
-  }, [together, graceOver]);
-  return (id) => together || (graceOver && loads[id] === 'answered');
-}
 const SETTINGS_MEMORY_SEARCH_THRESHOLD = 7;
 function MachineMemories({
   machineId,
@@ -674,18 +613,6 @@ function MachineMemories({
   for (const entry of associations.entries)
     if (!providers.some((p) => p.id === entry.providerId))
       providers.push({ id: entry.providerId, name: entry.providerId, createFields: [] });
-  const [loads, setLoads] = useState<Readonly<Record<string, ProviderLoad>>>({});
-  const reportLoad = useCallback(
-    (providerId: string, load: ProviderLoad) =>
-      setLoads((current) =>
-        current[providerId] === load ? current : { ...current, [providerId]: load }
-      ),
-    []
-  );
-  const revealed = useRevealedBlocks(
-    loads,
-    providers.map((provider) => provider.id)
-  );
   return (
     <>
       <SettingsPageActions>
@@ -709,8 +636,6 @@ function MachineMemories({
           machineId={machineId}
           isLocalMachine={machineId === localId}
           provider={provider}
-          revealed={revealed(provider.id)}
-          onLoad={reportLoad}
           refreshToken={refreshToken}
           query={searchable ? query : ''}
           getAssignedRoles={getAssignedRoles}
@@ -741,8 +666,6 @@ function ProviderRecords({
   machineId,
   isLocalMachine,
   provider,
-  revealed,
-  onLoad,
   supported,
   accountSupported,
   refreshToken,
@@ -765,9 +688,6 @@ function ProviderRecords({
    */
   isLocalMachine: boolean;
   provider: ProviderDefinition;
-  /** This block may show its body: every provider answered, or this one did and the grace is over. */
-  revealed: boolean;
-  onLoad: (providerId: string, load: ProviderLoad) => void;
   supported: boolean;
   /** The daemon also speaks the account providers' requests (protocol v2). */
   accountSupported: boolean;
@@ -841,19 +761,17 @@ function ProviderRecords({
     state.result?.status === 'error' &&
     providerInstalls(provider.id) &&
     failures >= UNREADABLE_AFTER;
-  const asked = online && supported && !personal && !outdated;
-  const load: ProviderLoad = state.result ? 'answered' : asked ? 'waiting' : 'idle';
-  useEffect(() => onLoad(provider.id, load), [onLoad, provider.id, load]);
-  if (!revealed)
+  // Until its own machine answers, a block that asked shows only its heading
+  // and a spinner. Every state it can settle into opens with this heading, so
+  // holding it alone moves nothing when the rest arrives.
+  if (!state.result && online && supported && !personal && !outdated)
     return (
       <div {...stylex.props(styles.stack)}>
-        {/* Every state this block can settle into opens with this heading, so
-            holding it alone moves nothing when the rest arrives. */}
         <MemoryProviderHeading
           logo={<MemoryProviderLogo providerId={provider.id} brandColor decorative />}
           name={provider.name}
           providerKey={provider.id}
-          action={load === 'waiting' ? <Spinner size="small" label={null} /> : null}
+          action={<Spinner size="small" label={null} />}
         />
       </div>
     );

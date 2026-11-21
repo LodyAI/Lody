@@ -191,6 +191,24 @@ export const MemoryProviderResponseSchema = z
   .strict();
 export type MemoryProviderResponse = z.infer<typeof MemoryProviderResponseSchema>;
 
+/**
+ * What a provider can do beyond listing identities. The three are independent:
+ * a provider may be installable long before Lody can sign in to it, and a
+ * hosted one may be signed in to without ever being installed.
+ */
+type MemoryProviderCapabilities = {
+  /**
+   * Attaches to the agents already on a machine instead of managing named
+   * identities: one account holds one memory, and connecting an agent only
+   * decides who may reach it. It renders an agent list, never an identity editor.
+   */
+  readonly connectsAgents: boolean;
+  /** Lody drives its sign-in, so a first-time user never has to leave for a terminal. */
+  readonly signsIn: boolean;
+  /** Lody can fetch it onto the machine rather than only link to it. */
+  readonly installs: boolean;
+};
+
 /** UI metadata only. Commands and environment mapping belong to the daemon adapter. */
 export const MEMORY_PROVIDERS = [
   {
@@ -198,42 +216,36 @@ export const MEMORY_PROVIDERS = [
     name: 'Nowledge Mem',
     installUrl: 'https://mem.nowledge.co/en',
     createFields: ['name', 'id', 'description', 'role'],
+    connectsAgents: false,
+    signsIn: false,
+    installs: false,
   },
   {
     id: 'everme',
     name: 'EverMe',
     installUrl: 'https://evermind.ai/everme',
     createFields: [],
+    connectsAgents: true,
+    signsIn: true,
+    installs: true,
   },
 ] as const;
 
-/**
- * Providers that attach to the agents already on a machine instead of managing
- * named identities: one account holds one memory, and connecting an agent only
- * decides who may reach it. They render an agent list, never an identity editor.
- */
-export const AGENT_CONNECT_PROVIDER_IDS = ['everme'] as const;
+const hasCapability = (
+  providerId: string,
+  capability: keyof MemoryProviderCapabilities
+): boolean => {
+  const provider: MemoryProviderCapabilities | undefined = MEMORY_PROVIDERS.find(
+    (entry) => entry.id === providerId
+  );
+  return provider?.[capability] ?? false;
+};
 export const isAgentConnectProvider = (providerId: string): boolean =>
-  (AGENT_CONNECT_PROVIDER_IDS as readonly string[]).includes(providerId);
-
-/**
- * Providers whose sign-in Lody can drive itself, so a first-time user never
- * has to leave for a terminal or go hunting for an API key. Separate from the
- * list above on purpose: connecting agents and holding an account are two
- * different capabilities, and a provider may grow one without the other.
- */
-export const SIGN_IN_PROVIDER_IDS = ['everme'] as const;
+  hasCapability(providerId, 'connectsAgents');
 export const providerSignsIn = (providerId: string): boolean =>
-  (SIGN_IN_PROVIDER_IDS as readonly string[]).includes(providerId);
-
-/**
- * Providers Lody can fetch onto the machine rather than only link to. Listed
- * apart again: a provider may be installable long before Lody can sign in to
- * it, and a hosted one may be signed in to without ever being installed.
- */
-export const INSTALL_PROVIDER_IDS = ['everme'] as const;
+  hasCapability(providerId, 'signsIn');
 export const providerInstalls = (providerId: string): boolean =>
-  (INSTALL_PROVIDER_IDS as readonly string[]).includes(providerId);
+  hasCapability(providerId, 'installs');
 
 /**
  * Providers set up only from the machine itself. Each reaches one person's

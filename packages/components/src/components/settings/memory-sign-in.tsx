@@ -11,6 +11,7 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { FormMessage } from './form-primitives';
 import { MemoryProviderHeading } from './memory-provider-heading';
+import { useMemoryJobPoll } from './use-memory-job-poll';
 
 /** Close enough to feel like the browser told us; far enough apart to stay quiet. */
 const POLL_INTERVAL_MS = 4_000;
@@ -111,11 +112,7 @@ export function MemorySignInCard({
   // Every flow carries an end: a code the provider dated, or Lody's own bound
   // when it did not. Without one a provider that stopped answering would leave
   // the card polling against nothing for as long as the page stayed open.
-  const expiresAt = useRef(0);
-  // The hook hands back a fresh closure each render; the interval reads the
-  // current one instead of restarting every time this component re-renders.
-  const poll = useRef(state.signInPoll);
-  poll.current = state.signInPoll;
+  const [expiresAt, setExpiresAt] = useState(0);
   const begun = useRef(false);
 
   useEffect(() => {
@@ -123,37 +120,21 @@ export function MemorySignInCard({
   }, [phase, onPendingChange]);
   useEffect(() => () => onPendingChange?.(false), [onPendingChange]);
 
-  useEffect(() => {
-    if (phase !== 'waiting') return undefined;
-    let cancelled = false;
-    // One ask at a time. A tick is allowed 4s but the call behind it is
-    // allowed twenty, so without this the same device code was redeemed
-    // twice — and the second attempt found it spent and called the flow
-    // expired on a machine that had just signed in.
-    let asking = false;
-    const timer = window.setInterval(() => {
-      if (Date.now() > expiresAt.current) {
-        setPhase('expired');
-        return;
-      }
-      if (asking) return;
-      asking = true;
-      void poll
-        .current()
-        .finally(() => {
-          asking = false;
-        })
-        .then((result) => {
-          // `approved` needs nothing here: the reply that carries it carries the
-          // signed-in inventory too, and the panel swaps this card for the list.
-          if (!cancelled && result?.signIn?.status === 'expired') setPhase('expired');
-        });
-    }, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [phase]);
+  // A tick is allowed 4s but the call behind it twenty; one ask at a time keeps
+  // a device code from being redeemed twice, which called a machine that had
+  // just signed in expired.
+  useMemoryJobPoll({
+    active: phase === 'waiting',
+    intervalMs: POLL_INTERVAL_MS,
+    endsAt: expiresAt,
+    ask: state.signInPoll,
+    // `approved` needs nothing here: the reply that carries it carries the
+    // signed-in inventory too, and the panel swaps this card for the list.
+    onReply: (result) => {
+      if (result?.signIn?.status === 'expired') setPhase('expired');
+    },
+    onExpire: () => setPhase('expired'),
+  });
 
   const start = async () => {
     if (phase === 'starting' || phase === 'waiting') return;
@@ -166,7 +147,7 @@ export function MemorySignInCard({
       return;
     }
     const page = started.verificationUrl;
-    expiresAt.current = Date.now() + (started.expiresInSec ?? FALLBACK_EXPIRY_SEC) * 1000;
+    setExpiresAt(Date.now() + (started.expiresInSec ?? FALLBACK_EXPIRY_SEC) * 1000);
     setFlow({ page, userCode: started.userCode, expiresInSec: started.expiresInSec, opened: true });
     setPhase('waiting');
     const opened = await openExternalUrl(page);

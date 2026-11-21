@@ -12,6 +12,7 @@ import type {
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { MemorySetting, RoleMemoryPicker } from '../src/components/settings/memory-setting';
 import { MemoryAgentConnectList } from '../src/components/settings/memory-agent-connect';
+import { MemoryInstallCard } from '../src/components/settings/memory-install';
 import { initI18n } from '../src/i18n';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -238,7 +239,7 @@ it('offers no way to add a memory to a provider this machine cannot reach', asyn
   expect(mocks.entries).toEqual([]);
 });
 
-it('holds every provider block until the machine answers, then shows them together', async () => {
+it('holds each provider block to its heading until its own machine answers', async () => {
   const labels = () => [...container.querySelectorAll('button')].map((node) => node.textContent);
   mocks.provider.result = undefined as unknown as MemoryProviderResponse;
   await renderSetting();
@@ -256,10 +257,9 @@ it('holds every provider block until the machine answers, then shows them togeth
   expect(labels()).toContain('Install manually');
 });
 
-it('shows an answered provider after the short grace while another is still asking', async () => {
+it('shows an answered provider at once while another is still asking', async () => {
   // Waiting for the slowest provider hid memories the user could already
   // edit for up to four seconds.
-  vi.useFakeTimers();
   mocks.entries = [saved];
   mocks.byProvider['nowledge-mem'] = {
     ...mocks.provider,
@@ -271,12 +271,60 @@ it('shows an answered provider after the short grace while another is still aski
   };
   mocks.byProvider.everme = { ...mocks.provider, result: undefined };
   await renderSetting();
-  expect(container.textContent).not.toContain('Review lessons');
-  await act(async () => vi.advanceTimersByTime(800));
   expect(container.textContent).toContain('Review lessons');
   // EverMe has said nothing yet, so its block still offers nothing.
   const labels = [...container.querySelectorAll('button')].map((node) => node.textContent);
   expect(labels).not.toContain('One-click download');
+});
+
+it('waits for the install receipt before asking after the job', async () => {
+  // A first reply slower than one poll interval used to be overtaken by the
+  // poll and read as a failed install while the machine was still installing.
+  vi.useFakeTimers();
+  let answerInstall!: (value: MemoryProviderResponse) => void;
+  let landed = false;
+  let installed = false;
+  const reply = (overrides: Partial<MemoryProviderResponse>): MemoryProviderResponse => ({
+    type: 'machine/memory',
+    status: 'not_installed',
+    memories: [],
+    ...overrides,
+  });
+  const state = {
+    ...mocks.provider,
+    install: () =>
+      new Promise<MemoryProviderResponse>((resolve) => {
+        answerInstall = resolve;
+      }),
+    installPoll: async () =>
+      landed
+        ? reply({ status: 'not_running', install: { status: 'done' } })
+        : // A poll before the receipt finds no job yet.
+          reply({ install: { status: 'failed' } }),
+  } as unknown as Parameters<typeof MemoryInstallCard>[0]['state'];
+  await act(async () =>
+    root.render(
+      <MemoryInstallCard
+        name="EverMe"
+        providerKey="everme"
+        installUrl="https://evermind.ai/everme"
+        reason="missing"
+        onInstalled={() => {
+          installed = true;
+        }}
+        state={state}
+      />
+    )
+  );
+  await click('One-click download');
+  await act(async () => vi.advanceTimersByTime(12_000));
+  expect(container.textContent).not.toContain('could not install');
+  expect(button('One-click download').disabled).toBe(true);
+  await act(async () => answerInstall(reply({ install: { status: 'running', step: 'provider' } })));
+  landed = true;
+  await act(async () => vi.advanceTimersByTime(5_000));
+  expect(installed).toBe(true);
+  expect(button('One-click download').disabled).toBe(false);
 });
 
 it('keeps a connect pending until the job on the machine reports back', async () => {

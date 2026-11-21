@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Download, ExternalLink, RefreshCw } from 'lucide-react';
@@ -11,6 +11,7 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { settingsCatalog as catalog } from './surface';
 import { FormMessage } from './form-primitives';
 import { MemoryProviderHeading, memoryProviderActions } from './memory-provider-heading';
+import { useMemoryJobPoll } from './use-memory-job-poll';
 
 /** A download, so slower than a sign-in poll and worth asking after less often. */
 const POLL_INTERVAL_MS = 5_000;
@@ -30,7 +31,12 @@ const styles = stylex.create({
   waiting: { display: 'flex', alignItems: 'center', gap: space[2] },
 });
 
-type Phase = 'idle' | 'running' | 'stranded' | 'failed';
+/**
+ * `starting` waits for the reply that says a job exists; only `running` polls.
+ * Asking after a job before the machine has confirmed one is how a slow first
+ * reply used to read as a failed install.
+ */
+type Phase = 'idle' | 'starting' | 'running' | 'stranded' | 'failed';
 
 /**
  * Whether an install that reported `done` actually put the provider where this
@@ -78,77 +84,57 @@ export function MemoryInstallCard({
   const [failure, setFailure] = useState<MemoryInstallFailure>();
   /** Which part of the install the daemon last said it was on. */
   const [step, setStep] = useState<'runtime' | 'provider'>();
-  // The hook hands back a fresh closure each render; the interval reads the
-  // current one rather than restarting every time this component re-renders.
-  const poll = useRef(state.installPoll);
-  poll.current = state.installPoll;
-  // Same reason as the poll above: a fresh closure each render, read through
-  // a ref so the interval is not torn down and rebuilt on every one.
-  const installed = useRef(onInstalled);
-  installed.current = onInstalled;
-  const endsAt = useRef(0);
+  const [endsAt, setEndsAt] = useState(0);
+  const busy = phase === 'starting' || phase === 'running';
 
-  useEffect(() => {
-    if (phase !== 'running') return undefined;
-    let cancelled = false;
-    // One ask at a time: each poll probes EverCLI, which is allowed longer
-    // than the gap between ticks, so they would otherwise pile up.
-    let asking = false;
-    const timer = window.setInterval(() => {
-      if (Date.now() > endsAt.current) {
-        setPhase('failed');
-        return;
-      }
-      if (asking) return;
-      asking = true;
-      void poll
-        .current()
-        .finally(() => {
-          asking = false;
-        })
-        .then((result) => {
-          if (cancelled || !result?.install) return;
-          setStep(result.install.step);
-          if (result.install.status === 'failed') {
-            setFailure(result.install.failure);
-            setPhase('failed');
-          }
-          // Landed and reachable: done. `not_running` counts — a machine that
-          // never had EverCLI has nobody signed in on it, which is the whole
-          // reason the next card exists. Only a provider that still cannot be
-          // seen at all is stranded.
-          else if (result.install.status === 'done') {
-            const settled = landed(result.status);
-            setPhase(settled ? 'idle' : 'stranded');
-            if (settled) installed.current?.();
-          }
-        });
-    }, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [phase]);
+  /** Reads a finished or failed job; a job still going keeps the phase. */
+  const settle = (result: MemoryProviderResponse | undefined) => {
+    if (!result?.install) return;
+    setStep(result.install.step);
+    if (result.install.status === 'failed') {
+      setFailure(result.install.failure);
+      setPhase('failed');
+    }
+    // Landed and reachable: done. `not_running` counts — a machine that never
+    // had EverCLI has nobody signed in on it, which is the whole reason the
+    // next card exists. Only a provider that still cannot be seen at all is
+    // stranded.
+    else if (result.install.status === 'done') {
+      const settled = landed(result.status);
+      setPhase(settled ? 'idle' : 'stranded');
+      if (settled) onInstalled?.();
+    }
+  };
+
+  useMemoryJobPoll({
+    active: phase === 'running',
+    intervalMs: POLL_INTERVAL_MS,
+    endsAt,
+    ask: state.installPoll,
+    onReply: settle,
+    onExpire: () => setPhase('failed'),
+  });
 
   const start = async () => {
-    if (phase === 'running') return;
-    endsAt.current = Date.now() + RUN_BUDGET_MS;
+    if (busy) return;
     setFailure(undefined);
     setStep(undefined);
-    setPhase('running');
+    setPhase('starting');
     const result = await state.install();
     // No job in the reply means the request never reached one — an offline
     // machine, a transport error. Waiting on a job nobody started is the hang
     // this guard exists to prevent.
-    if (!result?.install || result.install.status === 'failed') {
-      setFailure(result?.install?.failure);
+    if (!result?.install) {
       setPhase('failed');
-    } else if (result.install.status === 'done') {
-      // Same reading as the poll.
-      const settled = landed(result.status);
-      setPhase(settled ? 'idle' : 'stranded');
-      if (settled) installed.current?.();
+      return;
     }
+    if (result.install.status !== 'running') {
+      settle(result);
+      return;
+    }
+    setStep(result.install.step);
+    setEndsAt(Date.now() + RUN_BUDGET_MS);
+    setPhase('running');
   };
 
   return (
@@ -163,19 +149,14 @@ export function MemoryInstallCard({
       />
       <span {...stylex.props(memoryProviderActions)}>
         {reason ? (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={phase === 'running'}
-            onClick={() => void start()}
-          >
+          <Button type="button" variant="secondary" disabled={busy} onClick={() => void start()}>
             {/* The mark follows the label on every provider's button, so the
                 pair reads as one phrase and the icon always means the same
                 thing in the same place relative to the words. */}
             {phase === 'failed' || phase === 'stranded'
               ? t('settings.memory.setUp.retry')
               : t(`settings.memory.setUp.action.${reason}`, { provider: name })}
-            {phase === 'running' ? (
+            {busy ? (
               <Spinner size="small" label={null} {...stylex.props(catalog.icon)} />
             ) : reason === 'unreadable' ? (
               <RefreshCw {...stylex.props(catalog.icon)} />
@@ -199,7 +180,7 @@ export function MemoryInstallCard({
           </Button>
         ) : null}
       </span>
-      {phase === 'running' && reason ? (
+      {busy && reason ? (
         <span role="status" {...stylex.props(styles.waiting, catalog.meta)}>
           <Spinner size="small" label={null} />
           {t(
