@@ -92,7 +92,7 @@ steer 请求再独立等待五秒响应，与 UI 一致。建连超时回退后�
   `SESSION_ID_AMBIGUOUS` 失败，并列出最多八个带 ID 和标题的候选。
 - **排队输入。** 请求方可以列出、撤回或替换自己尚未开始的排队输入。已开始的输入
   返回 `ALREADY_STARTED`，这条路径从不取消它。
-- **Machine 资源。** `lody_machine_list` 报告 agent 额度及恢复时间和磁盘用量。Lody
+- **Machine 资源。** `lody_catalog` 的 `machines` 操作报告 agent 额度及恢复时间和磁盘用量。Lody
   不管理也不报告 agent 自己持有的锁。
 
 这些新增能力通过设计避免错误，而不是增加关卡。不确定的观测降级为 `unknown` 或提示

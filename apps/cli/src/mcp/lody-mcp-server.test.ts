@@ -321,38 +321,48 @@ describe('Lody MCP tool catalog', () => {
   it('publishes exactly the merged Lody tool catalog, with no Task family', async () => {
     const names = await listPublishedToolNames();
     expect([...names].sort()).toEqual([
-      'lody_agent_config',
       'lody_agent_role',
-      'lody_agent_role_create',
-      'lody_agent_role_update',
       'lody_automation',
+      'lody_catalog',
       'lody_feedback',
       'lody_help',
-      'lody_machine_list',
       'lody_mcp_configure',
-      'lody_mcp_list',
       'lody_operation',
       'lody_operation_cancel',
-      'lody_project_list',
       'lody_report_preview_candidate',
       'lody_schedule',
-      'lody_schedule_pause',
-      'lody_schedule_propose',
-      'lody_session_archive',
       'lody_session_cancel',
       'lody_session_chat',
       'lody_session_create',
       'lody_session_create_options',
       'lody_session_history',
       'lody_session_list',
+      'lody_session_manage',
       'lody_session_queue',
-      'lody_session_rename',
-      'lody_session_share',
       'lody_session_status_many',
       'lody_simulator_preview',
       'lody_upload',
     ]);
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
+  });
+
+  // Clients may auto-approve read-only tools, so reads never share a tool with writes.
+  it('keeps every read-only family in a read-only tool', async () => {
+    const server = buildLodyMcpServer();
+    const client = new Client({ name: 'read-only-test-client', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const { tools } = await client.listTools();
+      expect(
+        tools
+          .filter((tool) => tool.annotations?.readOnlyHint === true)
+          .map((tool) => tool.name)
+          .sort()
+      ).toEqual(['lody_catalog', 'lody_help', 'lody_operation']);
+    } finally {
+      await Promise.all([client.close(), server.close()]);
+    }
   });
 });
 
@@ -1652,16 +1662,18 @@ describe('session MCP input schemas', () => {
           runWithMcpSessionContext(
             { sessionId: 'caller', workspaceId: 'workspace-1', machineId: 'host-machine' },
             () =>
-              handlers.get(`lody_session_${operation}`)!(
-                operation === 'rename'
-                  ? {
-                      items: [
-                        { sessionId: privateId, title: 'Changed private' },
-                        { sessionId: editableId, title: 'Changed shared' },
-                      ],
-                    }
-                  : { sessionIds: [privateId, editableId] }
-              )
+              handlers.get('lody_session_manage')!({
+                action: operation,
+                arguments:
+                  operation === 'rename'
+                    ? {
+                        items: [
+                          { sessionId: privateId, title: 'Changed private' },
+                          { sessionId: editableId, title: 'Changed shared' },
+                        ],
+                      }
+                    : { sessionIds: [privateId, editableId] },
+              })
           )
         );
         const results = JSON.parse((response.content![0] as { text: string }).text).items;

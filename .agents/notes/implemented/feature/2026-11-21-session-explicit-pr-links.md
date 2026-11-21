@@ -48,7 +48,8 @@ a linked PR only after the provider returns it. The owner approved the design on
    one factual line.
 7. **Writers.** The renderer writes only the user's unlink records; the daemon writes
    shim and agent records through `apps/cli/src/lib/session-pr-links.ts`, whose
-   link/unlink/list operations a later Session-scoped agent tool reuses.
+   link/unlink/list operations the `lody_session_manage` `pr_*` actions reuse for the
+   calling Session ([action tools](2026-11-21-mcp-action-tools.md)).
 
 ## Alternatives
 
@@ -66,7 +67,8 @@ a linked PR only after the provider returns it. The owner approved the design on
 
 - Sessions without the managed shim (local projects using native credentials) and
   PRs created through other paths (GitHub MCP tools, raw API, web) are not linked
-  automatically; the Session-scoped agent action in the follow-up PR links them.
+  automatically; the agent links them with `lody_session_manage` action `pr_link`
+  ([action tools](2026-11-21-mcp-action-tools.md)).
 - An unreadable link is retried at the discovery cadence and stays listed with a reason.
 - Pending rows show the case-folded URL until the provider returns the PR.
 - Auto delivery is unchanged; several PRs still stall it with `multiple_prs`.

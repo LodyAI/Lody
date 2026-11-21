@@ -284,7 +284,7 @@ describe('gh pr create reports the created PR to its Session', () => {
       expect(await h.execute(createArgs)).toBe(0);
       expect(h.stdout.mock.calls).toEqual([['https://github.com/owner/repo/pull/42\n']]);
       expect(h.stderr).toHaveBeenCalledWith(
-        '[Lody] https://github.com/owner/repo/pull/42 was not linked to this Session.'
+        '[Lody] https://github.com/owner/repo/pull/42 was not linked to this Session. It can be linked with lody_session_manage action pr_link.'
       );
     }
   );

@@ -87,27 +87,42 @@ restarting work. These details stay in help rather than the discovery summaries.
 
 Every Lody-started Agent loads the whole `tools/list`; clients that do not defer MCP
 schemas (Gemini CLI, VS Code Copilot) pay for it on every turn, and tool selection
-degrades as the count grows. The catalog therefore keeps one tool per job:
+degrades as the count grows. The catalog therefore keeps one tool per job, and
+low-frequency families are action tools
+([decision](../../../../.agents/notes/implemented/feature/2026-11-21-mcp-action-tools.md)):
 
 - Single and batch forms share a tool. `lody_session_create` and `lody_session_chat`
   switch to batch mode when `items` or `defaults` is present; that mode validates with
   the former batch schema, so single-only fields (attachments, quotes, resume, legacy
   wait, top-level target fields) are rejected there and per-item results and error codes
-  are unchanged. `lody_session_rename` takes `items` the same way.
-- Get and list share a tool: `lody_operation` (operationId, batchId, or a list),
-  `lody_agent_role`, `lody_agent_config` and `lody_schedule` (an id reads one, otherwise
-  a page). Each mode keeps its own bounds and defaults; mixing modes is rejected.
+  are unchanged.
+- An action tool publishes only `action` and an open `arguments` object. Each action's
+  real schema validates `arguments` (issues keep their `arguments.*` path and the help
+  reminder), and `lody_help({command})` returns every action's description and schema,
+  `lody_help({command, action})` one of them. The families are `lody_session_manage`
+  (rename, archive, share, `pr_link`, `pr_unlink`, `pr_list`), `lody_schedule` (propose,
+  pause), `lody_agent_role` (create, update), `lody_operation` (get, batch, list) and
+  `lody_catalog` (machines, projects, mcp_servers, agent_configs, agent_roles, schedules).
+- Reads never share a tool with writes, so clients that auto-approve `readOnlyHint` tools
+  keep doing so: `lody_catalog`, `lody_operation` and `lody_help` are read-only, which is
+  why Role and Schedule reads live in the catalog and `lody_operation_cancel` stays apart.
+  `pr_list` is the one read inside a mutating tool, kept beside the link actions it
+  reports on. `lody_mcp_configure` stays separate as an execution and credential boundary.
+- A call that needs its own MCP request (`share` needs the abort signal and CLI account;
+  catalog `schedules` uses the schedule command client) runs in the receiving process via
+  `executeLocally`; the daemon rejects those calls over IPC. `pr_*` actions run in the
+  daemon on the calling Session only, through `lib/session-pr-links.ts` with source `agent`.
 - `lody_upload` takes `kind: images | files`; `lody_simulator_preview` takes `platform`.
   iOS is offered only on macOS hosts, decided when the per-connection server is built,
   so the list never changes during a session.
 
 Persisted Operation kinds (`session_create_many`, `session_chat_many`) are internal and
 did not change. Measured with an in-memory client against `buildLodyMcpServer()` on
-Linux: 40 tools and 51,355 bytes before; 30 tools and 35,368 bytes after. Dynamic tool
-lists (`tools/list_changed`) and a search/execute meta-tool were rejected: some clients
-ignore list changes, a changing list breaks prompt caches, and one execute tool loses
-per-tool permissions and read-only annotations. `lody-mcp-server.test.ts` guards the
-exact published names.
+Linux: 40 tools and 51,355 bytes on 0f24fb82c; 30 tools and 35,596 bytes after the merges
+(#3022 as merged); 21 tools and 27,769 bytes with action tools. Dynamic tool lists (`tools/list_changed`) and
+a search/execute meta-tool were rejected: some clients ignore list changes, a changing list
+breaks prompt caches, and one execute tool loses per-tool permissions and read-only
+annotations. `lody-mcp-server.test.ts` guards the exact published names and the read-only set.
 
 ## Skills over MCP
 
@@ -367,7 +382,7 @@ choice as `--mcp-server-ids '<JSON array>'`. See the
 
 ## Session archive
 
-`lody_session_archive` accepts either `{"sessionId":"SESSION_ID"}` or
+`lody_session_manage` action `archive` accepts either `{"sessionId":"SESSION_ID"}` or
 `{"sessionIds":["SESSION_A","SESSION_B"]}`. Batch input contains 1-20 unique ids.
 Single input retains its existing response; batch input returns `items` in input
 order, each with `sessionId`, `ok`, and either `archivedChildSessionIds` or `error`.
@@ -412,7 +427,7 @@ never model tool fields, role or userId.
 
 ## Agent Role proposals
 
-`lody_agent_role_create` and `lody_agent_role_update` publish a durable review card
+`lody_agent_role` actions `create` and `update` publish a durable review card
 in the invoking conversation; neither writes the Role catalog. Both use the active
 Turn's human identity and the daemon Session tool route in both compositions. Save is a renderer
 catalog write by that user. Updating requires Role ownership and patches only name,

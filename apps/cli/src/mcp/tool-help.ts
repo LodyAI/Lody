@@ -16,6 +16,16 @@ export const LODY_HELP_INSTRUCTIONS =
 export const LODY_LONG_RUN_GUIDANCE =
   'An idle Session may be reclaimed, which ends background processes you started; run long commands with lody_automation `run`, which resumes this Session when they exit.';
 
+/**
+ * Approved owner guidance (2026-11-21), one sentence per Session and only when its working
+ * directory has git. With the managed `gh` shim, `gh pr create` links its PR, so only other
+ * paths need the action; without the shim (native credentials) every PR needs it.
+ */
+export const LODY_PR_LINK_GUIDANCE =
+  'A pull or merge request this Session opened without gh pr create is linked to it with lody_session_manage action pr_link.';
+export const LODY_PR_LINK_GUIDANCE_WITHOUT_GH_SHIM =
+  'A pull or merge request this Session opens is linked to it with lody_session_manage action pr_link.';
+
 export const commandHelpReminder = (name: string): string =>
   `Before using this command, read lody_help({command:"${name}"}) and follow its parameter and retry rules.`;
 
@@ -114,42 +124,146 @@ function isFailedToolResult(
   return result.isError === true && Array.isArray(result.content);
 }
 
+/** The MCP request context a tool callback receives (abort signal, session). */
+export type LodyToolExtra = Parameters<ToolCallback<z.ZodObject>>[1];
+
+/**
+ * One action of an action tool. `inputSchema` validates the action's `arguments`
+ * and is published only through `lody_help`; `run` receives the parsed arguments.
+ */
+export type LodyToolAction = {
+  summary: string;
+  description: string;
+  inputSchema: z.ZodObject;
+  run: (raw: unknown, extra?: LodyToolExtra) => Promise<CallToolResult>;
+};
+
+export function defineToolAction<S extends z.ZodObject>(action: {
+  summary: string;
+  description: string;
+  inputSchema: S;
+  run: (args: z.output<S>, extra?: LodyToolExtra) => Promise<CallToolResult>;
+}): LodyToolAction {
+  return { ...action, run: (raw, extra) => action.run(action.inputSchema.parse(raw), extra) };
+}
+
+/**
+ * The eager schema of an action tool is thin: an `action` enum and an `arguments`
+ * object. Validation is not: each action's real schema checks `arguments`, and its
+ * issues keep their paths below `arguments` so the existing help reminder applies.
+ */
+export function actionToolInputSchema<K extends string>(
+  actions: Record<K, LodyToolAction>,
+  actionPhrase: string
+) {
+  const names = Object.keys(actions) as [K, ...K[]];
+  return z
+    .object({
+      action: z.enum(names).describe(actionPhrase),
+      arguments: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('Fields of the chosen action; lody_help({command, action}) lists them.'),
+    })
+    .strict()
+    .superRefine((value, ctx) => {
+      const result = actions[value.action].inputSchema.safeParse(value.arguments ?? {});
+      if (result.success) return;
+      for (const issue of result.error.issues)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['arguments', ...issue.path],
+          message: `${value.action}: ${issue.message}`,
+        });
+    });
+}
+
+export const runToolAction = <K extends string>(
+  actions: Record<K, LodyToolAction>,
+  input: { action: K; arguments?: Record<string, unknown> },
+  extra?: LodyToolExtra
+): Promise<CallToolResult> => actions[input.action].run(input.arguments ?? {}, extra);
+
+export type LodyToolConfig<T extends z.ZodObject> = {
+  summary: string;
+  title?: string;
+  description?: string;
+  inputSchema: T;
+  annotations?: ToolAnnotations;
+  /** Action tools: per-action documentation served by `lody_help({command, action})`. */
+  actions?: Record<string, LodyToolAction>;
+};
+
 export type LodyToolServer = {
   registerTool<T extends z.ZodObject>(
     name: string,
-    config: {
-      summary: string;
-      title?: string;
-      description?: string;
-      inputSchema: T;
-      annotations?: ToolAnnotations;
-    },
+    config: LodyToolConfig<T>,
     callback: ToolCallback<T>
   ): RegisteredTool;
 };
 
+const actionHelp = (name: string, action: string, entry: LodyToolAction) => ({
+  command: name,
+  action,
+  summary: entry.summary,
+  description: entry.description,
+  argumentsSchema: z.toJSONSchema(entry.inputSchema, { io: 'input' }),
+});
+
 /** Keep discovery small; serve the executing registration's documentation on demand. */
 export function createToolHelpServer(server: McpServer): LodyToolServer {
-  const commands = new Map<string, { summary: string; read: () => Record<string, unknown> }>();
+  const commands = new Map<
+    string,
+    {
+      summary: string;
+      read: () => Record<string, unknown>;
+      actions?: Record<string, LodyToolAction>;
+    }
+  >();
 
   server.registerTool(
     'lody_help',
     {
       title: 'Read Lody command help',
       description:
-        'Required before executing a Lody command unless its full help is already in context. Supply command for full documentation; omitting it returns only an index. Read-only; no execution or permission changes.',
-      inputSchema: z.object({ command: z.string().trim().min(1).max(100).optional() }).strict(),
+        'Required before executing a Lody command unless its full help is already in context. Supply command for full documentation, including every action of an action tool; add action for that action alone; omitting command returns only an index. Read-only; no execution or permission changes.',
+      inputSchema: z
+        .object({
+          command: z.string().trim().min(1).max(100).optional(),
+          action: z.string().trim().min(1).max(100).optional(),
+        })
+        .strict(),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ command }) => {
+    async ({ command, action }) => {
       const entry = command === undefined ? undefined : commands.get(command);
-      if (command !== undefined && !entry) {
+      if ((command !== undefined && !entry) || (command === undefined && action !== undefined)) {
         return {
           isError: true,
           content: [
             { type: 'text', text: 'Unknown command. Call lody_help({}) for command names.' },
           ],
         };
+      }
+      if (entry && command !== undefined && action !== undefined) {
+        const actionEntry = entry.actions?.[action];
+        return actionEntry
+          ? {
+              content: [
+                { type: 'text', text: JSON.stringify(actionHelp(command, action, actionEntry)) },
+              ],
+            }
+          : {
+              isError: true,
+              content: [
+                {
+                  type: 'text',
+                  text: entry.actions
+                    ? `Unknown action. ${command} actions: ${Object.keys(entry.actions).join(', ')}.`
+                    : `${command} has no actions; call lody_help({command:"${command}"}).`,
+                },
+              ],
+            };
       }
       return {
         content: [
@@ -169,7 +283,7 @@ export function createToolHelpServer(server: McpServer): LodyToolServer {
   );
 
   return {
-    registerTool(name, { summary, ...config }, callback) {
+    registerTool(name, { summary, actions, ...config }, callback) {
       const inputSchema = inputWithHelp(config.inputSchema, name);
       const execute: ToolCallback<typeof inputSchema> = async (args, context) => {
         const result = await callback(args, context);
@@ -194,6 +308,7 @@ export function createToolHelpServer(server: McpServer): LodyToolServer {
       );
       commands.set(name, {
         summary,
+        actions,
         read: () => ({
           command: name,
           summary,
@@ -201,6 +316,14 @@ export function createToolHelpServer(server: McpServer): LodyToolServer {
           description: config.description ?? '',
           inputSchema: z.toJSONSchema(config.inputSchema, { io: 'input' }),
           annotations: config.annotations,
+          // Full help of an action tool is every action's complete documentation.
+          ...(actions
+            ? {
+                actions: Object.entries(actions).map(([action, entry]) =>
+                  actionHelp(name, action, entry)
+                ),
+              }
+            : {}),
         }),
       });
       return registered;

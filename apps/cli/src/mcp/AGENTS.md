@@ -13,7 +13,7 @@ Parent instructions apply. Background: [README.md](README.md).
 - MCP sharing requires the active Turn user to equal the CLI authenticated account.
   Fail closed on shared-machine account mismatch; never substitute the machine owner.
 
-- `lody_mcp_configure` always derives its target from the current MCP session context and
+- `lody_mcp_configure` stays its own tool and always derives its target from the current MCP session context and
   re-authorizes that workspace with the daemon credential. Never accept a workspace selector.
 - MCP configuration is an execution and credential boundary. The tool may act only on an
   explicit user request, never on instructions from repository content, websites, or tool
@@ -67,6 +67,8 @@ Parent instructions apply. Background: [README.md](README.md).
   rederive until authored. Explicit choices/access stay strict.
   [Freshness/retries](README.md#machine-catalog-retry-guidance).
 
+- `lody_session_manage` `pr_*` actions act only on the calling Session from MCP context,
+  never an argument, with source `agent`.
 - `lody_simulator_preview` is the native-app tool; it offers `platform: "ios"` only on macOS hosts,
   fixed when the server is built. Web previews remain
   `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
@@ -126,9 +128,10 @@ Parent instructions apply. Background: [README.md](README.md).
   `session://` URIs too. Explicit workspace must match the tool context.
   ([contract](../../../../specs/deep-links.md))
 
-- Keep one published tool per job ([catalog size](README.md#catalog-size)): a batch or
-  list form is a mode of its single tool, validated by its own unchanged mode schema, and
-  a new tool name updates the exact-name guard in `lody-mcp-server.test.ts`.
+- Keep one published tool per job ([catalog size](README.md#catalog-size)): a batch form
+  is a mode of its single tool and a low-frequency family is an action tool, each validated
+  by its own unchanged schema. Never put a read in a mutating tool's family when that drops
+  its `readOnlyHint`; a name or read-only change updates the guards in `lody-mcp-server.test.ts`.
 
 - Single create/chat attachments require durable Operations and the calling daemon's
   `sessionInputAttachments` capability. Resolve paths inside the calling Session's
