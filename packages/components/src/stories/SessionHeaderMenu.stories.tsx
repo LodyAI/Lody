@@ -6,7 +6,6 @@ import { fn } from 'storybook/test';
 import type { MachineId, SessionMeta } from '@lody/shared';
 
 import { SessionHeaderMenu } from '@/components/sessions/session-chat-interface';
-import { useStoryPullRequestLinks } from './SessionPullRequestLinks.stories';
 import {
   SessionInfoDialog,
   type SessionOwnerMenuState,
@@ -165,18 +164,4 @@ export const InfoDialog: Story = {
       t={args.t}
     />
   ),
-};
-
-function LinkPullRequestMenu(props: Parameters<typeof SessionHeaderMenu>[0]) {
-  const links = useStoryPullRequestLinks({ project: githubWorktreeSession.project } as SessionMeta);
-  return <SessionHeaderMenu {...props} pullRequestLinks={links} />;
-}
-
-/** No PR yet: the menu offers "Link pull request…", which opens the paste dialog. */
-export const LinkPullRequest: Story = {
-  render: (args) => <LinkPullRequestMenu {...args} />,
-};
-export const LinkPullRequestDark: Story = {
-  ...LinkPullRequest,
-  globals: { theme: 'dark' },
 };

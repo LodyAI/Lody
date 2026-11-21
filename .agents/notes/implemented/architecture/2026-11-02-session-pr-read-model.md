@@ -66,7 +66,7 @@ client's 15 s poll to the reconciler's 20 s high lane; this is not measured.
    the reconciler still turns a link into an association. See
    [explicit PR links](../feature/2026-11-21-session-explicit-pr-links.md).
 5. **The Info Bar marker shows the primary PR**; it opens the list of every
-   linked PR (link, unlink, open). A single-project Session's primary PR stays
+   linked PR (open, copy link, unlink). A single-project Session's primary PR stays
    in its project repository when it holds one there.
 6. **CI pill.** The pill's verdict and the popover header use the metadata CI
    code (`s` passed; `f`/`e` failed; `p`/`x` running), the same code the

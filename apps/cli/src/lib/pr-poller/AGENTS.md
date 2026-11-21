@@ -76,7 +76,7 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   provider-clocked Flock entries; machines use the ordinary local writer. Retain orphan
   records until session purge.
   Rewrites strip legacy detail fields and `.r` readiness on touch.
-- **Explicit links are intent.** `prLink:*` records (renderer for users, daemon for
+- **Explicit links are intent.** `prLink:*` records (renderer for user unlinks, daemon for
   shim/agent reports) never edit `pullRequests`. A linked URL is queried by number and
   appended only after a valid provider result; unreadable results write `prLinkCheck:*`.
   Unlinked URLs are removed without a query and branch discovery never re-adds them.

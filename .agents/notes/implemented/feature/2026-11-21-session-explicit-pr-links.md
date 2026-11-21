@@ -11,8 +11,8 @@ Lody discovered a Session's PR only by repository plus the Session's runtime
 branch. An agent that ran `gh pr create` from a temporary clone on another branch
 (LodyAI/Lody #3019) produced a PR the Session never showed, and Create PR stayed
 visible. Sessions now hold explicit link records. The managed `gh` shim reports
-every PR it creates to the daemon, and users can link a PR by pasting its URL or
-unlink one. The reconciler stays the only writer of `pullRequests`: it associates
+every PR it creates to the daemon, and users can unlink a PR from the Info Bar list.
+The owner chose not to ship a manual link entry, because it would rarely be used. The reconciler stays the only writer of `pullRequests`: it associates
 a linked PR only after the provider returns it. The owner approved the design on
 2026-11-21.
 
@@ -46,7 +46,7 @@ a linked PR only after the provider returns it. The owner approved the design on
    daemon resolves the Session only from the host-authored context token (child Tab →
    owner) and writes a `shim` record. Exit code and stdout never change; stderr gets
    one factual line.
-7. **Writers.** The renderer writes the user's own records directly; the daemon writes
+7. **Writers.** The renderer writes only the user's unlink records; the daemon writes
    shim and agent records through `apps/cli/src/lib/session-pr-links.ts`, whose
    link/unlink/list operations a later Session-scoped agent tool reuses.
 
@@ -56,13 +56,17 @@ a linked PR only after the provider returns it. The owner approved the design on
   owner).** Both associate unrelated PRs and are not provider-neutral.
 - **Write `pullRequests` from the shim or the renderer (rejected).** It breaks the
   single-writer rule for membership and order and would associate unverified URLs.
+- **A paste-URL field and a session-menu "Link pull request" entry (removed before
+  merge by the owner).** They would rarely be used; the shim report and the agent
+  action cover linking.
 - **One map-valued metadata field (rejected).** A map value is replaced as a whole,
   so a concurrent user unlink and shim link could lose one of them.
 
 ## Consequences and limits
 
 - Sessions without the managed shim (local projects using native credentials) and
-  PRs created through other paths (GitHub MCP tools, raw API, web) need a manual link.
+  PRs created through other paths (GitHub MCP tools, raw API, web) are not linked
+  automatically; the Session-scoped agent action in the follow-up PR links them.
 - An unreadable link is retried at the discovery cadence and stays listed with a reason.
 - Pending rows show the case-folded URL until the provider returns the PR.
 - Auto delivery is unchanged; several PRs still stall it with `multiple_prs`.

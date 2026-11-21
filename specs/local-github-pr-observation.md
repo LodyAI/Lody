@@ -89,9 +89,9 @@ polling loop per view. Product-cloud requests remain forbidden in local mode.
 
 A Session can also hold pull requests that branch discovery cannot see, such as
 one its agent created from another directory, branch or fork. Link records are
-intent, kept per canonical PR URL: linked or unlinked, who wrote it, and when. The
-user writes their own records from the renderer; the machine writes records reported
-by the managed `gh` shim for the Session whose host-issued credential context made
+intent, kept per canonical PR URL: linked or unlinked, who wrote it, and when. A
+user can unlink a PR from the renderer; linking needs no user step. The machine writes
+records reported by the managed `gh` shim for the Session whose host-issued credential context made
 the request, never one named by the child process. A child Tab's PR belongs to its
 owner Session.
 
