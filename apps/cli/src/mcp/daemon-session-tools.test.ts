@@ -2596,7 +2596,8 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     });
 
     await backend.appendHistoryTurn({
-      id: 'coord-root-turn',
+      id: 'assistant:user-open-turn',
+      userTurnId: 'user-open-turn',
       role: 'assistant',
       timestamp: '2026-11-20T00:01:00.000Z',
       finished: true,
@@ -2619,7 +2620,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       id: 'user-reply-turn',
       role: 'user',
       timestamp: '2026-11-20T00:02:00.000Z',
-      threadRoots: 'bubble:coord-root-turn:bubble-ask',
+      threadRoots: 'bubble:assistant:user-open-turn:bubble-ask',
       inputConfig: {
         prompt: '保留 7 天即可',
         inputBlocks: [{ type: 'text', text: '保留 7 天即可' }],
@@ -2628,10 +2629,10 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         replyTo: {
           target: {
             kind: 'coordinator_bubble',
-            turnId: 'coord-root-turn',
+            turnId: 'assistant:user-open-turn',
             bubbleId: 'bubble-ask',
           },
-          threadRootId: 'bubble:coord-root-turn:bubble-ask',
+          threadRootId: 'bubble:assistant:user-open-turn:bubble-ask',
           author: 'coordinator',
           previewText: '需要你决定：迁移任务 的旧链接保留多久？',
         },
@@ -2644,20 +2645,22 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       workspaceId,
       userTurnId: 'user-reply-turn',
     });
-    expect(replyHeader).toContain('<reply_context thread_id="bubble:coord-root-turn:bubble-ask"');
+    expect(replyHeader).toContain(
+      '<reply_context thread_id="bubble:assistant:user-open-turn:bubble-ask"'
+    );
     expect(replyHeader).toContain('replied_author="coordinator"');
     expect(replyHeader).toContain('related_sessions="lody://session/child-e2ee-share?workspace=');
     expect(replyHeader).toContain('旧链接保留多久？');
 
     await backend.openAssistantTurn({
-      turnId: 'coord-reply-assistant',
+      turnId: 'assistant:user-reply-turn',
       userTurnId: 'user-reply-turn',
       timestamp: '2026-11-20T00:02:01.000Z',
     });
 
     const replyDaemon: DaemonWorkspace = {
       ...daemon,
-      readActiveAssistantTurnId: () => 'coord-reply-assistant',
+      readActiveAssistantTurnId: () => 'assistant:user-reply-turn',
     };
 
     const inheritedBubble = await runWithDaemonWorkspace(replyDaemon, () =>
@@ -2670,16 +2673,16 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     const explicitOtherThreadBubble = await runWithDaemonWorkspace(replyDaemon, () =>
       executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
         markdown: '顺便汇报：分页测试已经全绿了。',
-        threadId: 'bubble:coord-root-turn:bubble-other',
+        threadId: 'bubble:assistant:user-open-turn:bubble-other',
       })
     );
     expect(explicitOtherThreadBubble.isError).not.toBe(true);
 
-    const storedReplyTurn = await backend.readTurn('coord-reply-assistant');
+    const storedReplyTurn = await backend.readTurn('assistant:user-reply-turn');
     expect(storedReplyTurn.state).toBe('ready');
     if (storedReplyTurn.state !== 'ready') throw new Error('Expected ready reply turn');
     expect(storedReplyTurn.turn.threadRoots).toBe(
-      'bubble:coord-root-turn:bubble-ask\nbubble:coord-root-turn:bubble-other'
+      'bubble:assistant:user-open-turn:bubble-ask\nbubble:assistant:user-open-turn:bubble-other'
     );
     expect(storedReplyTurn.turn.items).toEqual([
       {
@@ -2688,7 +2691,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         body: '好，这就转告 [迁移任务](lody://session/child-e2ee-share) 按 7 天实现。',
         replyTo: {
           target: { kind: 'user_turn', turnId: 'user-reply-turn' },
-          threadRootId: 'bubble:coord-root-turn:bubble-ask',
+          threadRootId: 'bubble:assistant:user-open-turn:bubble-ask',
           author: 'user',
           previewText: '保留 7 天即可',
         },
@@ -2702,10 +2705,10 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         replyTo: {
           target: {
             kind: 'coordinator_bubble',
-            turnId: 'coord-root-turn',
+            turnId: 'assistant:user-open-turn',
             bubbleId: 'bubble-other',
           },
-          threadRootId: 'bubble:coord-root-turn:bubble-other',
+          threadRootId: 'bubble:assistant:user-open-turn:bubble-other',
           author: 'coordinator',
           previewText: '另一项分页测试也在跑。',
         },

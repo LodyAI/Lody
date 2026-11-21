@@ -31,6 +31,20 @@ export type CoordinatorThreadDirectoryIndex = {
   readonly turnIdsByRootId: ReadonlyMap<string, readonly string[]>;
 };
 
+export function resolveAssistantCausalTurnId(
+  assistantTurnId: string,
+  explicitUserTurnId?: string
+): string | undefined {
+  if (explicitUserTurnId && explicitUserTurnId.trim().length > 0) {
+    return explicitUserTurnId.trim();
+  }
+  if (assistantTurnId.startsWith('assistant:')) {
+    const rest = assistantTurnId.slice('assistant:'.length).trim();
+    if (rest.length > 0) return rest;
+  }
+  return undefined;
+}
+
 /**
  * Builds the O(N) directory-only index for coordinator threads without forcing
  * turn-body hydration across long conversations.
@@ -41,6 +55,27 @@ export function buildCoordinatorThreadDirectoryIndex(
   const replyCountByRootId = new Map<string, number>();
   const turnIdsByRootId = new Map<string, string[]>();
   const seenTurnIdsByRootId = new Map<string, Set<string>>();
+  const rowById = new Map<string, TurnIndexRow>();
+  const assistantIdsByCausalId = new Map<string, string[]>();
+
+  for (const row of indexRows) {
+    if (!row?.id) continue;
+    rowById.set(row.id, row);
+    if (row.role === 'assistant') {
+      const causalId = resolveAssistantCausalTurnId(row.id, row.userTurnId);
+      if (causalId) {
+        const list = assistantIdsByCausalId.get(causalId);
+        if (list) list.push(row.id);
+        else assistantIdsByCausalId.set(causalId, [row.id]);
+      }
+    }
+  }
+
+  const pushUnique = (seen: Set<string>, list: string[], turnId: string | undefined) => {
+    if (!turnId || seen.has(turnId)) return;
+    seen.add(turnId);
+    list.push(turnId);
+  };
 
   const addTurn = (rootId: string, turnId: string) => {
     let seen = seenTurnIdsByRootId.get(rootId);
@@ -52,14 +87,29 @@ export function buildCoordinatorThreadDirectoryIndex(
       turnIdsByRootId.set(rootId, list);
       const rootAnchor = parseCoordinatorAnchorId(rootId);
       if (rootAnchor) {
-        seen.add(rootAnchor.turnId);
-        list.push(rootAnchor.turnId);
+        if (rootAnchor.kind === 'coordinator_bubble') {
+          const assistantRow = rowById.get(rootAnchor.turnId);
+          const causalId = resolveAssistantCausalTurnId(
+            rootAnchor.turnId,
+            assistantRow?.userTurnId
+          );
+          const causalRow = causalId ? rowById.get(causalId) : undefined;
+          if (
+            causalRow?.role === 'user' &&
+            parseThreadRootsScalar(causalRow.threadRoots).length === 0
+          ) {
+            pushUnique(seen, list, causalRow.id);
+          }
+          pushUnique(seen, list, rootAnchor.turnId);
+        } else {
+          pushUnique(seen, list, rootAnchor.turnId);
+          for (const assistantId of assistantIdsByCausalId.get(rootAnchor.turnId) ?? []) {
+            pushUnique(seen, list, assistantId);
+          }
+        }
       }
     }
-    if (!seen.has(turnId)) {
-      seen.add(turnId);
-      list.push(turnId);
-    }
+    pushUnique(seen, list, turnId);
   };
 
   for (const row of indexRows) {
@@ -79,9 +129,9 @@ export function buildCoordinatorThreadDirectoryIndex(
 
 /**
  * Projects a sequence of `ChatStreamItem`s down to the single thread named by
- * `threadRootId`, keeping the root message/bubble, matching user/coordinator
- * replies, and matching task progress/completion strips while dropping
- * unrelated messages.
+ * `threadRootId`, keeping the root message/bubble (plus its opening causal pair
+ * when starting from an unthreaded exchange), matching user/coordinator replies,
+ * and matching task progress/completion strips while dropping unrelated messages.
  */
 export function filterThreadStreamItems(
   items: readonly ChatStreamItem[],
@@ -91,10 +141,42 @@ export function filterThreadStreamItems(
   if (!rootAnchor) return [];
   const canonicalRootId = formatCoordinatorAnchorId(rootAnchor);
 
+  let openingCausalUserTurnId: string | undefined;
+  if (rootAnchor.kind === 'coordinator_bubble') {
+    const rootAssistantItem = items.find(
+      (
+        candidate
+      ): candidate is Extract<ChatStreamItem, { type: 'message' }> =>
+        candidate.type === 'message' &&
+        candidate.message.id === rootAnchor.turnId &&
+        candidate.message.role === 'assistant'
+    );
+    const rootBubble = rootAssistantItem?.message.items.find(
+      (entry) => entry.type === 'coordinator_message' && entry.id === rootAnchor.bubbleId
+    );
+    const rootBubbleReplyTo =
+      rootBubble && rootBubble.type === 'coordinator_message' ? rootBubble.replyTo : undefined;
+    if (!rootBubbleReplyTo) {
+      openingCausalUserTurnId = resolveAssistantCausalTurnId(
+        rootAnchor.turnId,
+        rootAssistantItem?.message.userTurnId
+      );
+    }
+  }
+
   const filtered: ChatStreamItem[] = [];
   for (const item of items) {
     if (item.type !== 'message') continue;
     const msg = item.message;
+
+    if (openingCausalUserTurnId && msg.id === openingCausalUserTurnId && msg.role === 'user') {
+      const config = normalizeSessionTurnInputConfig(msg.inputConfig);
+      const roots = parseThreadRootsScalar(msg.threadRoots);
+      if (!config?.replyTo && roots.length === 0) {
+        filtered.push(item);
+        continue;
+      }
+    }
 
     if (msg.id === rootAnchor.turnId) {
       if (rootAnchor.kind === 'user_turn' && msg.role === 'user') {
@@ -118,6 +200,28 @@ export function filterThreadStreamItems(
         }
         continue;
       }
+    }
+
+    if (
+      rootAnchor.kind === 'user_turn' &&
+      msg.role === 'assistant' &&
+      resolveAssistantCausalTurnId(msg.id, msg.userTurnId) === rootAnchor.turnId
+    ) {
+      const isLiveTurn = msg.finished !== true && typeof msg.endedAt !== 'number';
+      const keptItems = msg.items.filter((entry) => {
+        if (entry.type === 'coordinator_status') {
+          return isLiveTurn;
+        }
+        if (entry.type !== 'coordinator_message') return false;
+        return !entry.replyTo || entry.replyTo.threadRootId === canonicalRootId;
+      });
+      if (keptItems.length > 0) {
+        filtered.push({
+          ...item,
+          message: { ...msg, items: keptItems },
+        });
+      }
+      continue;
     }
 
     if (msg.role === 'user') {

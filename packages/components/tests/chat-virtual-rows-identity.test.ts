@@ -460,46 +460,68 @@ describe('coordinator conversation bubbles and search', () => {
     ).toEqual({ label: '等待授权', tone: 'warning' });
   });
 
-  it('indexes thread reply counts from directory scalars, isolates single-thread projections, and collects linked child sessions', () => {
-    const rootA = 'bubble:turn-a:bubble-1';
-    const rootB = 'bubble:turn-a:bubble-2';
+  it('indexes thread reply counts from directory scalars, preserves colon-prefixed root bubbles and causal opening turns, and collects linked child sessions', () => {
+    const rootA = 'bubble:assistant:user-open-1:bubble-1';
+    const rootB = 'bubble:assistant:user-open-1:bubble-2';
+    const rootUser = 'turn:user-open-1';
 
     const indexRows: TurnIndexRow[] = [
-      { id: 'turn-a', role: 'assistant', timestamp: 1 } as TurnIndexRow,
+      { id: 'user-open-1', role: 'user', timestamp: '1' } as TurnIndexRow,
+      {
+        id: 'assistant:user-open-1',
+        userTurnId: 'user-open-1',
+        role: 'assistant',
+        timestamp: '2',
+      } as TurnIndexRow,
       {
         id: 'user-reply-a',
         role: 'user',
-        timestamp: 2,
+        timestamp: '3',
         threadRoots: rootA,
       } as TurnIndexRow,
       {
         id: 'sys-progress-a',
         role: 'system',
-        timestamp: 3,
+        timestamp: '4',
         threadRoots: rootA,
       } as TurnIndexRow,
       {
-        id: 'assistant-mixed',
+        id: 'assistant:user-reply-a',
+        userTurnId: 'user-reply-a',
         role: 'assistant',
-        timestamp: 4,
+        timestamp: '5',
         threadRoots: `${rootA}\n${rootB}`,
+      } as TurnIndexRow,
+      {
+        id: 'user-reply-root-user',
+        role: 'user',
+        timestamp: '6',
+        threadRoots: rootUser,
       } as TurnIndexRow,
     ];
 
     const directoryIndex = buildCoordinatorThreadDirectoryIndex(indexRows);
     expect(directoryIndex.replyCountByRootId.get(rootA)).toBe(2);
     expect(directoryIndex.replyCountByRootId.get(rootB)).toBe(1);
+    expect(directoryIndex.replyCountByRootId.get(rootUser)).toBe(1);
     expect(directoryIndex.turnIdsByRootId.get(rootA)).toEqual([
-      'turn-a',
+      'user-open-1',
+      'assistant:user-open-1',
       'user-reply-a',
       'sys-progress-a',
-      'assistant-mixed',
+      'assistant:user-reply-a',
+    ]);
+    expect(directoryIndex.turnIdsByRootId.get(rootUser)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-root-user',
     ]);
 
     const stream: ChatStreamItem[] = [
-      wrap(
-        makeMessage(
-          'turn-a',
+      wrap(makeMessage('user-open-1', 'user', [text('Please check Task 1 and Task 2')], true)),
+      wrap({
+        ...makeMessage(
+          'assistant:user-open-1',
           'assistant',
           [
             {
@@ -516,15 +538,20 @@ describe('coordinator conversation bubbles and search', () => {
             },
           ],
           true
-        )
-      ),
+        ),
+        userTurnId: 'user-open-1',
+      }),
       wrap({
         ...makeMessage('user-reply-a', 'user', [text('Go ahead with 7 days')], true),
         threadRoots: rootA,
         inputConfig: {
           prompt: 'Go ahead with 7 days',
           replyTo: {
-            target: { kind: 'coordinator_bubble', turnId: 'turn-a', bubbleId: 'bubble-1' },
+            target: {
+              kind: 'coordinator_bubble',
+              turnId: 'assistant:user-open-1',
+              bubbleId: 'bubble-1',
+            },
             threadRootId: rootA,
             author: 'coordinator',
             previewText: 'Root A asks',
@@ -588,7 +615,7 @@ describe('coordinator conversation bubbles and search', () => {
       ),
       wrap({
         ...makeMessage(
-          'assistant-mixed',
+          'assistant:user-reply-a',
           'assistant',
           [
             {
@@ -606,7 +633,11 @@ describe('coordinator conversation bubbles and search', () => {
               id: 'reply-b',
               body: 'Task 2 finished',
               replyTo: {
-                target: { kind: 'coordinator_bubble', turnId: 'turn-a', bubbleId: 'bubble-2' },
+                target: {
+                  kind: 'coordinator_bubble',
+                  turnId: 'assistant:user-open-1',
+                  bubbleId: 'bubble-2',
+                },
                 threadRootId: rootB,
                 author: 'coordinator',
               },
@@ -614,30 +645,61 @@ describe('coordinator conversation bubbles and search', () => {
           ],
           true
         ),
+        userTurnId: 'user-reply-a',
         threadRoots: `${rootA}\n${rootB}`,
+      }),
+      wrap({
+        ...makeMessage('user-reply-root-user', 'user', [text('Also check Task 3')], true),
+        threadRoots: rootUser,
+        inputConfig: {
+          prompt: 'Also check Task 3',
+          replyTo: {
+            target: { kind: 'user_turn', turnId: 'user-open-1' },
+            threadRootId: rootUser,
+            author: 'user',
+            previewText: 'Please check Task 1 and Task 2',
+          },
+        },
       }),
       wrap(makeMessage('unrelated-user', 'user', [text('Something else')], true)),
     ];
 
     const projectedA = filterThreadStreamItems(stream, rootA);
-    expect(projectedA).toHaveLength(4);
+    expect(projectedA).toHaveLength(5);
     const projectedMessagesA = projectedA.flatMap((item) =>
       item.type === 'message' ? [item.message] : []
     );
-    expect(projectedMessagesA[0]?.items).toEqual([
+    expect(projectedMessagesA.map((m) => m.id)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-a',
+      'sys-batch',
+      'assistant:user-reply-a',
+    ]);
+    expect(projectedMessagesA[1]?.items).toEqual([
       expect.objectContaining({ type: 'coordinator_message', id: 'bubble-1' }),
     ]);
-    expect(projectedMessagesA[2]?.items).toEqual([
+    expect(projectedMessagesA[3]?.items).toEqual([
       expect.objectContaining({
         type: 'operation_completion_batch',
         memberCount: 1,
         members: [expect.objectContaining({ deliveryId: 'd-a' })],
       }),
     ]);
-    expect(projectedMessagesA[3]?.items).toEqual([
+    expect(projectedMessagesA[4]?.items).toEqual([
       expect.objectContaining({ type: 'coordinator_message', id: 'reply-a' }),
     ]);
 
     expect(collectThreadLinkedSessionIds(projectedMessagesA)).toEqual(['child-1', 'child-3']);
+
+    const projectedUserRoot = filterThreadStreamItems(stream, rootUser).flatMap((item) =>
+      item.type === 'message' ? [item.message] : []
+    );
+    expect(projectedUserRoot.map((m) => m.id)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-root-user',
+    ]);
+    expect(projectedUserRoot[1]?.items).toHaveLength(2);
   });
 });

@@ -59,6 +59,7 @@ import { CoordinatorComposerReplyBanner } from './coordinator-reply-ui';
 import {
   collectThreadLinkedSessionIds,
   filterThreadStreamItems,
+  resolveAssistantCausalTurnId,
   type CoordinatorThreadDirectoryIndex,
 } from './coordinator-thread-model';
 import { formatTaskNumber, useCoordinatorTasksData } from './project-board';
@@ -277,7 +278,18 @@ export function CoordinatorThreadPanel({
       seen.add(id);
       list.push(id);
     };
-    if (rootAnchor) push(rootAnchor.turnId);
+    if (rootAnchor) {
+      if (rootAnchor.kind === 'coordinator_bubble') {
+        const rootIdx = conversationView?.indexOf(rootAnchor.turnId) ?? -1;
+        const rootRow = rootIdx >= 0 ? conversationView?.index(rootIdx) : undefined;
+        const causalId = resolveAssistantCausalTurnId(rootAnchor.turnId, rootRow?.userTurnId);
+        if (causalId) push(causalId);
+        push(rootAnchor.turnId);
+      } else {
+        push(rootAnchor.turnId);
+        push(`assistant:${rootAnchor.turnId}`);
+      }
+    }
     for (const id of threadIndex?.turnIdsByRootId.get(canonicalRootId) ?? []) {
       push(id);
     }
@@ -285,6 +297,13 @@ export function CoordinatorThreadPanel({
       for (let i = 0; i < conversationView.turnCount; i += 1) {
         const row = conversationView.index(i);
         if (!row?.id) continue;
+        if (
+          rootAnchor?.kind === 'user_turn' &&
+          row.role === 'assistant' &&
+          resolveAssistantCausalTurnId(row.id, row.userTurnId) === rootAnchor.turnId
+        ) {
+          push(row.id);
+        }
         if (parseThreadRootsScalar(row.threadRoots).includes(canonicalRootId)) {
           push(row.id);
         }
@@ -338,24 +357,9 @@ export function CoordinatorThreadPanel({
       const entry = conversationView.turn(idx);
       if (!entry) continue;
       const message: SessionHistoryParsed = {
-        id: entry.id,
+        ...entry,
         items: parseHistoryItemsForRender(entry.items),
-        role: entry.role,
-        status: entry.status,
         read: entry.read ?? false,
-        timestamp: entry.timestamp,
-        endedAt: entry.endedAt,
-        permissionWaitMs: entry.permissionWaitMs,
-        userId: entry.userId,
-        author: entry.author,
-        acpTurnId: entry.acpTurnId,
-        modelInfo: entry.modelInfo,
-        tokenUsage: entry.tokenUsage,
-        fileDiff: entry.fileDiff,
-        finished: entry.finished,
-        plan: entry.plan,
-        threadRoots: entry.threadRoots,
-        inputConfig: entry.inputConfig,
       };
       rawItems.push({
         type: 'message',

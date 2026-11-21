@@ -7638,7 +7638,7 @@ const SessionDetail = ({
         ? {
             coordinatorReplyDraft,
             onClearCoordinatorReplyDraft: handleClearCoordinatorReplyDraft,
-            onOpenCoordinatorReplyThread: handleOpenCoordinatorThread,
+            onOpenCoordinatorThread: handleOpenCoordinatorThread,
             onCoordinatorThreadHostStateChange: setCoordinatorThreadHostState,
           }
         : {}),

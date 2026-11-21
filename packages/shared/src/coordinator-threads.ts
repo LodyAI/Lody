@@ -65,7 +65,7 @@ export function parseCoordinatorAnchorId(raw: string | null | undefined): Coordi
   }
   if (trimmed.startsWith('bubble:')) {
     const rest = trimmed.slice('bubble:'.length);
-    const sep = rest.indexOf(':');
+    const sep = rest.lastIndexOf(':');
     if (sep <= 0) return undefined;
     const turnId = rest.slice(0, sep).trim();
     const bubbleId = rest.slice(sep + 1).trim();

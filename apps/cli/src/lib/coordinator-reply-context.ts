@@ -142,9 +142,13 @@ export async function readAnchorSnapshotFromHistory(
   history: SessionHistoryReader,
   anchor: CoordinatorAnchorRef
 ): Promise<{ author: 'user' | 'coordinator'; text: string; linkedSessionIds: SessionId[] } | null> {
-  const read = await history.readTurn(anchor.turnId);
+  const resolvedAnchor =
+    anchor.kind === 'coordinator_bubble' && anchor.bubbleId.includes(':')
+      ? (parseCoordinatorAnchorId(formatCoordinatorAnchorId(anchor)) ?? anchor)
+      : anchor;
+  const read = await history.readTurn(resolvedAnchor.turnId);
   if (read.state !== 'ready') return null;
-  if (anchor.kind === 'user_turn') {
+  if (resolvedAnchor.kind === 'user_turn') {
     const text = extractUserTurnPlainText(read.turn);
     return {
       author: 'user',
@@ -154,14 +158,14 @@ export async function readAnchorSnapshotFromHistory(
   }
   const bubble = (read.turn.items ?? []).find(
     (item): item is Record<string, unknown> =>
-      isRecord(item) && item.type === 'coordinator_message' && item.id === anchor.bubbleId
+      isRecord(item) && item.type === 'coordinator_message' && item.id === resolvedAnchor.bubbleId
   );
   if (!bubble) return null;
   const body = typeof bubble.body === 'string' ? bubble.body.trim() : '';
   return {
     author: 'coordinator',
     text: body,
-    linkedSessionIds: collectTurnLinkedSessionIds(read.turn, anchor.bubbleId),
+    linkedSessionIds: collectTurnLinkedSessionIds(read.turn, resolvedAnchor.bubbleId),
   };
 }
 
