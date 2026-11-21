@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createLocalCloudPort } from '@lody/platform';
 import {
-  createHistoryWriter,
   type SessionHistory,
   getMachineFlockDocId,
   getScheduleRegistryFlockDocId,
@@ -14,6 +13,7 @@ import {
   type MachineId,
   type WorkspaceId,
 } from '@lody/shared';
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { connectNativeRepo, nativeRepoDataDir } from '@lody/shared/node/native-repo';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import {
