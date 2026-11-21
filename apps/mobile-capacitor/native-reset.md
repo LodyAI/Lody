@@ -86,7 +86,7 @@ Android has no implementation in this change and retains web-level recovery.
 
 ## Validation
 
-`pnpm --filter @lody/mobile test` executes the real inline script with deterministic
+`pnpm --filter @lody/mobile-capacitor test` executes the real inline script with deterministic
 DOM and timer fixtures: web/old-shell gating, unavailable localStorage, native
 rejection propagation, confirmation, retry, styled/last-resort actions, preserved
 ID, and a pending native navigation. Bootstrap tests verify that native result

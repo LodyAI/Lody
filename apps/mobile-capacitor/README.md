@@ -10,10 +10,10 @@ or environment files are included. See [build requirements](BUILDING.md).
 From the repository root:
 
 ```bash
-pnpm --filter @lody/mobile build:ios
-pnpm --filter @lody/mobile build:android
-pnpm --filter @lody/mobile nightly:ios
-pnpm --filter @lody/mobile nightly:android
+pnpm --filter @lody/mobile-capacitor build:ios
+pnpm --filter @lody/mobile-capacitor build:android
+pnpm --filter @lody/mobile-capacitor nightly:ios
+pnpm --filter @lody/mobile-capacitor nightly:android
 ```
 
 Nightly uses the same `prod` environment variables and sync/open steps as the
@@ -36,7 +36,7 @@ space, the mobile dock and selected chat actions use a native side rail; otherwi
 the ordinary web controls remain available. Full-display builds require Xcode/iOS SDK 27.1+:
 
 ```sh
-pnpm --filter @lody/mobile build:ios:duo
+pnpm --filter @lody/mobile-capacitor build:ios:duo
 ```
 
 See [build requirements](BUILDING.md#iphone-duo) and the

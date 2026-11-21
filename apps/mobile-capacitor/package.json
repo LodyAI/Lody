@@ -1,5 +1,5 @@
 {
-  "name": "@lody/mobile",
+  "name": "@lody/mobile-capacitor",
   "version": "0.113.1",
   "description": "Lody native mobile app",
   "type": "module",

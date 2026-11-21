@@ -2,7 +2,7 @@
 
 ## Local native commands
 
-Run from the repository root with `pnpm --filter @lody/mobile <command>`:
+Run from the repository root with `pnpm --filter @lody/mobile-capacitor <command>`:
 
 | Environment | iOS           | Android           | Vite mode |
 | ----------- | ------------- | ----------------- | --------- |
@@ -22,8 +22,8 @@ Full-display builds require **Xcode 27.1 / iOS SDK 27.1 or later**, with an
 `xcode-select`, then run:
 
 ```sh
-pnpm --filter @lody/mobile check:ios:duo
-pnpm --filter @lody/mobile build:ios:duo
+pnpm --filter @lody/mobile-capacitor check:ios:duo
+pnpm --filter @lody/mobile-capacitor build:ios:duo
 ```
 
 The Duo entry checks the selected SDK before the standard production build,
@@ -118,7 +118,7 @@ generated directories exist. Builds without bindings, or without a
   wait for `xcrun simctl bootstatus <device-id> -b` before installing the app. The
   first boot prepares system caches and can take several minutes.
 - Install CocoaPods (`brew install cocoapods`) before the first Capacitor sync.
-  `pnpm --filter @lody/mobile exec cap sync ios --deployment` retains the locked
+  `pnpm --filter @lody/mobile-capacitor exec cap sync ios --deployment` retains the locked
   native dependencies.
 - Supply the existing staging client build variables before building. Mobile
   needs `VITE_CONVEX_SITE_URL`, `VITE_CONVEX_DEPLOY_URL`, and `VITE_SERVER_URL`; use

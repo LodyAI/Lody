@@ -90,8 +90,8 @@ export function computeLocalTestWaves({
     },
   };
 
-  const clientTasks = ['@lody/client-e2ee', '@lody/mobile'].map((name) => ({
-    id: name === '@lody/mobile' ? 'mobile' : 'client-e2ee',
+  const clientTasks = ['@lody/client-e2ee', '@lody/mobile-capacitor'].map((name) => ({
+    id: name === '@lody/mobile-capacitor' ? 'mobile' : 'client-e2ee',
     command: 'corepack',
     args: ['pnpm', '--filter', name, 'run', 'test'],
   }));
@@ -196,7 +196,7 @@ export function selectAffectedTestWaves(waves, scope, related = null) {
     electron: '@lody/electron',
     'site-docs': '@lody/site-docs',
     'client-e2ee': '@lody/client-e2ee',
-    mobile: '@lody/mobile',
+    mobile: '@lody/mobile-capacitor',
   };
   const rest = REST_PACKAGES.filter((dir) =>
     selected.has(dir === 'ignore' ? '@loro-dev/ignore' : `@lody/${dir}`)

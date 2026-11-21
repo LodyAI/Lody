@@ -92,7 +92,7 @@ Sources: [Direct Boot/CE semantics](https://developer.android.com/privacy-and-se
 
 ## Validation and remaining gates
 
-`JAVA_HOME=<JDK> pnpm --filter @lody/mobile test:kek:android` exercises the real
+`JAVA_HOME=<JDK> pnpm --filter @lody/mobile-capacitor test:kek:android` exercises the real
 Java custody state machine using injected in-memory storage and desktop JCE,
 including failure cut points and JS WebCrypto interop in both directions. It
 never accesses AndroidKeyStore or user keys. Set `LODY_REQUIRE_ANDROID_KEK_TESTS=1`

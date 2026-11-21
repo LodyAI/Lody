@@ -80,7 +80,7 @@ Keychain items after uninstall, so marker absence always blocks their reuse.
 
 ## Evidence and remaining gates
 
-`pnpm --filter @lody/mobile test:kek:ios` compiles and runs native Swift custody
+`pnpm --filter @lody/mobile-capacitor test:kek:ios` compiles and runs native Swift custody
 logic against injected storage, exercises failure cut points, then tests
 CryptoKit <-> JS WebCrypto AES-GCM interoperability with synthetic materials.
 It also typechecks the real Security adapter on macOS. The full iOS App was
