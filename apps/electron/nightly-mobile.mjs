@@ -112,7 +112,10 @@ export async function publishNightlyAndroid({ directory, candidate, displayVersi
   if (published !== undefined) {
     assert.ok(
       Number(androidNightlyIdentity(candidate, displayVersion).versionCode) >
-        Number(androidNightlyIdentity(published.candidate, published.version, { allowStored: true }).versionCode),
+        Number(
+          androidNightlyIdentity(published.candidate, published.version, { allowStored: true })
+            .versionCode
+        ),
       'Android version code must increase'
     )
   }
