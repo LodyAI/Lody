@@ -97,6 +97,7 @@ export {
   summarizeHistoryQuery,
   historyQueryRow,
   selectTranscriptHistoryPositions,
+  selectTranscriptTail,
   selectHistoryActionRows,
   selectAgentHistoryRows,
   type HistoryQueryRow,

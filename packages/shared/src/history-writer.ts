@@ -353,7 +353,14 @@ export function prepareReplacement(previous: unknown, incoming: unknown): Record
 
 export interface HistoryWriter {
   forEachStored(visit: (entry: SessionHistoryInput) => void): void;
-  readQuery(options?: { transcriptVisibility?: boolean }): HistoryQueryRow[];
+  /** Query rows of `[from, to)`, the whole history by default. */
+  readQuery(options?: {
+    transcriptVisibility?: boolean;
+    from?: number;
+    to?: number;
+  }): HistoryQueryRow[];
+  /** Detached stored entries at the given positions. */
+  readAt(positions: readonly number[]): SessionHistoryInput[];
   readSelected(
     select: (rows: readonly HistoryQueryRow[]) => readonly number[],
     options?: { transcriptVisibility?: boolean }
@@ -541,10 +548,16 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
   const prepare = (previous: readonly SessionHistory[], next: readonly SessionHistory[]) =>
     planWrite(previous, next);
 
-  const readQuery = (options?: { transcriptVisibility?: boolean }): HistoryQueryRow[] =>
-    Array.from({ length: list.length }, (_, index) =>
+  const readQuery = (options?: {
+    transcriptVisibility?: boolean;
+    from?: number;
+    to?: number;
+  }): HistoryQueryRow[] => {
+    const from = Math.max(0, options?.from ?? 0);
+    const to = Math.min(list.length, options?.to ?? list.length);
+    return Array.from({ length: Math.max(0, to - from) }, (_, offset) =>
       historyQueryRow(
-        list.get(index),
+        list.get(from + offset),
         {
           field: storedField,
           scalar: (value) => {
@@ -574,6 +587,7 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
         options?.transcriptVisibility
       )
     );
+  };
   const storedAt = (index: number): SessionHistoryInput => {
     const value = list.get(index);
     return structuredClone(isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
@@ -625,6 +639,13 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       }
     },
     readQuery,
+    readAt(positions) {
+      return positions.map((index) => {
+        if (!Number.isSafeInteger(index) || index < 0 || index >= list.length)
+          throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
+        return storedAt(index);
+      });
+    },
     readSelected(select, options) {
       const rows = readQuery(options);
       return select(rows).map((index) => {
