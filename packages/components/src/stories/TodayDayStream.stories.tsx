@@ -23,8 +23,15 @@ const PAGES: Record<string, string> = {
   [getTodayDocId(USER, '2026-11-18' as TodayDate)]: 'Ideas\n  Pin Today next to the sidebar',
 };
 
+/**
+ * How the demo's remote behaves: `opening` never finishes loading the page,
+ * `syncing` joins a registered (empty here) day whose sync never lands, and
+ * `retrying` fails every join.
+ */
+type DemoRemote = 'synced' | 'opening' | 'syncing' | 'retrying';
+
 /** In-memory pages so the stream renders without a workspace runtime. */
-function useDemoCache() {
+function useDemoCache(remote: DemoRemote = 'synced') {
   return useMemo(
     () =>
       createTodayPageStoreCache({
@@ -37,25 +44,29 @@ function useDemoCache() {
         },
         repo: {
           openDoc: async (docId) => {
+            if (remote === 'opening') await new Promise<never>(() => {});
             const doc = new LoroDoc();
             const seed = PAGES[docId];
             if (seed)
               openTodayOutline(doc).paste({ kind: 'page-start' }, parseTodayPasteText(seed));
             return {
               doc,
-              joinRoom: async () => ({
-                room: { unsubscribe: () => {} },
-                synced: Promise.resolve(),
-              }),
+              joinRoom: async () => {
+                if (remote === 'retrying') throw new Error('offline');
+                return {
+                  room: { unsubscribe: () => {} },
+                  synced: remote === 'syncing' ? new Promise<void>(() => {}) : Promise.resolve(),
+                };
+              },
             };
           },
-          isRegistered: async (docId) => docId in PAGES,
+          isRegistered: async (docId) => remote !== 'synced' || docId in PAGES,
           upsertDocMeta: async () => {},
           unloadDoc: async () => {},
           observeDocs: () => ({ docIds: Object.keys(PAGES), unsubscribe: () => {} }),
         },
       }),
-    []
+    [remote]
   );
 }
 
@@ -65,8 +76,9 @@ function DayStream(props: {
   wide?: boolean;
   fullWidth?: boolean;
   placement?: 'page' | 'pinned' | 'pinnedAtWindowEdge';
+  remote?: DemoRemote;
 }) {
-  const cache = useDemoCache();
+  const cache = useDemoCache(props.remote);
   const [controller, setController] = useState<TodayEditorController | null>(null);
   useEffect(() => {
     const created = new TodayEditorController(cache);
@@ -118,6 +130,21 @@ export const TodayWithEarlierDay: StoryObj<typeof DayStream> = {
 
 export const EmptyToday: StoryObj<typeof DayStream> = {
   args: { dates: ['2026-11-21' as TodayDate] },
+};
+
+/** A day another device wrote, opened before its content has synced. */
+export const DayStillSyncing: StoryObj<typeof DayStream> = {
+  args: { dates: ['2026-11-21' as TodayDate], remote: 'syncing' },
+};
+
+/** The same day while its room cannot be joined and a retry is pending. */
+export const DaySyncRetrying: StoryObj<typeof DayStream> = {
+  args: { dates: ['2026-11-21' as TodayDate], remote: 'retrying' },
+};
+
+/** A day whose page has not opened yet: a faint bar after a short delay. */
+export const DayOpening: StoryObj<typeof DayStream> = {
+  args: { dates: ['2026-11-21' as TodayDate], remote: 'opening' },
 };
 
 /** A wide main area: the stream keeps its readable column, centred. */
