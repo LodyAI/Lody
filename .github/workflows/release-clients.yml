@@ -345,7 +345,7 @@ jobs:
           'next'
         }}
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: ${{ matrix.target == 'mac' && '--max-old-space-size=4096' || '--max-old-space-size=6144' }}
+      NODE_OPTIONS: --max-old-space-size=6144
       npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud

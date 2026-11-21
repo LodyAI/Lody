@@ -186,7 +186,7 @@ jobs:
       VITE_ELECTRON_UPDATE_CHANNEL: nightly
       ELECTRON_UPDATE_CHANNEL: nightly
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: ${{ matrix.target == 'mac' && '--max-old-space-size=4096' || '--max-old-space-size=6144' }}
+      NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
