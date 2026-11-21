@@ -24,7 +24,10 @@ Lody 过去只按“仓库 + 会话运行时分支”发现会话的 PR。代理
    仓库被拒或缺少凭据时，每个关联版本只写一次 `prLinkCheck:<key>`，绝不虚构关联。
 3. **取消关联的抑制。** `resolveSessionPullRequests` 对所有读取方隐藏已取消关联的 URL，协调器
    无需查询提供方即从列表移除，分支发现也会跳过。之后的 `linked` 记录优先。
-4. **排序。** 当前 PR 选择中，显式关联的 PR 与运行时分支匹配同级，代理在别处创建的 PR 同样属于本会话。
+4. **当前 PR。** 当前 PR 是最近建立关联的 PR。新关联的 PR 成为当前 PR；显式关联且仍打开的当前 PR
+   一直保持，直到另一个 PR 新建立关联。其他打开 PR 收到提供方更新不会改变当前 PR。其余情况沿用既有
+   排序（运行时分支上较新的 PR 取代较旧的，终态 PR 让位于打开的 PR）。早期版本把关联 PR 与分支匹配
+   同级；两个打开 PR 打平后落到 `updatedAt`，当前 PR 会随最后一次评论、推送或 CI 事件来回切换。
 5. **主 PR 位置。** 单项目会话在其项目仓库有 PR 时，主 PR 是该仓库的最后一个 PR；其他仓库的关联
    会列出，但不占据主位置。
 6. **shim 报告。** `gh pr create`（REST 或原生）成功后，shim 在 2 秒内把 URL 发送到代理端点
@@ -50,8 +53,9 @@ Lody 过去只按“仓库 + 会话运行时分支”发现会话的 PR。代理
 ## 验证
 
 - `packages/shared/tests/session-pull-requests.test.ts`（"explicit session PR links"）。
-- `apps/cli/src/lib/pr-poller/pr-poll-scheduler.test.ts`（"explicit PR links"）：#3019 场景、排序、
-  无需查询的取消关联、重新关联、只记录一次的不可读结果，以及一个会话的多个打开 PR 都会轮询。
+- `apps/cli/src/lib/pr-poller/pr-poll-scheduler.test.ts`（"explicit PR links"）：#3019 场景、新关联的 PR
+  成为当前 PR、两个打开 PR 交替更新时当前 PR 不变、终态关联 PR 让位、无需查询的取消关联、重新关联、
+  只记录一次的不可读结果，以及一个会话的多个打开 PR 都会轮询。
 - `apps/cli/tests/gh-shim-script.test.ts`、`apps/cli/src/lib/git-credential-broker.test.ts`、
   `packages/components/tests/session-pr-links.test.tsx`。
 - 未验证：真实守护进程与 GitHub 的往返。

@@ -80,6 +80,8 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   shim/agent reports) never edit `pullRequests`. A linked URL is queried by number and
   appended only after a valid provider result; unreadable results write `prLinkCheck:*`.
   Unlinked URLs are removed without a query and branch discovery never re-adds them.
+  A newly linked PR becomes current, and an open linked current PR stays current until
+  another PR is newly associated: never rank by `updatedAt` across them.
   [Decision](../../../../../.agents/notes/implemented/feature/2026-11-21-session-explicit-pr-links.md).
 - **Machine ownership.** Each daemon enumerates only session metas whose
   `machineId` matches the local machine; archived owners are excluded.

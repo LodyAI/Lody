@@ -1460,6 +1460,109 @@ describe('PrPollScheduler', () => {
       ).toEqual([11, 3019]);
     });
 
+    it('keeps the current PR when two associated open PRs alternate provider updates', async () => {
+      for (const [first, second] of [
+        [11, 3019], // branch PR, then a PR linked from elsewhere (current)
+        [3018, 3019], // two linked PRs
+      ] as const) {
+        const workspace = new FakeWorkspace('ws1');
+        const firstUrl = prMeta(first).url;
+        const secondUrl = prMeta(second).url;
+        workspace.metas.set(
+          sid('s1'),
+          makeMeta({
+            ...repoSession('owner/repo'),
+            pullRequests: [prMeta(first), prMeta(second)],
+            ...(first === 11 ? {} : link(firstUrl)),
+            ...link(secondUrl, 'l', T0 + 1),
+          })
+        );
+        let round = 0;
+        clientHandler = async (batch) => {
+          round += 1;
+          const result = successOutcome(batch);
+          if (result.kind === 'success')
+            for (const item of result.batch.pullRequests) {
+              // Both PRs keep receiving provider updates; which one is newest alternates.
+              const newer = (round % 2 === 1) === (item.prNumber === first);
+              const hour = String(2 * round - (newer ? 0 : 1)).padStart(2, '0');
+              item.pr = observation(item.prNumber, {
+                headRefName: item.prNumber === 11 ? 'feat/x' : 'elsewhere',
+                updatedAt: `2026-07-18T${hour}:00:00Z`,
+              });
+            }
+          return result;
+        };
+        scheduler.stop();
+        scheduler = makeScheduler();
+        await startWith([workspace]);
+        const orders: string[][] = [];
+        for (let index = 0; index < 3; index += 1) {
+          await advance(config.lowStatusIntervalMs);
+          orders.push(workspace.metas.get(sid('s1'))?.pullRequests?.map((pr) => pr.url) ?? []);
+        }
+        expect(round).toBeGreaterThanOrEqual(4);
+        // Every round, including those where the older PR received the newest update.
+        expect(orders).toEqual([
+          [firstUrl, secondUrl],
+          [firstUrl, secondUrl],
+          [firstUrl, secondUrl],
+        ]);
+      }
+    });
+
+    it('makes a newly linked PR current even when the branch PR was updated later', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({ ...repoSession('owner/repo'), pullRequests: [prMeta(11)], ...link(linkedUrl) })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const item of result.batch.pullRequests)
+            item.pr = observation(item.prNumber, {
+              headRefName: item.prNumber === 11 ? 'feat/x' : 'elsewhere',
+              updatedAt: item.prNumber === 11 ? '2026-07-20T00:00:00Z' : '2026-07-17T00:00:00Z',
+            });
+        return result;
+      };
+      await startWith([workspace]);
+      await advance(config.lowStatusIntervalMs);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests?.map((pr) => pr.url)).toEqual([
+        prMeta(11).url,
+        linkedUrl,
+      ]);
+    });
+
+    it('lets a terminal linked PR yield to an open branch PR', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          ...repoSession('owner/repo'),
+          pullRequests: [prMeta(11), { url: linkedUrl, status: 'open' }],
+          ...link(linkedUrl),
+        })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const item of result.batch.pullRequests)
+            item.pr = observation(item.prNumber, {
+              headRefName: item.prNumber === 11 ? 'feat/x' : 'elsewhere',
+              status: item.prNumber === 3019 ? 'merged' : 'open',
+              updatedAt: '2026-07-18T00:00:00Z',
+            });
+        return result;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([
+        { url: linkedUrl, status: 'merged' },
+        { url: prMeta(11).url, status: 'open' },
+      ]);
+    });
+
     it('removes an unlinked PR without querying it and never rediscovers it on the branch', async () => {
       const workspace = new FakeWorkspace('ws1');
       workspace.metas.set(

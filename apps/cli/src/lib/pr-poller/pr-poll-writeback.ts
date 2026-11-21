@@ -34,9 +34,7 @@ const isTerminal = (status: PrStatus): boolean => status === 'merged' || status 
 /**
  * Deterministic current-PR selection over associated entries (fresh meta
  * order) and this round's observations. Stable ranking:
- * 1. observed `headRefName` equals the runtime branch, or the Session
- *    explicitly links the PR (`isLinked`) — a PR the agent created elsewhere
- *    is as much the Session's own as one on its branch;
+ * 1. observed `headRefName` equals the runtime branch;
  * 2. open/draft over merged/closed (stored status when unobserved);
  * 3. newer observed `updatedAt` (unobserved ranks below any observed);
  * 4. larger PR number;
@@ -47,7 +45,6 @@ export function selectCurrentPullRequestUrl(args: {
   associated: readonly SessionPullRequestMeta[];
   observations: ReadonlyMap<string, PrObservation>;
   runtimeBranch: string | null;
-  isLinked?: (url: string) => boolean;
 }): string | null {
   const { associated, observations, runtimeBranch } = args;
   let best: { url: string; rank: [number, number, number, number, number] } | null = null;
@@ -59,10 +56,7 @@ export function selectCurrentPullRequestUrl(args: {
     const observation = observations.get(pr.url);
     const status = observation?.status ?? pr.status;
     const branchMatch =
-      (observation && runtimeBranch && observation.headRefName === runtimeBranch) ||
-      (observation && args.isLinked?.(pr.url))
-        ? 1
-        : 0;
+      observation && runtimeBranch && observation.headRefName === runtimeBranch ? 1 : 0;
     const open = isTerminal(status) ? 0 : 1;
     const updatedAtMs = observation ? Date.parse(observation.updatedAt) || 0 : -1;
     const prNumber = observation?.number ?? parseGitHubPullRequestUrl(pr.url)?.prNumber ?? -1;
@@ -161,7 +155,6 @@ export function planAssociation(args: {
     associated: candidates,
     observations,
     runtimeBranch: args.runtimeBranch,
-    isLinked: (url) => isPullRequestExplicitlyLinked(args.meta, url),
   });
   const winner = currentUrl === null ? undefined : eligible.get(currentUrl);
   if (!winner) {
@@ -237,11 +230,13 @@ export function planPullRequestMetaWrite(args: {
   }
 
   // 2. Append authenticated discoveries; webhook association may still be pending.
+  const appendedUrls: string[] = [];
   for (const pr of args.newlyAssociated ?? []) {
     if (seenUrls.has(pr.url)) {
       continue;
     }
     seenUrls.add(pr.url);
+    appendedUrls.push(pr.url);
     nextPrs.push({
       url: pr.url,
       status:
@@ -253,17 +248,30 @@ export function planPullRequestMetaWrite(args: {
   }
 
   // 3. Move the selected current PR to the last position (stable otherwise).
-  const currentUrl = selectCurrentPullRequestUrl({
-    associated: nextPrs.filter(
-      (pr) =>
-        !args.repoFullName ||
-        parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() ===
-          args.repoFullName.toLowerCase()
-    ),
-    observations: observationByUrl,
-    runtimeBranch: args.runtimeBranch,
-    isLinked: (url) => isPullRequestExplicitlyLinked(meta, url),
-  });
+  //    The current PR is the most recently associated one: a newly linked PR
+  //    becomes current, and an open linked current PR stays current until a
+  //    PR is newly associated (provider updates to another PR never move it).
+  //    Otherwise the ranking above applies, which lets a newer PR on the
+  //    runtime branch replace an older one and a terminal PR yield to an open one.
+  const inScope = (url: string) =>
+    !args.repoFullName ||
+    parseGitHubPullRequestUrl(url)?.repoFullName.toLowerCase() === args.repoFullName.toLowerCase();
+  const scopedPrs = nextPrs.filter((pr) => inScope(pr.url));
+  const appendedInScope = appendedUrls.filter(inScope);
+  const previousCurrent = scopedPrs.at(-1);
+  const newlyLinked = appendedInScope.filter((url) => isPullRequestExplicitlyLinked(meta, url));
+  const currentUrl =
+    newlyLinked.at(-1) ??
+    (appendedInScope.length === 0 &&
+    previousCurrent &&
+    !isTerminal(previousCurrent.status) &&
+    isPullRequestExplicitlyLinked(meta, previousCurrent.url)
+      ? previousCurrent.url
+      : selectCurrentPullRequestUrl({
+          associated: scopedPrs,
+          observations: observationByUrl,
+          runtimeBranch: args.runtimeBranch,
+        }));
   if (currentUrl !== null) {
     const index = nextPrs.findIndex((pr) => pr.url === currentUrl);
     const lastIndex = args.repoFullName

@@ -31,8 +31,13 @@ a linked PR only after the provider returns it. The owner approved the design on
 3. **Unlink suppression.** `resolveSessionPullRequests` hides unlinked URLs from every
    reader, the reconciler removes them from the list without a provider query, and
    branch discovery skips them. A later `linked` record wins.
-4. **Ranking.** An explicitly linked PR ranks like a runtime-branch match in
-   current-PR selection, so a PR the agent created elsewhere is the Session's own.
+4. **Current PR.** The current PR is the most recently associated one. A newly linked
+   PR becomes current; an open linked current PR stays current until another PR is
+   newly associated. Provider updates to another open PR never move it. Otherwise the
+   existing ranking applies (a newer PR on the runtime branch replaces an older one,
+   and a terminal PR yields to an open one). An earlier revision ranked linked PRs like
+   a branch match; with two open PRs that tie fell through to `updatedAt`, so the
+   current PR followed whichever PR received the last comment, push or CI event.
 5. **Primary slot.** A single-project Session's primary PR is the last PR of its
    project repository when it holds one there; links in other repositories are listed
    but never take that slot.
@@ -66,8 +71,9 @@ a linked PR only after the provider returns it. The owner approved the design on
 
 - `packages/shared/tests/session-pull-requests.test.ts` ("explicit session PR links").
 - `apps/cli/src/lib/pr-poller/pr-poll-scheduler.test.ts` ("explicit PR links"): the
-  #3019 sequence, ranking, unlink without a query, relink, unreadable once, and that
-  several open PRs of one Session are all polled.
+  #3019 sequence, a newly linked PR becoming current, a stable current PR while two
+  open PRs alternate provider updates, a terminal linked PR yielding, unlink without a
+  query, relink, unreadable once, and that several open PRs of one Session are all polled.
 - `apps/cli/tests/gh-shim-script.test.ts`, `apps/cli/src/lib/git-credential-broker.test.ts`,
   `packages/components/tests/session-pr-links.test.tsx`.
 - Not verified: a live daemon and GitHub round trip.
