@@ -282,7 +282,6 @@ export function buildStatusViewLayout(input: StatusViewLayoutInput): StatusViewL
   };
   for (const session of input.sessions) {
     if (pinnedIds.has(session.id)) {
-      // A pinned row's snooze still wakes its unread state and activity.
       consider(session.snoozedUntil);
     } else {
       consider(statusViewTierChangeAt(tierInput(session, nowMs), nowMs));

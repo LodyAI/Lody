@@ -13,7 +13,8 @@ import {
   type PinnedSessionPlacement,
 } from '@lody/shared';
 import { LoroSidebar } from '@/components/loro-sidebar';
-import { isSidebarBucketCollapsed, sidebarStatusGroup } from '@/lib/sidebar-status-group';
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
+import { statusViewTier } from '@lody/shared';
 import type { SidebarPinSectionActions } from '@/components/sidebar-pinned-sections';
 import type {
   SidebarUpdatedBucketKey,
@@ -292,9 +293,9 @@ function StatusViewPlayground({
         sessions.filter(
           (s) =>
             !s.isPinned &&
-            sidebarStatusGroup(
+            statusViewTier(
               {
-                latestMessageAt: s.latestMessageAt,
+                activityAt: s.latestMessageAt,
                 isWorking: s.isWorking,
                 isWaitingPermission: s.isWaitingPermission,
                 snoozedUntil: s.snoozedUntil,

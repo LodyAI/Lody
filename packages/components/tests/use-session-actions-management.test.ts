@@ -2,6 +2,7 @@ import { createSessionControlPlaneMirror } from '@lody/shared/session-control-pl
 // @vitest-environment jsdom
 import { cloudOperations } from '../src/lib/cloud-api-operations';
 import { buildVisibleMachineIndex } from '../src/lib/visible-machine-index';
+import { statusViewSessionFromMeta } from '../src/lib/status-view-state';
 import { useVisibleSessionMetas } from '../src/hooks/use-visible-session-metas';
 import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { userAtom } from '../src/atoms';
@@ -1698,13 +1699,26 @@ describe('useSessionActions', () => {
     });
     const actions = await renderActions(createRuntime({ repo: tree.metaRepo.repo }));
 
-    await actions.applySessionFocusOrder(
-      [{ sessionId: tree.rootSession.id, orderKey: 'a0' }],
-      tree.rootSession.id
+    // The list shows the root settled; its opened sub-conversations are not listed.
+    await actions.runStatusViewCommand(
+      { type: 'move', sessionId: tree.rootSession.id, to: { area: 'focus' }, beforeId: null },
+      {
+        sessions: [
+          {
+            ...statusViewSessionFromMeta(tree.rootSession, null),
+            settledAt: Date.now(),
+          },
+        ],
+        sections: [],
+        sectionsLoaded: true,
+        canManageSections: true,
+        nowMs: Date.now(),
+      }
     );
 
     const root = tree.metaRepo.getSession(tree.rootSession.id);
-    expect(root?.orderKey).toBe('a0');
+    expect(isPinOrderKey(root?.orderKey)).toBe(true);
+    expect(root?.settledAt).toBeUndefined();
     expect(root?.focusRestoredAt).toBeGreaterThan(0);
     // The dropped parent's opened sub-conversations restore without order keys.
     for (const session of [tree.openedSession, tree.openedFromTabSession]) {

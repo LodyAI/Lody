@@ -140,6 +140,12 @@ function indexBefore(ids: readonly string[], beforeId: string | null): number {
   return index < 0 ? ids.length : index;
 }
 
+/**
+ * Expired snoozes float at the top of Focus without writes; an explicit drag
+ * gives them real keys first, so the drop lands where it was shown. A row
+ * dropped in from Later, Settled or the Pinned area is restored (and unpinned)
+ * together with its opened sub-conversations, which get no keys of their own.
+ */
 function planFocusMove(
   state: StatusViewState,
   pool: Pool,
@@ -154,8 +160,6 @@ function planFocusMove(
   const focusRoots = buildStatusViewLayout({ ...state, nowMs }).focus;
   const wasInFocus = focusRoots.some((row) => row.id === sessionId);
 
-  // Expired snoozes float at the top of Focus without writes. An explicit drag
-  // gives them real keys first, so the drop lands where it was shown.
   const placements: { id: string; orderKey: string | null }[] = [];
   for (const row of focusRoots) {
     if (row.woken) continue;
@@ -191,12 +195,10 @@ function planFocusMove(
         patch.focusRestoredAt = Math.max(session.focusRestoredAt ?? 0, wokeAt);
       }
     }
-    // A pinned row dropped into Focus leaves the Pinned area; its key stays.
     if (id === sessionId && moved.isPinned)
       Object.assign(patch, { isPinned: false, pinSectionId: null });
     writes.push(sessionWrite(id, 'manage', patch));
   }
-  // Opened sub-conversations follow a row dropped into Focus without keys of their own.
   for (const id of restored) {
     writes.push(
       sessionWrite(id, 'manage', { snoozedUntil: null, settledAt: null, focusRestoredAt: nowMs })
@@ -205,6 +207,7 @@ function planFocusMove(
   return allowed(pool, writes);
 }
 
+/** Plans against the pinned rows themselves; carried opened rows never move alone. */
 function planPinnedMove(
   state: StatusViewState,
   pool: Pool,
@@ -215,7 +218,6 @@ function planPinnedMove(
   jitter: JitterOptions
 ): StatusViewWrite[] {
   if (!pool.has(sessionId)) return [];
-  // Plan against the pinned rows themselves; carried opened rows never move alone.
   const placements = state.sessions
     .filter((session) => session.isPinned)
     .map((session) => ({
@@ -275,7 +277,6 @@ export function planStatusViewCommand(
         pool,
         targets.map((session) =>
           sessionWrite(session.id, 'manage', {
-            // Tolerates clock skew: never before the conversation's latest message.
             settledAt: Math.max(nowMs, session.lastMessageAt ?? 0),
             snoozedUntil: null,
           })
@@ -299,7 +300,6 @@ export function planStatusViewCommand(
     case 'setPinned': {
       if (!pool.has(command.sessionId)) return [];
       if (!command.pinned) {
-        // Unpinning keeps `orderKey` for Focus ordering.
         return allowed(pool, [
           sessionWrite(command.sessionId, 'prefer', { isPinned: false, pinSectionId: null }),
         ]);
@@ -352,7 +352,6 @@ export function planStatusViewCommand(
     }
     case 'deleteSection': {
       if (!state.canManageSections) return [];
-      // Its conversations fall back to the default section on read.
       return state.sections.some((section) => section.id === command.sectionId)
         ? [{ type: 'deleteSection', sectionId: command.sectionId }]
         : [];
@@ -383,7 +382,6 @@ export function planStatusViewCommand(
         : [];
     }
     case 'newSessionOrder': {
-      // An opened conversation renders nested under its opener and never reorders it.
       if (pool.get(command.sessionId)?.openedById) return [];
       let topKey: string | null = null;
       for (const session of pool.values()) {

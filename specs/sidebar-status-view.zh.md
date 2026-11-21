@@ -70,6 +70,7 @@ Translation: current
 实现：
 
 - 共享 schema、排序与未读汇总：`packages/shared/src/schema.ts`、`packages/shared/src/pinned-sections.ts`、`packages/shared/src/live-activity-summary.ts`
-- 状态分类、已读回执与倒计时：`packages/components/src/lib/sidebar-status-group.ts`、`packages/components/src/lib/session-read-receipt.ts`
+- 状态布局、写入规划、倒计时与测试样例：`packages/shared/src/status-view/`
+- 已读回执：`packages/components/src/lib/session-read-receipt.ts`
 - 侧栏渲染、拖拽、菜单与写入：`packages/components/src/components/sidebar-updated-session-list.tsx`、`packages/components/src/components/loro-sidebar.tsx`、`packages/components/src/components/loro-app-sidebar.tsx`、`packages/components/src/components/sessions/session-chat-interface.tsx`、`packages/components/src/hooks/use-session-actions.ts`、`packages/components/src/atoms/doc-meta.ts`、`packages/components/src/atoms/sidebar-state.ts`
 - Storybook：`packages/components/src/stories/SidebarStatusView.stories.tsx`

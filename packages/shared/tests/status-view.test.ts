@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildSnoozePresets,
   buildStatusViewLayout,
+  formatSnoozeCountdown,
   planStatusViewCommand,
   type StatusViewCommand,
   type StatusViewLayout,
@@ -59,8 +61,7 @@ describe('status view golden vectors', () => {
     await expect(serialize(commandVectors())).toMatchFileSnapshot(COMMAND_VECTORS);
   });
 
-  // What every other consumer runs: only the JSON file, no case definitions.
-  it('reproduce from the JSON alone', () => {
+  it('reproduce from the JSON alone, as every other consumer runs them', () => {
     const read = <T>(path: string): T =>
       JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as T;
     const layouts = read<{
@@ -87,5 +88,33 @@ describe('status view golden vectors', () => {
     }
     expect(layouts.cases.length).toBe(LAYOUT_CASES.length);
     expect(commands.cases.length).toBe(COMMAND_CASES.length);
+  });
+});
+
+describe('Later countdown and presets', () => {
+  it('formats compact countdown units', () => {
+    expect(formatSnoozeCountdown(NOW - 1, NOW)).toBeNull();
+    expect(formatSnoozeCountdown(NOW + 20_000, NOW)).toBe('<1m');
+    expect(formatSnoozeCountdown(NOW + 45 * 60_000, NOW)).toBe('45m');
+    expect(formatSnoozeCountdown(NOW + 2 * 3_600_000, NOW)).toBe('2h');
+    expect(formatSnoozeCountdown(NOW + 3 * 86_400_000, NOW)).toBe('3d');
+  });
+
+  it('offers four future presets with morning anchors at 9:00 local time', () => {
+    const presets = buildSnoozePresets(NOW);
+    expect(presets.map((preset) => preset.id)).toEqual([
+      'oneHour',
+      'laterToday',
+      'tomorrowMorning',
+      'nextWeek',
+    ]);
+    for (const preset of presets) {
+      expect(preset.timestamp).toBeGreaterThan(NOW);
+      expect(preset.countdown.length).toBeGreaterThan(0);
+    }
+    const tomorrow = new Date(presets[2]!.timestamp);
+    const nextWeek = new Date(presets[3]!.timestamp);
+    expect([tomorrow.getHours(), tomorrow.getMinutes()]).toEqual([9, 0]);
+    expect([nextWeek.getDay(), nextWeek.getHours()]).toEqual([1, 9]);
   });
 });

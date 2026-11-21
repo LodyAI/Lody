@@ -68,6 +68,7 @@ type StatusViewLayout = {
   focus: StatusViewRow[];
   later: StatusViewRow[];
   settled: StatusViewRow[];
+  canManageSections: boolean; // create, rename, reorder, delete pin sections
   /** Earliest future instant at which the layout can change by time alone. */
   nextChangeAt: number | null;
 };
@@ -112,12 +113,21 @@ type StatusViewCommand =
   | { type: 'newSessionOrder'; sessionId: string }; // top of Focus; none for opened-by or Tab
 ```
 
+A session patch carries `access: 'manage' | 'prefer'` so the host applies the
+matching guard, and `null` clears a field. `state` may add `related` rows the list
+does not show (another scope, archived) that opened-tree actions still reach; they
+never affect order. A command the state cannot satisfy (unknown row, missing
+permission, a past snooze time) plans no writes rather than a partial set.
+
 A move names the neighbor it lands before rather than an index, so a stale list on
 the caller still resolves against the planner's current order. The planner keeps
 today's rules: one key per move with jitter, keys for unkeyed rows above the drop,
 materializing expired snoozes when Focus is reordered, restoring opened
 sub-conversations when a row is dropped into Focus, `settledAt = max(now,
 lastMessageAt)`, unpin keeps `orderKey`.
+
+The modules live in `packages/shared/src/status-view/`, with the vectors in its
+`vectors/` directory.
 
 **Golden vectors** — JSON files of `{input, expected layout}` and `{state, command,
 fixed env, expected writes}` live beside the shared modules. They run in

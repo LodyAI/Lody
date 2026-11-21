@@ -56,6 +56,7 @@ type StatusViewLayout = {
   focus: StatusViewRow[];
   later: StatusViewRow[];
   settled: StatusViewRow[];
+  canManageSections: boolean; // 新建、重命名、排序、删除 pin 分组
   /** 仅因时间流逝，布局最早会发生变化的时刻。 */
   nextChangeAt: number | null;
 };
@@ -99,10 +100,16 @@ type StatusViewCommand =
   | { type: 'newSessionOrder'; sessionId: string }; // 进行中顶部；opened-by 子对话和 Tab 不写
 ```
 
+会话补丁带 `access: 'manage' | 'prefer'`，宿主据此套用对应的权限检查；`null` 表示清除字段。`state`
+可以附带列表不显示的 `related` 行（其他可见范围、已归档），带上子对话的操作仍会作用到它们，但它们不影响
+排序。状态无法满足的命令（未知行、缺少权限、已过去的稍后时间）不规划任何写入，而不是只写一部分。
+
 移动命令给出的是「落在哪一行前面」而不是下标，所以调用方手里的列表即使过期，也能按规划方当前的顺序
 解析。规划沿用现在的规则：每次移动只生成一个带 jitter 的键，为落点上方没有键的行补键，在进行中排序
 时为已到期的稍后条目落地真实的键，把行拖进进行中时一并恢复它的 opened-by 子对话，
 `settledAt = max(now, lastMessageAt)`，取消 pin 保留 `orderKey`。
+
+模块位于 `packages/shared/src/status-view/`，样例在其中的 `vectors/` 目录。
 
 **测试样例** — `{输入, 期望布局}` 和 `{状态, 命令, 固定的 env, 期望写入}` 的 JSON 文件放在共享模块
 旁边。它们在 `packages/shared` 里运行，在 `packages/components` 里针对桌面和手机 WebView 的适配层

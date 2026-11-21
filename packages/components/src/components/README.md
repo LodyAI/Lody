@@ -85,18 +85,16 @@ selection lives in `selectVisibleLocalProjectSections`
 sit with the GitHub repositories and stay listed only while they have
 conversations, whatever the switch says.
 
-Status organize mode lists the same rows as Updated, split into the native mobile
-Home's status groups in its order: Needs you, Just finished, Open pull requests,
-Running, Idle. `lib/sidebar-status-group.ts` classifies each row through the new-chat
-page's `homeNowReason` (`lib/home-now.ts`), so a session reads the same reason on
-both surfaces; rows that page leaves out (quiet for days, merged or closed PR) are
-Idle here. A conversation whose latest turn failed is under Needs you unless it is
-working again: the CLI writes the failed user turn into `SessionMeta.lastFailedUserMsgId`
-together with `lastHandledUserMsgId`, and `hasFailedLatestTurn` reads it only while the
-two match, so a later handled or canceled turn retires it without another write. Child
-Tabs roll their failure into the row. `buildSidebarUpdatedBuckets` feeds both the renderer and keyboard
-navigation, empty groups are skipped, and only Idle folds behind Show all. Group
-collapse and Show all share Updated's persisted per-bucket maps, keyed by group.
+Status organize mode lists the same rows as Updated below the Pinned area, in the
+Focus, Later and Settled tiers of the [Status view Spec](../../../../specs/sidebar-status-view.md).
+The shared Status view in `packages/shared/src/status-view/` decides each row's tier,
+order and opened-by nesting and plans every Status and pin-section write;
+`buildSidebarUpdatedBuckets` adapts its tiers for both the renderer and keyboard
+navigation, and `hooks/use-session-actions.ts` performs the planned writes. Focus stays
+mounted while empty as a drop target, only Settled folds behind Show all, and tier
+collapse and Show all share Updated's persisted per-bucket maps. Members who cannot
+write shared state (an encrypted workspace's Guest, a read-only membership) are not
+offered Status actions or section management (`hooks/use-status-view-writable.ts`).
 
 ## Entry points and layout
 

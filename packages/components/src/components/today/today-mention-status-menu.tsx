@@ -8,7 +8,7 @@ import {
   type CustomSnoozeDialogTarget,
 } from '@/components/sidebar-status-snooze-dialog';
 import { useSessionActions } from '@/hooks/use-session-actions';
-import { buildSnoozePresets, type SnoozePresetId } from '@/lib/sidebar-status-group';
+import { buildSnoozePresets, type SnoozePresetId } from '@lody/shared';
 import { toast } from '@/lib/toast';
 import { useTodayEditor } from './editor/today-editor-context';
 import { useTodaySessionDisplay } from './today-session-mention';

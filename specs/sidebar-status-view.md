@@ -157,9 +157,9 @@ Implementation:
 - Shared schema, ordering & unread summary: `packages/shared/src/schema.ts`,
   `packages/shared/src/pinned-sections.ts`,
   `packages/shared/src/live-activity-summary.ts`
-- Status classification, read receipts & snooze countdown:
-  `packages/components/src/lib/sidebar-status-group.ts`,
-  `packages/components/src/lib/session-read-receipt.ts`
+- Status layout, write planning, snooze countdown & golden vectors:
+  `packages/shared/src/status-view/`
+- Read receipts: `packages/components/src/lib/session-read-receipt.ts`
 - Sidebar rendering, DnD, menus & actions:
   `packages/components/src/components/sidebar-updated-session-list.tsx`,
   `packages/components/src/components/loro-sidebar.tsx`,
