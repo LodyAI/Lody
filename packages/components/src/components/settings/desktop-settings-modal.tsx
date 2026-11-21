@@ -8,7 +8,7 @@ import {
   loadStatsSettingsComponent,
   loadProjectSettingsComponent,
   loadMachineAgentSettings,
-  loadLodyAgentSetting,
+  loadHarness,
   loadIntegrationsSettingsComponent,
   loadKeyboardShortcutsSetting,
   loadAboutSettingsComponent,
@@ -69,7 +69,7 @@ const BillingSettingsComponent = lazy(loadBillingSettingsComponent);
 const StatsSettingsComponent = lazy(loadStatsSettingsComponent);
 const ProjectSettingsComponent = lazy(loadProjectSettingsComponent);
 const MachineAgentSettings = lazy(loadMachineAgentSettings);
-const LodyAgentSetting = lazy(loadLodyAgentSetting);
+const Harness = lazy(loadHarness);
 const IntegrationsSettingsComponent = lazy(loadIntegrationsSettingsComponent);
 const KeyboardShortcutsSetting = lazy(loadKeyboardShortcutsSetting);
 const AboutSettingsComponent = lazy(loadAboutSettingsComponent);
@@ -621,7 +621,7 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
         />
       );
     case 'lody-agent':
-      return <LodyAgentSetting />;
+      return <Harness />;
     case 'memory':
       return <MemorySetting />;
     case 'agent-roles':

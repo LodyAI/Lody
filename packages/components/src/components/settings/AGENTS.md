@@ -57,10 +57,9 @@ Lody Agent connections and Sorbet endpoints follow
   system has one — button, input, select, switch, spinner, kbd — and hand-drawn
   where it does not. Never give it a stylesheet of its own.
   Its state is the local harness store (`lody-harness-v1`) until the provider and
-  machine RPC wiring lands. The desktop settings route redirects into this
-  overlay, so the modal is the whole desktop surface; the `/settings/lody-agent`
-  route keeps `LodyAgentSetting` for phone widths. Do not re-import that
-  component into the desktop pane.
+  machine RPC wiring lands. Both the desktop settings pane and the narrow
+  `/settings/lody-agent` route render this surface; keep it responsive rather than
+  introducing a second settings implementation.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
