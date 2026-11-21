@@ -2,6 +2,9 @@ import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'child_process';
 import os from 'os';
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { openSorbetControl, type AuthEvent, type AuthPrompt } from '@sorbetai/control';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import * as acp from '@agentclientprotocol/sdk';
 import type { AuthMethod } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
@@ -31,7 +34,6 @@ import {
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { acquireSorbetCredentialMutation } from './sorbet-credential-mutation';
 import {
   AcpAgentAuthorizationOutputParser,
   BuiltinAuthenticationOutputParser,
@@ -167,7 +169,6 @@ const BUILTIN_AUTH_METHODS = {
 
 type RunningAuthentication = {
   child?: ChildProcess;
-  sorbetLease?: Awaited<ReturnType<typeof acquireSorbetCredentialMutation>>;
   requestId: string;
   cancelled: boolean;
   timedOut: boolean;
@@ -600,6 +601,132 @@ export class AcpAuthenticationManager {
       options.resolveAuthenticationProcessLaunch ?? resolveBuiltinAuthenticationProcessLaunch;
   }
 
+  private async authenticateSorbetControl(
+    options: {
+      methodId?: string;
+      onProgress?: (event: AcpAuthenticationProgressEvent) => void;
+    },
+    running: RunningAuthentication
+  ): Promise<AcpAuthenticationResult> {
+    const control = await openSorbetControl({
+      dataDirectory: join(getLodyDataDir(), 'sorbet'),
+      signal: running.abortController.signal,
+    });
+    try {
+      const methods = await control.authentication.methods({
+        signal: running.abortController.signal,
+      });
+      const advertised = methods.map((method) => ({
+        id: `sorbet:${method.providerId}:${method.type}`,
+        name: method.name,
+        description: method.providerName,
+        type: 'agent' as const,
+      }));
+      let methodId = options.methodId?.trim() || undefined;
+      if (!methodId || !advertised.some((method) => method.id === methodId)) {
+        if (advertised.length === 1) methodId = advertised[0]?.id;
+        else {
+          const interactionId = randomUUID();
+          const pending = this.waitForAuthenticationInput(running, interactionId);
+          if (!pending) throw new Error('Authentication input is already pending');
+          options.onProgress?.({ status: 'auth-methods', interactionId, authMethods: advertised });
+          const input = await pending;
+          if (input.action !== 'accept' || !input.methodId) {
+            throw new DOMException('Authentication cancelled', 'AbortError');
+          }
+          methodId = input.methodId;
+        }
+      }
+      const selectedIndex = advertised.findIndex((method) => method.id === methodId);
+      const selected = methods[selectedIndex];
+      if (!selected) throw new Error('Sorbet no longer advertises that authentication method');
+
+      const prompt = async (request: AuthPrompt): Promise<string> => {
+        request.signal?.throwIfAborted();
+        const interactionId = randomUUID();
+        const field =
+          request.type === 'select'
+            ? {
+                id: 'value',
+                type: 'select' as const,
+                label: request.message,
+                required: true,
+                options: request.options.map((option) => ({
+                  value: option.id,
+                  label: option.label,
+                })),
+              }
+            : {
+                id: 'value',
+                type: request.type === 'secret' ? ('secret' as const) : ('text' as const),
+                label: request.message,
+                required: true,
+              };
+        const pending = this.waitForAuthenticationInput(running, interactionId);
+        if (!pending) throw new Error('Authentication input is already pending');
+        options.onProgress?.({
+          status: 'input-required',
+          interactionId,
+          message: request.message,
+          form: { fields: [field] },
+        });
+        const input = await pending;
+        if (input.action !== 'accept') {
+          throw new DOMException('Authentication cancelled', 'AbortError');
+        }
+        const value = input.content?.value;
+        if (typeof value !== 'string') throw new Error('Authentication input is invalid');
+        return value;
+      };
+      const notify = (event: AuthEvent): void => {
+        if (event.type === 'auth_url' && isAllowedAuthorizationUrl(event.url)) {
+          options.onProgress?.({
+            status: 'authorization',
+            authorizationUrl: event.url,
+            message: event.instructions,
+          });
+          return;
+        }
+        if (event.type === 'device_code' && isAllowedAuthorizationUrl(event.verificationUri)) {
+          options.onProgress?.({
+            status: 'authorization',
+            authorizationUrl: event.verificationUri,
+            userCode: event.userCode,
+            expiresInSeconds: event.expiresInSeconds,
+          });
+          return;
+        }
+        if (event.type === 'info') {
+          const link = event.links?.find((candidate) => isAllowedAuthorizationUrl(candidate.url));
+          if (link) {
+            options.onProgress?.({
+              status: 'authorization',
+              authorizationUrl: link.url,
+              message: event.message,
+            });
+          } else {
+            options.onProgress?.({ status: 'output', stream: 'stdout', output: event.message });
+          }
+          return;
+        }
+        if (event.type === 'progress') {
+          options.onProgress?.({ status: 'output', stream: 'stdout', output: event.message });
+        }
+      };
+
+      await control.authentication.login({
+        providerId: selected.providerId,
+        type: selected.type,
+        interaction: { signal: running.abortController.signal, prompt, notify },
+        signal: running.abortController.signal,
+      });
+      options.onProgress?.({ status: 'authenticated' });
+      return { success: true, disposition: 'authenticated' };
+    } finally {
+      await control.close();
+    }
+  }
+
   async authenticate(options: {
     requestId: string;
     cliType: AgentConfigCliType;
@@ -687,8 +814,7 @@ export class AcpAuthenticationManager {
 
     try {
       if (options.cliType === 'builtin' && options.agentType === 'sorbet') {
-        running.sorbetLease = await acquireSorbetCredentialMutation(running.abortController.signal);
-        running.abortController.signal.throwIfAborted();
+        return await this.authenticateSorbetControl(options, running);
       }
       if (options.authenticateManagedProfile) {
         await options.authenticateManagedProfile({
@@ -843,11 +969,10 @@ export class AcpAuthenticationManager {
           'Codex authentication process record cleanup failed; retained for recovery'
         );
       } finally {
-        running.sorbetLease?.release();
         if (timeoutHandle) clearTimeout(timeoutHandle);
         if (this.runningByAgentType.get(options.agentType) === running) {
           const child = running.child;
-          if (!running.sorbetLease && child && child.exitCode == null && child.signalCode == null) {
+          if (child && child.exitCode == null && child.signalCode == null) {
             child.once('exit', () => {
               if (this.runningByAgentType.get(options.agentType) === running)
                 this.runningByAgentType.delete(options.agentType);
@@ -1042,7 +1167,6 @@ export class AcpAuthenticationManager {
     delete env.TERM;
     running.abortController.signal.throwIfAborted();
     let lastStderrTail = '';
-    let safeOfflineFailure = false;
     await withAcpSessionStartSlot(
       {
         label: `acp-auth:${options.agentType}`,
@@ -1051,10 +1175,6 @@ export class AcpAuthenticationManager {
       },
       async () =>
         await runNpxStartupWithRecovery({
-          maxAttempts: running.sorbetLease ? 1 : undefined,
-          canRetryOfflineAfterFailure: running.sorbetLease
-            ? () => safeOfflineFailure && !running.abortController.signal.aborted
-            : undefined,
           command: launch.command,
           args: launch.args,
           env,
@@ -1064,10 +1184,6 @@ export class AcpAuthenticationManager {
           attempt: async ({ args }) => {
             running.abortController.signal.throwIfAborted();
             lastStderrTail = '';
-            safeOfflineFailure = false;
-            let initializationCompleted = false;
-            let interactionStarted = false;
-            let sawProtocolOutput = false;
             options.onProgress?.({ status: 'starting' });
             const child = spawnAcpProcess({
               cliType: options.cliType,
@@ -1083,9 +1199,7 @@ export class AcpAuthenticationManager {
             });
             running.child = child;
             running.terminating = false;
-            child.stdout?.on('data', () => {
-              sawProtocolOutput = true;
-            });
+            child.stdout?.on('data', () => {});
             child.stderr?.setEncoding('utf8');
             const authorizationParser = new AcpAgentAuthorizationOutputParser();
             child.stderr?.on('data', (chunk: string) => {
@@ -1095,7 +1209,6 @@ export class AcpAuthenticationManager {
               lastStderrTail = appendStderrTail(lastStderrTail, chunk);
               const authorization = authorizationParser.push(chunk);
               if (authorization && isAllowedAuthorizationUrl(authorization.authorizationUrl)) {
-                interactionStarted = true;
                 options.onProgress?.({ status: 'authorization', ...authorization });
               }
             });
@@ -1133,7 +1246,6 @@ export class AcpAuthenticationManager {
               const app = acp
                 .client({ name: 'lody-authentication' })
                 .onRequest(acp.methods.client.elicitation.create, async ({ params }) => {
-                  interactionStarted = true;
                   const raw = asRecord(params);
                   if (raw?.mode === 'url') {
                     if (typeof raw.url !== 'string' || !isAllowedAuthorizationUrl(raw.url)) {
@@ -1213,7 +1325,6 @@ export class AcpAuthenticationManager {
                         `${options.agentType} ACP initialization failed. Check the agent configuration and try again.`
                       );
                     });
-                  initializationCompleted = true;
                   const advertisedMethods = [...(initialized.authMethods ?? [])];
                   const methods = advertisedMethods.filter(
                     (method) => getAuthMethodType(method) === 'agent'
@@ -1323,61 +1434,30 @@ export class AcpAuthenticationManager {
               running.pendingInteraction?.resolve({ action: 'cancel' });
               running.pendingInteraction = undefined;
               startupMonitor.dispose();
-              if (running.sorbetLease) {
-                const terminate = () =>
-                  terminateAcpProcessTree(child, {
-                    logger: this.logger,
-                    sessionLabel: 'sorbet-authentication',
-                    exitTimeoutMs: this.terminationGraceMs,
-                    nodeProcess: this.nodeProcess,
-                  });
-                try {
-                  await terminate();
-                } catch (error) {
-                  running.sorbetLease.retain(child, terminate);
-                  cleanupFailed = true;
-                  cleanupError = error;
-                }
-              } else {
-                try {
-                  await terminateAcpProcessTree(child, {
-                    logger: this.logger,
-                    sessionLabel: `acp-auth:${options.agentType}:protocol`,
-                    exitTimeoutMs: this.terminationGraceMs,
-                    nodeProcess: this.nodeProcess,
-                  });
-                } catch (error) {
-                  cleanupFailed = true;
-                  cleanupError = error;
-                }
+              try {
+                await terminateAcpProcessTree(child, {
+                  logger: this.logger,
+                  sessionLabel: `acp-auth:${options.agentType}:protocol`,
+                  exitTimeoutMs: this.terminationGraceMs,
+                  nodeProcess: this.nodeProcess,
+                });
+              } catch (error) {
+                cleanupFailed = true;
+                cleanupError = error;
               }
               if (!cleanupFailed && running.child === child) running.child = undefined;
             }
-            safeOfflineFailure =
-              operationFailed &&
-              !cleanupFailed &&
-              !initializationCompleted &&
-              !interactionStarted &&
-              !sawProtocolOutput &&
-              child.exitCode !== null &&
-              child.exitCode !== 0 &&
-              /npm (?:error|ERR!) code (?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH)/i.test(
-                lastStderrTail
-              );
             if (operationFailed && cleanupFailed) {
               throw new AggregateError(
                 [operationError, cleanupError],
-                `${formatErrorMessage(operationError)}; ${running.sorbetLease ? 'Sorbet a' : 'A'}uthentication process cleanup is unconfirmed`
+                `${formatErrorMessage(operationError)}; authentication process cleanup is unconfirmed`
               );
             }
             if (operationFailed) throw operationError;
             if (cleanupFailed) {
-              throw new Error(
-                `${running.sorbetLease ? 'Sorbet a' : 'A'}uthentication process cleanup is unconfirmed`,
-                {
-                  cause: cleanupError,
-                }
-              );
+              throw new Error('Authentication process cleanup is unconfirmed', {
+                cause: cleanupError,
+              });
             }
           },
         })

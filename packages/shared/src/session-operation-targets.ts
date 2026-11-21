@@ -1,5 +1,5 @@
 import type { LoroRepo } from 'loro-repo';
-import { getSessionIdFromRoomId, SESSION_DOC_PREFIX } from './index';
+import { getSessionIdFromRoomId, SESSION_DOC_PREFIX } from './loro-streams-routing';
 import { isLoroRepoDocDeleted } from './repo-doc-meta';
 import { collectSessionArchiveTargets, collectSessionTreeTargets } from './session-archive-targets';
 import type { SessionId } from './ids';

@@ -406,10 +406,13 @@ describe('AcpAuthenticationAuthorizationView', () => {
         )
       );
       const action = Array.from(container.querySelectorAll('button')).find(
-        (button) => button.textContent?.trim() === 'Enter API key'
+        (button) => button.textContent?.trim() === 'Add API key'
       );
       expect(action?.disabled).toBe(false);
       await act(async () => action?.click());
+      expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain(
+        'Add sorbet API key'
+      );
       expect(started).toEqual(['sorbet:gateway:api_key']);
       expect(document.body.querySelector('[role="dialog"] [role="status"]')).not.toBeNull();
       await act(async () =>
@@ -449,6 +452,10 @@ describe('AcpAuthenticationAuthorizationView', () => {
         />
       );
     });
+    expect(container.textContent).toContain('Authorization result');
+    expect(container.querySelector('input')?.placeholder).toBe(
+      'Paste the code or final redirect URL'
+    );
     expect(container.textContent).toContain('Paste the code or return URL');
     expect(container.textContent).not.toContain('returning automatically');
   });

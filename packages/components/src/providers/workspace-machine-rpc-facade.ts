@@ -2166,10 +2166,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     return result;
   };
 
-  /**
-   * Custom Providers live in the agent's store, so every call runs a bounded Sorbet
-   * process on the target machine. Writes are owner-scoped like the credentials panel.
-   */
+  /** Sorbet control-plane reads and writes are owner-scoped like the credentials panel. */
   const requestLocalSorbetProviders = async (
     machineId: MachineId,
     request:
@@ -2185,6 +2182,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-delete' }>,
           'method' | 'params'
         >
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-refresh' }>,
+          'method' | 'params'
+        >
+      | Pick<Extract<LocalMachineRpcRequest, { method: 'sorbet/models-list' }>, 'method' | 'params'>
   ) => {
     const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
     const local = await canUseLocalMachineRpc(machineId);

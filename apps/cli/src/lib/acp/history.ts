@@ -62,9 +62,6 @@ const resolveBoundHistoryBackend = <T>(
   return bound;
 };
 
-// ---------------------------------------------------------------------------
-// Cross-call enrichment state
-// ---------------------------------------------------------------------------
 //
 // When notifications arrive one at a time (streamed mode), a completed update
 // may arrive in a separate `handleACPUpdateMessage()` call from the in-progress
@@ -671,11 +668,6 @@ const describeValue = (value: unknown): string => {
   return typeof value;
 };
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Title-to-kind heuristic for agents that don't send `kind`
-// ---------------------------------------------------------------------------
-
 /** Tool kind values used in enrichment — superset of ACP ToolKind to cover internal kinds. */
 type EnrichmentToolKind =
   | 'read'
@@ -733,10 +725,6 @@ const normalizeToolKind = (kind: unknown): EnrichmentToolKind | undefined =>
     ? (kind as EnrichmentToolKind)
     : undefined;
 
-// ---------------------------------------------------------------------------
-// Content block helpers
-// ---------------------------------------------------------------------------
-
 type AcpContentLike = ReadonlyArray<{ type: string; content?: { type: string; text?: string } }>;
 
 /** Extract all non-empty text strings from ACP tool-call content blocks of type "content". */
@@ -769,10 +757,8 @@ const tryParseJsonFromContentBlocks = (content: AcpContentLike): Record<string, 
   return null;
 };
 
-// ---------------------------------------------------------------------------
 // Notification enrichment (single pass — replaces the former
 // `propagateToolCallState` + `enrichKimiToolData` two-pass pipeline)
-// ---------------------------------------------------------------------------
 
 /**
  * Enrich a batch of ACP notifications before history filtering.

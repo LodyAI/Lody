@@ -376,11 +376,7 @@ export class Lody {
       workspaceDocument: documentManager,
       memoryPressure: options.memoryPressure,
       handlerConfig: {
-        sorbetCredentials: createSorbetCredentialsHandler(
-          documentManager,
-          this.machineId,
-          this.logger
-        ),
+        sorbetCredentials: createSorbetCredentialsHandler(documentManager, this.machineId),
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
         encryptedExecution: options.contentMode === 'e2ee' ? encryptedExecution : undefined,
