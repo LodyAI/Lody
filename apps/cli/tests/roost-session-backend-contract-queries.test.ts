@@ -6,6 +6,7 @@ import {
 } from '@lody/loro-streams-rpc';
 import {
   SessionHistoryChangesSchema,
+  SessionHistoryReadQuerySchema,
   SessionHistoryReadResponseSchema,
   type MachineId,
   type SessionId,
@@ -44,6 +45,147 @@ import {
 
 registerRoostNativeBackendSuite();
 describe('Production Roost history semantics (replica sync and bounded stream)', () => {
+  it('reads an unchanged older page while Agent output continues through receipt verification', async ({
+    onTestFinished,
+  }) => {
+    const fixture = await coldHistoryHandlerFixture(1);
+    const sessionId = [...fixture.docs.keys()][0];
+    const doc = sessionId && fixture.docs.get(sessionId);
+    if (!sessionId || !doc) throw new Error('Missing synthetic session');
+    const scanning = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    onTestFinished(release.resolve);
+    const open = RoostNativeClient.prototype.stream;
+    vi.spyOn(RoostNativeClient.prototype, 'stream').mockImplementation(function (id) {
+      const stream = open.call(this, id);
+      if (id === `lody-session:${sessionId}`) {
+        const scan = stream.commitMetadataAfter.bind(stream);
+        vi.spyOn(stream, 'commitMetadataAfter').mockImplementationOnce(async (...args) => {
+          scanning.resolve();
+          await release.promise;
+          return scan(...args);
+        });
+      }
+      return stream;
+    });
+    try {
+      await fixture.ready(sessionId);
+      const older = nativeUser('older-before-streaming');
+      const active = nativeAssistant('agent-writing-during-read');
+      expect(
+        await fixture.rpc.writeSessionHistoryForRpc(sessionId, 'append', { entry: older })
+      ).toMatchObject({ success: true });
+      const backend = await createSessionBackend(doc);
+      const publication = async () => {
+        const current = await backend.history.getPublication?.();
+        if (!current) throw new Error('Missing Native publication');
+        return current;
+      };
+      const output = (text: string) =>
+        backend.applyAgentBatch({
+          targetAssistantEntryId: active.id,
+          operationIds: [text],
+          notifications: [
+            {
+              sessionId,
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text },
+              },
+            },
+          ],
+        });
+      await backend.appendHistoryTurn(active);
+      const base = await publication();
+      await output('output before older page request');
+      await backend.appendHistoryTurn(nativeUser('appended after older page'));
+      const observed = await publication();
+      const query = SessionHistoryReadQuerySchema.parse({
+        kind: 'readOlderRange',
+        from: 0,
+        to: 1,
+        baseCheckpoint: base.checkpoint,
+      });
+      const reading = fixture.rpc.readSessionHistoryForRpc(sessionId, query);
+      await Promise.race([
+        scanning.promise,
+        reading.then(() => {
+          throw new Error('Expected to verify an older page against an earlier checkpoint');
+        }),
+      ]);
+      await output('output during receipt verification');
+      expect((await publication()).historyRevision).toBeGreaterThan(observed.historyRevision);
+      release.resolve();
+      expect(SessionHistoryReadResponseSchema.parse(await reading)).toMatchObject({
+        success: true,
+        historyRevision: observed.historyRevision,
+        historyCount: observed.historyCount,
+        result: {
+          baseCheckpoint: base.checkpoint,
+          checkpoint: observed.checkpoint,
+          turns: [{ state: 'ready', turn: older }],
+        },
+      });
+      expect(
+        await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readRange',
+          from: 0,
+          to: 1,
+          atCheckpoint: base.checkpoint,
+        })
+      ).toMatchObject({ success: false, retryReason: 'superseded' });
+
+      expect(
+        await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+          kind: 'readOlderRange',
+          from: 0,
+          to: 3,
+          baseCheckpoint: base.checkpoint,
+        })
+      ).toMatchObject({ success: false, retryReason: 'superseded' });
+
+      await backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: older.id,
+        status: 'handled',
+      });
+      expect(await fixture.rpc.readSessionHistoryForRpc(sessionId, query)).toMatchObject({
+        success: false,
+        retryReason: 'superseded',
+      });
+      const beforeReset = await publication();
+      const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
+      const owner = Identity.fromSeed(seed).owner();
+      const client = new RoostNativeClient({
+        dbPath: join(nativeDirectory, 'history.db'),
+        seed,
+        allowedOwners: [owner],
+        maxQueuedRequests: 32,
+        maxQueuedBytes: 8 * 1024 * 1024,
+      });
+      try {
+        await client.ready;
+        await new RoostHistoryGeneration(client, owner, sessionId).replace(
+          [nativeUser('new-generation')],
+          'replace-while-older-page-cached'
+        );
+        expect(
+          await fixture.rpc.readSessionHistoryForRpc(sessionId, {
+            kind: 'readOlderRange',
+            from: 0,
+            to: 1,
+            baseCheckpoint: beforeReset.checkpoint,
+          })
+        ).toMatchObject({ success: false, retryReason: 'superseded' });
+      } finally {
+        await client.close();
+      }
+    } finally {
+      release.resolve();
+      await fixture.close();
+    }
+  });
+
   it('delivers an accepted user turn through the ACP buffer and Native history to peer RPC reads', async () => {
     const fixture = await coldHistoryHandlerFixture(1);
     const sessionId = [...fixture.docs.keys()][0];

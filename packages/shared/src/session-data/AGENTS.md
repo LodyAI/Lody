@@ -92,6 +92,9 @@
 
 - Native owns Roost history publication; control documents never publish its revisions.
   Roost incremental reads bind a complete logical change interval to one owner checkpoint.
+  Older pages can join an earlier checkpoint only when the owner proves that their
+  positions and bodies are unchanged across the verified interval. A page alone
+  never advances the cached checkpoint.
   Missing or foreign checkpoint evidence requires explicit reset, never trusting the last hint.
   Persist repaired bodies, membership and checkpoint atomically; the cache grants no write receipt.
   Reset replaces the latest window atomically; invalidated older pages load on demand,

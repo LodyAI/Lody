@@ -53,6 +53,7 @@ import type {
  */
 export type RoostSessionBackendServices = {
   readonly sessionData: RoostSessionData;
+  readonly readOlderHistoryRange?: SessionBackend['readOlderHistoryRange'];
   readonly readHistoryInspection?: SessionBackend['readHistoryInspection'];
   readonly readHistoryReplay?: SessionBackend['readHistoryReplay'];
   readonly readHistoryTranscript?: SessionBackend['readHistoryTranscript'];
@@ -123,6 +124,10 @@ export class RoostSessionBackend implements SessionBackend {
 
   get history(): SessionHistoryReader {
     return this.services.sessionData.history;
+  }
+
+  get readOlderHistoryRange() {
+    return this.services.readOlderHistoryRange;
   }
 
   get readHistoryInspection() {
