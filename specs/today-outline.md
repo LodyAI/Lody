@@ -159,15 +159,15 @@ any time; when off it changes none of the app's existing behavior.
 - Clicking the status icon opens a status menu that changes the conversation's status (writing the same session
   metadata as the sidebar): Mark as unread / Mark as read (whichever applies), Later (presets and custom, reusing
   the sidebar's), Done, Move to Focus (only when Later or Done).
-- When the conversation was deleted or the current user cannot access it, the mention shows "Conversation deleted
-  / No access" without a title; it stays until the user removes it. Removing a mention does not affect the
+- When the conversation was deleted or the current user cannot access it, the mention shows "Session deleted / No
+  access" without a title; it stays until the user removes it. Removing a mention does not affect the
   conversation.
 - In plain text (copy, the Convert to task prompt) each mention is written as
   `[@Title](lody://session/<id>?workspace=<id>)`.
 
 ### Member mentions
 
-- The `@` menu also lists workspace members (user decision, after Feishu): tabs "All", "People" and "Conversations";
+- The `@` menu also lists workspace members (user decision, after Feishu): tabs "All", "People" and "Sessions";
   "All" shows the first matches of each kind, people first. People show only in a workspace with other members.
 - A member mention is the same one-character mention with `kind: 'member'` and the member's userId as `id`. It shows
   as a tinted pill with the member's avatar and current name; clicking it opens that member's Today. A member no

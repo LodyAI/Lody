@@ -390,7 +390,7 @@ describe('Today @ picker with people', () => {
       [...surface.querySelectorAll<HTMLElement>('[role="tab"]')].find(
         (t) => t.textContent === label
       )!;
-    await act(async () => tab('Conversations').click());
+    await act(async () => tab('Sessions').click());
     expect(options()).toEqual([['session', 'Align the release']]);
     await act(async () => tab('People').click());
     expect(options()).toEqual([['member', 'AWAlice Wong']]);

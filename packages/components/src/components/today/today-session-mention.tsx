@@ -297,12 +297,12 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
         {...rootProps}
       >
         {display.state === 'missing'
-          ? t('today.sessionMissing', 'Conversation deleted / No access')
+          ? t('today.sessionMissing', 'Session deleted / No access')
           : '…'}
       </span>
     );
   }
-  const title = display.title || t('today.untitledSession', 'Untitled conversation');
+  const title = display.title || t('today.untitledSession', 'Untitled session');
   const statusLabel = {
     waiting: t('today.status.waiting', 'Waiting for you'),
     running: t('today.status.running', 'Running'),
@@ -341,7 +341,7 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
       <button
         type="button"
         {...stylex.props(styles.title, display.status === 'done' && styles.titleDone)}
-        aria-label={t('today.mentionLabel', 'Conversation: {{title}}, {{status}}', {
+        aria-label={t('today.mentionLabel', 'Session: {{title}}, {{status}}', {
           title,
           status: statusLabel,
         })}

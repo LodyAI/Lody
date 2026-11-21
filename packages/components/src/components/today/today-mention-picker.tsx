@@ -166,7 +166,7 @@ export function TodaySessionPicker(props: { items: readonly SessionMentionItem[]
   const tabs: Array<[TodayPickerTab, string]> = [
     ['all', t('today.picker.all', 'All')],
     ['member', t('today.picker.people', 'People')],
-    ['session', t('today.picker.sessions', 'Conversations')],
+    ['session', t('today.picker.sessions', 'Sessions')],
   ];
   return (
     <div
@@ -205,8 +205,8 @@ export function TodaySessionPicker(props: { items: readonly SessionMentionItem[]
             {tab === 'member'
               ? t('today.noMembers', 'No matching people')
               : tab === 'session'
-                ? t('today.noSessions', 'No matching conversations')
-                : t('today.noMentions', 'No matching people or conversations')}
+                ? t('today.noSessions', 'No matching sessions')
+                : t('today.noMentions', 'No matching people or sessions')}
           </span>
         ) : (
           rows.map((row, index) => (
@@ -236,7 +236,7 @@ export function TodaySessionPicker(props: { items: readonly SessionMentionItem[]
                     <MessageSquare size={14} strokeWidth={1.75} />
                   </span>
                   <span {...stylex.props(pickerStyles.itemLabel)}>
-                    {row.item.title || t('today.untitledSession', 'Untitled conversation')}
+                    {row.item.title || t('today.untitledSession', 'Untitled session')}
                   </span>
                 </>
               )}
