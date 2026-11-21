@@ -4069,13 +4069,19 @@ export function LoroAppSidebar({
         orderKey,
       }));
       const wasInFocus = focusRoots.some((item) => item.id === sessionId);
-      void applySessionFocusOrder(writes, wasInFocus ? undefined : (sessionId as SessionId)).catch(
-        (error) => {
+      // A pinned row dropped into Focus leaves the pinned area first.
+      const unpin = sessionById.get(sessionId)?.isPinned
+        ? setSessionPinned(sessionId as SessionId, false)
+        : Promise.resolve();
+      void unpin
+        .then(() =>
+          applySessionFocusOrder(writes, wasInFocus ? undefined : (sessionId as SessionId))
+        )
+        .catch((error) => {
           toast.error(error instanceof Error ? error.message : String(error));
-        }
-      );
+        });
     },
-    [applySessionFocusOrder, updatedItems]
+    [applySessionFocusOrder, sessionById, setSessionPinned, updatedItems]
   );
   const [updatedBucketShowFullState, setUpdatedBucketShowFullState] = useAtom(
     sidebarUpdatedBucketShowFullStateAtom

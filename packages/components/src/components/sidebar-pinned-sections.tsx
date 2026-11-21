@@ -128,6 +128,8 @@ export type SidebarPinnedSectionsProps = {
   headerAction?: ReactNode;
   /** Absent when this viewer cannot manage pin sections. */
   actions?: SidebarPinSectionActions;
+  /** Status view: a pinned row released over Focus is unpinned into Focus at `toIndex`. */
+  onDropIntoFocus?: (sessionId: string, toIndex: number) => void;
   listProps: SharedListProps;
   emptyTitle: string;
   emptyDescription: string;
@@ -152,6 +154,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
   onToggleSection,
   headerAction,
   actions,
+  onDropIntoFocus,
   listProps,
   emptyTitle,
   emptyDescription,
@@ -275,6 +278,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
   const [activeRow, setActiveRow] = useState<string | null>(null);
   const [activeGhost, setActiveGhost] = useState<HTMLElement | null>(null);
   const rowOrderRef = useLatestRef(rowOrder);
+  const allowFocusTarget = typeof onDropIntoFocus === 'function';
 
   // Pointer only: rows and section headers hold their own Enter/Space.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -324,12 +328,17 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
   }, []);
 
   // Aim the drag at the section under the pointer: its rows open a gap there.
-  const handleDragMove = useCallback((event: DragMoveEvent) => {
-    const dragged = parsePinnedDndId(event.active.id);
-    if (dragged?.kind !== 'row') return;
-    const point = pointerOf(event);
-    setPinnedPointerTarget(point ? pinnedPointerTargetAt(point, dragged.id) : null);
-  }, []);
+  const handleDragMove = useCallback(
+    (event: DragMoveEvent) => {
+      const dragged = parsePinnedDndId(event.active.id);
+      if (dragged?.kind !== 'row') return;
+      const point = pointerOf(event);
+      setPinnedPointerTarget(
+        point ? pinnedPointerTargetAt(point, dragged.id, allowFocusTarget) : null
+      );
+    },
+    [allowFocusTarget]
+  );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -359,16 +368,13 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
       const order = rowOrderRef.current;
       // Released outside the pinned area, nothing moves: the copy flies home.
       const target =
-        (point ? pinnedPointerTargetAt(point, dragged.id) : null) ??
+        (point ? pinnedPointerTargetAt(point, dragged.id, allowFocusTarget) : null) ??
         homeTargetOf(order, dragged.id);
       if (!target || !lifted) {
         endPointerDrag();
         return;
       }
-      const sectionKey = pinSectionKey(target.sectionId);
-      const next = moveRowIntoSection(order, dragged.id, sectionKey, target.index);
-      // The lifted copy flies from where it was released into the row's new slot.
-      beginPinnedDropSettle({
+      const settle = {
         sessionId: dragged.id,
         toSectionId: target.sectionId,
         toIndex: target.index,
@@ -376,7 +382,23 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         ghost: activeGhost,
         fromBackground: liftedBackground(),
         fromShadow: PINNED_ROW_LIFT_SHADOW,
-      });
+      };
+      // Released over Focus: the row leaves the pinned area and lands in Focus.
+      if (target.sectionId === FOCUS_SECTION_DND_KEY) {
+        beginPinnedDropSettle(settle);
+        setPendingOrder(
+          Object.fromEntries(
+            Object.entries(order).map(([key, ids]) => [key, ids.filter((id) => id !== dragged.id)])
+          )
+        );
+        endPointerDrag();
+        onDropIntoFocus?.(dragged.id, target.index);
+        return;
+      }
+      const sectionKey = pinSectionKey(target.sectionId);
+      const next = moveRowIntoSection(order, dragged.id, sectionKey, target.index);
+      // The lifted copy flies from where it was released into the row's new slot.
+      beginPinnedDropSettle(settle);
       setPendingOrder(next);
       endPointerDrag();
       if (!sameRowOrder(next, propsOrder)) {
@@ -385,7 +407,9 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     },
     [
       activeGhost,
+      allowFocusTarget,
       endPointerDrag,
+      onDropIntoFocus,
       onDropItem,
       onMoveSection,
       propsOrder,
@@ -604,12 +628,14 @@ const pinnedCollisionDetection: CollisionDetection = (args) =>
   });
 
 /**
- * The pin section under `point` and the drop index there. Found by geometry:
- * during a drag the sections ignore the pointer (hover is held off).
+ * The pin section (or Focus, when `allowFocusTarget` is true) under `point` and
+ * the drop index there. Found by geometry: during a drag the sections ignore
+ * the pointer (hover is held off).
  */
 function pinnedPointerTargetAt(
   point: { x: number; y: number },
-  draggedId: string
+  draggedId: string,
+  allowFocusTarget: boolean
 ): PinnedPointerTarget | null {
   for (const element of Array.from(document.querySelectorAll<HTMLElement>('[data-pin-section]'))) {
     const box = element.getBoundingClientRect();
@@ -617,7 +643,7 @@ function pinnedPointerTargetAt(
       continue;
     }
     const attr = element.getAttribute('data-pin-section');
-    if (attr === FOCUS_SECTION_DND_KEY) continue;
+    if (attr === FOCUS_SECTION_DND_KEY && !allowFocusTarget) continue;
     const sectionId = attr === DEFAULT_PIN_SECTION_KEY ? null : attr;
     const rows = element.querySelector<HTMLElement>('[data-pin-rows]');
     return { sectionId, index: pinnedDropIndexAt(rows, point.y, draggedId) };
