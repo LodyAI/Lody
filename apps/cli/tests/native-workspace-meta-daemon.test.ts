@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createLocalCloudPort } from '@lody/platform';
 import {
+  type SessionHistory,
   getMachineFlockDocId,
   getScheduleRegistryFlockDocId,
   getSessionRoomId,
@@ -12,6 +13,7 @@ import {
   type MachineId,
   type WorkspaceId,
 } from '@lody/shared';
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { connectNativeRepo, nativeRepoDataDir } from '@lody/shared/node/native-repo';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import {
@@ -137,6 +139,24 @@ describe('native Workspace Meta in the CLI daemon', () => {
     const everywhere = (value: unknown) => ownedIds.map(() => value);
     const newMachineId = getMachineFlockDocId(wsId, 'native-machine' as MachineId);
     await putRow(legacy.manager, ['mcpServer', 'legacy'], { name: 'legacy' });
+    const sessionDoc = getSessionRoomId(kept);
+    const turns = async (manager: LoroDocumentManager) =>
+      (await manager.repo.openPersistedDoc(sessionDoc)).doc
+        .getList('history')
+        .toJSON()
+        .map((turn: { id: string }) => turn.id);
+    const appendTurn = async (manager: LoroDocumentManager, id: string) => {
+      const { doc } = await manager.repo.openPersistedDoc(sessionDoc);
+      createHistoryWriter(doc).append({
+        id,
+        role: 'user',
+        timestamp: '2026-01-01T00:00:00Z',
+        items: [{ type: 'text', text: id }],
+        fileDiff: [],
+      } as SessionHistory);
+      await manager.repo.persistDocNow(sessionDoc, doc);
+    };
+    await appendTurn(legacy.manager, 'legacy-turn');
     await legacy.manager.repo.deleteDoc(getSessionRoomId(removed));
     await legacy.close();
 
@@ -160,6 +180,8 @@ describe('native Workspace Meta in the CLI daemon', () => {
         everywhere({ name: 'legacy' })
       );
       await putRow(daemon.manager, ['mcpServer', 'native'], { name: 'native' });
+      expect(await turns(daemon.manager)).toEqual(['legacy-turn']);
+      await appendTurn(daemon.manager, 'native-turn');
       const created = (await daemon.manager.repo.openFlockDoc(newMachineId)).flock;
       created.put(['machine'], 'new');
       await daemon.manager.repo.persistFlockDocNow(newMachineId, created);
@@ -195,6 +217,8 @@ describe('native Workspace Meta in the CLI daemon', () => {
       ).toBe('new');
       await legacyAgain.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'offline' });
       await putRow(legacyAgain.manager, ['mcpServer', 'offline'], { name: 'offline' });
+      expect(await turns(legacyAgain.manager)).toEqual(['legacy-turn', 'native-turn']);
+      await appendTurn(legacyAgain.manager, 'offline-turn');
     } finally {
       await legacyAgain.close();
     }
@@ -205,6 +229,11 @@ describe('native Workspace Meta in the CLI daemon', () => {
       expect((await nativeAgain.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
         'offline'
       );
+      expect(await turns(nativeAgain.manager)).toEqual([
+        'legacy-turn',
+        'native-turn',
+        'offline-turn',
+      ]);
       expect(await rows(nativeAgain.manager, ['mcpServer', 'offline'])).toEqual(
         everywhere({ name: 'offline' })
       );

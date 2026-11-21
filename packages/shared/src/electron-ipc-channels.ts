@@ -28,6 +28,7 @@ export type IpcPushMap = {
   'loro.status': boolean;
   'nativeWorkspaceMeta.update': import('./native-workspace-meta-ipc').NativeMetaEvent;
   'nativeWorkspaceMeta.flock': import('./native-workspace-meta-ipc').NativeFlockEvent;
+  'nativeWorkspaceMeta.doc': import('./native-workspace-meta-ipc').NativeDocEvent;
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
   'storageGuard.state': ElectronStorageGuardState;
@@ -75,6 +76,7 @@ export const IPC_PUSH_CHANNELS = {
   loroStatus: 'loro.status',
   nativeWorkspaceMeta: 'nativeWorkspaceMeta.update',
   nativeFlockDoc: 'nativeWorkspaceMeta.flock',
+  nativeDoc: 'nativeWorkspaceMeta.doc',
   cliState: 'cli.state',
   updaterState: 'updater.state',
   storageGuardState: 'storageGuard.state',

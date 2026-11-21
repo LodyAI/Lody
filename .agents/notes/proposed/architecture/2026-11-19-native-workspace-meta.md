@@ -51,6 +51,13 @@ owns the long-term directory contract, and both stay active.
   loro-repo's external Flock owner keeps the replica in memory, loads it from the
   room's raw export, applies changes that carry clocks (added for this), and
   commits through the existing persistence barriers.
+- **Session Loro documents through an SDK document owner.** About 170 call sites
+  use the `LoroDoc` from `openPersistedDoc`, through `DocManager`. The same reasoning
+  as for named Flock documents applies, so loro-repo gained an external Loro
+  document owner. The engine gained a binary update subscription because its
+  existing document subscription re-projects and JSON-diffs the whole document per
+  commit. Migration is lazy per document and source, so opening a workspace never
+  imports every Session.
 - **One host process, launched by either side.** The daemon owning the engine (#2895)
   would couple Meta availability to the daemon; a host per side would race
   `files.lock`. The host idles out after its last connection.
@@ -65,4 +72,8 @@ owns the long-term directory contract, and both stay active.
   reopened the stale replica was rejected because the merge reuses the same LWW
   import and needs no compatibility handling. A commit already sent when the host dies latches that repo's
   Meta writes until it is recreated (SDK contract).
+- A Session first screen is proportional to history: 236 ms at 10,000 turns and
+  3.6 s at 100,000. The cost is the Session reader's whole-history directory, which
+  the legacy path shares, and the engine's whole-snapshot transfer. A windowed
+  directory and on-demand document loading are the next slice.
 - Cloud and encrypted workspaces are out of scope: the OSS desktop is local-only.
