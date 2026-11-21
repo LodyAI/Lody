@@ -348,18 +348,26 @@ End of synthetic document.`,
   });
 
   it.each([
-    ['```html\n<button>Add</button>\n```', true],
-    ['~~~html\n<button>Add</button>\n~~~~', true],
-    ['````html\n<button>Add</button>\n```', false],
-    ['```html\n<button>Add</button>\n~~~', false],
-    ['```html\n<button>Add</button>', false],
-    ['```html\n<button>Add</button>\n    ```', false],
-    ['> - ~~~html\n>   <button>Add</button>\n>   ~~~', true],
-    ['    ```html\n    <button>Add</button>\n    ```', false],
-    ['```htmlbars\n<button>Add</button>\n```', false],
-    ['```HTML\n<button>Add</button>\n```', false],
+    ['```html render\n<button>Add</button>\n```', true],
+    ['~~~html render\n<button>Add</button>\n~~~~', true],
+    ['````html render\n<button>Add</button>\n```', false],
+    ['```html render\n<button>Add</button>\n~~~', false],
+    ['```html render\n<button>Add</button>', false],
+    ['```html render\n<button>Add</button>\n    ```', false],
+    ['> - ~~~html render\n>   <button>Add</button>\n>   ~~~', true],
+    ['    ```html render\n    <button>Add</button>\n    ```', false],
+    ['```htmlbars render\n<button>Add</button>\n```', false],
+    ['```HTML render\n<button>Add</button>\n```', false],
+    // Plain html fences are source the user reads or copies.
+    ['```html\n<button>Add</button>\n```', false],
+    ['```html rendered\n<button>Add</button>\n```', false],
+    ['```html title="Counter"\n<button>Add</button>\n```', false],
     [
       '<pre><code class="language-html" data-incomplete="false">&lt;button&gt;Add&lt;/button&gt;</code></pre>',
+      false,
+    ],
+    [
+      '<pre><code class="language-html" data-render="true" data-incomplete="false">&lt;button&gt;Add&lt;/button&gt;</code></pre>',
       false,
     ],
   ])('requires parser-confirmed html closure: %s', async (source, executable) => {
@@ -372,7 +380,7 @@ End of synthetic document.`,
   it.each(['plain', 'quote', 'list'] as const)(
     'retains the %s HTML document through appended text and stream completion',
     async (kind) => {
-      const block = '```html title="Counter"\n<button>Add</button>\n```';
+      const block = '```html render\n<button>Add</button>\n```';
       const nested =
         kind === 'quote'
           ? block
@@ -408,12 +416,12 @@ End of synthetic document.`,
   );
 
   it.each([false, true])(
-    'shows bootstrap failure only without confirmation (confirmed=%s)',
+    'falls back to source only without bootstrap confirmation (confirmed=%s)',
     async (confirmed) => {
       await renderMarkdown('Warm parser');
       vi.useFakeTimers();
       try {
-        await renderMarkdown('```html\n<button>Bootstrap boundary</button>\n```');
+        await renderMarkdown('```html render\n<button>Bootstrap boundary</button>\n```');
         const frame = container!.querySelector('iframe')!;
         let id = '';
         vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation((payload) => {
@@ -434,12 +442,8 @@ End of synthetic document.`,
         });
         expect(frame.style.visibility).toBe('visible');
         expect(frame.style.height).toBe('120px');
-        expect(container!.textContent!.includes('HTML preview failed to load')).toBe(!confirmed);
-        expect(
-          [...container!.querySelectorAll('button')].some(
-            (button) => button.textContent === 'Reload'
-          )
-        ).toBe(true);
+        // An unstarted document falls back to the source the agent wrote.
+        expect(!!container!.querySelector('[data-streamdown="code-block"]')).toBe(!confirmed);
         if (!confirmed) {
           await act(async () => {
             window.dispatchEvent(
@@ -449,7 +453,7 @@ End of synthetic document.`,
               })
             );
           });
-          expect(container!.textContent).not.toContain('HTML preview failed to load');
+          expect(container!.querySelector('[data-streamdown="code-block"]')).toBeNull();
         }
       } finally {
         vi.useRealTimers();

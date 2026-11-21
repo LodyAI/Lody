@@ -11,6 +11,14 @@ type Tree = ReturnType<NonNullable<Processor['parser']>> & {
 };
 type File = Parameters<NonNullable<Processor['parser']>>[1];
 
+/** Only an explicit `html render` fence runs; a plain `html` fence stays readable source. */
+export function isRenderedHtmlFence(
+  language: string | null | undefined,
+  meta: string | null | undefined
+) {
+  return language === 'html' && meta?.trim() === 'render';
+}
+
 /** Mark closure from the parser's fence tokens, including nested containers. */
 export function remarkFenceClosure(this: Processor) {
   const data = this.data();
@@ -27,29 +35,43 @@ export function remarkFenceClosure(this: Processor) {
   });
   return (tree: Tree, file: File) => {
     const closure = new Map<number, boolean>();
+    const rendered = new Set<number>();
     const pending = [tree];
     while (pending.length) {
       const node = pending.pop()!;
       const offset = node.position?.start.offset;
       if (node.type === 'code' && offset !== undefined) {
-        const data = node.data as { hProperties?: { dataIncomplete?: boolean } } | undefined;
-        closure.set(offset, data?.hProperties?.dataIncomplete !== false);
+        const code = node as Tree & {
+          lang?: string | null;
+          meta?: string | null;
+          data?: { hProperties?: Record<string, unknown> };
+        };
+        const properties = ((code.data ??= {}).hProperties ??= {});
+        closure.set(offset, properties.dataIncomplete !== false);
+        if (isRenderedHtmlFence(code.lang, code.meta)) {
+          rendered.add(offset);
+          properties.dataRender = true;
+        }
       }
       if (Array.isArray(node.children)) pending.push(...node.children);
     }
     file.data.lodyFenceClosure = closure;
+    file.data.lodyFenceRender = rendered;
   };
 }
 
-/** Restore parser-owned closure after raw HTML parsing and sanitization. */
+/** Restore parser-owned closure and render markers after raw HTML parsing and sanitization. */
 export function rehypeFenceClosure() {
   return (tree: Tree, file: File) => {
     const closure = file.data.lodyFenceClosure as Map<number, boolean>;
+    const rendered = file.data.lodyFenceRender as Set<number>;
     const pending = [tree];
     while (pending.length) {
       const node = pending.pop()!;
       if (node.type === 'element' && node.tagName === 'code') {
-        node.properties!.dataIncomplete = closure.get(node.position?.start.offset ?? -1);
+        const offset = node.position?.start.offset ?? -1;
+        node.properties!.dataIncomplete = closure.get(offset);
+        node.properties!.dataRender = rendered.has(offset) || undefined;
       }
       if (Array.isArray(node.children)) pending.push(...node.children);
     }
@@ -63,7 +85,7 @@ export function hasHtmlCodeBlock(source: string): boolean {
   const pending = [...tree.children];
   while (pending.length) {
     const node = pending.pop()!;
-    if (node.type === 'code' && node.lang === 'html') return true;
+    if (node.type === 'code' && isRenderedHtmlFence(node.lang, node.meta)) return true;
     if ('children' in node) pending.push(...(node.children as typeof pending));
   }
   return false;

@@ -82,17 +82,19 @@ restarting work. These details stay in help rather than the discovery summaries.
 
 The built-in `lody` server publishes the
 [Skills extension](https://skills.extensions.modelcontextprotocol.io/) from
-[one bundled catalog](skills/automations.ts). `skills/list` and `skills/get` return
+one bundled catalog: [Automations](skills/automations.ts) and
+[Visualize](skills/visualize.ts). `skills/list` and `skills/get` return
 frontmatter and complete file manifests with SHA-256 digests and UTF-8 byte lengths.
 `resources/read` returns individual files. The App's modern HTTP handler advertises
 the extension through `server/discover`.
 
-| Boundary                       | Owner                                                 | Behavior                                                                          |
-| ------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Protocol discovery and content | [MCP registration](skills/server.ts)                  | Publishes skill entries and resources; server instructions point to the entry URI |
-| Manifest construction          | [Bundle construction](skills/catalog.ts)              | Parses SKILL.md frontmatter and hashes the exact resource bytes                   |
-| Automation workflow            | [Automations skill](skills/lody-automations/SKILL.md) | Routes conditions, settings and inspection to focused references                  |
-| Exact API parameters           | [Automation bundle](skills/automations.ts)            | Generates JSON Schema resources from the executing shared schemas                 |
+| Boundary                       | Owner                                                 | Behavior                                                                           |
+| ------------------------------ | ----------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Protocol discovery and content | [MCP registration](skills/server.ts)                  | Publishes skill entries and resources; server instructions point to the entry URI  |
+| Manifest construction          | [Bundle construction](skills/catalog.ts)              | Parses SKILL.md frontmatter and hashes the exact resource bytes                    |
+| Automation workflow            | [Automations skill](skills/lody-automations/SKILL.md) | Routes conditions, settings and inspection to focused references                   |
+| Inline generative UI           | [Visualize skill](skills/lody-visualize/SKILL.md)     | Teaches `html render` fences against the conversation renderer's sandbox and theme |
+| Exact API parameters           | [Automation bundle](skills/automations.ts)            | Generates JSON Schema resources from the executing shared schemas                  |
 
 The MCP host discovers entries through `skills/list`, exposes names and descriptions
 in its native skill catalog, and uses its skill-loading path to verify and activate
@@ -106,6 +108,11 @@ standard `mcpServers`, using the existing HTTP or stdio transport. The Agent own
 its MCP connection and Skills extension consumption. ACP carries no additional skill
 metadata; Lody does not open a second client, install local snapshots, modify native
 plugin configuration or inject the guide into prompts.
+
+The server instructions name every entry URI, because the verified hosts below did
+not request `skills/list`; instructions are the only guidance those hosts receive at
+connection time. Visualize guidance must match the
+[conversation HTML renderer](../../../../packages/components/src/components/ai-gui/html-preview/AGENTS.md).
 
 Automatic summary discovery requires an MCP host implementing the Skills extension.
 Supporting MCP tools or ACP alone does not establish that support. Hosts without the

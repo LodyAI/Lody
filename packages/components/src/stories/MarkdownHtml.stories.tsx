@@ -7,24 +7,29 @@ const counter = `<button id="add">Add</button><output id="n">0</output>
 const meta = {
   title: 'Conversation/Markdown HTML',
   component: MarkdownRenderer,
-  args: { text: `Before\n\n\`\`\`html title="Counter"\n${counter}\n\`\`\`\n\nAfter` },
+  args: { text: `Before\n\n\`\`\`html render\n${counter}\n\`\`\`\n\nAfter` },
 } satisfies Meta<typeof MarkdownRenderer>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Counter: Story = {};
-export const Unclosed: Story = { args: { text: `\`\`\`html\n${counter}` } };
+export const Source: Story = {
+  args: { text: `Plain html fences stay source.\n\n\`\`\`html\n${counter}\n\`\`\`` },
+};
+export const Unclosed: Story = { args: { text: `\`\`\`html render\n${counter}` } };
 export const Error: Story = {
-  args: { text: '\`\`\`html\n<script>throw new Error("Synthetic failure")</script>\n\`\`\`' },
+  args: {
+    text: '\`\`\`html render\n<script>throw new Error("Synthetic failure")</script>\n\`\`\`',
+  },
 };
 export const Tall: Story = {
   args: {
-    text: '\`\`\`html\n<button onclick="document.querySelector(\'div\').style.height=\'900px\'">Grow</button><div style="height:120px">Content</div>\n\`\`\`',
+    text: '\`\`\`html render\n<button onclick="document.querySelector(\'div\').style.height=\'900px\'">Grow</button><div style="height:120px">Content</div>\n\`\`\`',
   },
 };
 
 export const Isolation: Story = {
   args: {
-    text: `\`\`\`html
+    text: `\`\`\`html render
 <output id="result"></output><script>try{parent.document.body;document.getElementById('result').textContent='FAIL: parent readable'}catch(e){document.getElementById('result').textContent='Blocked: '+e.name}</script>
 \`\`\``,
   },
@@ -32,7 +37,7 @@ export const Isolation: Story = {
 
 export const Controls: Story = {
   args: {
-    text: `\`\`\`html title="Controls"
+    text: `\`\`\`html render
 ${counter}
 <p><input placeholder="Text field"><input disabled value="Disabled"></p>
 <p><textarea placeholder="Notes"></textarea><select><option>First option</option><option>Second option</option></select></p>
@@ -44,7 +49,7 @@ ${counter}
 
 export const AuthoredOverrides: Story = {
   args: {
-    text: `\`\`\`html title="Author overrides"
+    text: `\`\`\`html render
 <!doctype html><html><head><style>
 @layer author { * { border-radius: 0; } button { background: gold; color: black; box-shadow: none; } html { color-scheme: light; } }
 .custom { background: navy; color: white; font-family: monospace; }

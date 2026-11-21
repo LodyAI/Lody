@@ -1,9 +1,10 @@
 import { ProtocolError, INVALID_PARAMS, type McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { automationSkill } from './automations';
+import { visualizeSkill } from './visualize';
 import { skillEntrySchema } from './catalog';
 
-const bundles = [automationSkill];
+const bundles = [automationSkill, visualizeSkill];
 const cache = { resultType: 'complete' as const, ttlMs: 300_000, cacheScope: 'public' as const };
 const cacheSchema = z.object({
   resultType: z.literal('complete'),
@@ -11,8 +12,10 @@ const cacheSchema = z.object({
   cacheScope: z.literal('public'),
 });
 const metadata = z.record(z.string(), z.json()).optional();
-export const LODY_SKILL_INSTRUCTIONS =
-  'Automation guidance is available as a skill on this MCP server: skill://lody-automations/SKILL.md.';
+export const LODY_SKILL_INSTRUCTIONS = [
+  'Automation guidance is available as a skill on this MCP server: skill://lody-automations/SKILL.md.',
+  'Lody can show a chart, comparison, mockup or small interactive tool inline in your reply; read skill://lody-visualize/SKILL.md before writing one.',
+].join(' ');
 
 /** Skill manifests and resource reads share the same immutable bundle. */
 export function registerLodySkills(server: McpServer): void {

@@ -947,6 +947,7 @@ const readCodeElement = (pre: HastElement | undefined) => {
     code: code.children.map((child) => (child.type === 'text' ? child.value : '')).join(''),
     language: language || 'text',
     meta: (code.data as { meta?: string | null } | undefined)?.meta ?? undefined,
+    render: language === 'html' && code.properties.dataRender === true,
     isIncomplete:
       language === 'html'
         ? code.properties.dataIncomplete !== false
@@ -955,12 +956,13 @@ const readCodeElement = (pre: HastElement | undefined) => {
 };
 
 function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & ExtraProps) {
-  const block = readCodeElement(node);
-  if (!block) return <pre {...props} />;
+  const element = readCodeElement(node);
+  if (!element) return <pre {...props} />;
+  const { render, ...block } = element;
   if (block.language === 'mermaid' && !block.isIncomplete) {
     return <MarkdownMermaidBlock code={block.code} />;
   }
-  if (block.language === 'html' && !block.isIncomplete)
+  if (render && !block.isIncomplete)
     return <MarkdownHtmlBlock code={block.code.replace(/\n$/u, '')} meta={block.meta} />;
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
   return <MarkdownFencedCodeBlock {...block} />;
