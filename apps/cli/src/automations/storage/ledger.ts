@@ -38,7 +38,61 @@ import { evaluateCapacity } from '../runtime/capacity';
 export const automationIdentity = (...parts: Array<string | number>): string =>
   createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 const terminal = new Set<AutomationState>(['settled', 'failed', 'cancelled', 'superseded']);
+const nonterminal = `'accepted','waiting','resolved','submitting','queued','running','blocked','unknown','cancelling'`;
 type JsonRow = { payload: string };
+
+/** The payload is the frozen acceptance record; every queried field lives in a real column. */
+const eventColumns = (event: AutomationEvent) => ({
+  type: event.type,
+  source: event.source,
+  subject: event.subject,
+  session_id: event.scope.sessionId ?? null,
+  project_id: event.scope.projectId ?? null,
+  work_id: typeof event.data.workId === 'string' ? event.data.workId : null,
+  observed_at: event.observedAt,
+});
+const receiptColumns = (receipt: AutomationReceipt) => ({
+  session_id: receipt.sessionId,
+  scope_session_id: receipt.rule.scope.sessionId ?? receipt.sessionId,
+  owner_user_id: receipt.rule.ownerUserId,
+  rule_id: receipt.rule.id,
+  action_kind: receipt.intent.action.kind,
+  event_type: receipt.event.type,
+  event_source: receipt.event.source,
+  event_id: receipt.event.id,
+  correlation_key: receipt.event.correlationId ?? receipt.deliveryId,
+  policy: receipt.rule.handler.kind === 'policy' ? receipt.rule.handler.policy : null,
+  work_id: typeof receipt.event.data.workId === 'string' ? receipt.event.data.workId : null,
+  retry_at: receipt.retryAt ?? 0,
+});
+const waitColumns = (wait: AutomationWait) => ({
+  session_id: wait.sessionId,
+  owner_user_id: wait.ownerUserId,
+  invocation_id: wait.invocationId ?? null,
+  created_at: wait.createdAt,
+  due_at: Math.min(wait.nextCheckAt, wait.expiresAt ?? Number.MAX_SAFE_INTEGER),
+  run_pending: wait.run && wait.run.startedAt !== undefined && !wait.run.exit ? 1 : 0,
+});
+const workColumns = (work: PendingWork) => ({
+  session_id: work.sessionId,
+  owner_user_id: work.ownerUserId,
+  state: work.state,
+  turn_id: work.turnId,
+  invocation_id: work.invocationId ?? null,
+  updated_at: work.updatedAt,
+  binding_id: work.bindingId,
+  fingerprint: work.fingerprint,
+  model_id: work.modelId ?? null,
+});
+const deliveryColumns = (delivery: Delivery) => ({
+  rule_id: delivery.rule.id,
+  owner_user_id: delivery.rule.ownerUserId,
+  scope_session_id: delivery.rule.scope.sessionId ?? null,
+  event_source: delivery.event.source,
+  event_id: delivery.event.id,
+  event_work_id: typeof delivery.event.data.workId === 'string' ? delivery.event.data.workId : null,
+  updated_at: delivery.updatedAt,
+});
 export type Delivery = {
   id: string;
   rule: AutomationRule;
@@ -65,7 +119,7 @@ export class AutomationLedger {
     try {
       const db = this.connection.raw;
       const version = Number(db.pragma('user_version', { simple: true }));
-      if (version > 2) throw new Error('AUTOMATION_DATABASE_VERSION_UNSUPPORTED');
+      if (version > 4) throw new Error('AUTOMATION_DATABASE_VERSION_UNSUPPORTED');
       db.exec(`
         CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS events (
@@ -86,19 +140,241 @@ export class AutomationLedger {
         CREATE TABLE IF NOT EXISTS capacity (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS work (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS waits (id TEXT PRIMARY KEY, state TEXT NOT NULL, next_check_at INTEGER NOT NULL, payload TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS waits_due ON waits(state,next_check_at);
         CREATE TABLE IF NOT EXISTS turn_observations (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS wait_reads (
+          wait_id TEXT NOT NULL, resource TEXT NOT NULL,
+          PRIMARY KEY (wait_id, resource)
+        );
       `);
       if (version < 2)
         this.connection.withImmediate(() => {
           db.exec('ALTER TABLE turn_observations ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0');
           db.pragma('user_version = 2');
         });
-      db.exec('CREATE INDEX IF NOT EXISTS turn_observations_due ON turn_observations(retry_at)');
+      if (version < 4) this.migrateQueryColumns();
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS turn_observations_due ON turn_observations(retry_at);
+        CREATE INDEX IF NOT EXISTS events_session ON events(session_id, observed_at);
+        CREATE INDEX IF NOT EXISTS events_work ON events(work_id);
+        DROP INDEX IF EXISTS receipts_due;
+        CREATE INDEX IF NOT EXISTS receipts_due_active ON receipts(retry_at)
+        WHERE state IN (${nonterminal});
+        CREATE INDEX IF NOT EXISTS receipts_updated ON receipts(updated_at);
+        DROP INDEX IF EXISTS receipts_delivery;
+        DROP INDEX IF EXISTS deliveries_state;
+        CREATE INDEX IF NOT EXISTS receipts_rule ON receipts(rule_id);
+        CREATE INDEX IF NOT EXISTS receipts_invocation ON receipts(rule_id, action_kind, correlation_key);
+        CREATE INDEX IF NOT EXISTS receipts_session ON receipts(session_id);
+        CREATE INDEX IF NOT EXISTS receipts_event ON receipts(event_source, event_id);
+        CREATE INDEX IF NOT EXISTS receipts_capacity ON receipts(event_type, policy, state);
+        CREATE INDEX IF NOT EXISTS receipts_owner ON receipts(owner_user_id);
+        CREATE INDEX IF NOT EXISTS waits_due_at ON waits(state, due_at);
+        CREATE INDEX IF NOT EXISTS waits_owner ON waits(owner_user_id, session_id);
+        CREATE INDEX IF NOT EXISTS waits_session ON waits(session_id);
+        CREATE INDEX IF NOT EXISTS waits_run ON waits(state, run_pending);
+        CREATE INDEX IF NOT EXISTS wait_reads_resource ON wait_reads(resource, wait_id);
+        CREATE INDEX IF NOT EXISTS work_session ON work(session_id, state);
+        CREATE INDEX IF NOT EXISTS work_owner ON work(owner_user_id);
+        CREATE INDEX IF NOT EXISTS work_binding ON work(binding_id);
+        CREATE INDEX IF NOT EXISTS receipts_work ON receipts(work_id);
+        CREATE INDEX IF NOT EXISTS deliveries_event ON deliveries(event_source, event_id);
+        CREATE INDEX IF NOT EXISTS deliveries_work ON deliveries(event_work_id, rule_id);
+        CREATE INDEX IF NOT EXISTS deliveries_owner ON deliveries(owner_user_id);
+        CREATE INDEX IF NOT EXISTS turn_observations_owner ON turn_observations(user_id, observed_at);
+      `);
     } catch (cause) {
       this.close();
       throw cause;
     }
+  }
+  /** v3 lifts every predicate out of the payload into real columns, backfilled by the writer projections. */
+  private migrateQueryColumns(): void {
+    const db = this.connection.raw;
+    this.connection.withImmediate(() => {
+      const addColumns = (table: string, columns: Record<string, string>) => {
+        const existing = new Set(
+          (db.pragma(`table_info(${table})`) as Array<{ name: string }>).map((c) => c.name)
+        );
+        for (const [name, declaration] of Object.entries(columns))
+          if (!existing.has(name))
+            db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${declaration}`);
+      };
+      addColumns('events', {
+        type: 'TEXT',
+        source: 'TEXT',
+        subject: 'TEXT',
+        session_id: 'TEXT',
+        project_id: 'TEXT',
+        work_id: 'TEXT',
+        observed_at: 'INTEGER',
+      });
+      addColumns('receipts', {
+        session_id: 'TEXT',
+        scope_session_id: 'TEXT',
+        owner_user_id: 'TEXT',
+        rule_id: 'TEXT',
+        action_kind: 'TEXT',
+        event_type: 'TEXT',
+        event_source: 'TEXT',
+        event_id: 'TEXT',
+        correlation_key: 'TEXT',
+        policy: 'TEXT',
+        work_id: 'TEXT',
+        retry_at: 'INTEGER NOT NULL DEFAULT 0',
+      });
+      addColumns('waits', {
+        session_id: 'TEXT',
+        owner_user_id: 'TEXT',
+        invocation_id: 'TEXT',
+        created_at: 'INTEGER',
+        due_at: 'INTEGER',
+        run_pending: 'INTEGER NOT NULL DEFAULT 0',
+      });
+      addColumns('work', {
+        session_id: 'TEXT',
+        owner_user_id: 'TEXT',
+        state: 'TEXT',
+        turn_id: 'TEXT',
+        invocation_id: 'TEXT',
+        updated_at: 'INTEGER',
+        binding_id: 'TEXT',
+        fingerprint: 'TEXT',
+        model_id: 'TEXT',
+      });
+      addColumns('deliveries', {
+        rule_id: 'TEXT',
+        owner_user_id: 'TEXT',
+        scope_session_id: 'TEXT',
+        event_source: 'TEXT',
+        event_id: 'TEXT',
+        event_work_id: 'TEXT',
+        updated_at: 'INTEGER',
+      });
+      addColumns('turn_observations', {
+        user_id: 'TEXT',
+        session_id: 'TEXT',
+        observed_at: 'INTEGER',
+      });
+      db.exec('DROP INDEX IF EXISTS waits_due');
+      // Rowid-keyed batches bound upgrade memory; a write cursor cannot share a reading cursor.
+      const backfill = (
+        select: string,
+        apply: (row: JsonRow & { rowid: number; id: string }) => void
+      ) => {
+        const stmt = db.prepare(`${select} WHERE rowid>? ORDER BY rowid LIMIT 512`);
+        let after = 0;
+        for (;;) {
+          const rows = stmt.all(after) as Array<JsonRow & { rowid: number; id: string }>;
+          for (const row of rows) {
+            apply(row);
+            after = row.rowid;
+          }
+          if (rows.length < 512) return;
+        }
+      };
+      const events = db.prepare(
+        `UPDATE events SET type=?,source=?,subject=?,session_id=?,project_id=?,work_id=?,observed_at=?
+        WHERE sequence=?`
+      );
+      backfill('SELECT rowid AS rowid,payload FROM events', (row) => {
+        const c = eventColumns(JSON.parse(row.payload) as AutomationEvent);
+        events.run(
+          c.type,
+          c.source,
+          c.subject,
+          c.session_id,
+          c.project_id,
+          c.work_id,
+          c.observed_at,
+          row.rowid
+        );
+      });
+      const receipts = db.prepare(
+        `UPDATE receipts SET session_id=?,scope_session_id=?,owner_user_id=?,rule_id=?,action_kind=?,
+        event_type=?,event_source=?,event_id=?,correlation_key=?,policy=?,work_id=?,retry_at=? WHERE id=?`
+      );
+      backfill('SELECT rowid,id,payload FROM receipts', (row) => {
+        const c = receiptColumns(JSON.parse(row.payload) as AutomationReceipt);
+        receipts.run(
+          c.session_id,
+          c.scope_session_id,
+          c.owner_user_id,
+          c.rule_id,
+          c.action_kind,
+          c.event_type,
+          c.event_source,
+          c.event_id,
+          c.correlation_key,
+          c.policy,
+          c.work_id,
+          c.retry_at,
+          row.id
+        );
+      });
+      const waits = db.prepare(
+        `UPDATE waits SET session_id=?,owner_user_id=?,invocation_id=?,created_at=?,due_at=?,run_pending=?
+        WHERE id=?`
+      );
+      const insertRead = db.prepare('INSERT OR IGNORE INTO wait_reads VALUES (?,?)');
+      backfill('SELECT rowid,id,payload FROM waits', (row) => {
+        const wait = JSON.parse(row.payload) as AutomationWait;
+        const c = waitColumns(wait);
+        waits.run(
+          c.session_id,
+          c.owner_user_id,
+          c.invocation_id,
+          c.created_at,
+          c.due_at,
+          c.run_pending,
+          row.id
+        );
+        for (const resource of wait.reads ?? []) insertRead.run(row.id, resource);
+      });
+      const work = db.prepare(
+        `UPDATE work SET session_id=?,owner_user_id=?,state=?,turn_id=?,invocation_id=?,updated_at=?,
+        binding_id=?,fingerprint=?,model_id=? WHERE id=?`
+      );
+      backfill('SELECT rowid,id,payload FROM work', (row) => {
+        const c = workColumns(JSON.parse(row.payload) as PendingWork);
+        work.run(
+          c.session_id,
+          c.owner_user_id,
+          c.state,
+          c.turn_id,
+          c.invocation_id,
+          c.updated_at,
+          c.binding_id,
+          c.fingerprint,
+          c.model_id,
+          row.id
+        );
+      });
+      const deliveries = db.prepare(
+        `UPDATE deliveries SET rule_id=?,owner_user_id=?,scope_session_id=?,event_source=?,event_id=?,
+        event_work_id=?,updated_at=? WHERE id=?`
+      );
+      backfill('SELECT rowid,id,payload FROM deliveries', (row) => {
+        const c = deliveryColumns(JSON.parse(row.payload) as Delivery);
+        deliveries.run(
+          c.rule_id,
+          c.owner_user_id,
+          c.scope_session_id,
+          c.event_source,
+          c.event_id,
+          c.event_work_id,
+          c.updated_at,
+          row.id
+        );
+      });
+      const turns = db.prepare(
+        'UPDATE turn_observations SET user_id=?,session_id=?,observed_at=? WHERE id=?'
+      );
+      backfill('SELECT rowid,id,payload FROM turn_observations', (row) => {
+        const fact = JSON.parse(row.payload) as SessionAutomationObservation;
+        turns.run(fact.userId, fact.sessionId, fact.observedAt, row.id);
+      });
+      db.pragma('user_version = 4');
+    });
   }
   registerWait(
     input: AutomationRegistration,
@@ -200,9 +476,9 @@ export class AutomationLedger {
   orphanStartedRuns(now: number): void {
     this.connection.withImmediate(() => {
       const rows = this.connection.raw
-        .prepare(`SELECT payload FROM waits WHERE state IN ('waiting','checking')
-        AND json_extract(payload,'$.run.startedAt') IS NOT NULL
-        AND json_extract(payload,'$.run.exit') IS NULL`)
+        .prepare(
+          `SELECT payload FROM waits WHERE state IN ('waiting','checking') AND run_pending=1`
+        )
         .all() as JsonRow[];
       for (const row of rows) {
         const wait = JSON.parse(row.payload) as AutomationWait;
@@ -234,10 +510,30 @@ export class AutomationLedger {
     });
   }
   private writeWait(wait: AutomationWait): void {
+    const c = waitColumns(wait);
     this.connection.raw
-      .prepare(`INSERT INTO waits VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET
-      state=excluded.state,next_check_at=excluded.next_check_at,payload=excluded.payload`)
-      .run(wait.id, wait.state, wait.nextCheckAt, JSON.stringify(wait));
+      .prepare(`INSERT INTO waits
+      (id,state,next_check_at,session_id,owner_user_id,invocation_id,created_at,due_at,run_pending,payload)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET state=excluded.state,next_check_at=excluded.next_check_at,
+      session_id=excluded.session_id,owner_user_id=excluded.owner_user_id,
+      invocation_id=excluded.invocation_id,created_at=excluded.created_at,due_at=excluded.due_at,
+      run_pending=excluded.run_pending,payload=excluded.payload`)
+      .run(
+        wait.id,
+        wait.state,
+        wait.nextCheckAt,
+        c.session_id,
+        c.owner_user_id,
+        c.invocation_id,
+        c.created_at,
+        c.due_at,
+        c.run_pending,
+        JSON.stringify(wait)
+      );
+    this.connection.raw.prepare('DELETE FROM wait_reads WHERE wait_id=?').run(wait.id);
+    const insert = this.connection.raw.prepare('INSERT OR IGNORE INTO wait_reads VALUES (?,?)');
+    for (const resource of wait.reads ?? []) insert.run(wait.id, resource);
   }
   wait(id: string): AutomationWait | undefined {
     return this.read('waits', id);
@@ -245,18 +541,34 @@ export class AutomationLedger {
   waits(userId: string, sessionId?: string): AutomationWait[] {
     return (
       this.connection.raw
-        .prepare(`SELECT payload FROM waits WHERE json_extract(payload,'$.ownerUserId')=?
-      AND (? IS NULL OR json_extract(payload,'$.sessionId')=?) ORDER BY json_extract(payload,'$.createdAt') DESC,id`)
-        .all(userId, sessionId ?? null, sessionId ?? null) as JsonRow[]
+        .prepare(`SELECT payload FROM waits WHERE owner_user_id=?
+      ${sessionId === undefined ? '' : 'AND session_id=?'} ORDER BY created_at DESC,id`)
+        .all(...(sessionId === undefined ? [userId] : [userId, sessionId])) as JsonRow[]
     ).map((row) => JSON.parse(row.payload) as AutomationWait);
   }
   dueWaits(now: number, limit = 4): AutomationWait[] {
     return (
       this.connection.raw
         .prepare(`SELECT payload FROM waits WHERE state IN ('waiting','checking')
-      AND (next_check_at<=? OR json_extract(payload,'$.expiresAt')<=?) ORDER BY next_check_at,id LIMIT ?`)
-        .all(now, now, limit) as JsonRow[]
+      AND due_at<=? ORDER BY due_at,id LIMIT ?`)
+        .all(now, limit) as JsonRow[]
     ).map((row) => JSON.parse(row.payload) as AutomationWait);
+  }
+  /** Earliest durable deadline; an accepted delivery is always due at once. */
+  nextDueAt(now: number): number | undefined {
+    let next: number | undefined;
+    const track = (sql: string) => {
+      const { due } = this.connection.raw.prepare(sql).get() as { due: number | null };
+      if (due !== null && (next === undefined || due < next)) next = due;
+    };
+    track(`SELECT MIN(due_at) AS due FROM waits WHERE state IN ('waiting','checking')`);
+    track(`SELECT MIN(retry_at) AS due FROM receipts WHERE state IN (${nonterminal})`);
+    track('SELECT MIN(retry_at) AS due FROM turn_observations');
+    if (
+      this.connection.raw.prepare(`SELECT 1 FROM deliveries WHERE state='accepted' LIMIT 1`).get()
+    )
+      return now;
+    return next;
   }
   updateWait(
     id: string,
@@ -295,20 +607,37 @@ export class AutomationLedger {
       );
     });
   }
+  private wantsReadSql = `SELECT 1 FROM waits JOIN wait_reads ON wait_reads.wait_id=waits.id
+    WHERE wait_reads.resource=? AND (waits.state IN ('waiting','checking') OR (waits.state='matched'
+      AND EXISTS (SELECT 1 FROM receipts WHERE receipts.id=waits.invocation_id
+      AND receipts.state IN (${nonterminal}))))`;
   wantsRead(resource: string, sessionId?: string): boolean {
-    return !!this.connection.raw
-      .prepare(`SELECT 1 FROM waits,json_each(waits.payload,'$.reads') AS dependency
-      WHERE (waits.state IN ('waiting','checking') OR (waits.state='matched' AND EXISTS
-        (SELECT 1 FROM receipts WHERE receipts.id=json_extract(waits.payload,'$.invocationId')
-        AND receipts.state NOT IN ('settled','failed','cancelled','superseded')))) AND dependency.value=?
-      AND (? IS NULL OR json_extract(waits.payload,'$.sessionId')=?) LIMIT 1`)
-      .get(resource, sessionId ?? null, sessionId ?? null);
+    return sessionId === undefined
+      ? !!this.connection.raw.prepare(`${this.wantsReadSql} LIMIT 1`).get(resource)
+      : !!this.connection.raw
+          .prepare(`${this.wantsReadSql} AND waits.session_id=? LIMIT 1`)
+          .get(resource, sessionId);
+  }
+  wantsReadSessions(resource: string): Set<string> {
+    return new Set(
+      (
+        this.connection.raw
+          .prepare(`SELECT DISTINCT waits.session_id FROM waits
+        JOIN wait_reads ON wait_reads.wait_id=waits.id
+        WHERE wait_reads.resource=? AND waits.session_id IS NOT NULL
+        AND (waits.state IN ('waiting','checking') OR (waits.state='matched'
+          AND EXISTS (SELECT 1 FROM receipts WHERE receipts.id=waits.invocation_id
+          AND receipts.state IN (${nonterminal}))))`)
+          .all(resource) as Array<{ session_id: string }>
+      ).map((row) => row.session_id)
+    );
   }
   invalidateReads(resource: string, sessionId: string, now: number): void {
     const waits = this.connection.raw
-      .prepare(`SELECT waits.payload FROM waits,json_each(waits.payload,'$.reads') AS dependency
-      WHERE waits.state='waiting' AND dependency.value=? AND json_extract(waits.payload,'$.sessionId')=?`)
-      .all(resource, sessionId) as JsonRow[];
+      .prepare(`SELECT waits.id,waits.payload FROM waits
+      JOIN wait_reads ON wait_reads.wait_id=waits.id
+      WHERE waits.state='waiting' AND wait_reads.resource=? AND waits.session_id=?`)
+      .all(resource, sessionId) as Array<JsonRow & { id: string }>;
     for (const row of waits) {
       const wait = JSON.parse(row.payload) as AutomationWait;
       this.updateWait(wait.id, 'waiting', { nextCheckAt: Math.min(wait.nextCheckAt, now) }, now);
@@ -318,8 +647,7 @@ export class AutomationLedger {
     return (
       this.connection.raw
         .prepare(`SELECT payload FROM events
-      WHERE json_extract(payload,'$.scope.sessionId')=? AND json_extract(payload,'$.observedAt')>=?
-      ORDER BY sequence DESC LIMIT ?`)
+      WHERE session_id=? AND observed_at>=? ORDER BY sequence DESC LIMIT ?`)
         .all(sessionId, since, limit) as JsonRow[]
     ).map((row) => JSON.parse(row.payload) as AutomationEvent);
   }
@@ -340,14 +668,12 @@ export class AutomationLedger {
           'checking',
           {
             state: 'waiting',
-            // A run exit recorded during this check is due now, not after another interval.
             nextCheckAt: current.run?.exit ? now : now + wait.intervalMs,
             consecutiveErrors: 0,
             lastError: undefined,
           },
           now
         );
-      // Completion-to-resume is fixed Host policy. Programs cannot author rules or target another Session.
       const invocation = {
         target: {
           kind: 'existing' as const,
@@ -461,10 +787,11 @@ export class AutomationLedger {
         return;
       this.connection.raw
         .prepare(
-          `INSERT INTO turn_observations (id,payload) VALUES (?,?)
-          ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,retry_at=0`
+          `INSERT INTO turn_observations (id,payload,user_id,session_id,observed_at) VALUES (?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,retry_at=0,
+          user_id=excluded.user_id,session_id=excluded.session_id,observed_at=excluded.observed_at`
         )
-        .run(id, JSON.stringify(fact));
+        .run(id, JSON.stringify(fact), fact.userId, fact.sessionId, fact.observedAt);
     });
   }
   stagedTurns(now = Date.now()): Array<{ id: string; fact: SessionAutomationObservation }> {
@@ -562,9 +889,24 @@ export class AutomationLedger {
       throw new Error('AUTOMATION_WORKSPACE_MISMATCH');
     return this.connection.withImmediate(() => {
       const key = automationIdentity(event.source, event.id);
+      const c = eventColumns(event);
       const result = this.connection.raw
-        .prepare('INSERT OR IGNORE INTO events(event_key,payload) VALUES (?,?)')
-        .run(key, JSON.stringify(event));
+        .prepare(
+          `INSERT OR IGNORE INTO events
+          (event_key,type,source,subject,session_id,project_id,work_id,observed_at,payload)
+          VALUES (?,?,?,?,?,?,?,?,?)`
+        )
+        .run(
+          key,
+          c.type,
+          c.source,
+          c.subject,
+          c.session_id,
+          c.project_id,
+          c.work_id,
+          c.observed_at,
+          JSON.stringify(event)
+        );
       if (!result.changes) {
         const previous = this.connection.raw
           .prepare('SELECT payload FROM events WHERE event_key=?')
@@ -599,9 +941,25 @@ export class AutomationLedger {
           state: 'accepted',
           updatedAt: event.observedAt,
         };
+        const d = deliveryColumns(delivery);
         this.connection.raw
-          .prepare('INSERT INTO deliveries VALUES (?,?,?)')
-          .run(delivery.id, delivery.state, JSON.stringify(delivery));
+          .prepare(
+            `INSERT INTO deliveries
+            (id,state,rule_id,owner_user_id,scope_session_id,event_source,event_id,event_work_id,updated_at,payload)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`
+          )
+          .run(
+            delivery.id,
+            delivery.state,
+            d.rule_id,
+            d.owner_user_id,
+            d.scope_session_id,
+            d.event_source,
+            d.event_id,
+            d.event_work_id,
+            d.updated_at,
+            JSON.stringify(delivery)
+          );
       }
       return key;
     });
@@ -624,8 +982,10 @@ export class AutomationLedger {
       updatedAt: now,
     };
     this.connection.raw
-      .prepare("UPDATE deliveries SET state=?,payload=? WHERE id=? AND state='accepted'")
-      .run(next.state, JSON.stringify(next), next.id);
+      .prepare(
+        "UPDATE deliveries SET state=?,updated_at=?,payload=? WHERE id=? AND state='accepted'"
+      )
+      .run(next.state, next.updatedAt, JSON.stringify(next), next.id);
   }
   accept(
     delivery: Delivery,
@@ -651,7 +1011,7 @@ export class AutomationLedger {
         .get(delivery.id) as { count: number };
       const { count: pending } = this.connection.raw
         .prepare(`SELECT COUNT(*) AS count FROM receipts
-        WHERE json_extract(payload,'$.rule.id')=? AND state NOT IN ('settled','failed','cancelled','superseded')`)
+        WHERE rule_id=? AND state IN (${nonterminal})`)
         .get(delivery.rule.id) as { count: number };
       if (pending >= (delivery.rule.budget.maxPendingActions ?? 256))
         throw new Error('AUTOMATION_QUEUE_BUDGET_EXHAUSTED');
@@ -666,9 +1026,7 @@ export class AutomationLedger {
           automationIdentity(delivery.event.source, delivery.event.id);
         const { count: invocations } = this.connection.raw
           .prepare(`SELECT COUNT(*) AS count FROM receipts
-          WHERE json_extract(payload,'$.rule.id')=?
-          AND json_extract(payload,'$.intent.action.kind') = 'agent.invoke'
-          AND COALESCE(json_extract(payload,'$.event.correlationId'),json_extract(payload,'$.deliveryId'))=?`)
+          WHERE rule_id=? AND action_kind='agent.invoke' AND correlation_key=?`)
           .get(delivery.rule.id, correlation) as { count: number };
         if (invocations >= delivery.rule.budget.maxInvocationsPerCorrelation)
           throw new Error('AUTOMATION_INVOCATION_BUDGET_EXHAUSTED');
@@ -698,9 +1056,33 @@ export class AutomationLedger {
         createdAt: now,
         updatedAt: now,
       };
+      const c = receiptColumns(receipt);
       this.connection.raw
-        .prepare('INSERT INTO receipts VALUES (?,?,?,?,?)')
-        .run(id, delivery.id, receipt.state, now, JSON.stringify(receipt));
+        .prepare(
+          `INSERT INTO receipts
+          (id,delivery_id,state,updated_at,session_id,scope_session_id,owner_user_id,rule_id,
+          action_kind,event_type,event_source,event_id,correlation_key,policy,work_id,retry_at,payload)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        )
+        .run(
+          id,
+          delivery.id,
+          receipt.state,
+          now,
+          c.session_id,
+          c.scope_session_id,
+          c.owner_user_id,
+          c.rule_id,
+          c.action_kind,
+          c.event_type,
+          c.event_source,
+          c.event_id,
+          c.correlation_key,
+          c.policy,
+          c.work_id,
+          c.retry_at,
+          JSON.stringify(receipt)
+        );
       return receipt;
     });
   }
@@ -729,9 +1111,7 @@ export class AutomationLedger {
   eventReceipts(source: string, eventId: string): AutomationReceipt[] {
     return (
       this.connection.raw
-        .prepare(
-          "SELECT payload FROM receipts WHERE json_extract(payload,'$.event.source')=? AND json_extract(payload,'$.event.id')=?"
-        )
+        .prepare('SELECT payload FROM receipts WHERE event_source=? AND event_id=?')
         .all(source, eventId) as JsonRow[]
     ).map((row) => JSON.parse(row.payload) as AutomationReceipt);
   }
@@ -739,7 +1119,7 @@ export class AutomationLedger {
   hasEventDelivery(source: string, eventId: string): boolean {
     return !!this.connection.raw
       .prepare(
-        "SELECT 1 FROM deliveries WHERE state='accepted' AND json_extract(payload,'$.event.source')=? AND json_extract(payload,'$.event.id')=? LIMIT 1"
+        "SELECT 1 FROM deliveries WHERE state='accepted' AND event_source=? AND event_id=? LIMIT 1"
       )
       .get(source, eventId);
   }
@@ -754,21 +1134,19 @@ export class AutomationLedger {
   }
   hasSessionWork(sessionId: string, excludingInvocationId?: string): boolean {
     const receipt = this.connection.raw
-      .prepare(`SELECT 1 FROM receipts WHERE state NOT IN ('settled','failed','cancelled','superseded')
-      AND id<>? AND json_extract(payload,'$.intent.action.kind') IN ('agent.invoke','session.compact')
-      AND (json_extract(payload,'$.sessionId')=? OR json_extract(payload,'$.intent.action.parameters.target.sessionId')=?
-        OR json_extract(payload,'$.intent.action.parameters.sessionId')=?) LIMIT 1`)
-      .get(excludingInvocationId ?? '', sessionId, sessionId, sessionId);
+      .prepare(`SELECT 1 FROM receipts WHERE state IN (${nonterminal})
+      AND id<>? AND action_kind IN ('agent.invoke','session.compact') AND session_id=? LIMIT 1`)
+      .get(excludingInvocationId ?? '', sessionId);
     const work = this.connection.raw
-      .prepare(`SELECT 1 FROM work WHERE json_extract(payload,'$.sessionId')=?
-      AND json_extract(payload,'$.state') NOT IN ('settled','cancelled','failed')
-      AND (? IS NULL OR COALESCE(json_extract(payload,'$.invocationId'),'')<>?) LIMIT 1`)
+      .prepare(`SELECT 1 FROM work WHERE session_id=?
+      AND state NOT IN ('settled','cancelled','failed')
+      AND (? IS NULL OR COALESCE(invocation_id,'')<>?) LIMIT 1`)
       .get(sessionId, excludingInvocationId ?? null, excludingInvocationId ?? null);
     const wait = this.connection.raw
       .prepare(`SELECT 1 FROM waits WHERE state IN ('waiting','checking','matched')
-      AND id<>? AND json_extract(payload,'$.sessionId')=? AND (? IS NULL OR COALESCE(json_extract(payload,'$.invocationId'),'')<>?)
-      AND (state<>'matched' OR EXISTS (SELECT 1 FROM receipts WHERE receipts.id=json_extract(waits.payload,'$.invocationId')
-        AND receipts.state NOT IN ('settled','failed','cancelled','superseded'))) LIMIT 1`)
+      AND id<>? AND session_id=? AND (? IS NULL OR COALESCE(invocation_id,'')<>?)
+      AND (state<>'matched' OR EXISTS (SELECT 1 FROM receipts WHERE receipts.id=waits.invocation_id
+        AND receipts.state IN (${nonterminal}))) LIMIT 1`)
       .get(
         excludingInvocationId ?? '',
         sessionId,
@@ -783,19 +1161,27 @@ export class AutomationLedger {
     limit: number,
     before?: { updatedAt: number; id: string }
   ) {
+    const sessionClause = (column: string) => (sessionId === undefined ? '' : `AND ${column}=?`);
+    const args = (user: string) => (sessionId === undefined ? [user] : [user, sessionId]);
     const rows = this.connection.raw
       .prepare(`SELECT * FROM (
       SELECT 'action' AS kind,id,updated_at AS updatedAt,payload FROM receipts
-      UNION ALL SELECT 'handler' AS kind,id,COALESCE(json_extract(payload,'$.updatedAt'),0) AS updatedAt,payload FROM deliveries
-      UNION ALL SELECT 'work' AS kind,id,COALESCE(json_extract(payload,'$.updatedAt'),0) AS updatedAt,payload FROM work
-      UNION ALL SELECT 'release' AS kind,id,json_extract(payload,'$.observedAt') AS updatedAt,payload FROM turn_observations
-    ) WHERE COALESCE(json_extract(payload,'$.rule.ownerUserId'),json_extract(payload,'$.ownerUserId'),json_extract(payload,'$.userId'))=?
-      AND (? IS NULL OR COALESCE(json_extract(payload,'$.rule.scope.sessionId'),json_extract(payload,'$.sessionId'))=?)
-      AND (updatedAt<? OR (updatedAt=? AND id>?)) ORDER BY updatedAt DESC,id LIMIT ?`)
+      WHERE owner_user_id=? ${sessionClause('scope_session_id')}
+      UNION ALL
+      SELECT 'handler' AS kind,id,updated_at AS updatedAt,payload FROM deliveries
+      WHERE owner_user_id=? ${sessionClause('scope_session_id')}
+      UNION ALL
+      SELECT 'work' AS kind,id,updated_at AS updatedAt,payload FROM work
+      WHERE owner_user_id=? ${sessionClause('session_id')}
+      UNION ALL
+      SELECT 'release' AS kind,id,observed_at AS updatedAt,payload FROM turn_observations
+      WHERE user_id=? ${sessionClause('session_id')}
+    ) WHERE (updatedAt<? OR (updatedAt=? AND id>?)) ORDER BY updatedAt DESC,id LIMIT ?`)
       .all(
-        userId,
-        sessionId ?? null,
-        sessionId ?? null,
+        ...args(userId),
+        ...args(userId),
+        ...args(userId),
+        ...args(userId),
         before?.updatedAt ?? Number.MAX_SAFE_INTEGER,
         before?.updatedAt ?? Number.MAX_SAFE_INTEGER,
         before?.id ?? '',
@@ -827,8 +1213,8 @@ export class AutomationLedger {
   pending(now: number, limit = 100): AutomationReceipt[] {
     return (
       this.connection.raw
-        .prepare(`SELECT payload FROM receipts WHERE state NOT IN ('settled','failed','cancelled','superseded')
-      AND COALESCE(json_extract(payload,'$.retryAt'),0)<=? ORDER BY updated_at,id LIMIT ?`)
+        .prepare(`SELECT payload FROM receipts WHERE state IN (${nonterminal})
+      AND retry_at<=? ORDER BY updated_at,id LIMIT ?`)
         .all(now, limit) as JsonRow[]
     ).map((row) => JSON.parse(row.payload) as AutomationReceipt);
   }
@@ -852,9 +1238,29 @@ export class AutomationLedger {
         intent: previous.intent,
         updatedAt: now,
       };
+      const c = receiptColumns(next);
       this.connection.raw
-        .prepare('UPDATE receipts SET state=?,updated_at=?,payload=? WHERE id=?')
-        .run(next.state, now, JSON.stringify(next), id);
+        .prepare(`UPDATE receipts SET state=?,updated_at=?,session_id=?,scope_session_id=?,
+        owner_user_id=?,rule_id=?,action_kind=?,event_type=?,event_source=?,event_id=?,
+        correlation_key=?,policy=?,work_id=?,retry_at=?,payload=? WHERE id=?`)
+        .run(
+          next.state,
+          now,
+          c.session_id,
+          c.scope_session_id,
+          c.owner_user_id,
+          c.rule_id,
+          c.action_kind,
+          c.event_type,
+          c.event_source,
+          c.event_id,
+          c.correlation_key,
+          c.policy,
+          c.work_id,
+          c.retry_at,
+          JSON.stringify(next),
+          id
+        );
       if (terminal.has(next.state) && next.intent.action.kind === 'agent.invoke') {
         const invocation = automationInvocationSchema.safeParse(next.intent.action.parameters);
         const work =
@@ -887,41 +1293,58 @@ export class AutomationLedger {
   capacity(bindingId: string, modelId?: string): CapacityObservation | undefined {
     return this.read('capacity', automationIdentity(bindingId, modelId ?? ''));
   }
-  recordCapacity(observation: CapacityObservation, event?: AutomationEvent): void {
+  recordCapacity(observation: CapacityObservation, now: number, event?: AutomationEvent): void {
     this.connection.withImmediate(() => {
       this.putCapacity(observation);
-      if (event) {
-        this.publish(event);
-        const rows = this.connection.raw
-          .prepare(
-            "SELECT payload FROM receipts WHERE state IN ('accepted','waiting','blocked','resolved') AND json_extract(payload,'$.event.type')='provider.quota.exhausted' AND json_extract(payload,'$.rule.handler.policy')='recover-capacity'"
-          )
-          .all() as JsonRow[];
-        for (const row of rows) {
-          const receipt = JSON.parse(row.payload) as AutomationReceipt;
-          const ref = receipt.event.data.workId;
-          const work = typeof ref === 'string' ? this.work(ref) : undefined;
-          if (
-            !work ||
-            work.bindingId !== observation.bindingId ||
-            work.fingerprint !== observation.fingerprint ||
-            (observation.modelId !== undefined && work.modelId !== observation.modelId)
-          )
-            continue;
-          const current =
-            this.capacity(work.bindingId, work.modelId) ?? this.capacity(work.bindingId);
-          if (evaluateCapacity(current, work, event.observedAt).value !== 'yes') continue;
-          this.update(
-            receipt.id,
-            receipt.state,
-            {
-              retryAt: event.observedAt,
-              capacityWakeRevision: (receipt.capacityWakeRevision ?? 0) + 1,
-            },
-            event.observedAt
-          );
-        }
+      if (event) this.publish(event);
+      // A fresh available observation is new evidence; the deadline is a recheck, never admission.
+      if (evaluateCapacity(observation, observation, now).value !== 'yes') return;
+      // Same-or-older evidence for this binding/model was already scanned — no new wake.
+      const wakeKey = `wake/${automationIdentity(observation.bindingId, observation.modelId ?? '')}`;
+      const seen = this.read('capacity', wakeKey) as { observedAt?: number } | undefined;
+      if ((seen?.observedAt ?? -1) >= observation.observedAt) return;
+      const rows = (
+        observation.modelId === undefined
+          ? this.connection.raw
+              .prepare(
+                `SELECT r.payload AS receipt, w.payload AS work FROM receipts r
+                JOIN work w ON w.id=r.work_id AND w.binding_id=? AND w.fingerprint=?
+                WHERE r.state IN ('accepted','waiting','blocked','resolved')
+                AND r.event_type='provider.quota.exhausted' AND r.policy='recover-capacity'`
+              )
+              .all(observation.bindingId, observation.fingerprint)
+          : this.connection.raw
+              .prepare(
+                `SELECT r.payload AS receipt, w.payload AS work FROM receipts r
+                JOIN work w ON w.id=r.work_id AND w.binding_id=? AND w.fingerprint=? AND w.model_id=?
+                WHERE r.state IN ('accepted','waiting','blocked','resolved')
+                AND r.event_type='provider.quota.exhausted' AND r.policy='recover-capacity'`
+              )
+              .all(observation.bindingId, observation.fingerprint, observation.modelId)
+      ) as Array<{ receipt: string; work: string }>;
+      for (const row of rows) {
+        const receipt = JSON.parse(row.receipt) as AutomationReceipt;
+        const work = JSON.parse(row.work) as PendingWork;
+        const current =
+          this.capacity(work.bindingId, work.modelId) ?? this.capacity(work.bindingId);
+        if (evaluateCapacity(current, work, now).value !== 'yes') continue;
+        // One wake per receipt per push: a snapshot expands to one observation per model plus aggregate.
+        if (receipt.retryAt === now) continue;
+        this.update(
+          receipt.id,
+          receipt.state,
+          {
+            retryAt: now,
+            capacityWakeRevision: (receipt.capacityWakeRevision ?? 0) + 1,
+          },
+          now
+        );
       }
+      this.connection.raw
+        .prepare(
+          'INSERT INTO capacity VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload'
+        )
+        .run(wakeKey, JSON.stringify({ observedAt: observation.observedAt }));
     });
   }
   recordWork(work: PendingWork, event: AutomationEvent): void {
@@ -952,9 +1375,9 @@ export class AutomationLedger {
   ): void {
     this.connection.withImmediate(() => {
       const rows = this.connection.raw
-        .prepare(`SELECT payload FROM work WHERE json_extract(payload,'$.sessionId')=?
-        AND json_extract(payload,'$.turnId')<>? AND json_extract(payload,'$.state') IN ('blocked_on_capacity','queued')
-        AND (? IS NULL OR COALESCE(json_extract(payload,'$.invocationId'),'')<>?)`)
+        .prepare(`SELECT payload FROM work WHERE session_id=?
+        AND turn_id<>? AND state IN ('blocked_on_capacity','queued')
+        AND (? IS NULL OR COALESCE(invocation_id,'')<>?)`)
         .all(sessionId, turnId, invocationId ?? null, invocationId ?? null) as JsonRow[];
       for (const row of rows)
         this.putWork({
@@ -992,14 +1415,13 @@ export class AutomationLedger {
       );
       if (!work) return;
       const existing = this.connection.raw
-        .prepare(
-          "SELECT 1 FROM deliveries WHERE json_extract(payload,'$.event.data.workId')=? AND json_extract(payload,'$.rule.id')=? LIMIT 1"
-        )
+        .prepare('SELECT 1 FROM deliveries WHERE event_work_id=? AND rule_id=? LIMIT 1')
         .get(work.id, automationIdentity('session-policy', sessionId, 'recover-capacity'));
       if (existing) return;
       const row = this.connection.raw
         .prepare(
-          "SELECT payload FROM events WHERE json_extract(payload,'$.data.workId')=? AND json_extract(payload,'$.type') IN ('provider.quota.exhausted','provider.model.overloaded') LIMIT 1"
+          `SELECT payload FROM events WHERE work_id=?
+          AND type IN ('provider.quota.exhausted','provider.model.overloaded') LIMIT 1`
         )
         .get(work.id) as JsonRow | undefined;
       if (!row) return;
@@ -1015,7 +1437,7 @@ export class AutomationLedger {
     return (
       this.connection.raw
         .prepare(
-          "SELECT payload FROM work WHERE json_extract(payload,'$.sessionId')=? AND json_extract(payload,'$.ownerUserId')=? ORDER BY json_extract(payload,'$.updatedAt') DESC"
+          'SELECT payload FROM work WHERE session_id=? AND owner_user_id=? ORDER BY updated_at DESC'
         )
         .all(sessionId, userId) as JsonRow[]
     ).map((row) => JSON.parse(row.payload) as PendingWork);
@@ -1034,10 +1456,30 @@ export class AutomationLedger {
     });
   }
   putWork(work: PendingWork): void {
+    const c = workColumns(work);
     this.connection.raw
       .prepare(
-        'INSERT INTO work VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload'
+        `INSERT INTO work (id,session_id,owner_user_id,state,turn_id,invocation_id,updated_at,
+        binding_id,fingerprint,model_id,payload)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id,
+        owner_user_id=excluded.owner_user_id,state=excluded.state,turn_id=excluded.turn_id,
+        invocation_id=excluded.invocation_id,updated_at=excluded.updated_at,
+        binding_id=excluded.binding_id,fingerprint=excluded.fingerprint,model_id=excluded.model_id,
+        payload=excluded.payload`
       )
-      .run(work.id, JSON.stringify(work));
+      .run(
+        work.id,
+        c.session_id,
+        c.owner_user_id,
+        c.state,
+        c.turn_id,
+        c.invocation_id,
+        c.updated_at,
+        c.binding_id,
+        c.fingerprint,
+        c.model_id,
+        JSON.stringify(work)
+      );
   }
 }

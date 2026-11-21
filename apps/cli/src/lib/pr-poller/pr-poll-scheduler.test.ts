@@ -121,7 +121,7 @@ class FakeWorkspace {
   hostedAssociation = true;
   automationHooks: Pick<
     PrPollerWorkspaceHandle,
-    'wantsWorkflowObservations' | 'recordObservations' | 'recordWorkflowObservations'
+    'workflowObservationOwners' | 'recordObservations' | 'recordWorkflowObservations'
   > = {};
 
   readonly associateCalls: AssociatePullRequestArgs[] = [];
@@ -339,7 +339,7 @@ describe('PrPollScheduler', () => {
     let demand = true;
     const published: Array<{ head: string; gap: boolean }> = [];
     workspace.automationHooks = {
-      wantsWorkflowObservations: () => demand,
+      workflowObservationOwners: () => (demand ? new Set([sessionId]) : new Set()),
       recordWorkflowObservations: async (_meta, _repo, headSha, _runs, gap) => {
         published.push({ head: headSha, gap });
       },
@@ -387,6 +387,29 @@ describe('PrPollScheduler', () => {
     const ended = scheduler.counters.calls;
     await advance(Math.max(config.highIntervalMs, config.lowMinIntervalMs));
     expect(scheduler.counters.calls).toBe(ended);
+  });
+
+  it('asks for workflow demand once per build, not once per tracked session', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    const owners = Array.from({ length: 8 }, (_, index) => {
+      const sessionId = sid(`s${index + 1}`);
+      workspace.metas.set(sessionId, makeMeta({ id: sessionId, pullRequests: [prMeta(11)] }));
+      return sessionId;
+    });
+    let demandCalls = 0;
+    workspace.automationHooks = {
+      workflowObservationOwners: () => {
+        demandCalls += 1;
+        return new Set(owners);
+      },
+    };
+    await startWith([workspace]);
+    expect(calls().length).toBeGreaterThan(0);
+    expect(demandCalls).toBeGreaterThan(0);
+    expect(demandCalls).toBeLessThanOrEqual(4);
+    const before = demandCalls;
+    await advance(60_000);
+    expect(demandCalls - before).toBeLessThanOrEqual(4);
   });
 
   it('a new viewer promotes a stale session without waiting for the low cadence', async () => {

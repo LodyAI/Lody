@@ -51,7 +51,7 @@ export type PrPollMetaPatch = {
 };
 
 export interface PrPollerWorkspaceHandle {
-  wantsWorkflowObservations?(sessionId: string): boolean;
+  workflowObservationOwners?(): ReadonlySet<SessionId>;
   recordWorkflowObservations?(
     meta: SessionMeta,
     repository: string,
@@ -93,7 +93,7 @@ const ASSOCIATE_TIMEOUT_MS = 15_000;
 
 export function createLodyPrPollerWorkspace(options: {
   recordObservations?: PrPollerWorkspaceHandle['recordObservations'];
-  wantsWorkflowObservations?: PrPollerWorkspaceHandle['wantsWorkflowObservations'];
+  workflowObservationOwners?: PrPollerWorkspaceHandle['workflowObservationOwners'];
   recordWorkflowObservations?: PrPollerWorkspaceHandle['recordWorkflowObservations'];
   documentManager: LoroDocumentManager;
   workspaceId: string;
@@ -120,7 +120,7 @@ export function createLodyPrPollerWorkspace(options: {
     workspaceId,
     machineId,
     recordObservations: options.recordObservations,
-    wantsWorkflowObservations: options.wantsWorkflowObservations,
+    workflowObservationOwners: options.workflowObservationOwners,
     recordWorkflowObservations: options.recordWorkflowObservations,
 
     async listAliveSessionMetas(): Promise<AliveSessionMeta[]> {
