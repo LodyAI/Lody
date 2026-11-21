@@ -1,11 +1,3 @@
-<<<<<<< HEAD
-import { createContext, useCallback, useContext, useRef, type ReactNode } from 'react';
-import * as stylex from '@stylexjs/stylex';
-import { isNativeAppShell } from '@/lib/native-platform';
-import { markMobileBackNavigation } from '@/lib/mobile-back-navigation';
-import { withClassName } from '@/lib/stylex';
-import { themeColors } from '../../style/theme-colors.stylex';
-=======
 import {
   createContext,
   useCallback,
@@ -15,12 +7,14 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { isNativeAppShell } from '@/lib/native-platform';
 import {
   consumeMobileBackNavigation,
   markMobileBackNavigation,
 } from '@/lib/mobile-back-navigation';
->>>>>>> origin/main
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
 import { MobileEdgeBackSwipeZone } from './mobile-edge-back-swipe';
 
 const styles = stylex.create({
@@ -217,14 +211,10 @@ export function MobileDrillPageLayout({ children, onBack }: MobileDrillPageLayou
            `mobile-home-screen.tsx`. */
         {...withClassName(stylex.props(styles.root), 'safe-areas')}
       >
-<<<<<<< HEAD
-        <div {...withClassName(stylex.props(styles.inner), 'mobile-drill-in')}>
-=======
         <div
           data-mobile-drill-panel=""
-          className="mobile-drill-in relative flex h-full flex-col bg-background"
+          {...withClassName(stylex.props(styles.inner), 'mobile-drill-in')}
         >
->>>>>>> origin/main
           {onBack ? (
             <MobileEdgeBackSwipeZone
               isNativeApp={isNativeAppShell()}

@@ -42,7 +42,6 @@ import {
 import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
 
 const styles = stylex.create({
-<<<<<<< HEAD
   /* The hint button. */
   hintButton: {
     display: 'flex',
@@ -190,15 +189,10 @@ const styles = stylex.create({
     color: { default: themeColors.foreground, ':hover': themeColors.hoverForeground },
     backgroundColor: { default: themeColors.background, ':hover': themeColors.hover },
   },
-  // The send chord inside the dialog's submit button: part of the label,
-  // one step quieter than the word.
-  chord: { opacity: 0.6, fontWeight: 400 },
-=======
   // The Return glyph inside the dialog's submit button: part of the label,
   // one step quieter than the word. An icon, never the ↩ character, which
   // macOS paints as a colour emoji.
-  chord: { opacity: 0.6, flexShrink: 0 },
->>>>>>> origin/main
+  chord: { opacity: 0.6, fontWeight: 400, flexShrink: 0 },
 });
 
 export type ChatLandingTone = 'light' | 'dark';

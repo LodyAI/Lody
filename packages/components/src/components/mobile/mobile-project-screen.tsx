@@ -18,17 +18,13 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Spinner } from '@lody/ui/spinner';
 import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { MdChat, MdSettings } from 'react-icons/md';
 import { FaRegFileCode } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
 import type { SessionPullRequestCiState, SessionPullRequestReadiness } from '@lody/shared';
 import { isNativeAppShell } from '@/lib/native-platform';
-<<<<<<< HEAD
-import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { withClassName } from '@/lib/stylex';
-=======
-import { cn } from '@/lib/utils';
->>>>>>> origin/main
 import { useLongPress } from '@/hooks/use-long-press';
 import { Checkbox } from '@lody/ui/checkbox';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
@@ -1319,14 +1315,10 @@ export function MobileProjectScreen({
   const animatedBack = useMobileDrillExit(rootRef, onBack) ?? onBack;
 
   return (
-<<<<<<< HEAD
-    <div {...withClassName(stylex.props(styles.screen), 'mobile-home-app safe-areas')}>
-=======
     <div
       ref={rootRef}
-      className="mobile-home-app safe-areas relative h-full min-h-0 w-full overflow-hidden text-foreground"
+      {...withClassName(stylex.props(styles.screen), 'mobile-home-app safe-areas')}
     >
->>>>>>> origin/main
       {/* iOS-style push enter: slide in from the right on mount, unless
          we're a back-navigation destination (see `backRevealClass`
          above). Back slides this panel off via `animatedBack`. */}
@@ -1341,14 +1333,7 @@ export function MobileProjectScreen({
            conversation list, not running through the header + pills.
            See the user-reported bug "scrollbar should be above the
            pills". */
-<<<<<<< HEAD
-        {...withClassName(stylex.props(styles.shell), 'mobile-home-shell')}
-=======
-        className={cn(
-          'mobile-home-shell relative flex h-full w-full flex-col bg-background',
-          backRevealClass
-        )}
->>>>>>> origin/main
+        {...withClassName(stylex.props(styles.shell), clsx('mobile-home-shell', backRevealClass))}
       >
         {filesTabNested ? null : (
           <MobileEdgeBackSwipeZone

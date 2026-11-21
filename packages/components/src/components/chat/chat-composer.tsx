@@ -532,7 +532,6 @@ const modalStyles = stylex.create({
     flexDirection: 'column',
     gap: space[3],
   },
-<<<<<<< HEAD
   textarea: {
     minHeight: '132px',
     borderWidth: 0,
@@ -540,13 +539,11 @@ const modalStyles = stylex.create({
     paddingBlock: 0,
     resize: 'none',
   },
-=======
   // One row, like a create dialog's property bar (Linear): it never wraps.
   // Running short, the project label truncates to its minimum first; past
   // that (desktop windows go down to 400px) the row scrolls sideways, its
   // scrollbar hidden. The block padding keeps the pills' lift and focus rings
   // inside the scroll box.
->>>>>>> origin/main
   pills: {
     display: 'flex',
     flexWrap: 'nowrap',

@@ -1,6 +1,4 @@
-<<<<<<< HEAD
 import * as stylex from '@stylexjs/stylex';
-=======
 import {
   commands,
   getCommandKeybindings,
@@ -8,7 +6,6 @@ import {
   unregisterBuiltInCommands,
 } from '@/lib/commands';
 import { __resetPlatformCacheForTests } from '@/lib/commands/platform';
->>>>>>> origin/main
 import type { Meta, StoryObj } from '@storybook/react';
 import { TodayColumnSash, TodayPinnedCard } from '@/components/today/today-pinned-column';
 import { TodayToolbar } from '@/components/today/today-view';

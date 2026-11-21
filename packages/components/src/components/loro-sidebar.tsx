@@ -21,12 +21,8 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-<<<<<<< HEAD
-import { useStore } from 'jotai';
-=======
 import { useAtomValue, useStore } from 'jotai';
 import { cn } from '@/lib/utils';
->>>>>>> origin/main
 import { BOOT_SHELL_SIDEBAR_WIDTH, isMobileSidebarDevice } from '@/lib/boot-shell-script';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
 import {
@@ -1155,118 +1151,7 @@ function useCommandBinding(id: ShortcutCommandId): string | null {
     () => commands.getKeybindingsFor(id)[0] ?? '',
     () => ''
   );
-<<<<<<< HEAD
-  return binding ? formatKeyBinding(binding) : null;
-}
-
-type NavigationAvailability = {
-  canGoBack: boolean;
-  canGoForward: boolean;
-};
-
-type WindowNavigation = {
-  canGoBack: boolean;
-  canGoForward: boolean;
-  addEventListener: (type: string, listener: () => void) => void;
-  removeEventListener: (type: string, listener: () => void) => void;
-};
-
-const readNavigationAvailability = (): NavigationAvailability => {
-  const navigation = (window as Window & { navigation?: WindowNavigation }).navigation;
-  if (navigation && typeof navigation.canGoBack === 'boolean') {
-    return { canGoBack: navigation.canGoBack, canGoForward: navigation.canGoForward };
-  }
-  return {
-    canGoBack: window.history.length > 1,
-    canGoForward: false,
-  };
-};
-
-let navigationAvailabilitySnapshot: NavigationAvailability = {
-  canGoBack: false,
-  canGoForward: false,
-};
-
-const getNavigationAvailabilitySnapshot = (): NavigationAvailability => {
-  const next = readNavigationAvailability();
-  if (
-    next.canGoBack === navigationAvailabilitySnapshot.canGoBack &&
-    next.canGoForward === navigationAvailabilitySnapshot.canGoForward
-  ) {
-    return navigationAvailabilitySnapshot;
-  }
-  navigationAvailabilitySnapshot = next;
-  return next;
-};
-
-const subscribeNavigationAvailability = (onStoreChange: () => void) => {
-  window.addEventListener('popstate', onStoreChange);
-  const navigation = (window as Window & { navigation?: WindowNavigation }).navigation;
-  navigation?.addEventListener('currententrychange', onStoreChange);
-  navigation?.addEventListener('navigate', onStoreChange);
-  return () => {
-    window.removeEventListener('popstate', onStoreChange);
-    navigation?.removeEventListener('currententrychange', onStoreChange);
-    navigation?.removeEventListener('navigate', onStoreChange);
-  };
-};
-
-function useNavigationAvailability(): NavigationAvailability {
-  return useSyncExternalStore(
-    subscribeNavigationAvailability,
-    getNavigationAvailabilitySnapshot,
-    () => navigationAvailabilitySnapshot
-  );
-}
-
-function SidebarHeaderIconButton({
-  label,
-  shortcut,
-  onClick,
-  className,
-  disabled = false,
-  children,
-}: {
-  label: string;
-  shortcut?: string | null;
-  onClick?: () => void;
-  className?: string;
-  disabled?: boolean;
-  children: ReactNode;
-}) {
-  const button = (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={clsx(
-        // The same box, ink and fills as the footer's icon buttons.
-        stylex.props(
-          sidebarSurface.iconButton,
-          shellStyles.nativeControl,
-          // Disabled controls retain their muted ink without a hover fill.
-          disabled ? shellStyles.disabledControl : shellStyles.noFocusRing
-        ).className,
-        className
-      )}
-    >
-      {children}
-    </button>
-  );
-  if (disabled) return button;
-  return (
-    <Tooltip.Root>
-      <Tooltip.Trigger render={button} />
-      <Tooltip.Content side="bottom" {...stylex.props(shellStyles.headerTooltipRow)}>
-        <span>{label}</span>
-        {shortcut ? <Kbd>{shortcut}</Kbd> : null}
-      </Tooltip.Content>
-    </Tooltip.Root>
-  );
-=======
   return binding || null;
->>>>>>> origin/main
 }
 
 function NavButton({
@@ -2141,57 +2026,13 @@ export const LoroSidebar = memo(function LoroSidebar({
             </span>
           )}
           {!isMobile ? (
-<<<<<<< HEAD
-            <Tooltip.Provider delay={400}>
-              <div
-                className={clsx(
-                  // `gap-0.5` between full-size buttons keeps Back and Forward
-                  // apart as two targets instead of one fused control.
-                  stylex.props(shellStyles.headerActions).className,
-                  windowDrag && WINDOW_DRAG_EXEMPT_CLASS
-                )}
-              >
-                {onRequestCollapse ? (
-                  <SidebarHeaderIconButton
-                    label={t('commands.sidebar.toggle', 'Toggle Sidebar')}
-                    shortcut={collapseShortcut}
-                    onClick={() => onRequestCollapse()}
-                    // Always visible: the collapse control is found where it
-                    // was last seen, not revealed by hovering the header.
-                  >
-                    <CuidaSidebarExpandOutline {...stylex.props(shellStyles.glyph16)} />
-                  </SidebarHeaderIconButton>
-                ) : null}
-                <SidebarHeaderIconButton
-                  disabled={!canGoBack}
-                  label={t('commands.nav.back', 'Back')}
-                  shortcut={backShortcut}
-                  onClick={() => {
-                    if (!canGoBack) return;
-                    if (!commands.execute('nav.back')) window.history.back();
-                  }}
-                >
-                  <ChevronLeft {...stylex.props(shellStyles.glyph16)} strokeWidth={1.5} />
-                </SidebarHeaderIconButton>
-                <SidebarHeaderIconButton
-                  disabled={!canGoForward}
-                  label={t('commands.nav.forward', 'Forward')}
-                  shortcut={forwardShortcut}
-                  onClick={() => {
-                    if (!canGoForward) return;
-                    if (!commands.execute('nav.forward')) window.history.forward();
-                  }}
-                >
-                  <ChevronRight {...stylex.props(shellStyles.glyph16)} strokeWidth={1.5} />
-                </SidebarHeaderIconButton>
-              </div>
-            </Tooltip.Provider>
-=======
             <SidebarHistoryControls
               onToggleSidebar={onRequestCollapse}
-              className={cn('ml-auto', windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
+              className={cn(
+                stylex.props(shellStyles.headerActions).className,
+                windowDrag && WINDOW_DRAG_EXEMPT_CLASS
+              )}
             />
->>>>>>> origin/main
           ) : null}
         </div>
 

@@ -40,11 +40,8 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { withClassName } from '@/lib/stylex';
-<<<<<<< HEAD
-=======
 import { cn } from '@/lib/utils';
 import { SidebarHistoryControls } from '../sidebar-history-controls';
->>>>>>> origin/main
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
   useMacTrafficLightRowPadClass,
@@ -1140,20 +1137,6 @@ export function ScheduleListView({
             data-beside-traffic-lights={besideTrafficLights ? '' : undefined}
           >
             {showSidebarToggle ? (
-<<<<<<< HEAD
-              <Button
-                type="button"
-                variant="ghost"
-                size="small"
-                icon
-                onClick={() => showNavigationSidebar()}
-                aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-                xstyle={styles.sidebarToggle}
-                className={WINDOW_DRAG_EXEMPT_CLASS}
-              >
-                <PanelLeft {...stylex.props(styles.glyph)} />
-              </Button>
-=======
               <SidebarHistoryControls
                 onToggleSidebar={() => showNavigationSidebar()}
                 className={cn(
@@ -1161,7 +1144,6 @@ export function ScheduleListView({
                   WINDOW_DRAG_EXEMPT_CLASS
                 )}
               />
->>>>>>> origin/main
             ) : null}
             <h1 {...stylex.props(styles.pageTitle)}>{t('schedules.title', 'Schedules')}</h1>
             <Input

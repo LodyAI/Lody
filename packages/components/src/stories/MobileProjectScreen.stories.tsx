@@ -4,7 +4,6 @@ import { fn } from 'storybook/test';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { ChevronRight, Wrench } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import type { WorktreeSetupScriptConfig, WorktreeSetupShell } from '@lody/shared';
 
 import {
@@ -314,12 +313,40 @@ export const IOSLocal: Story = {
   render: () => <StoryShell project={localProject} />,
 };
 
-<<<<<<< HEAD
 const ownedStyles = stylex.create({
   frame: { maxWidth: 440, backgroundColor: themeColors.background },
   screen: { width: '100%', height: 'calc(100dvh - 104px)', minHeight: 400, overflow: 'hidden' },
   scopeControls: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: 8 },
   result: { display: 'block', padding: 8, fontSize: 12, color: themeColors.mutedForeground },
+  home: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+  },
+  homeTitle: {
+    paddingTop: 'calc(var(--k-safe-area-top, 0px) + 1rem)',
+    paddingInline: '1rem',
+    paddingBottom: '0.75rem',
+    fontSize: '1.5rem',
+    fontWeight: 600,
+  },
+  homeProject: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginInline: '0.75rem',
+    marginBottom: '0.5rem',
+    borderRadius: '0.75rem',
+    backgroundColor: themeColors.card,
+    paddingInline: '1rem',
+    paddingBlock: '0.75rem',
+    textAlign: 'left',
+  },
+  homeProjectName: { display: 'block', fontSize: '0.875rem', fontWeight: 500 },
+  homeProjectDetail: { display: 'block', fontSize: '0.75rem', color: themeColors.mutedForeground },
+  homeChevron: { width: '1rem', height: '1rem', color: themeColors.mutedForeground },
 });
 
 const ownedConversations: MobileConversationItem[] = [
@@ -411,7 +438,10 @@ function OwnedProjectFixture({ scoped = false }: { scoped?: boolean }) {
       <output {...stylex.props(ownedStyles.result)}>
         Back {backCount}; filter {filter}; archived {String(archived)}
       </output>
-=======
+    </div>
+  );
+}
+
 /* Home ⇄ project in one slot, as in `MobileWorkspaceLayout`: Back slides the
    project off while the list underneath, a stand-in for the home Projects
    tab, mounts with the same reveal `MobileHomeScreen` plays. */
@@ -420,41 +450,39 @@ function StandInProjectsHome({ onOpen }: { onOpen: (project: MobileProjectContex
   return (
     <div
       data-testid="stand-in-home"
-      className={cn('safe-areas flex h-full flex-col bg-background', backRevealClass)}
+      {...withClassName(stylex.props(ownedStyles.home), backRevealClass ?? undefined)}
     >
-      <h1 className="pt-safe-4 px-4 pb-3 text-2xl font-semibold">项目</h1>
+      <h1 {...stylex.props(ownedStyles.homeTitle)}>项目</h1>
       {[localProject, githubProject].map((item) => (
         <button
           key={item.kind}
           type="button"
           onClick={() => onOpen(item)}
-          className="mx-3 mb-2 flex items-center justify-between rounded-xl bg-card px-4 py-3 text-left"
+          {...stylex.props(ownedStyles.homeProject)}
         >
           <span>
-            <span className="block text-sm font-medium">{item.name}</span>
-            <span className="block text-xs text-muted-foreground">
+            <span {...stylex.props(ownedStyles.homeProjectName)}>{item.name}</span>
+            <span {...stylex.props(ownedStyles.homeProjectDetail)}>
               {item.kind === 'local' ? item.path : item.fullName}
             </span>
           </span>
-          <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          <ChevronRight {...stylex.props(ownedStyles.homeChevron)} aria-hidden="true" />
         </button>
       ))}
->>>>>>> origin/main
     </div>
   );
 }
 
-<<<<<<< HEAD
 type OwnedProjectStory = StoryObj<typeof OwnedProjectFixture>;
 
 export const OwnedControls: OwnedProjectStory = { render: () => <OwnedProjectFixture /> };
 export const OwnedScopes: OwnedProjectStory = { render: () => <OwnedProjectFixture scoped /> };
-=======
+
 function BackToHomeShell() {
   const [project, setProject] = useState<MobileProjectContext | null>(null);
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="relative h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
         {project ? (
           <MobileProjectScreen
             key={project.kind}
@@ -482,4 +510,3 @@ export const BackToHome: Story = {
   },
   render: () => <BackToHomeShell />,
 };
->>>>>>> origin/main

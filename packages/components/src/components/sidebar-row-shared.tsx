@@ -176,10 +176,11 @@ const rowParts = stylex.create({
     height: themeSpace[5],
     flexShrink: 0,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     pointerEvents: 'none',
   },
   endReserve: { minWidth: themeSpace[5] },
+  endReserveMultiple: { minWidth: themeSpace[10] },
   emptySlot: { width: 0 },
   rest: { display: 'flex' },
   restFade: {
@@ -270,6 +271,7 @@ const rowParts = stylex.create({
   },
   destructiveGlyph: { width: themeSpace[3], height: themeSpace[3], color: themeColors.destructive },
   primaryGlyph: { width: themeSpace[3], height: themeSpace[3], color: themeColors.primary },
+  warningGlyph: { width: themeSpace[3], height: themeSpace[3], color: themeColors.statusWarning },
   smallGlyph: { width: themeSpace[3], height: themeSpace[3], flexShrink: 0 },
   /** A row's trailing meta: a quiet line that never wraps. */
   trailingMeta: {
@@ -577,13 +579,9 @@ export function SessionRowStatusIndicator({
     icon = <CircleAlert {...stylex.props(rowParts.destructiveGlyph)} strokeWidth={2.25} />;
     label = sendLabel;
   } else if (isWaitingPermission === true) {
-<<<<<<< HEAD
     icon = <Hand {...stylex.props(rowParts.primaryGlyph)} />;
-=======
-    icon = <Hand className="h-3 w-3 text-primary" />;
   } else if (needsAttention === true && isWorking !== true) {
-    icon = <CircleAlert className="h-3 w-3 text-status-warning" strokeWidth={2.25} />;
->>>>>>> origin/main
+    icon = <CircleAlert {...stylex.props(rowParts.warningGlyph)} strokeWidth={2.25} />;
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
@@ -1133,12 +1131,8 @@ export function SidebarRowEndSlot({
   menu,
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
-<<<<<<< HEAD
   fadeClassName = stylex.props(rowParts.fade).className,
-=======
-  fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
   rowGroup = 'group',
->>>>>>> origin/main
 }: {
   /**
    * Reads this session's local send status here, in the leaf, so upload
@@ -1198,6 +1192,14 @@ export function SidebarRowEndSlot({
   // one column would leave the ⋯ absolutely positioned over the title's tail.
   const actionColumns = showActions ? (menu ? 1 : 0) + (archive ? 1 : 0) : 0;
   const reserve = hasRest || showActions;
+  const endSlotStyle = stylex.props(
+    rowParts.endSlot,
+    reserve
+      ? actionColumns > 1
+        ? rowParts.endReserveMultiple
+        : rowParts.endReserve
+      : rowParts.emptySlot
+  );
   return (
     // pointer-events-none so the resting PR icon area still passes clicks through to
     // the row's navigation; the hover action buttons re-enable pointer events on hover.
@@ -1209,19 +1211,14 @@ export function SidebarRowEndSlot({
     // one ancestor selector to win over the plain hover fill.
     <div
       data-session-row-end-slot=""
-<<<<<<< HEAD
-      {...stylex.props(rowParts.endSlot, reserve ? rowParts.endReserve : rowParts.emptySlot)}
-=======
       className={cn(
-        'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
-        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0',
+        endSlotStyle.className,
         showActions &&
           cn(
             'transition-colors duration-100',
             rowGroup === 'row' ? NAMED_ROW_GROUP_FILL : PLAIN_ROW_GROUP_FILL
           )
       )}
->>>>>>> origin/main
     >
       {hasRest ? (
         <span

@@ -247,23 +247,12 @@ function SettingsInnerBody({ children, hasMounted }: { children: ReactNode; hasM
   const bodyProps = stylex.props(styles.body);
   return (
     <div
-<<<<<<< HEAD
       {...bodyProps}
-      className={clsx(bodyProps.className, skipDrill ? undefined : 'mobile-drill-in')}
-=======
-      className={cn(
-        'relative flex h-full min-h-0 flex-col',
-        /* Bottom safe-area padding so the last setting row clears the
-           home-indicator (iOS) / navigation bar (Android) on native.
-           Konsta's `pb-safe-*` resolves to `--k-safe-area-bottom + N`,
-           giving us a small breathing buffer beyond the system inset.
-           Pages with their own scroll regions (agent-config) opt out
-           by overriding inside their own component. */
-        'pb-safe-4',
+      className={clsx(
+        bodyProps.className,
         entrance === 'push' && 'mobile-drill-in',
         entrance === 'reveal' && 'mobile-drill-reveal'
       )}
->>>>>>> origin/main
     >
       {children}
     </div>

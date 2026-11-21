@@ -37,7 +37,6 @@ import {
   type SessionSyncIndicatorVariant,
 } from './session-syncing-indicator';
 import { SessionMachineInfo } from './session-machine-info';
-<<<<<<< HEAD
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -46,9 +45,7 @@ import {
   themeRadius,
   themeSpace,
 } from '../../style/theme-scale.stylex';
-=======
 import type { SessionPullRequestLinksProps } from './session-pr-links';
->>>>>>> origin/main
 
 export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'scheduleSource' | 'context';
 

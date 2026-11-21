@@ -46,13 +46,9 @@ import { isIOSRuntimeEnvironment } from '@/lib/native-platform';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getDownloadPageUrl } from '@/lib/lody-urls';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-<<<<<<< HEAD
 import { clsx } from 'clsx';
 import { withClassName } from '@/lib/stylex';
-=======
-import { cn } from '@/lib/utils';
 import { useMobileBackRevealClass } from './mobile-drill-page-layout';
->>>>>>> origin/main
 import { usePullToRefresh } from '@/hooks/use-pull-to-refresh';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { type MobileConversationItem } from './mobile-project-screen';
@@ -2668,16 +2664,9 @@ export function MobileHomeScreen({
          scroll region — keeps the vertical scrollbar contained to
          the list area instead of running through the chrome at the
          top. Mirrors the structure on MobileProjectScreen. */}
-<<<<<<< HEAD
-      <div {...withClassName(stylex.props(styles.shell), 'mobile-home-shell')}>
-=======
       <div
-        className={cn(
-          'mobile-home-shell relative flex h-full w-full flex-col bg-background',
-          backRevealClass
-        )}
+        {...withClassName(stylex.props(styles.shell), clsx('mobile-home-shell', backRevealClass))}
       >
->>>>>>> origin/main
         {/* Sticky header: safe-area padding outside the chrome row so the
            status/pull pill can center on the same h-9 band as the
            workspace / search / trailing controls — not the full header

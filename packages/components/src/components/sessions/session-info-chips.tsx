@@ -59,7 +59,6 @@ import { SessionPrIcon } from '@/components/sidebar-row-shared';
 import { PR_STATUS_META } from './pull-request-badge';
 import { useSessionStatusPresentation, type SessionStatusStripState } from './session-status-strip';
 import { PrMergeButton, PrMergeMethodLabel } from './pr-merge-button';
-<<<<<<< HEAD
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -515,12 +514,10 @@ const styles = stylex.create({
   ciQueued: { color: themeColors.mutedForeground },
   ciSkipped: { color: 'hsl(var(--muted-foreground) / 0.7)' },
 });
-=======
 import {
   SessionPullRequestLinksPanel,
   type SessionPullRequestLinksProps,
 } from './session-pr-links';
->>>>>>> origin/main
 
 /**
  * Shared contract: the bar renders each item either collapsed in the cluster
@@ -1146,9 +1143,7 @@ export function ContextChip({
         {prMarker}
       </button>
     ) : (
-      <span {...stylex.props(styles.prStatic)}>
-        {prMarker}
-      </span>
+      <span {...stylex.props(styles.prStatic)}>{prMarker}</span>
     )
   ) : undefined;
 
@@ -1175,23 +1170,25 @@ export function ContextChip({
   // inside their own chip rather than past the bar.
   const diffChip =
     hasDiff && diffStat ? (
-    <button
-      type="button"
-      onClick={onOpenAllChanges}
-      disabled={!onOpenAllChanges}
-      aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
-      title={t('sessions.detailTabs.allChanges', 'All Changes')}
-      className={clsx(stylex.props(styles.diffChip).className, INFO_BAR_TEXT_CLASS)}
-    >
-      {diffStat.add + diffStat.del > 0 ? (
-        <>
-          <span {...stylex.props(styles.diffAdded)}>+{diffStat.add}</span>
-          <span {...stylex.props(styles.diffRemoved)}>−{diffStat.del}</span>
-        </>
-      ) : (
-        <span>{t('sessions.fileProvider.fileCount', '{{count}} files', { count: diffStat.files })}</span>
-      )}
-    </button>
+      <button
+        type="button"
+        onClick={onOpenAllChanges}
+        disabled={!onOpenAllChanges}
+        aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
+        title={t('sessions.detailTabs.allChanges', 'All Changes')}
+        className={clsx(stylex.props(styles.diffChip).className, INFO_BAR_TEXT_CLASS)}
+      >
+        {diffStat.add + diffStat.del > 0 ? (
+          <>
+            <span {...stylex.props(styles.diffAdded)}>+{diffStat.add}</span>
+            <span {...stylex.props(styles.diffRemoved)}>−{diffStat.del}</span>
+          </>
+        ) : (
+          <span>
+            {t('sessions.fileProvider.fileCount', '{{count}} files', { count: diffStat.files })}
+          </span>
+        )}
+      </button>
     ) : null;
   const trailing =
     diffChip || actions?.length ? (

@@ -1,10 +1,7 @@
 import { parseGitHubPullRequestUrl } from './github-url';
 import { resolveProjectGitHubRepo } from './project';
-<<<<<<< HEAD
-=======
 import { isPullRequestUnlinked, readSessionPullRequestLinks } from './session-pull-request-links';
 import { parsePullRequestUrl } from './pull-request-url';
->>>>>>> origin/main
 // The PR field types/helpers live in a loro-free module so boot-path consumers
 // of this file (session list atoms, notifications) do not pull the
 // loro-mirror/loro-crdt graph through `./schema`.

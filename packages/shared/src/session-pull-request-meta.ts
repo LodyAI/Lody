@@ -52,8 +52,6 @@ export function normalizeSessionPullRequestMeta(value: unknown): SessionPullRequ
   return { url, status };
 }
 
-<<<<<<< HEAD
-=======
 /**
  * Auto delivery progress. `pr`: waiting for the requested pull request; `ci`:
  * waiting for checks; `fix`/`conflict`/`merge`: the matching request was sent;
@@ -95,7 +93,6 @@ export type SessionAutoDelivery = {
   updatedAt: number;
 };
 
->>>>>>> origin/main
 /** Rollup CI state of a PR's head commit: success/failure/pending/error/expected. */
 export type SessionPullRequestCiState = 's' | 'f' | 'p' | 'e' | 'x';
 
@@ -149,8 +146,6 @@ export type SessionPullRequestLifecycle = { s: PrStatus; u: number };
 export type SessionPullRequestLifecycleFields = {
   [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
 };
-<<<<<<< HEAD
-=======
 
 /**
  * Explicit link intent for one pull request, stored at
@@ -169,4 +164,3 @@ export type SessionPullRequestLinkFields = {
 /** Per-PR records stored as top-level Session metadata keys (lifecycle and links). */
 export type SessionPullRequestRecordFields = SessionPullRequestLifecycleFields &
   SessionPullRequestLinkFields;
->>>>>>> origin/main

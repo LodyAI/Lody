@@ -4473,17 +4473,9 @@ function WorkspaceChatLanding({
       {/* Embedded, the scope pills are items of the composer's one property row,
           beside the run config, so each pill shrinks by its own rule. */}
       <div
-<<<<<<< HEAD
         {...stylex.props(
           isEmbedded ? landingStyles.topSelectorRowEmbedded : landingStyles.topSelectorRow
         )}
-=======
-        className={
-          isEmbedded
-            ? 'contents'
-            : 'flex w-full min-w-0 items-center gap-2'
-        }
->>>>>>> origin/main
       >
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
@@ -7531,23 +7523,10 @@ function WorkspaceChatLanding({
         onOpenMobileDrawer={() => openMobileDrawer(true)}
         leftSidebarExpandSlot={
           !isMobile && isLeftSidebarHidden ? (
-<<<<<<< HEAD
-            <Button
-              type="button"
-              variant="ghost"
-              icon
-              onClick={() => showNavigationSidebar()}
-              aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
-              width="calc(var(--spacing) * 7)"
-              height="calc(var(--spacing) * 7)"
-              labelColor="hsl(var(--muted-foreground) / 1)"
-              xstyle={landingStyles.nonShrinking}
-            >
-              <PanelLeft {...stylex.props(landingStyles.glyph16)} />
-            </Button>
-=======
-            <SidebarHistoryControls onToggleSidebar={() => showNavigationSidebar()} />
->>>>>>> origin/main
+            <SidebarHistoryControls
+              onToggleSidebar={() => showNavigationSidebar()}
+              className={stylex.props(landingStyles.nonShrinking).className}
+            />
           ) : null
         }
         resetKeys={[workspaceId, workspaceSlug, contextType, isMobile]}

@@ -355,15 +355,16 @@ export function AttachmentAddMenu({
                     >
                       {mcpLabel}
                     </Menu.SubmenuTrigger>
-<<<<<<< HEAD
-                    <Menu.Content align="end" sideOffset={8} xstyle={styles.mcpContent}>
-=======
                     {/* `end` keeps the panel above the composer toolbar. The
                         trigger is the last row of a menu that opens upward;
                         `start` (the submenu default) hangs the description and
                         the footnote down onto the model row. */}
-                    <Menu.Content align="end" sideOffset={8} className={MCP_PANEL_CLASS}>
->>>>>>> origin/main
+                    <Menu.Content
+                      align="end"
+                      sideOffset={8}
+                      xstyle={styles.mcpContent}
+                      className={MCP_PANEL_CLASS}
+                    >
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
                     </Menu.Content>
                   </Menu.Submenu>

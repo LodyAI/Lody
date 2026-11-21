@@ -1503,12 +1503,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             needsAttention={item.deliveryStalled}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
-<<<<<<< HEAD
-            fadeClassName={stylex.props(updatedStyles.rowFade).className}
-=======
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
             rowGroup="row"
->>>>>>> origin/main
             restIcon={
               snoozeCountdown ||
               showPr ||
