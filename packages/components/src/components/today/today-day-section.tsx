@@ -18,10 +18,13 @@ import { useTodayEditor } from './editor/today-editor-context';
 import { TodayMentionDecorators } from './editor/today-mention-decorators';
 import { TODAY_INDENT_PX } from './editor/today-editor-controller';
 import { TodayMention } from './today-session-mention';
-import type { TodayPageStore } from '@/lib/today/today-page-store';
+import type { TodayPageStore, TodayPageSyncStatus } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
 import { formatTodayHeading } from './today-stream';
 import { todayOutline } from './outline.stylex';
+
+// Revealed only if opening outlasts a local-cache hit, so a fast open never flashes.
+const pendingReveal = stylex.keyframes({ from: { opacity: 0 }, to: { opacity: 1 } });
 
 const styles = stylex.create({
   section: { display: 'flex', flexDirection: 'column', gap: space[1], paddingBlock: space[3] },
@@ -95,6 +98,18 @@ const styles = stylex.create({
     overflowWrap: 'anywhere',
   },
   placeholder: { color: colors.tertiaryLabel, cursor: 'text' },
+  pending: { justifyContent: 'center' },
+  pendingBar: {
+    width: '40%',
+    height: 10,
+    borderRadius: radius.full,
+    backgroundColor: colors.hoverFill,
+    opacity: 0,
+    animationName: pendingReveal,
+    animationDuration: '200ms',
+    animationDelay: '300ms',
+    animationFillMode: 'forwards',
+  },
   failed: {
     display: 'flex',
     alignItems: 'center',
@@ -147,7 +162,9 @@ export function TodayDaySection(props: {
           </Button>
         </div>
       ) : (
-        <div {...stylex.props(styles.outline)} />
+        <div {...stylex.props(styles.outline, styles.pending)} aria-busy="true">
+          <div {...stylex.props(styles.pendingBar)} />
+        </div>
       )}
     </section>
   );
@@ -161,6 +178,7 @@ function TodayStaticOutline(props: {
 }) {
   const { store, isTop, onEmptyChange } = props;
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const syncStatus = useSyncExternalStore(store.subscribe, store.getSyncStatus);
   const controller = useTodayEditor();
   useEffect(() => controller?.registerDay(store.date, store), [controller, store]);
   useEffect(() => {
@@ -182,7 +200,7 @@ function TodayStaticOutline(props: {
   if (snapshot.visible.length === 0) {
     return (
       <div {...stylex.props(styles.outline)}>
-        <TodayRow node={null} store={store} />
+        <TodayRow node={null} store={store} syncStatus={syncStatus} />
       </div>
     );
   }
@@ -212,6 +230,8 @@ function TodayRow(props: {
   store: TodayPageStore;
   joinsPrevious?: boolean;
   joinsNext?: boolean;
+  /** For the empty page's line: a registered day still on its way says so. */
+  syncStatus?: TodayPageSyncStatus;
 }) {
   const { t } = useTranslation();
   const { node, store } = props;
@@ -292,7 +312,7 @@ function TodayRow(props: {
             else controller.pointerDown(store, node.id, event.currentTarget, event);
           }}
         >
-          {node ? <TodayStaticText node={node} /> : t('today.empty', 'Write something…')}
+          {node ? <TodayStaticText node={node} /> : emptyLineLabel(t, props.syncStatus)}
           {node?.text.endsWith('\n') ? '\n' : null}
         </div>
       )}
@@ -313,6 +333,20 @@ function TodayStaticText(props: { node: TodayNodeView }) {
   }
   if (cursor < text.length) parts.push(text.slice(cursor));
   return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>);
+}
+
+/**
+ * What an empty page's line says. A day another device wrote may still be
+ * arriving; the line stays editable either way (edits merge on sync).
+ */
+function emptyLineLabel(
+  t: ReturnType<typeof useTranslation>['t'],
+  status: TodayPageSyncStatus | undefined
+): string {
+  if (status === 'syncing') return t('today.syncing', 'Syncing…');
+  if (status === 'retrying')
+    return t('today.syncRetrying', "Can't sync right now. This day appears once connected.");
+  return t('today.empty', 'Write something…');
 }
 
 /** Acquire the page while its section is within ~1.5 screens of the viewport. */
