@@ -17,8 +17,9 @@
 - A run is a wait without a program, owned by the Host's run Scope, never by the check
   that starts it. Persist the start before spawn; a started run without a live owner
   is reported interrupted, never started again. Runs receive an explicit environment,
-  not Agent credentials. Prompt and MCP guidance recommending `run` is owner-approved;
-  keep it one sentence per surface. [Decision](../../../../.agents/notes/implemented/feature/2026-11-16-managed-long-runs.md).
+  not Agent credentials. Per-prompt text does not recommend Automation; MCP help limits `run` to work
+  that must outlive the current turn and resume the Session on exit. [Ownership](../../../../.agents/notes/implemented/feature/2026-11-16-managed-long-runs.md);
+  [guidance](../../../../.agents/notes/implemented/simplification/2026-11-21-automation-guidance-scope.md).
 - External JavaScript checks conditions and returns false or a resume result. Keep
   event-to-action mapping internal; registration binds the same Session once.
 - Commit a matched result and its continuation identity together. Never rerun a matched

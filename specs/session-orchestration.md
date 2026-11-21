@@ -124,8 +124,8 @@ lock tasks or reject sends as duplicates.
 - **Queued inputs.** A requester may list, withdraw or replace its own queued
   inputs that have not started. A started input returns `ALREADY_STARTED` and is
   never cancelled by this path.
-- **Machine resources.** `lody_machine_list` reports agent quota with reset
-  times and disk usage. `lody_agent_config` and
+- **Machine resources.** `lody_catalog` action `machines` reports agent quota with reset
+  times and disk usage. Its `agent_configs` action and
   `lody_session_create_options` report an exhausted scoped quota as
   `quota_exhausted` with `availableAt`, so a coordinator stops dispatching to
   that config until the window resets. Lody does not manage or report agent-held

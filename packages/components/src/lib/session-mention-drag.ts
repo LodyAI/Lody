@@ -199,7 +199,6 @@ export function readSessionMentionDragSessionId(
   return dataTransfer.getData(SESSION_MENTION_DRAG_TYPE) || null;
 }
 
-// ---------------------------------------------------------------------------
 // Pointer drops. Pointer-driven drags (dnd-kit: pinned sidebar rows) carry no
 // `dataTransfer`, so a mention surface also registers its element here and a
 // release over it is delivered like a native drop.

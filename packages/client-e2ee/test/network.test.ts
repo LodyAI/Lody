@@ -514,6 +514,16 @@ it('joins under the account login only, retires an ended request for a new invit
     source: 'link',
     state: 'pending',
     expiresAt: 1,
+    offer: {
+      version: 1,
+      workspaceId: scope.workspaceId,
+      genesisHash: hash,
+      genesisRecordHex: 'abcd',
+      endorser: hash,
+      token: 'dd'.repeat(32),
+      mode: 'link',
+      expiresAt: 1,
+    },
   };
   let replyWorkspace = scope.workspaceId;
   const { network } = fixture(async (name, args) => {
@@ -671,6 +681,16 @@ it('binds an approved member to the credential of the package the session listed
             source: 'link',
             state: 'pending',
             expiresAt: 1,
+            offer: {
+              version: 1,
+              workspaceId: scope.workspaceId,
+              genesisHash: hexOf(signed.genesis.genesis.toBytes()),
+              genesisRecordHex: hexOf(signed.genesis.record),
+              endorser: hash,
+              token: 'dd'.repeat(32),
+              mode: 'link',
+              expiresAt: 1,
+            },
             applicantName: 'Riley',
             applicantEmail: 'r@example.test',
           },

@@ -12,11 +12,9 @@ and Lody treated the Session as idle: idle GC could stop the Agent together with
 the processes it had started, nothing woke the Session when the work finished, and
 users typed "continue" to check. `lody_automation` now has a `run` command: the
 automation Host owns the process, keeps the Session's group unsettled while it runs,
-and queues one continuation with the exit facts when it ends. The product owner
-asked for every Session prompt, the MCP server instructions and the tool
-description to recommend it in one sentence each, which is a deliberate exception to
-the rule that Lody's agent-facing text carries only requests and facts. Whether
-agents follow the recommendation is unmeasured.
+and queues one continuation with the exit facts when it ends. The original broad recommendation is narrowed by the
+[guidance scope decision](../simplification/2026-11-21-automation-guidance-scope.md).
+Process ownership remains unchanged; agent selection frequency is unmeasured.
 
 ## Decision
 
@@ -39,12 +37,9 @@ agents follow the recommendation is unmeasured.
 - The environment is explicit: `PATH` from the login shell and the daemon, home and
   temp variables, and the caller's `env`. Agent provider credentials and the Session
   shell environment are not inherited.
-- Guidance: `LODY_LONG_RUN_GUIDANCE` is appended to the per-prompt Lody tools
-  reminder; the MCP server instructions and the `lody_automation` description each
-  carry one sentence; the skill documents the command. Each states the fact that an
-  idle Session may be reclaimed, ending processes the Agent started, and recommends
-  `run`. The root `AGENTS.md` rule now allows owner-approved standing guidance only
-  when recorded in a note.
+- Guidance follows the [scope decision](../simplification/2026-11-21-automation-guidance-scope.md):
+  per-prompt text carries no Automation recommendation; help and the skill reserve
+  `run` for work that must outlive the current turn and resume on exit.
 
 ## Alternatives
 
@@ -62,7 +57,7 @@ agents follow the recommendation is unmeasured.
 ## Consequences
 
 The [no-workflow prompt decision](../simplification/2026-11-11-agent-prompts-without-workflow.md)
-still governs all other text. Every prompt grows by one sentence. Logs live under
+governs agent-facing text, with the narrowed help guidance linked above. Logs live under
 `<data dir>/automations/runs/` with a 16 MiB cap per run and seven-day retention,
 pruned when another run starts in the same workspace.
 

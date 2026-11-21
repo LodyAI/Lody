@@ -64,10 +64,6 @@ const DAY = 24 * HOUR;
 const NOW = Date.UTC(2026, 10, 20, 12, 0, 0);
 const MACHINE_ID = 'machine-mac-studio' as MachineId;
 
-// ---------------------------------------------------------------------------
-// Story 1: Pill style & row-state review gallery
-// ---------------------------------------------------------------------------
-
 const GALLERY_ROWS: SidebarUpdatedItem[] = [
   {
     id: 'gal-1',
@@ -254,10 +250,6 @@ export const PillGallery: Story = {
     </Tooltip.Provider>
   ),
 };
-
-// ---------------------------------------------------------------------------
-// Story 2: Full interactive sidebar playground across all views & sections
-// ---------------------------------------------------------------------------
 
 type PlaygroundSession = {
   id: string;

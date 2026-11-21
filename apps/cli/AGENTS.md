@@ -23,6 +23,12 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   bare specifier only, so the bundle can import `loro-crdt/bundler/*` to read the shared memory
   ([decision](../../.agents/notes/implemented/bug-fix/2026-11-09-loro-wasm-heap-exhaustion.md)).
 
+- Every daemon process pays for each module it evaluates, so keep the bundle graph narrow.
+  Rollup applies each workspace package's own `sideEffects` declaration, so keep that field
+  accurate. Vendor wasm ships as `dist/assets/*.wasm` read from disk, never as inline base64.
+  The `daemon-runner` watchdog composes no Workspace presence and must never open a workspace
+  document. Daemon-owned Node children cap glibc arenas, and release the cap before launching
+  anything ([decision](../../.agents/notes/implemented/architecture/2026-11-21-daemon-memory-footprint.md)).
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
   never initialize telemetry in local mode even if PostHog env vars are set.
 - INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling

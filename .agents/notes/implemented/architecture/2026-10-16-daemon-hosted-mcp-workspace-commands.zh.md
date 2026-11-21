@@ -54,7 +54,7 @@ MCP 进程 ──session/call-tool──▶ daemon：唯一的工作区副本
 - Cloud MCP 工具的工作现在跑在 daemon 事件循环上，包括 operation store 的同步 SQLite 调用。OSS 自 #1133 起即如此；MCP 进程仍是协议适配层，因此没有把这部分挪回去。
 - 路由后的调用依赖 daemon。调用 Lody MCP 的 agent 本身就运行在 daemon 管理的 Session 中，所以没有新增可用性依赖。路由后的调用沿用子 CLI 路径的十分钟上限，只有旧式 `wait: true` 调用在其最长等待之外再加这十分钟；此前 OSS 的上限是 30 秒。local-control 协议不携带取消，被放弃的调用仍会在该上限内于 daemon 中执行完；OSS 原本就是如此。
 - 旧 owner 的工作仍被保留时就接纳替换者，旧流的迟到写入可能到达。presence 是最新状态，TTL 90 秒、心跳 30 秒，零星条目会自愈；durable 数据不受影响。
-- 终端独立运行的 `lody` 命令仍打开短生命周期副本，因为那里不保证有 daemon；它们的失败不再阻塞后续命令。`lody_session_share` 留在 MCP 进程，因为它需要 MCP 请求的 abort signal，且不使用工作区副本。
+- 终端独立运行的 `lody` 命令仍打开短生命周期副本，因为那里不保证有 daemon；它们的失败不再阻塞后续命令。`lody_session_manage` 的 `share` 操作 留在 MCP 进程，因为它需要 MCP 请求的 abort signal，且不使用工作区副本。
 
 ## 验证
 

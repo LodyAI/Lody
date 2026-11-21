@@ -54,7 +54,7 @@ Translation: current
 ## 验证与限制
 
 `daemon-session-tools.test.ts` 在发现接口被拒的情况下运行真实的 `lody_session_list`
-和 `lody_session_archive` handler，覆盖：
+和 `lody_session_manage` `archive` handler，覆盖：
 
 - 列表查询调用次数为零；
 - 撤权后拒绝；

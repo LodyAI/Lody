@@ -225,6 +225,10 @@ cache collection. See [SEA packaging](scripts/sea/README.md) and the
 [ownership decision](../../.agents/notes/implemented/bug-fix/2026-10-03-daemon-upgrade-installation.md)
 explains why npm handoff and self-replacement were removed.
 
+The Worker's V8 heap limit is 20% of physical memory, between 768 and 4096 MiB.
+Hosts billed by memory can set `LODY_WORKER_MAX_OLD_SPACE_MB` (a whole number from 256
+to 65536) in the watchdog's service environment; an unusable value is logged and ignored.
+
 ## Structured Session output
 
 Session commands with `--json` or `--jsonl` reserve stdout for structured results.
@@ -250,9 +254,9 @@ lody operation list --workspace team --session SESSION_ID --state active --json
 lody session list --workspace team --query parser --machine-id MACHINE_ID --agent-role-id ROLE_ID --json
 ```
 
-Matching MCP tools are `lody_machine_list`, `lody_project_list`,
-`lody_agent_config`, `lody_agent_role`, `lody_mcp_list`, and
-`lody_operation` (list mode). Session list adds `query`, `machineId`, `agentConfigId`,
+Matching MCP tools are the read-only `lody_catalog` actions `machines`, `projects`,
+`agent_configs`, `agent_roles` and `mcp_servers`, and
+`lody_operation` action `list`. Session list adds `query`, `machineId`, `agentConfigId`,
 and `agentRoleId`. Creation provenance is what the Role filter matches.
 
 `lody_session_create_options` and Agent config discovery expose `runConfig.modes`
