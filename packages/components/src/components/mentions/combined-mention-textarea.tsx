@@ -71,10 +71,6 @@ import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
 import { shortcutTemplateCategories } from './mention-shortcut-template';
 
-// ============================================================================
-// Two-level `@` menu
-// ============================================================================
-
 /**
  * Whether a lazy source has nothing to show yet. `idle` is "nobody has asked",
  * and rendering the category is exactly what asks — so an unasked source reads
@@ -463,10 +459,6 @@ function TwoLevelMentionMenu({
   );
 }
 
-// ============================================================================
-// Hydrators
-// ============================================================================
-
 function FileMentionHydrator({
   text,
   getKnownPaths,
@@ -592,10 +584,6 @@ function AgentRoleMentionHydrator({
   return null;
 }
 
-// ============================================================================
-// Imperative insertion
-// ============================================================================
-
 /**
  * What a surface outside the composer may write into it.
  *
@@ -691,10 +679,6 @@ function MentionActionsBridge({
 
   return null;
 }
-
-// ============================================================================
-// Main Component
-// ============================================================================
 
 /** Handlers a composer accepts; they receive the mention editor or, without
  * mention sources, the plain textarea. */

@@ -760,8 +760,6 @@ export function buildTourHistory({
   return history;
 }
 
-// ─── Store ────────────────────────────────────────────────────────────────────
-
 const tourRuntime = {
   workspaceId: TOUR_WORKSPACE_ID,
   workspaceSlug: TOUR_WORKSPACE_SLUG,
@@ -887,8 +885,6 @@ export function buildTourStableSession(identity: TourIdentity) {
     refetch: async () => ({ data, error: null }),
   };
 }
-
-// ─── Terminal ─────────────────────────────────────────────────────────────────
 
 /** What the scripted terminal prints, in order, once it is attached. */
 const TERMINAL_SCRIPT: string[] = [

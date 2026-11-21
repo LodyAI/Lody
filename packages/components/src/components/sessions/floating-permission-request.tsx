@@ -107,10 +107,6 @@ export function hasPendingPermissionRequest(
   return findPendingPermissions(sessionHistory).length > 0;
 }
 
-// =============================================================================
-// Styles
-// =============================================================================
-
 /**
  * A block inside a card: the region rung. Its named token collapses into the
  * card in Vesper, so it is the card mixed toward the ink, as the settings
@@ -250,10 +246,6 @@ const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
   },
 });
-
-// =============================================================================
-// The prompt
-// =============================================================================
 
 export interface PermissionPromptPosition {
   /** Zero-based. */
@@ -626,10 +618,6 @@ function PositionControl({ position }: { position: PermissionPromptPosition }) {
     </>
   );
 }
-
-// =============================================================================
-// The live surface
-// =============================================================================
 
 export interface FloatingPermissionRequestProps {
   /** Mobile session drawers render outside the workspace keyboard padding. */

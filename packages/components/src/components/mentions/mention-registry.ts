@@ -416,10 +416,6 @@ export function selectMentionMenuViewForTrigger(
   };
 }
 
-// ============================================================================
-// Candidate builders
-// ============================================================================
-
 /** Cut a ranked list down before it is mapped into candidate objects. */
 function applyLimit<T>(ranked: T[], limit: number | undefined): T[] {
   return limit === undefined || ranked.length <= limit ? ranked : ranked.slice(0, limit);
@@ -677,10 +673,6 @@ export function buildCommandCandidates(
     limit ?? commands.length
   ).map(({ item, rank }) => toCommandCandidate(item, rank));
 }
-
-// ============================================================================
-// Hook
-// ============================================================================
 
 type SourceState = {
   enabled: boolean;

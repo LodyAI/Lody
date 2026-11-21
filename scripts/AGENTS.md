@@ -17,6 +17,10 @@ maintenance commands here.
   cloud query/mutation/action references. New endpoints in its protected protocol
   families inherit the rule. Keep non-React/control exceptions exact and reasoned;
   `--inventory` prints every current client entry and protection.
+- `check-comment-ratchet.mjs` bans comment growth: per-scope counted comment
+  lines may only shrink against `comment-ratchet-baseline.json`; tighten with
+  `--update`, never to permit new prose comments. JSDoc and tool directives are
+  exempt. The audit procedure lives in `.agents/skills/delete-comment`.
 - `check-public-boundary.mjs` rejects closed product paths, private workspace
   dependencies/imports, unresolved `workspace:` dependencies, closed-path
   documentation, internal absolute paths in any publishable text, and captured

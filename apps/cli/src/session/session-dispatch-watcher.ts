@@ -1439,7 +1439,6 @@ export class SessionDispatchWatcher {
       await this.deps.reconcileLocalImages?.(sessionId, sessionDoc, meta.latestUserMsgId);
       ensureActive();
 
-      // ── Gather snapshot ──
       const snapshot = {
         meta,
         history: [] as SessionHistoryInput[], // deferred — only needed after guard checks
@@ -1452,7 +1451,6 @@ export class SessionDispatchWatcher {
         this.deps.workspaceId
       );
 
-      // ── Handle guard/stale-status results (no history needed) ──
       if (guardAction.type === 'noop') {
         outcome = `guard-noop-${guardAction.reason}`;
         if (guardAction.reason === 'release-blocked') {
@@ -1492,7 +1490,6 @@ export class SessionDispatchWatcher {
         // Fall through to turn-finding below (status is now idle)
       }
 
-      // ── Find dispatchable turn (with bounded history sync wait) ──
       const nextUserTurn = await traceAsync(
         this.deps.logger,
         'dispatch.find_or_await_turn',
@@ -1515,7 +1512,6 @@ export class SessionDispatchWatcher {
         }
         return;
       }
-      // ── Re-read state and re-evaluate before dispatching ──
       // The wait above can take up to 5 minutes. Session state may have changed
       // (archived, reassigned, another path created a session, etc.).
       const freshMeta = await traceAsync(

@@ -73,8 +73,6 @@ const GITHUB_SYSTEM_COMMANDS = `
   - The agent may use a one-time URL rewrite to fetch SSH git submodules over HTTPS, as long as the submodule is also authorized for lody or is public: git -c url."https://github.com/".insteadOf=git@github.com: submodule update --init --recursive`;
 
 const LODY_MCP_TOOLS_REMINDER = `\n\nUse the available Lody MCP tools when relevant. ${LODY_HELP_INSTRUCTIONS} ${LODY_LONG_RUN_GUIDANCE}`;
-
-// TODO: use system prompt
 export const buildPrompt = (
   prompt: string,
   project?: ProjectRef,

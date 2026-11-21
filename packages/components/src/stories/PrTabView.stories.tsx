@@ -719,10 +719,6 @@ export const Merging: Story = {
   },
 };
 
-// -------------------------------------------------------------------------
-// Merge methods — default button label reflects the selected method
-// -------------------------------------------------------------------------
-
 export const MergeMethodMerge: Story = {
   args: {
     repoFullName: 'loro-dev/lody',
@@ -755,10 +751,6 @@ export const MergeMethodRebase: Story = {
     mergeMethod: 'rebase',
   },
 };
-
-// -------------------------------------------------------------------------
-// Conversation content variants
-// -------------------------------------------------------------------------
 
 export const NoComments: Story = {
   args: {
@@ -835,10 +827,6 @@ export const OutdatedReviewThread: Story = {
   },
 };
 
-// -------------------------------------------------------------------------
-// Body & metadata variants
-// -------------------------------------------------------------------------
-
 export const NoBody: Story = {
   args: {
     repoFullName: 'loro-dev/lody',
@@ -881,10 +869,6 @@ export const GhostAuthor: Story = {
   },
 };
 
-// -------------------------------------------------------------------------
-// Interaction / transient states
-// -------------------------------------------------------------------------
-
 export const Refreshing: Story = {
   args: {
     repoFullName: 'loro-dev/lody',
@@ -906,10 +890,6 @@ export const PostingComment: Story = {
     ...storyCallbacks,
   },
 };
-
-// -------------------------------------------------------------------------
-// Mobile full-screen drawer dressing (leadingSlot + narrow viewport)
-// -------------------------------------------------------------------------
 
 export const MobileWithBackButton: Story = {
   args: {
@@ -961,10 +941,8 @@ export const MobileNativeKeyboardDrawer: Story = {
   ],
 };
 
-// -------------------------------------------------------------------------
 // Read-only (no callbacks) — useful to confirm the view still renders when
 // the parent hasn't wired any action handlers yet.
-// -------------------------------------------------------------------------
 
 export const ReadOnly: Story = {
   args: {
