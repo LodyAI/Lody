@@ -29,10 +29,19 @@ const meta = {
     state: {
       result,
       busy: false,
+      refresh: async () => result,
       create: async () => result,
       update: async () => result,
+      // The editor never connects agents or signs in; EverMe-style providers
+      // skip it entirely and render their own panel instead.
+      connect: async () => result,
+      disconnect: async () => result,
+      connectPoll: async () => result,
+      signIn: async () => result,
+      signInPoll: async () => result,
+      install: async () => result,
+      installPoll: async () => result,
     },
-    onProvider: () => {},
     onClose: () => {},
     save: async () => {},
   },
