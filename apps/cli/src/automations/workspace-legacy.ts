@@ -54,7 +54,10 @@ import { AutomationLedger, automationIdentity } from './storage/ledger';
 import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateCapacity } from './runtime/capacity';
 import { evaluateAutomationProgram } from './programs/codemode';
-import { AutomationSessionActionsLegacy } from './actions/session-actions-legacy';
+import {
+  AutomationSessionActionsLegacy,
+  isDurableSessionDenial,
+} from './actions/session-actions-legacy';
 import { retainsAutomationGrant, matchesPreparedOrigin } from './actions/authorization';
 import { observeCapacity } from './sources/capacity';
 import { reconcileSessionTurnsLegacy } from './sources/sessions-legacy';
@@ -246,7 +249,7 @@ export async function createAutomationWorkspaceLegacy(options: {
     if (authorization.value !== 'yes') return authorization;
     if (receipt.intent.guard) {
       const guard = await condition(receipt.intent.guard, receipt);
-      if (guard.value !== 'yes') return guard;
+      if (guard.value !== 'yes') return { ...guard, reason: `guard:${guard.reason}` };
     }
     if (receipt.intent.condition && !['queued', 'running', 'unknown'].includes(receipt.state)) {
       const predicate = await condition(receipt.intent.condition, receipt);
@@ -544,8 +547,12 @@ export async function createAutomationWorkspaceLegacy(options: {
     authority.setAdmission(
       async ({ sessionId, turnId, userId, origin }) => {
         const receipt = ledger.receipt(origin.invocationId);
+        if (!receipt || ['settled', 'failed', 'cancelled', 'superseded'].includes(receipt.state)) {
+          // The input outlived its receipt; leave no zombie for dispatch to re-verify.
+          await authority.cancelInput(sessionId, turnId).catch(() => false);
+          return false;
+        }
         if (
-          !receipt ||
           receipt.sessionId !== sessionId ||
           receipt.turnId !== turnId ||
           receipt.rule.ownerUserId !== userId ||
@@ -554,7 +561,18 @@ export async function createAutomationWorkspaceLegacy(options: {
           !canSubmit(sessionId, turnId, origin)
         )
           return false;
-        return (await recheck(receipt)).value === 'yes';
+        const verdict = await recheck(receipt);
+        if (verdict.value === 'yes') return true;
+        if (verdict.value === 'no' && isDurableSessionDenial(verdict)) {
+          const now = Date.now();
+          ledger.update(
+            receipt.id,
+            receipt.state,
+            { state: 'cancelling', reason: verdict.reason, retryAt: now },
+            now
+          );
+        }
+        return false;
       },
       canSubmit,
       async ({ sessionId, turnId, userId, origin }) => {
@@ -671,7 +689,6 @@ export async function createAutomationWorkspaceLegacy(options: {
               !wasEnabled ? currentTurn : undefined,
               now
             );
-            // Turning it off, or dismissing a finished status, clears the shown status.
             if (command.settings.autoDeliver === false)
               await lody.documentManager.repo.upsertDocMeta(
                 getSessionRoomId(sessionId as SessionId),
@@ -765,8 +782,8 @@ export async function createAutomationWorkspaceLegacy(options: {
             authority,
           })
         ),
-      wantsWorkflowObservations: (sessionId: string) =>
-        ledger.wantsRead('github.workflowRuns', sessionId),
+      workflowObservationOwners: () =>
+        ledger.wantsReadSessions('github.workflowRuns') as Set<SessionId>,
       recordWorkflowObservations: ((meta, repository, headSha, runs, gap, observedAt) =>
         observe(async () => {
           observeWorkflows(ledger, meta, repository, headSha, runs, gap, observedAt);

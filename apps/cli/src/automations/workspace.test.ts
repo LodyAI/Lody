@@ -12,6 +12,8 @@ import { createSessionBackend } from '@/session/session-backend';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
 import {
   remoteAutomationSecretEnvelopeSchema,
+  type AutomationInvocation,
+  type AutomationRuleDraft,
   type RemoteAutomationIntent,
   type RemoteAutomationOperation,
 } from '@lody/shared/automations';
@@ -27,6 +29,10 @@ import {
 
 const roots: string[] = [];
 const owners: AutomationWorkspaceHandle[] = [];
+function required<A>(value: A | undefined): A {
+  if (value === undefined) throw new Error('Required value missing');
+  return value;
+}
 afterEach(async () => {
   for (const owner of owners.splice(0)) await owner.dispose();
   vi.useRealTimers();
@@ -39,6 +45,7 @@ async function workspaceFixture(
     machineId: string;
     userId: string;
     collaborationStopped: boolean;
+    isArchived?: boolean;
     cliType?: string;
     agentType?: string;
     latestUserMsgId?: string;
@@ -92,6 +99,12 @@ async function workspaceFixture(
       return origin && admit ? admit({ ...args, origin }) : Promise.resolve(false);
     },
     inputDisposition: () => 'unsubmitted',
+    cancelInput: async (_sessionId: SessionId, turnId: string) => {
+      const backend = await createSessionBackend(doc);
+      for (const item of await backend.getMessageQueue())
+        if (item.userTurnId === turnId) await backend.removeMessageQueueItem(item.$cid);
+      return true;
+    },
     refreshCapacity: () => quota?.refresh(),
   };
   const repo = {
@@ -136,6 +149,7 @@ async function workspaceFixture(
     testDocument: doc,
     testEditors: editors,
     testAuthors: authors,
+    testAdmission: (args: AutomationSessionAdmission) => admit?.(args),
   });
 }
 describe('Automation control authority', () => {
@@ -185,16 +199,19 @@ describe('Automation control authority', () => {
       },
     });
     const fingerprint = providerBindingFingerprint(config);
-    host.ledger.recordCapacity({
-      bindingId: 'binding',
-      fingerprint,
-      observedAt: 90_000,
-      validUntil: 200_000,
-      source: 'query',
-      authentication: 'valid',
-      billing: 'valid',
-      windows: [{ id: 'quota', usedPercent: 100, resetsAt: 100_000 }],
-    });
+    host.ledger.recordCapacity(
+      {
+        bindingId: 'binding',
+        fingerprint,
+        observedAt: 90_000,
+        validUntil: 200_000,
+        source: 'query',
+        authentication: 'valid',
+        billing: 'valid',
+        windows: [{ id: 'quota', usedPercent: 100, resetsAt: 100_000 }],
+      },
+      90_000
+    );
     await host.command({
       type: 'configure',
       sessionId: 'session-a',
@@ -244,7 +261,6 @@ describe('Automation control authority', () => {
       machineId: 'machine',
       userId: 'user',
       collaborationStopped: false,
-      // Delivery already turned itself off when the PR merged; only the status remains.
       autoDelivery: { state: 'merged', updatedAt: 1 } as Record<string, unknown> | null,
     };
     const host = await workspaceFixture(meta);
@@ -742,6 +758,179 @@ describe('Automation control authority', () => {
     expect(host.ledger.wait(ready.id)?.state).toBe('cancelled');
     expect(host.ledger.wait(wait.id)?.consecutiveErrors).toBe(0);
   });
+  it('cancels a queued continuation whose authorization is durably revoked', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    };
+    const host = await workspaceFixture(meta);
+    const invocation: AutomationInvocation = {
+      target: { kind: 'existing', sessionId: 'session-a', onUnavailable: 'blocked' },
+      input: { kind: 'external_event', ref: 'event' },
+      ifBusy: 'enqueue',
+    };
+    const draft: AutomationRuleDraft = {
+      id: 'rule',
+      name: 'resume',
+      scope: { workspaceId: 'workspace' },
+      selector: { types: ['test.event'] },
+      enabled: true,
+      handler: { kind: 'agent', invocation },
+      grants: {
+        actions: ['agent.invoke'],
+        sessionIds: ['session-a'],
+        agentRoleIds: [],
+        bindingIds: [],
+        allowLinkedSession: false,
+        allowCapacityAttempt: false,
+      },
+      budget: { maxActionsPerEvent: 10, maxInvocationsPerCorrelation: 2, maxDepth: 4 },
+    };
+    const rule = host.ledger.upsert(draft, 'user', Date.now());
+    host.ledger.publish({
+      id: 'e1',
+      source: 'test',
+      type: 'test.event',
+      version: 1,
+      subject: 'subject',
+      observedAt: Date.now(),
+      scope: { workspaceId: 'workspace', sessionId: 'session-a' },
+      data: {},
+      provenance: 'poll',
+      completeness: 'observed',
+      depth: 0,
+    });
+    const receipt = host.ledger.accept(
+      required(host.ledger.deliveries()[0]),
+      { key: 'step', action: { kind: 'agent.invoke', parameters: invocation } },
+      Date.now()
+    );
+    host.ledger.update(receipt.id, 'accepted', { state: 'queued' }, Date.now());
+    await host.testDocument.pushMessageQueue({
+      task: 'resume',
+      userId: 'user',
+      userTurnId: receipt.turnId,
+      operationId: receipt.id,
+      timestamp: new Date().toISOString(),
+      isEditing: false,
+      editingStartedAt: undefined,
+      project: undefined,
+    });
+    meta.collaborationStopped = true;
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(host.ledger.receipt(receipt.id)).toMatchObject({ state: 'queued' });
+    host.ledger.upsert({ ...draft, enabled: false }, 'user', Date.now(), rule.revision);
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(host.ledger.receipt(receipt.id)).toMatchObject({
+      state: 'cancelled',
+      reason: 'authorization_revoked',
+    });
+    const queue = await (await createSessionBackend(host.testDocument)).getMessageQueue();
+    expect(queue).toHaveLength(0);
+  });
+  it('supersedes a queued continuation whose admission guard went stale', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const host = await workspaceFixture({
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    });
+    const invocation: AutomationInvocation = {
+      target: { kind: 'existing', sessionId: 'session-a', onUnavailable: 'blocked' },
+      input: { kind: 'external_event', ref: 'event' },
+      ifBusy: 'enqueue',
+    };
+    const draft: AutomationRuleDraft = {
+      id: 'rule',
+      name: 'deliver',
+      scope: { workspaceId: 'workspace' },
+      selector: { types: ['test.event'] },
+      enabled: true,
+      handler: { kind: 'agent', invocation },
+      grants: {
+        actions: ['agent.invoke'],
+        sessionIds: ['session-a'],
+        agentRoleIds: [],
+        bindingIds: [],
+        allowLinkedSession: false,
+        allowCapacityAttempt: false,
+      },
+      budget: { maxActionsPerEvent: 10, maxInvocationsPerCorrelation: 2, maxDepth: 4 },
+    };
+    const rule = host.ledger.upsert(draft, 'user', Date.now());
+    host.ledger.publish({
+      id: 'e1',
+      source: 'test',
+      type: 'test.event',
+      version: 1,
+      subject: 'subject',
+      observedAt: Date.now(),
+      scope: { workspaceId: 'workspace', sessionId: 'session-a' },
+      data: {},
+      provenance: 'poll',
+      completeness: 'observed',
+      depth: 0,
+    });
+    const receipt = host.ledger.accept(
+      required(host.ledger.deliveries()[0]),
+      {
+        key: 'step',
+        guard: {
+          kind: 'session.delivery.current',
+          parameters: { sessionId: 'session-a', eventId: 'ev-stale' },
+        },
+        action: { kind: 'agent.invoke', parameters: invocation },
+      },
+      Date.now()
+    );
+    const origin = {
+      invocationId: receipt.id,
+      ruleId: rule.id,
+      ruleRevision: rule.revision,
+      eventRef: receipt.event.id,
+      authorizationUserId: 'user',
+    };
+    host.ledger.update(
+      receipt.id,
+      'accepted',
+      { state: 'queued', prepared: { kind: 'queue', config: { _lodyAutomation: origin } } },
+      Date.now()
+    );
+    await host.testDocument.pushMessageQueue({
+      task: 'deliver',
+      userId: 'user',
+      userTurnId: receipt.turnId,
+      operationId: receipt.id,
+      timestamp: new Date().toISOString(),
+      isEditing: false,
+      editingStartedAt: undefined,
+      project: undefined,
+    });
+    expect(
+      await host.testAdmission({
+        sessionId: 'session-a' as SessionId,
+        turnId: receipt.turnId,
+        userId: 'user',
+        origin,
+      })
+    ).toBe(false);
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(host.ledger.receipt(receipt.id)).toMatchObject({
+      state: 'superseded',
+      reason: 'guard:delivery_step_replaced',
+    });
+    const queue = await (await createSessionBackend(host.testDocument)).getMessageQueue();
+    expect(queue).toHaveLength(0);
+  });
   it('manages an owned Session’s automations from another active Session', async () => {
     const host = await workspaceFixture({
       id: 'session-b',
@@ -836,7 +1025,6 @@ it('registers a condition with implicit Session identity and rejects invalid pro
 });
 
 describe('Managed runs', () => {
-  // The child exits only once the test creates its release file, so no timing assumption is needed.
   const gated = (release: string, exitCode: number) => ({
     command: process.execPath,
     args: [

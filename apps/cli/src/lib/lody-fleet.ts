@@ -1356,10 +1356,9 @@ export class LodyFleet {
                 githubTokens: this.cloudPort.githubTokens,
                 prAssociation: this.cloudPort.prAssociation,
                 logger: workspaceLogger,
-                wantsWorkflowObservations: (sessionId) =>
-                  this.runtimes
-                    .get(workspace.id)
-                    ?.automations?.wantsWorkflowObservations(sessionId) ?? false,
+                workflowObservationOwners: () =>
+                  this.runtimes.get(workspace.id)?.automations?.workflowObservationOwners() ??
+                  new Set(),
                 recordWorkflowObservations: async (...args) => {
                   await this.runtimes
                     .get(workspace.id)
