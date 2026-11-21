@@ -22,7 +22,9 @@ flowchart TD
   E --> EP
   G --> AP[Android immutable APK then its manifest]
   A --> AP
-  G --> I[iOS TestFlight]
+  P --> IB[iOS archive and export]
+  IB --> I[iOS TestFlight]
+  G --> I
   NP --> T[Tag the frozen source after every publisher succeeds]
   EP --> T
   AP --> T
@@ -38,9 +40,13 @@ transaction journal retain the existing recovery behavior.
 
 `release-clients.yml` uses linked Release Please components on `release` (stable)
 and `main` (`next`). It publishes only when Release Please created a release.
-Its historical `validate-app-redirects` job id now validates the public composition;
-private website redirect validation stays with private deployment. Keeping the id
-makes the narrow all-publishers-untouched recovery topology explicit.
+Both workflows validate with three parallel Ubuntu matrix lanes: `lint`,
+`typecheck-desktop-cli`, and `typecheck-mobile`. The desktop lane retains the other
+workspace packages' typechecks and ACP preparation; mobile runs on a separate
+runner. Stable keeps the historical `validate-app-redirects` job id, now expanded
+into those matrix jobs. Recovery requires complete, terminal validation results,
+at least one failed lane, and untouched publishers. Private website redirect
+validation stays with private deployment.
 
 The five `publish-*.yml` entry points are independent, commit-pinned dispatches.
 Production dispatches run from `release`, so the environment's release-only branch
@@ -56,6 +62,51 @@ succeeded, public validation failed, and every publisher was skipped. It never
 runs Release Please again and selects one client component plus its required SEA
 publication/check. Other partial releases
 use the component workflow or rerun failed jobs; ambiguous state fails closed.
+
+## Build duration and memory
+
+All mobile dependency installs set `LODY_SKIP_ELECTRON_POSTINSTALL=1` and select
+`{./apps/mobile-capacitor}...`, including its complete dependency closure. Track A's
+package is currently named `@lody/mobile`, so the directory selector avoids relying
+on the proposed `@lody/mobile-capacitor` name. `@lody/shared` brings
+`acp-extension-core` into this closure; its own prepare script still builds its
+runtime export. Android sets up Java before installation and hashes only the
+Capacitor Gradle files and wrapper properties for its dependency cache.
+
+Nightly and stable iOS start dependency installation/archive/export after common
+validation (and Nightly version reservation), concurrently with SEA. Immediately
+before uploading, `wait-release-gate.mjs` waits up to 60 minutes for the current
+run's exact-source `verify-daemon-installation` job to succeed. Failure, cancellation,
+skip, ambiguous/wrong-source evidence or timeout prevents upload. Manual iOS checks
+the exact version's public installer at that same upload boundary. Keep the existing
+iOS lock across build and upload so concurrent builds cannot reuse an unresolved
+App Store train/build number. Stable recovery rechecks App Store admission after
+the wait, immediately before upload.
+
+macOS Electron jobs explicitly use a 4096 MiB Node heap. The previous private
+`build-app.mjs` honors an existing `NODE_OPTIONS` heap, rather than overwriting it;
+Track B must preserve that behavior. `.github/scripts/observe-macos-build.sh` prints
+physical memory, `vm_stat`, swap snapshots and `/usr/bin/time -l` maximum RSS around
+the compile/package command, including the after snapshot on failure. No environment
+or credential dumps are included.
+
+Future shared compilation can replace the `build` invocation in Nightly's `build`
+job and stable/manual `build-electron` with an artifact download after an
+`ubuntu-latest` compile job. That artifact would contain platform-neutral Electron
+`out/` plus CLI `dist/`, bound to the admitted SHA, channel, version, cloud
+configuration and build identity. Keep platform-native runtime staging, native
+addons, signing/notarization and packaging on their target runner. First verify
+these outputs contain no host-specific native closure and that packaging can
+consume them without rebuilding. This PR leaves `package-electron.mjs` unchanged.
+
+Nightly desktop publication installs only the Electron dependency closure with
+lifecycle scripts disabled, rather than installing every workspace project. All
+R2 publishers use `.github/scripts/setup-aws-cli.sh`: reuse a runner's existing
+CLI, otherwise install AWS CLI v2 from its official HTTPS distribution for the
+runner's operating system/architecture, before injecting any upload credentials.
+
+The supplied duration savings are the migration owner's prior measurements;
+these workflow changes have not yet been benchmarked on public release runners.
 
 ## Track A and Track B integration contract
 

@@ -100,7 +100,7 @@ jobs:
           'next'
         }}
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: --max-old-space-size=6144
+      NODE_OPTIONS: ${{ matrix.target == 'mac' && '--max-old-space-size=4096' || '--max-old-space-size=6144' }}
       npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
@@ -223,8 +223,15 @@ jobs:
           APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
           APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
           SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
+          BUILD_SCRIPT: ${{ matrix.build_script }}
         shell: bash
-        run: pnpm --filter @lody/electron run ${{ matrix.build_script }}
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            bash .github/scripts/observe-macos-build.sh corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
+          else
+            corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
+          fi
       - name: Generate signed Sparkle appcast and deltas (staging)
         if: matrix.target == 'mac' && github.ref_name != 'release'
         uses: ./.github/actions/generate-sparkle-appcast
@@ -355,6 +362,10 @@ jobs:
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Clear previous Electron upload artifacts
         shell: bash
         run: rm -rf -- electron-release-assets download-aliases
@@ -365,15 +376,8 @@ jobs:
           path: electron-release-assets
           merge-multiple: true
       - name: Ensure AWS CLI
-        run: |
-          if command -v aws >/dev/null 2>&1; then
-            aws --version
-            exit 0
-          fi
-
-          sudo apt-get update
-          sudo apt-get install -y awscli
-          aws --version
+        run: bash .github/scripts/setup-aws-cli.sh
+        shell: bash
       - name: Upload Electron installers and updater metadata to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

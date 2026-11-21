@@ -77,26 +77,7 @@ jobs:
           path: candidate
       - name: Ensure AWS CLI
         shell: bash
-        run: |
-          if command -v aws >/dev/null 2>&1; then
-            aws --version
-            exit 0
-          fi
-
-          if ! command -v curl >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y curl unzip
-          fi
-          download_dir="$(mktemp -d "$RUNNER_TEMP/aws-download.XXXXXX")"
-          install_dir="$(mktemp -d "$RUNNER_TEMP/aws-cli.XXXXXX")"
-          trap 'rm -rf "$download_dir"' EXIT
-          curl --fail --show-error --silent --location --retry 3 \
-            https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip \
-            -o "$download_dir/awscliv2.zip"
-          unzip -q "$download_dir/awscliv2.zip" -d "$download_dir"
-          "$download_dir/aws/install" --install-dir "$install_dir/cli" --bin-dir "$install_dir/bin"
-          echo "$install_dir/bin" >> "$GITHUB_PATH"
-          "$install_dir/bin/aws" --version
+        run: bash .github/scripts/setup-aws-cli.sh
       - name: Recover interrupted publication and check candidate
         id: prepare
         env:
@@ -120,6 +101,7 @@ jobs:
       NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
+      LODY_SKIP_ELECTRON_POSTINSTALL: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -134,16 +116,44 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
-      - name: Install exact composition dependencies
-        run: corepack pnpm install --frozen-lockfile --prefer-offline
-      - name: Validate the public client composition
+      - name: Install validation dependencies
+        run: >
+          set -euo pipefail
+
+          if [[ "$CHECK" == typecheck-mobile ]]; then
+            corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+          else
+            corepack pnpm install --frozen-lockfile --prefer-offline
+          fi
         env:
+          CHECK: ${{ matrix.check }}
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+      - name: Run independent validation
+        env:
+          CHECK: ${{ matrix.check }}
           GOMAXPROCS: '2'
           GOMEMLIMIT: 3GiB
-        run: |
+        shell: bash
+        run: >
           set -euo pipefail
-          corepack pnpm typecheck
-          corepack pnpm check:quick
+
+          case "$CHECK" in
+            lint) corepack pnpm check:quick ;;
+            typecheck-desktop-cli)
+              corepack pnpm --dir apps/cli prepare:acp-adapters
+              corepack pnpm -r --no-sort --workspace-concurrency=2 --filter '!{**/acp-extension-*}' --filter '!./apps/mobile-capacitor' run typecheck
+              ;;
+            typecheck-mobile) corepack pnpm --dir apps/mobile-capacitor typecheck ;;
+            *) exit 1 ;;
+          esac
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - lint
+          - typecheck-desktop-cli
+          - typecheck-mobile
+    name: validate (${{ matrix.check }})
   build:
     needs:
       - candidate
@@ -184,7 +194,7 @@ jobs:
       VITE_ELECTRON_UPDATE_CHANNEL: nightly
       ELECTRON_UPDATE_CHANNEL: nightly
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: --max-old-space-size=6144
+      NODE_OPTIONS: ${{ matrix.target == 'mac' && '--max-old-space-size=4096' || '--max-old-space-size=6144' }}
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
@@ -277,8 +287,9 @@ jobs:
 
           unset APPLE_API_KEY_P8
 
-          APPLE_API_KEY="${key_file}" corepack pnpm --dir apps/electron build && APPLE_API_KEY="${key_file}" corepack
-          pnpm --dir apps/electron package:nightly:mac
+          APPLE_API_KEY="${key_file}" bash .github/scripts/observe-macos-build.sh corepack pnpm --dir apps/electron
+          build && APPLE_API_KEY="${key_file}" bash .github/scripts/observe-macos-build.sh corepack pnpm --dir
+          apps/electron package:nightly:mac
       - name: Verify signed and notarized macOS archives
         if: steps.cached.outputs.id == '0' && matrix.target == 'mac'
         shell: bash
@@ -390,8 +401,19 @@ jobs:
         with:
           node-version: 26.13.0
           cache: pnpm
+      - name: Setup Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            apps/mobile-capacitor/android/**/*.gradle*
+            apps/mobile-capacitor/android/gradle/wrapper/gradle-wrapper.properties
       - name: Install exact composition dependencies
-        run: corepack pnpm install --frozen-lockfile --prefer-offline
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
       - name: Export frozen mobile identity
         run: >
           node --input-type=module <<'JS'
@@ -434,13 +456,6 @@ jobs:
           artifact-ids: ${{ steps.cached.outputs.id }}
           path: release-assets
           merge-multiple: true
-      - name: Setup Java
-        if: steps.cached.outputs.id == '0'
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: gradle
       - name: Setup Android SDK
         if: steps.cached.outputs.id == '0'
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
@@ -511,7 +526,6 @@ jobs:
       - candidate
       - prepare
       - validate
-      - verify-daemon-installation
     if: needs.prepare.outputs.publish == 'true'
     uses: ./.github/workflows/publish-ios.yml
     secrets: inherit
@@ -539,7 +553,9 @@ jobs:
           node-version: 26.13.0
           cache: pnpm
       - name: Install verification dependencies without lifecycle scripts
-        run: corepack pnpm install --frozen-lockfile --prefer-offline --ignore-scripts
+        run:
+          corepack pnpm --filter '{./apps/electron}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+          --ignore-scripts
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: nightly-candidate-${{ github.run_id }}
@@ -562,26 +578,7 @@ jobs:
           path: release-assets/linux-arm64
       - name: Ensure AWS CLI
         shell: bash
-        run: |
-          if command -v aws >/dev/null 2>&1; then
-            aws --version
-            exit 0
-          fi
-
-          if ! command -v curl >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y curl unzip
-          fi
-          download_dir="$(mktemp -d "$RUNNER_TEMP/aws-download.XXXXXX")"
-          install_dir="$(mktemp -d "$RUNNER_TEMP/aws-cli.XXXXXX")"
-          trap 'rm -rf "$download_dir"' EXIT
-          curl --fail --show-error --silent --location --retry 3 \
-            https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip \
-            -o "$download_dir/awscliv2.zip"
-          unzip -q "$download_dir/awscliv2.zip" -d "$download_dir"
-          "$download_dir/aws/install" --install-dir "$install_dir/cli" --bin-dir "$install_dir/bin"
-          echo "$install_dir/bin" >> "$GITHUB_PATH"
-          "$install_dir/bin/aws" --version
+        run: bash .github/scripts/setup-aws-cli.sh
       - name: Verify complete matrix, upload immutable assets and commit feeds
         env:
           LODY_NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
@@ -623,6 +620,9 @@ jobs:
         with:
           name: nightly-build-${{ github.run_id }}-android
           path: release-assets
+      - name: Ensure AWS CLI
+        shell: bash
+        run: bash .github/scripts/setup-aws-cli.sh
       - name: Verify and publish Android independently
         env:
           LODY_NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}

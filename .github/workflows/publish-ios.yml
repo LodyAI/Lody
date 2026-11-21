@@ -116,10 +116,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - name: Verify public daemon installation before client publication
-        run: node apps/cli/check-installer.mjs . ${{ inputs.nightly-version != '' && 'nightly' || 'stable' }}
       - name: Install dependencies
-        run: corepack pnpm install --frozen-lockfile --prefer-offline
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
       - name: Normalize mobile auth base URL
         shell: bash
         run: |
@@ -425,6 +425,16 @@ jobs:
             'mobile-ios-ipa' }}
           path: ${{ runner.temp }}/LodyIpa/*.ipa
           if-no-files-found: error
+      - name: Wait for same-run SEA verification before Nightly iOS publication
+        if: inputs.nightly-version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/wait-release-gate.mjs
+      - name: Verify exact-version public installer immediately before iOS upload
+        run: node apps/cli/check-installer.mjs . "$DAEMON_CHANNEL" "$DAEMON_EXPECTED_VERSION"
+        env:
+          DAEMON_CHANNEL: ${{ inputs.nightly-version != '' && 'nightly' || 'stable' }}
+          DAEMON_EXPECTED_VERSION: ${{ inputs.nightly-version || inputs.expected_version }}
       - name: Reject existing or uncertain iOS recovery uploads
         if: inputs.nightly-version == ''
         env:

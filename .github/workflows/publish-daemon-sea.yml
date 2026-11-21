@@ -245,15 +245,8 @@ jobs:
 
           JS
       - name: Ensure AWS CLI is available without publication credentials
-        run: >
-          set -euo pipefail
-
-          if ! command -v aws >/dev/null 2>&1; then
-            curl --fail --silent --show-error --location https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o "$RUNNER_TEMP/awscli.zip"
-            unzip -q "$RUNNER_TEMP/awscli.zip" -d "$RUNNER_TEMP/daemon-aws"
-            "$RUNNER_TEMP/daemon-aws/aws/install" --install-dir "$RUNNER_TEMP/daemon-aws-cli" --bin-dir "$RUNNER_TEMP/daemon-aws-bin"
-            echo "$RUNNER_TEMP/daemon-aws-bin" >> "$GITHUB_PATH"
-          fi
+        run: bash .github/scripts/setup-aws-cli.sh
+        shell: bash
       - name: Upload immutable release, then conditionally advance channel
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

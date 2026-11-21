@@ -118,6 +118,7 @@ jobs:
       NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
+      LODY_SKIP_ELECTRON_POSTINSTALL: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -132,10 +133,44 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Validate public composition
-        run: corepack pnpm check:quick
+      - name: Install validation dependencies
+        run: >
+          set -euo pipefail
+
+          if [[ "$CHECK" == typecheck-mobile ]]; then
+            corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+          else
+            corepack pnpm install --frozen-lockfile --prefer-offline
+          fi
+        env:
+          CHECK: ${{ matrix.check }}
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+      - name: Run independent validation
+        env:
+          CHECK: ${{ matrix.check }}
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 3GiB
+        shell: bash
+        run: >
+          set -euo pipefail
+
+          case "$CHECK" in
+            lint) corepack pnpm check:quick ;;
+            typecheck-desktop-cli)
+              corepack pnpm --dir apps/cli prepare:acp-adapters
+              corepack pnpm -r --no-sort --workspace-concurrency=2 --filter '!{**/acp-extension-*}' --filter '!./apps/mobile-capacitor' run typecheck
+              ;;
+            typecheck-mobile) corepack pnpm --dir apps/mobile-capacitor typecheck ;;
+            *) exit 1 ;;
+          esac
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - lint
+          - typecheck-desktop-cli
+          - typecheck-mobile
+    name: validate-app-redirects (${{ matrix.check }})
   publish-daemon:
     permissions:
       contents: read
@@ -318,7 +353,7 @@ jobs:
           'next'
         }}
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: --max-old-space-size=6144
+      NODE_OPTIONS: ${{ matrix.target == 'mac' && '--max-old-space-size=4096' || '--max-old-space-size=6144' }}
       npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
@@ -437,8 +472,15 @@ jobs:
           APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
           APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
           SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
+          BUILD_SCRIPT: ${{ matrix.build_script }}
         shell: bash
-        run: pnpm --filter @lody/electron run ${{ matrix.build_script }}
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            bash .github/scripts/observe-macos-build.sh corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
+          else
+            corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
+          fi
       - name: Generate signed Sparkle appcast and deltas (staging)
         if: matrix.target == 'mac' && needs.release.outputs.target_environment != 'production'
         uses: ./.github/actions/generate-sparkle-appcast
@@ -586,6 +628,10 @@ jobs:
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Clear previous Electron upload artifacts
         shell: bash
         run: rm -rf -- electron-release-assets download-aliases
@@ -596,15 +642,8 @@ jobs:
           path: electron-release-assets
           merge-multiple: true
       - name: Ensure AWS CLI
-        run: |
-          if command -v aws >/dev/null 2>&1; then
-            aws --version
-            exit 0
-          fi
-
-          sudo apt-get update
-          sudo apt-get install -y awscli
-          aws --version
+        run: bash .github/scripts/setup-aws-cli.sh
+        shell: bash
       - name: Upload Electron installers and updater metadata to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -863,18 +902,23 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
       - name: Setup Java
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-        with:
-          packages: platform-tools
+          cache-dependency-path: |
+            apps/mobile-capacitor/android/**/*.gradle*
+            apps/mobile-capacitor/android/gradle/wrapper/gradle-wrapper.properties
       - name: Install dependencies
-        run: corepack pnpm install --frozen-lockfile --prefer-offline
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
       - name: Normalize mobile auth base URL
         shell: bash
         run: |
@@ -1030,20 +1074,7 @@ jobs:
           if-no-files-found: error
       - name: Ensure AWS CLI
         shell: bash
-        run: |
-          set -euo pipefail
-          if command -v aws >/dev/null 2>&1; then
-            aws --version
-            exit 0
-          fi
-
-          if [[ "${RUNNER_OS}" == "macOS" ]]; then
-            brew install awscli
-          else
-            sudo apt-get update
-            sudo apt-get install -y awscli
-          fi
-          aws --version
+        run: bash .github/scripts/setup-aws-cli.sh
       - name: Upload Android APK and metadata to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -1057,12 +1088,11 @@ jobs:
     needs:
       - release
       - validate-app-redirects
-      - verify-daemon-installation
     permissions:
       contents: read
-    if: >-
+      actions: read
+    if: |-
       ${{ !cancelled() && needs.release.result == 'success' && needs.validate-app-redirects.result == 'success' &&
-      needs.verify-daemon-installation.result == 'success' &&
           ((github.event_name == 'push' || inputs.component == 'ios') &&
         needs.release.outputs.publish_requested == 'true' &&
         contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor') &&
@@ -1131,7 +1161,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - name: Install dependencies
-        run: corepack pnpm install --frozen-lockfile --prefer-offline
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
       - name: Reject existing or uncertain iOS uploads before build
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -1421,6 +1453,10 @@ jobs:
           name: mobile-ios-ipa
           path: ${{ runner.temp }}/LodyIpa/*.ipa
           if-no-files-found: error
+      - name: Wait for same-run SEA verification before iOS publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/wait-release-gate.mjs
       - name: Recheck iOS admission immediately before upload
         if: github.event_name == 'workflow_dispatch'
         env:

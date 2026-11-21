@@ -194,3 +194,95 @@ await test('GitHub release retries preserve existing installer bytes and origina
   await assert.rejects(attachReleaseAssets(args), /different or unverifiable/);
   assert.equal(assets[0].digest, `sha256:${createHash('sha256').update(bytes).digest('hex')}`);
 });
+
+await test('iOS archives can finish before SEA; publication waits for that exact same-run verification', async () => {
+  const { waitForReleaseGate } = await import('./wait-release-gate.mjs');
+  let clock = 0;
+  let state = [];
+  const observed = [];
+  const job = {
+    name: 'verify-daemon-installation',
+    head_sha: sha,
+    status: 'in_progress',
+    conclusion: null,
+  };
+  await waitForReleaseGate({
+    expectedSha: sha,
+    now: () => clock,
+    timeoutMs: 100,
+    intervalMs: 10,
+    getJobs: async () => state,
+    sleep: async (ms) => {
+      clock += ms;
+      observed.push(clock);
+      state = clock === 10 ? [job] : [{ ...job, status: 'completed', conclusion: 'success' }];
+    },
+  });
+  assert.deepEqual(observed, [10, 20]);
+  assert.equal(clock, 20);
+});
+for (const conclusion of ['failure', 'cancelled', 'skipped', 'timed_out', 'neutral', null]) {
+  await test(`iOS upload remains blocked after SEA conclusion ${conclusion}`, async () => {
+    const { waitForReleaseGate } = await import('./wait-release-gate.mjs');
+    await assert.rejects(
+      waitForReleaseGate({
+        expectedSha: sha,
+        getJobs: async () => [
+          { name: 'verify-daemon-installation', head_sha: sha, status: 'completed', conclusion },
+        ],
+      }),
+      /did not succeed/
+    );
+  });
+}
+await test('missing SEA verification has a bounded wait; source mismatch and ambiguous verification fail closed', async () => {
+  const { waitForReleaseGate } = await import('./wait-release-gate.mjs');
+  let clock = 0;
+  await assert.rejects(
+    waitForReleaseGate({
+      expectedSha: sha,
+      now: () => clock,
+      timeoutMs: 15,
+      intervalMs: 10,
+      getJobs: async () => [],
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    }),
+    /Timed out/
+  );
+  assert.equal(clock, 15);
+  const job = {
+    name: 'verify-daemon-installation',
+    head_sha: sha,
+    status: 'completed',
+    conclusion: 'success',
+  };
+  await assert.rejects(
+    waitForReleaseGate({
+      expectedSha: sha,
+      getJobs: async () => [{ ...job, head_sha: 'b'.repeat(40) }],
+    }),
+    /different source/
+  );
+  await assert.rejects(
+    waitForReleaseGate({ expectedSha: sha, getJobs: async () => [job, job] }),
+    /Ambiguous/
+  );
+});
+await test('an unreadable SEA verification response never admits iOS publication', async () => {
+  const { waitForReleaseGate } = await import('./wait-release-gate.mjs');
+  await assert.rejects(
+    waitForReleaseGate({
+      expectedSha: sha,
+      getJobs: async () => {
+        throw new Error('API unavailable');
+      },
+    }),
+    /API unavailable/
+  );
+  await assert.rejects(
+    waitForReleaseGate({ expectedSha: sha, getJobs: async () => ({ jobs: [] }) }),
+    /Invalid/
+  );
+});

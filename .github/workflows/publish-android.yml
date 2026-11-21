@@ -143,18 +143,23 @@ jobs:
           }} "$EXPECTED_VERSION"
         env:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
       - name: Setup Java
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-        with:
-          packages: platform-tools
+          cache-dependency-path: |
+            apps/mobile-capacitor/android/**/*.gradle*
+            apps/mobile-capacitor/android/gradle/wrapper/gradle-wrapper.properties
       - name: Install dependencies
-        run: corepack pnpm install --frozen-lockfile --prefer-offline
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
       - name: Normalize mobile auth base URL
         shell: bash
         run: |
@@ -310,20 +315,7 @@ jobs:
           if-no-files-found: error
       - name: Ensure AWS CLI
         shell: bash
-        run: |
-          set -euo pipefail
-          if command -v aws >/dev/null 2>&1; then
-            aws --version
-            exit 0
-          fi
-
-          if [[ "${RUNNER_OS}" == "macOS" ]]; then
-            brew install awscli
-          else
-            sudo apt-get update
-            sudo apt-get install -y awscli
-          fi
-          aws --version
+        run: bash .github/scripts/setup-aws-cli.sh
       - name: Upload Android APK and metadata to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

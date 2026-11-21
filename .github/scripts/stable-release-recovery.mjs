@@ -73,7 +73,6 @@ export async function validateRecovery({ github, context, inputs, currentSha, fe
   });
   const expectedJobs = {
     release: 'success',
-    'validate-app-redirects': 'failure',
     'publish-daemon': 'skipped',
     'verify-daemon-installation': 'skipped',
     'attach-electron-release': 'skipped',
@@ -84,7 +83,7 @@ export async function validateRecovery({ github, context, inputs, currentSha, fe
     'upload-mobile-ios-to-app-store-connect': 'skipped',
   };
   requireCondition(
-    jobs.length === Object.keys(expectedJobs).length &&
+    jobs.length === Object.keys(expectedJobs).length + 3 &&
       Object.entries(expectedJobs).every(([name, conclusion]) => {
         const matches = jobs.filter((job) => job.name === name);
         return (
@@ -93,7 +92,23 @@ export async function validateRecovery({ github, context, inputs, currentSha, fe
           matches[0].conclusion === conclusion
         );
       }),
-    'Source run must have only the failed redirect gate and untouched publishers'
+    'Source run must have only failed public validation and untouched publishers'
+  );
+  const validation = ['lint', 'typecheck-desktop-cli', 'typecheck-mobile'].map((check) => {
+    const matches = jobs.filter((job) => job.name === `validate-app-redirects (${check})`);
+    requireCondition(
+      matches.length === 1 && matches[0].status === 'completed',
+      'Incomplete public validation evidence'
+    );
+    requireCondition(
+      ['success', 'failure'].includes(matches[0].conclusion),
+      'Unknown public validation result'
+    );
+    return matches[0];
+  });
+  requireCondition(
+    validation.some((job) => job.conclusion === 'failure'),
+    'Source validation did not fail'
   );
 
   const refs = await github.paginate(github.rest.git.listMatchingRefs, {

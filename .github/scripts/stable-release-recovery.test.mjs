@@ -25,7 +25,9 @@ function fixture(component = 'cli') {
     },
     jobs: Object.entries({
       release: 'success',
-      'validate-app-redirects': 'failure',
+      'validate-app-redirects (lint)': 'failure',
+      'validate-app-redirects (typecheck-desktop-cli)': 'success',
+      'validate-app-redirects (typecheck-mobile)': 'success',
       'publish-daemon': 'skipped',
       'verify-daemon-installation': 'skipped',
       'attach-electron-release': 'skipped',
@@ -175,7 +177,7 @@ const invalid = {
     f.state.jobs[0].conclusion = 'failure';
   },
   'publisher already ran': (f) => {
-    f.state.jobs[2].conclusion = 'success';
+    f.state.jobs.find((job) => job.name === 'publish-cli').conclusion = 'success';
   },
   'missing tag': (f) => {
     f.state.refs.pop();
@@ -258,4 +260,29 @@ await test('iOS pins original source without confusing Android metadata with App
     paths_released: '["apps/mobile-capacitor"]',
   });
   assert.equal(state.probes.length, 0);
+});
+
+await test('public validation recovery requires a failed matrix lane and complete results for every lane', async () => {
+  for (const mutate of [
+    (jobs) => {
+      jobs.find((job) => job.name === 'validate-app-redirects (lint)').conclusion = 'success';
+    },
+    (jobs) => {
+      jobs.find((job) => job.name === 'validate-app-redirects (typecheck-mobile)').status =
+        'in_progress';
+    },
+    (jobs) => {
+      jobs.find((job) => job.name === 'validate-app-redirects (typecheck-desktop-cli)').conclusion =
+        'cancelled';
+    },
+    (jobs) => {
+      jobs.find((job) => job.name === 'validate-app-redirects (typecheck-mobile)').name =
+        'unexpected validation';
+    },
+  ]) {
+    const { state, args } = fixture();
+    mutate(state.jobs);
+    await assert.rejects(validateRecovery(args));
+    assert.deepEqual(state.probes, []);
+  }
 });
