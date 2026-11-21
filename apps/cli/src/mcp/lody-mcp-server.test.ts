@@ -286,14 +286,15 @@ describe('Lody MCP tool catalog', () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
     try {
-      const { tools } = await client.listTools();
+      // Deferring clients search instructions: coverage comes first, then the help-first rule.
+      expect(client.getInstructions()).toMatch(/^Lody tools coordinate work across Lody conversations/);
+      expect(client.getInstructions()).toContain('you MUST call lody_help({command: TOOL_NAME})');
       for (const name of [
         'lody_session_create',
         'lody_session_create_many',
         'lody_session_chat',
         'lody_session_chat_many',
       ]) {
-        expect(tools.find((tool) => tool.name === name)?.description).toContain('lody_help');
         const help = CallToolResultSchema.parse(
           await client.callTool({ name: 'lody_help', arguments: { command: name } })
         );

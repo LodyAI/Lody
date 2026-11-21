@@ -4698,6 +4698,13 @@ const OPERATION_SNAPSHOT_GUIDANCE = [
   'Delivery: completion is stored before being injected into the requester conversation at a permitted input boundary. A finished snapshot does not prove the agent has already received that notification. Take an occasional diagnostic snapshot when necessary; let automatic delivery handle normal waiting. Do not poll or recreate work to recover a missing notification.',
 ].join('\n\n');
 
+/**
+ * Deferring clients search server instructions to decide when to load tools, so the
+ * first sentences name what the tools cover; the rules after it stay verbatim.
+ */
+const LODY_MCP_COVERAGE =
+  'Lody tools coordinate work across Lody conversations (Sessions) in this workspace: delegate to new Sessions on any machine and directory, chat with or steer existing ones, read their history and status, track asynchronous Operations and their results; propose Schedules and Agent Roles; run and watch long commands with automations; discover machines, projects, agent configurations and MCP servers; report web or native simulator previews; upload images and files into this chat; send product feedback.';
+
 export function buildLodyMcpServer(): McpServer {
   return buildSessionToolServer();
 }
@@ -4714,6 +4721,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     },
     {
       instructions: [
+        LODY_MCP_COVERAGE,
         'Session mentions use [@Title](lody://session/<sessionId>?workspace=<workspaceId>); old transcripts may use session://<sessionId>.',
         'To read that conversation, pass the full URI as sessionId to lody_session_history. The workspace must match this tool context. Bare session IDs are also accepted; use the exact child session ID to read a child conversation.',
         'Paginate with nextCursor when you need older turns.',

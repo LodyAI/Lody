@@ -44,8 +44,12 @@ URLs, machine state or another conversation. It executes no target command and
 changes no permissions.
 
 [Tool help registration](tool-help.ts) preserves the original validators and
-callbacks. Tool discovery retains concise purpose, the input schema and a help
-pointer; full descriptions are kept once per registration and returned on demand.
+callbacks. Tool discovery publishes only the purpose summary and a slim input
+schema: every type, enum, bound and required list, plus the short phrase on each
+top-level argument. Prose on nested fields (batch items, work contexts, unions),
+`$schema`, and generated patterns already named by a `format` are left to help, which
+returns the full description and complete schema kept once per registration.
+Validation always uses the original schema.
 Each registration supplies an explicit purpose summary, independent of its display
 title. Agents see these summaries in the tool list before reading help, and
 `lody_help({})` uses the same summaries. The short purpose distinguishes commands
@@ -54,8 +58,9 @@ results, and cancelling a current turn versus cancelling an Operation.
 The same path covers Session/catalog, Schedule, automation, preview and upload
 tools. Skills keep their existing resource-loading path.
 
-Each tool summary, server instructions and the Lody prompt require reading successful
-command-specific help before execution. The index alone does not satisfy this rule,
+Server instructions and the Lody prompt require reading successful command-specific
+help before execution; tool descriptions no longer repeat the rule, which cost about
+4 KB across the catalog (see [catalog size](#catalog-size)). The index alone does not satisfy this rule,
 and the agent must not run help and the command in parallel. Already-read full help
 may be reused while it remains in context; after compaction or loss, read it again.
 This is an agent instruction,
