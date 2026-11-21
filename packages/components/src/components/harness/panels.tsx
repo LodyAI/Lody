@@ -196,7 +196,7 @@ export function ProvidersPanel() {
       })}
       <p {...stylex.props(parts.footnote)}>
         <Lock size={12} {...stylex.props(parts.footnoteGlyph)} />
-        Credentials live in the agent's own store on this machine; Lody never sees the secret.
+        Credentials stay in Sorbet’s store on the selected machine; Lody never stores the secret.
       </p>
     </div>
   );
