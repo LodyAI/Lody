@@ -197,6 +197,7 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
       await import('@lody/shared/node/native-encrypted-workspace'),
     '../../services/native-encrypted-access': {},
     '../../services/native-session-read': {},
+    '../../services/native-views': await import('../services/native-views.ts'),
     '../../services/native-encrypted-workspaces': { onNativeAccessLost: () => () => {} }
   })
   new meta.NativeWorkspaceMetaIpc()
@@ -301,20 +302,37 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
         observationId: '00000000-0000-4000-8000-000000000005'
       })
     )
+    await assert.rejects(
+      handlers.get('nativeWorkspaceMeta.openDoc')(auxiliary, {
+        ...scope,
+        docId: 'session-a',
+        observationId: '00000000-0000-4000-8000-000000000008'
+      })
+    )
+    const raw = new LoroDoc()
+    raw.getList('history').push('forged')
+    raw.commit()
+    await assert.rejects(
+      handlers.get('nativeWorkspaceMeta.commitDoc')(primary, {
+        ...scope,
+        docId: 'session-a',
+        updates: [raw.export({ mode: 'update' })]
+      })
+    )
     const docEvents = []
     auxiliary.sender.on(nativeIpc.NATIVE_DOC_CHANNEL, (event) => docEvents.push(event))
     await handlers.get('nativeWorkspaceMeta.openDoc')(auxiliary, {
       ...scope,
-      docId: 'session-a',
+      docId: 'preview-comment-a',
       observationId: '00000000-0000-4000-8000-000000000006'
     })
     assert.equal(docEvents[0].event.kind, 'snapshot')
     const authored = new LoroDoc()
-    authored.getList('history').push('turn')
+    authored.getMap('meta').set('sessionId', 'a')
     authored.commit()
     await handlers.get('nativeWorkspaceMeta.commitDoc')(primary, {
       ...scope,
-      docId: 'session-a',
+      docId: 'preview-comment-a',
       updates: [authored.export({ mode: 'update' })]
     })
     while (!docEvents.some((event) => event.event.kind === 'changes'))
@@ -323,15 +341,15 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     replica.import(docEvents[0].event.file)
     for (const event of docEvents.filter((e) => e.event.kind === 'changes'))
       for (const update of event.event.updates) replica.import(update)
-    assert.deepEqual(replica.getList('history').toJSON(), ['turn'])
+    assert.deepEqual(replica.getMap('meta').toJSON(), { sessionId: 'a' })
     const version = Object.fromEntries(replica.oplogVersion().toJSON())
     const later = new LoroDoc()
     later.import(replica.export({ mode: 'snapshot' }))
-    later.getList('history').push('later')
+    later.getMap('meta').set('sessionId', 'b')
     later.commit()
     await handlers.get('nativeWorkspaceMeta.commitDoc')(primary, {
       ...scope,
-      docId: 'session-a',
+      docId: 'preview-comment-a',
       updates: [later.export({ mode: 'update', from: replica.oplogVersion() })]
     })
     const reopened = []
@@ -340,7 +358,7 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     })
     await handlers.get('nativeWorkspaceMeta.openDoc')(auxiliary, {
       ...scope,
-      docId: 'session-a',
+      docId: 'preview-comment-a',
       observationId: '00000000-0000-4000-8000-000000000007',
       since: version
     })
@@ -348,7 +366,7 @@ void test('privileged IPC rejects browser views, iframes and unknown windows bef
     assert.equal(reopened[0].delta, true)
     assert.ok(reopened[0].file.byteLength < later.export({ mode: 'snapshot' }).byteLength)
     replica.import(reopened[0].file)
-    assert.deepEqual(replica.getList('history').toJSON(), ['turn', 'later'])
+    assert.deepEqual(replica.getMap('meta').toJSON(), { sessionId: 'b' })
     const remote = { ...scope, docId: 'session-remote' }
     const pathEvents = []
     auxiliary.sender.on(nativeIpc.NATIVE_DOC_PATHS_CHANNEL, (event) => pathEvents.push(event))

@@ -56,6 +56,9 @@ export async function admitNativeEncryptedReader(
   await handle
   return {
     accountId,
+    membershipId: status.membershipId ?? null,
+    mayWrite:
+      !!status.memberRole && status.memberRole !== 'guest' && status.deviceKind !== 'recovery',
     readMachineSharing: async (machineId) => {
       const work = await withDesktopE2eeAccount(
         (owner) =>

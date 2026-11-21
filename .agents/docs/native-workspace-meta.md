@@ -137,8 +137,10 @@ replica loads the room's raw snapshot (`exportLoroRaw`) and then receives binary
 updates from an update subscription (`observeLoroDoc`, the third load on the one
 observation lifecycle). Local changes commit as Loro updates with
 `importRoomState` on the existing persistence barriers. A reload after reconnect
-delivers the snapshot again, which imports as an update. The renderer opens and
-commits through main (`openDoc`/`commitDoc`), which admits only owned ids.
+delivers the snapshot again, which imports as an update. A renderer holds
+replicas only of Schedule and Preview comment documents: `openDoc`, `commitDoc`
+and the legacy-replica import admit those ids alone (`isNativeReplicaDocId`), so
+no raw Loro update from a renderer reaches a Session room.
 
 Writers merge as Loro CRDT updates: concurrent appends from the daemon and a
 renderer are both kept in every replica. A failed commit stays pending in the
@@ -199,7 +201,10 @@ ids instead of opening a replica.
   `replaceEditableTail`, imports and stored copies are refused.
 - **Authorization and outcomes.** Main admits patches only to `history`, `mq`,
   `humanInputReceipts` and `cancelRequest`; a receipt only as a set for the current
-  local user (`authorizeSessionPatch`). A refused write rolls the optimistic state
+  local user (`authorizeSessionPatch`). In an encrypted workspace the writer must
+  also be allowed to edit the Session (below). A renderer's legacy replica of a
+  Session is not imported: it is a copy of what the daemon (local) or the cloud
+  (encrypted) already holds, and a raw import would bypass these checks. A refused write rolls the optimistic state
   back to the engine's; a lost reply is `RemoteWriteIndeterminateError` and is never
   treated as unwritten. Receipts are committed before the turn is written or
   activated (`commitSessionState`).
@@ -431,13 +436,20 @@ reports every successful key round and ledger ingest, and main then reinstalls.
 When the last reader leaves, main stops reinstalling. Each Session document request
 is checked with the shared
 [`session-visibility.ts`](../../packages/shared/src/session-visibility.ts) rules,
-the same functions the renderer lists Sessions with. Their inputs are the
-Session's Meta row, its parent, its machine's owner, and the host's verified
-sharing view for that machine
+the same functions the renderer lists and edits Sessions with: reads need the
+Session to be visible, writes need it to be editable (`isSessionEditableToUser`)
+and a device the verified ledger lets write (a non-Guest member). A Preview
+comment document follows its Session. The inputs are the Session's Meta row, its
+parent, and the host's verified sharing view for its machine; the machine's owner
+is the view's verified owner membership compared with this device's, never a Meta
+field, which any writer can set and a paired machine leaves empty
 ([`native-session-read.ts`](../../apps/electron/src/main/services/native-session-read.ts)).
-Once the removal receipt is durable, `removeLocalWorkspace` closes the workspace's
-views (late replies are discarded), then retires main's writer or drops the
-namespace. Main's first connection finishes any pending wipe
+Every request is fenced by the workspace's access generation
+([`native-views.ts`](../../apps/electron/src/main/services/native-views.ts)): a view
+is registered only after it is established and only if access was not lost
+meanwhile, and a reply started before a loss is discarded. Once the removal receipt
+is durable, `removeLocalWorkspace` closes the workspace's views, then retires
+main's writer or drops the namespace. Main's first connection finishes any pending wipe
 (`finishPendingNativeWipes`). The renderer tries native Meta for protected
 content too. A window without a lease, or an attach that fails, stays on the
 legacy path, so the switch never blocks opening a workspace.
