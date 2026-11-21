@@ -8,9 +8,10 @@ the decisions and rejected alternatives are in the
 [proposal note](../notes/proposed/architecture/2026-11-19-native-workspace-meta.md).
 
 The mode is opt-in with `LODY_NATIVE_WORKSPACE_META=1`, read by both the daemon and
-desktop main. It applies only to the local platform and unencrypted workspaces: the
-OSS desktop has no cloud Meta, and cloud replication of a native room is a separate,
-unstarted slice.
+desktop main. It applies to the local platform's unencrypted workspaces, and, in
+the cloud composition, to encrypted workspaces as phase 1 of the
+[native engine cloud/E2EE Spec](https://github.com/LodyAI/Lody/blob/main/specs/native-engine-cloud-e2ee.md) wires
+them in (see [Encrypted workspaces](#encrypted-workspaces)).
 
 ## Processes and connections
 
@@ -360,6 +361,37 @@ the existing local data plane. Because the marker is gone, enabling the flag aga
 re-imports the replica, including edits made while the flag was off. Native mode
 has no released data, so this is a development switch-back with no compatibility
 handling; a failed write-back is logged and retried on the next start.
+
+## Encrypted workspaces
+
+Each platform has its own engine directory (`nativeRepoDataDir(platform)`). An
+encrypted workspace's namespace is registered as encrypted before its first room
+exists, so every Meta, Flock and Loro room is created encrypted. Local migration
+markers stay plaintext and are routed off the remote.
+[`attachNativeEncryptedWorkspace`](../../packages/shared/src/node/native-encrypted-workspace.ts)
+then, after the caller's content-open admission:
+
+1. finishes a pending wipe if one is recorded, and refuses to open;
+2. installs keys through core's `EngineKeyringSync` (the caller's `syncKeyring`),
+   sets the encrypted snapshot policy (writers only, 30 s quiet, 1 MiB minimum,
+   4 MiB forced) and registers the content token with its expiry;
+3. configures the `e2ee-content` remote: the bucket and gateway from the content
+   token, `aadDomain: lody-e2ee:<genesis>`, and the Lody route table, so rooms map to
+   the same `<base>/ds/<bucket>/<ws>:s:<id>` streams legacy clients use.
+
+The keyring and snapshot policy live in engine memory, so they are reinstalled on
+every reconnect (host restart or build handoff). `refresh()` reruns the install
+for the Spec's notification table; `wipe()` records the marker, clears the
+keyring, removes the remote and drops the namespace, and only a successful drop
+clears the marker. Daemon and main share the namespace. Each installs its own
+writer; the one that may write registers its token at a higher priority, so an
+append never uses a read-only token.
+
+Limits: an encrypted namespace does not import the legacy local store. It
+bootstraps from the cloud, because re-uploading imported state would sign
+other authors' ops as this device. Content tokens are per remote, not per writer;
+the gateway checks only the token's scope today, and per-writer tokens become an
+SDK gap if the host ever enforces submitter = signer.
 
 ## Slices and budgets
 
