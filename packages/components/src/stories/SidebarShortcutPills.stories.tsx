@@ -38,7 +38,7 @@ import {
   buildSidebarNavigationItems,
 } from '@/components/sidebar-navigation-model';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
-import { SidebarShortcutPill } from '@/components/sidebar-shortcut-pill';
+import { SidebarBindingPill, SidebarShortcutPill } from '@/components/sidebar-shortcut-pill';
 import {
   SidebarUpdatedSessionList,
   type SidebarUpdatedBucketKey,
@@ -226,6 +226,17 @@ export const PillGallery: Story = {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold">Navigation Row Bindings</h2>
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sidebar-border/80 bg-sidebar p-4 text-sidebar-foreground">
+            {['Mod+N', 'Mod+Shift+D', 'Mod+,', 'Alt+Shift+P', 'Ctrl+Alt+T', 'Shift+Enter'].map(
+              (binding) => (
+                <SidebarBindingPill key={binding} binding={binding} />
+              )
+            )}
           </div>
         </div>
 
