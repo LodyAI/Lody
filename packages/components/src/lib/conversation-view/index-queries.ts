@@ -13,13 +13,18 @@ import {
  * surfaces ask at token rate. None of these hydrate a turn.
  */
 
+/** First position worth scanning: everything below a paged view's `loadedFrom` is a sentinel. */
+export const loadedStart = (view: { readonly loadedFrom?: number }): number => view.loadedFrom ?? 0;
+
 /** Index of the last row satisfying `predicate`, scanning from the tail; -1 when none. */
 export function findLastIndex(
-  view: Pick<ConversationView, 'turnCount' | 'index'>,
+  view: Pick<ConversationView, 'turnCount' | 'index' | 'loadedFrom'>,
   predicate: (row: TurnIndexRow, index: number) => boolean,
   options: { limit?: number } = {}
 ): number {
-  const stop = options.limit === undefined ? 0 : Math.max(0, view.turnCount - options.limit);
+  const floor = loadedStart(view);
+  const stop =
+    options.limit === undefined ? floor : Math.max(floor, view.turnCount - options.limit);
   for (let i = view.turnCount - 1; i >= stop; i -= 1) {
     const row = view.index(i);
     if (row && !isUnloadedTurnId(row.id) && predicate(row, i)) return i;
@@ -47,11 +52,11 @@ export function resolveActiveAssistantTurnIdFromIndex(
  * the last rendered assistant turn that finished, skipping empty entries.
  */
 export function resolveLastAssistantTurnIds(
-  view: Pick<ConversationView, 'turnCount' | 'index' | 'indexOf'>
+  view: Pick<ConversationView, 'turnCount' | 'index' | 'indexOf' | 'loadedFrom'>
 ): { lastAssistantMessageId: string | null; lastCompletedAssistantMessageId: string | null } {
   let lastAssistantMessageId: string | null = null;
   let lastCompletedAssistantMessageId: string | null = null;
-  for (let i = view.turnCount - 1; i >= 0; i -= 1) {
+  for (let i = view.turnCount - 1; i >= loadedStart(view); i -= 1) {
     const row = view.index(i);
     if (
       !row ||
@@ -71,9 +76,11 @@ export function resolveLastAssistantTurnIds(
   return { lastAssistantMessageId, lastCompletedAssistantMessageId };
 }
 
-export function countUserTurns(view: Pick<ConversationView, 'turnCount' | 'index'>): number {
+export function countUserTurns(
+  view: Pick<ConversationView, 'turnCount' | 'index' | 'loadedFrom'>
+): number {
   let count = 0;
-  for (let i = 0; i < view.turnCount; i += 1) {
+  for (let i = loadedStart(view); i < view.turnCount; i += 1) {
     const row = view.index(i);
     if (row && !isUnloadedTurnId(row.id) && row.role === 'user') count += 1;
   }
@@ -140,11 +147,11 @@ function configSourceFromTurn(turn: SessionHistory): ConversationConfigSource {
  * index row carrying its shallow config, newest last as the resolver expects.
  */
 export function collectConversationConfigSources(
-  view: Pick<ConversationView, 'turnCount' | 'index' | 'turn'>,
+  view: Pick<ConversationView, 'turnCount' | 'index' | 'turn' | 'loadedFrom'>,
   tailFrom: number
 ): ConversationConfigSource[] {
   const sources: ConversationConfigSource[] = [];
-  for (let i = 0; i < tailFrom; i += 1) {
+  for (let i = loadedStart(view); i < tailFrom; i += 1) {
     const row = view.index(i);
     if (!row || row.role !== 'user') continue;
     // The index row already IS a source: same id and role, and an

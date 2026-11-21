@@ -7,6 +7,18 @@ import { MIGRATIONS_ROOM, observeLoroDoc, observeLoroPaths } from './native-repo
 const CAPABILITY = 'loro-external-docs-v1' as const;
 
 const docRoom = (docId: string): RoomKey => ({ kind: 'loro_doc', id: docId });
+
+/**
+ * Creates (or re-declares) a Session document room. Declaring the `history`
+ * root lets the engine read below it by type: an undeclared root is found
+ * through the document's shallow value, which a freshly loaded 100k-turn room
+ * answers in about 240 ms.
+ */
+export function createDocRoom(client: RepoClient, namespace: string, docId: string) {
+  return client.createRoom(namespace, docRoom(docId), 'plaintext', {
+    rootContainers: { history: 'list' },
+  });
+}
 /** Migration and native-write markers share one prefix per document. */
 const marker = (docId: string, source: string) => ['loro_doc', docId, source];
 export const NATIVE_WRITE_SOURCE = 'native';
@@ -44,7 +56,7 @@ export async function importLegacyDoc(
   const key = marker(docId, source);
   const legacy = await load();
   if (legacy) {
-    await client.createRoom(namespace, docRoom(docId), 'plaintext');
+    await createDocRoom(client, namespace, docId);
     await client.importRoomState(namespace, docRoom(docId), { snapshot: legacy.snapshot });
     const { version } = await client.inspectDocCausal(namespace, docRoom(docId));
     const missing = Object.entries(legacy.version).filter(
@@ -111,7 +123,7 @@ export async function observeNativeDoc(
   listener: Parameters<typeof observeLoroDoc>[3],
   since?: Readonly<Record<string, number>>
 ) {
-  await client.createRoom(namespace, docRoom(docId), 'plaintext');
+  await createDocRoom(client, namespace, docId);
   return observeLoroDoc(client, namespace, docRoom(docId), listener, since);
 }
 
@@ -181,7 +193,7 @@ export function createNativeRemoteHistoryPort(
   docId: string
 ): RemoteLoroHistoryPort {
   const room = docRoom(docId);
-  const created = client.createRoom(namespace, room, 'plaintext');
+  const created = createDocRoom(client, namespace, docId);
   return {
     async readListFields(start, end, fields) {
       await created;

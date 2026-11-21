@@ -95,6 +95,10 @@ const phantomRow = (position: number): TurnIndexRow => ({
   planCount: 0,
 });
 
+/** The id a directory entry's row will carry, without building the row. */
+const idOfEntry = (entry: SessionDirectoryRow): string =>
+  entry.state === 'ready' && entry.scalars ? entry.scalars.id : `invalid-turn:${entry.position}`;
+
 const unloadedRow = (position: number): TurnIndexRow => ({
   ...phantomRow(position),
   id: unloadedTurnId(position),
@@ -149,9 +153,29 @@ export function createConversationViewFromReader(
   const now = options.now ?? Date.now;
   let lastUpdateAt: number | null = null;
 
-  /** Position-aligned with the raw directory; every row owns an id. */
+  /**
+   * Position-aligned with the raw directory. A paged view leaves unloaded
+   * positions as holes: only loaded rows are allocated, and `rowAt`/`idAt`
+   * answer a hole with its sentinel. Nothing proportional to the whole
+   * conversation is built per page.
+   */
   let rows: TurnIndexRow[] = [];
   let ids: string[] = [];
+  /** Sentinel rows handed out for holes, so a position keeps one identity. */
+  const sentinels = new Map<number, TurnIndexRow>();
+  const rowAt = (position: number): TurnIndexRow | undefined => {
+    if (position < 0 || position >= ids.length) return undefined;
+    const row = rows[position];
+    if (row) return row;
+    let sentinel = sentinels.get(position);
+    if (!sentinel) sentinels.set(position, (sentinel = unloadedRow(position)));
+    return sentinel;
+  };
+  /** Loaded positions of a paged view, ascending; every position otherwise. */
+  const loadedPositions = (): number[] =>
+    pagedReader
+      ? [...pagedDirectoryRows.keys()].sort((a, b) => a - b)
+      : Array.from({ length: ids.length }, (_, index) => index);
   const pagedReader =
     reader.readLatestDirectoryPage && reader.readOlderDirectoryPage
       ? {
@@ -338,9 +362,10 @@ export function createConversationViewFromReader(
     for (const [id, index] of indexById) {
       if (index >= from) indexById.delete(id);
     }
-    for (let i = from; i < ids.length; i += 1) {
-      const id = ids[i]!;
-      if (!indexById.has(id)) indexById.set(id, i);
+    for (const i of loadedPositions()) {
+      if (i < from) continue;
+      const id = ids[i];
+      if (id !== undefined && !indexById.has(id)) indexById.set(id, i);
     }
   };
 
@@ -470,8 +495,8 @@ export function createConversationViewFromReader(
     let deferred = false;
     const targets: string[] = [];
     for (let i = ids.length - 1; i >= tailStart(); i -= 1) {
-      const id = ids[i]!;
-      if (isUnloadedTurnId(id)) continue;
+      const id = ids[i];
+      if (id === undefined || isUnloadedTurnId(id)) continue;
       if (hydrated.has(id)) continue;
       const weight = Math.max(1, rows[i]?.itemCount ?? 0);
       // The newest turn is always admitted; a turn that alone exceeds what is
@@ -834,8 +859,13 @@ export function createConversationViewFromReader(
       return true;
     }
     const previousOlderCursor = olderCursor;
-    const previousById = new Map(ids.map((id, index) => [id, rows[index]! as TurnIndexRow]));
-    const previousIds = new Set(ids);
+    const previousLoaded = loadedPositions();
+    const previousById = new Map<string, TurnIndexRow>();
+    for (const position of previousLoaded) {
+      const id = ids[position];
+      if (id !== undefined) previousById.set(id, rows[position]!);
+    }
+    const previousIds = new Set(previousById.keys());
     if (pageOptions.clearFrom !== undefined) {
       for (const position of [...pagedDirectoryRows.keys()]) {
         if (position >= pageOptions.clearFrom) pagedDirectoryRows.delete(position);
@@ -857,21 +887,31 @@ export function createConversationViewFromReader(
     // if that boundary was loaded from position zero, the old null cursor wins.
     const retainedOlderPrefix = nextAbsoluteStart < page.startPosition;
     const nextOlderCursor = retainedOlderPrefix ? previousOlderCursor : page.cursor;
-    const nextRows = Array.from({ length: page.totalCount }, (_, position) => {
-      const entry = pagedDirectoryRows.get(position);
-      if (!entry) return unloadedRow(position);
-      const row = rowFromDirectory(entry);
-      return carryBodyFacts(previousById.get(row.id), row);
-    });
-    const nextIds = nextRows.map((row) => row.id);
-    const nextIdSet = new Set(nextIds);
+    const nextLoaded = [...pagedDirectoryRows.keys()].sort((a, b) => a - b);
+    const nextRows: TurnIndexRow[] = new Array<TurnIndexRow>(page.totalCount);
+    const nextIds: string[] = new Array<string>(page.totalCount);
+    const reportedFrom = pageOptions.clearFrom ?? 0;
+    for (const position of nextLoaded) {
+      const old = previousById.get(idOfEntry(pagedDirectoryRows.get(position)!));
+      const row = carryBodyFacts(old, rowFromDirectory(pagedDirectoryRows.get(position)!));
+      nextRows[position] =
+        old && position < reportedFrom && ids[position] === row.id && !rowChanged(old, row)
+          ? old
+          : row;
+      nextIds[position] = row.id;
+    }
+    const nextIdSet = new Set<string>();
+    for (const position of nextLoaded) nextIdSet.add(nextIds[position]!);
     const structureChanged =
       absoluteStart !== nextAbsoluteStart ||
       ids.length !== nextIds.length ||
-      ids.some((id, index) => id !== nextIds[index]);
+      previousLoaded.length !== nextLoaded.length ||
+      previousLoaded.some(
+        (position, index) => position !== nextLoaded[index] || ids[position] !== nextIds[position]
+      );
     const structuralSignal = structureChanged || pageOptions.refreshSurvivors === true;
     const touchedSurvivors: string[] = [];
-    for (let index = 0; index < nextRows.length; index += 1) {
+    for (const index of nextLoaded) {
       const row = nextRows[index]!;
       const old = previousById.get(row.id);
       const refresh =
@@ -1073,8 +1113,8 @@ export function createConversationViewFromReader(
     if (pagedReader) {
       pagedDirectoryRows.clear();
       for (const entry of entries) pagedDirectoryRows.set(entry.position, entry);
-      rows = Array.from({ length: pageTotalCount }, (_, position) => unloadedRow(position));
-      ids = rows.map((row) => row.id);
+      rows = new Array<TurnIndexRow>(pageTotalCount);
+      ids = new Array<string>(pageTotalCount);
       absoluteStart = entries[0]?.position ?? pageTotalCount;
     }
     for (const entry of entries) {
@@ -1248,8 +1288,17 @@ export function createConversationViewFromReader(
       return hasMoreOlder;
     },
     ready,
-    index: (i) => rows[i],
-    indexOf: (turnId) => indexById.get(turnId) ?? -1,
+    get loadedFrom() {
+      return pagedReader ? Math.min(absoluteStart, ids.length) : 0;
+    },
+    index: rowAt,
+    indexOf: (turnId) => {
+      const position = indexById.get(turnId);
+      if (position !== undefined) return position;
+      if (!isUnloadedTurnId(turnId)) return -1;
+      const hole = Number(turnId.slice(UNLOADED_TURN_PREFIX.length));
+      return Number.isSafeInteger(hole) && hole < ids.length && ids[hole] === undefined ? hole : -1;
+    },
     // One consistent port read for export/replay/hash, instead of stitching the
     // windowed cache across a changing source.
     readAll: async () => (await reader.readAll()) as unknown as SessionHistory[],
@@ -1283,8 +1332,8 @@ export function createConversationViewFromReader(
       let chunk: string[] = [];
       let weight = 0;
       for (let i = a; i < b; i += 1) {
-        const id = ids[i]!;
-        if (isUnloadedTurnId(id)) continue;
+        const id = ids[i];
+        if (id === undefined || isUnloadedTurnId(id)) continue;
         if (hydrated.has(id)) continue;
         const turnWeight = Math.max(1, rows[i]?.itemCount ?? 0);
         if (
@@ -1336,6 +1385,7 @@ export function createConversationViewFromReader(
       flushRetryPending = false;
       rows.length = 0;
       ids.length = 0;
+      sentinels.clear();
       indexById.clear();
       pagedDirectoryRows.clear();
       turnEpoch.clear();
