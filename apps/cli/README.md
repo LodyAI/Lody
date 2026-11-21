@@ -225,6 +225,10 @@ cache collection. See [SEA packaging](scripts/sea/README.md) and the
 [ownership decision](../../.agents/notes/implemented/bug-fix/2026-10-03-daemon-upgrade-installation.md)
 explains why npm handoff and self-replacement were removed.
 
+The Worker's V8 heap limit is 20% of physical memory, between 768 and 4096 MiB.
+Hosts billed by memory can set `LODY_WORKER_MAX_OLD_SPACE_MB` (a whole number from 256
+to 65536) in the watchdog's service environment; an unusable value is logged and ignored.
+
 ## Structured Session output
 
 Session commands with `--json` or `--jsonl` reserve stdout for structured results.

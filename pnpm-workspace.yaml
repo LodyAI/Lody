@@ -61,7 +61,7 @@ catalog:
   vite: ^8.2.2
   vite-plugin-top-level-await: ^1.6.0
   vite-plugin-wasm: ^3.6.0
-  zod: ^4.1.5
+  zod: ^4.6.7
 
 ignoredBuiltDependencies:
   - node-pty
@@ -244,7 +244,7 @@ overrides:
   undici@>=7.18.0 <7.30.1: 7.30.1
   undici@>=8.0.0 <8.12.2: 8.12.2
   vite@7.3.1>esbuild: 0.27.0
-  zod: 4.3.6
+  zod: 4.6.7
 
 packageExtensions:
   konsta@4.0.1:
