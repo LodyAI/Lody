@@ -49,6 +49,12 @@ any time; when off it changes none of the app's existing behavior.
   height.
   While pinned, a Today link to this workspace or the sidebar's Today entry only moves the column to that day; the
   main area likewise keeps its content.
+- On desktop, a button beside the pin (page or pinned column) opens Today in its own window at the day shown, one
+  window per workspace (opening it again raises it); the source window is unchanged. That window shows only the day
+  stream, and its pin instead keeps the window above all other windows. Conversations its mentions open, by click
+  or Enter, show in the primary window; Convert to task keeps Today in place. The window loads none of the workspace
+  shell (sidebar, notifications, badges, command palette) and starts no background conversation prefetch: it
+  syncs only the pages, metadata and live status it shows. Turning the experiment off closes it.
 
 ### Page stream and dates
 
@@ -242,3 +248,4 @@ any time; when off it changes none of the app's existing behavior.
   `packages/components/src/components/chat/chat-landing-selectors.tsx`
 - Sidebar drag bridge: `packages/components/src/lib/session-mention-drag.ts`
 - Live status: `packages/shared/src/live-activity-summary.ts`; status grouping in PR #2948
+- Today window: `apps/electron/src/main/today-windows.ts`, `packages/components/src/routes/$workspaceName/today-window.tsx`
