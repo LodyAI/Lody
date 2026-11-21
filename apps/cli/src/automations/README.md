@@ -129,8 +129,10 @@ Closing the owner terminates every run without recording an exit. A restarted ow
 reports each started, unfinished run as interrupted, with its pid, and never starts
 it again; a Host crash can leave that process running. Identical unfinished runs in
 one Session deduplicate. The [run decision](../../../../.agents/notes/implemented/feature/2026-11-16-managed-long-runs.md)
-records the ownership, no-restart and environment trade-offs, and the owner-approved
-one-sentence guidance that recommends `run` in prompts and MCP text.
+records the ownership, no-restart and environment trade-offs.
+[Agent guidance](../../../../.agents/notes/implemented/simplification/2026-11-21-automation-guidance-scope.md)
+limits `run` to work that must continue beyond the current turn and resume the
+Session on exit; ordinary commands stay in the current turn.
 
 ## Completion and cancellation
 

@@ -10,9 +10,9 @@ Translation: current
 Agent 在后台启动耗时的构建或测试后结束本轮，Lody 便把会话当作空闲：空闲 GC 可能连同
 Agent 启动的进程一起停掉 Agent，工作结束时也没有任何东西唤醒会话，用户只好输入“继续”来
 追问。`lody_automation` 现在提供 `run` 命令：由 automation Host 持有进程，运行期间会话组
-保持未安定，进程结束时排入一条带退出事实的续跑。产品 owner 要求每次会话提示、MCP 服务器
-说明和工具描述各用一句话推荐它，这是对“Lody 发给 agent 的文字只包含请求和事实”规则的有意
-例外。Agent 是否照做尚未测量。
+保持未安定，进程结束时排入一条带退出事实的续跑。原来宽泛的推荐已按
+[提示范围决定](../simplification/2026-11-21-automation-guidance-scope.zh.md)收紧。
+进程归属保持不变；agent 实际选择该能力的频率尚未测量。
 
 ## 决定
 
@@ -30,10 +30,9 @@ Agent 启动的进程一起停掉 Agent，工作结束时也没有任何东西�
   以保持在 64 KiB 结果上限内。
 - 环境是显式的：来自登录 shell 与守护进程的 `PATH`、home 与临时目录变量，以及调用方的
   `env`。不继承 Agent 的提供商凭据和会话 shell 环境。
-- 提示：`LODY_LONG_RUN_GUIDANCE` 附加在每次提示的 Lody 工具提醒之后；MCP 服务器说明和
-  `lody_automation` 描述各一句；skill 文档说明命令用法。每处都陈述“空闲会话可能被回收，
-  Agent 自己启动的进程会随之结束”这一事实并推荐 `run`。根 `AGENTS.md` 规则现在只允许记录在
-  note 中、经 owner 批准的常驻提示。
+- 提示遵循[范围决定](../simplification/2026-11-21-automation-guidance-scope.zh.md)：
+  每轮提示不再推荐 Automation；帮助和 skill 只为必须在本轮结束后继续、并在退出时唤醒
+  会话的工作说明 `run` 的用法。
 
 ## 备选方案
 
@@ -48,7 +47,7 @@ Agent 启动的进程一起停掉 Agent，工作结束时也没有任何东西�
 ## 影响
 
 [提示不含流程的决定](../simplification/2026-11-11-agent-prompts-without-workflow.zh.md)
-仍约束其余所有文字。每次提示多一句话。日志位于 `<data dir>/automations/runs/`，每个 run
+约束发给 agent 的文字，工具帮助中的使用条件按上述范围收紧。日志位于 `<data dir>/automations/runs/`，每个 run
 上限 16 MiB，保留七天，在同一工作区启动另一个 run 时清理。
 
 ## 验证
