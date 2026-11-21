@@ -90,8 +90,8 @@ and what can wait or has settled.
 
 The phone WebView layout and the native iOS and Android clients show the same
 Pinned area and the same three tiers, in the same order, as the desktop sidebar.
-Nothing below is implemented yet; the design is in the
-[phone note](../.agents/notes/proposed/architecture/2026-11-21-status-view-on-phones.md).
+All three ship this; the design, its limits and what was verified are in the
+[phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md).
 
 - Every surface derives the list and plans its writes from one shared
   implementation. Native clients render the layout their shared runtime computes
@@ -170,3 +170,18 @@ Implementation:
   `packages/components/src/atoms/sidebar-state.ts`
 - Storybook:
   `packages/components/src/stories/SidebarStatusView.stories.tsx`
+- Phones: `packages/components/src/components/mobile/` (WebView); the native
+  shared runtime and lists in the `apps/mobile/ios` and `apps/mobile/android`
+  submodules.
+
+Executed validation: the golden vectors (8 layout and 28 command cases) in
+`packages/shared/tests/status-view.test.ts`, against the desktop and phone adapters
+in `packages/components` and in the iOS and Android runtime tests; the Storybook
+end-to-end suite `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`
+(5 cases); the phone WebView in Storybook on the iOS Simulator and the Android
+emulator; the native lists on the Simulator and the emulator with the offline
+fixture. Not verified: physical phones, a signed-in cloud workspace on the native
+clients, the desktop app writing to a real replica, a real encrypted Guest session
+and the hosted gateway admitting the encrypted writes, VoiceOver on a device, and
+the Capacitor-packaged app. Details: the
+[phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md#verification).
