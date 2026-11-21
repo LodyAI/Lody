@@ -103,7 +103,7 @@ updates from an update subscription (`observeLoroDoc`, the third load on the one
 observation lifecycle). Local changes commit as Loro updates with
 `importRoomState` on the existing persistence barriers. A reload after reconnect
 delivers the snapshot again, which imports as an update. The renderer opens and
-commits through main (`openDoc`/`commitDoc`), which admits only Session ids.
+commits through main (`openDoc`/`commitDoc`), which admits only owned ids.
 
 Writers merge as Loro CRDT updates: concurrent appends from the daemon and a
 renderer are both kept in every replica. A failed commit stays pending in the
@@ -238,6 +238,17 @@ turns whole. With 50k turns that is about 4.3 s, against 10.4 s for the same
 selection on an open replica (after a 0.7–1.1 s open). Neither is bounded; a
 bounded count needs a visibility index or a nested-field projection primitive.
 
+## Schedule documents
+
+Schedule documents (`schedule-*`) use the same external document owner and lazy
+per-document migration as Session documents; `isNativeDocId` covers both, and
+`isNativeSessionDocId` selects the Session-only paths (remote store, idle reads,
+remote reads and patches through main). A Schedule document holds one definition,
+its prompt, message and recent activity, so every process keeps a replica: there
+is no history that grows. Each room declares its own Mirror's roots
+(`engineDocSchemaFor`), never the Session schema. Write-back walks them with the
+Session documents.
+
 ## Workspace Meta
 
 [`native-workspace-meta.ts`](../../packages/shared/src/node/native-workspace-meta.ts)
@@ -304,7 +315,8 @@ handling; a failed write-back is logged and retried on the next start.
 | —        | Cold 100k-turn opens: owner decision pending (segmented history or SDK transfer work)                 | to be sized           |
 | 10       | Daemon reads idle Sessions from the engine; replicas only for running Sessions                        | 300 (actual ≈160)     |
 | 11       | Automation, schedule, `session history` and `observe` reads on the same port                          | 250 (actual ≈140 net) |
-| —        | Remaining Loro documents (`schedule-*`, Preview comments) on the same owner                           | small per type        |
+| 12       | Schedule documents (`schedule-*`) on the same owner                                                   | small (actual ≈20)    |
+| —        | Preview comments and legacy agent/machine documents on the same owner                                 | small per type        |
 | —        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
 
 ## Performance

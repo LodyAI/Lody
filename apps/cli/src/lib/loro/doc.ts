@@ -1,6 +1,6 @@
 import { createHistoryWriter } from '@lody/shared/history-writer';
 import { createSessionControlPlaneMirror } from '@lody/shared/session-control-plane';
-import { isNativeDocId } from '@lody/shared/native-workspace-meta-ipc';
+import { isNativeSessionDocId } from '@lody/shared/native-workspace-meta-ipc';
 import { Cause, Effect } from 'effect';
 import { isDeepStrictEqual } from 'node:util';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
@@ -2498,7 +2498,7 @@ export class LoroDocumentManager {
   async openIdleSessionReader(sessionId: SessionId) {
     if (!this.nativeMeta || this.peekSessionDoc(sessionId)) return undefined;
     const roomId = getSessionRoomId(sessionId);
-    if (!isNativeDocId(roomId)) return undefined;
+    if (!isNativeSessionDocId(roomId)) return undefined;
     const record = await this.repo.getDocMeta(roomId);
     const meta = record?.meta as Pick<SessionMeta, 'historyBackend'> | undefined;
     if (!meta || resolveSessionHistoryBackendKind(meta) !== 'loro') return undefined;
