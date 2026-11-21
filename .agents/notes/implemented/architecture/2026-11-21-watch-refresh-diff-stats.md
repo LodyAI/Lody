@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#3064](https://github.com/LodyAI/Lody/pull/3064)
 
 [中文](2026-11-21-watch-refresh-diff-stats.zh.md)
 
