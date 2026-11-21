@@ -1707,3 +1707,58 @@ void test('after workspace creation (verified length 1, no prior cursor), ingest
     })
   )
 })
+
+void test('the host installs verified keys and the personal seed into the native engine keyring, then wipes them', async (t) => {
+  const { createPrivateKey, createPublicKey } = await import('node:crypto')
+  const directory = await fixture(t)
+  const calls = []
+  let seed, borrowed, epochKey
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      const prepared = yield* bind(owner)
+      const status = yield* owner.host.open(workspaceId)
+      const report = yield* owner.host.syncEngineKeyring(workspaceId, {
+        configure: (genesis) => Effect.sync(() => calls.push(['configure', hex(genesis)])),
+        admit: (keys) => Effect.sync(() => calls.push(['admit', keys.map(hex)])),
+        installEpoch: (epoch, key) =>
+          Effect.sync(() => {
+            epochKey = key
+            calls.push(['installEpoch', epoch, key.length])
+          }),
+        setSealEpoch: (epoch) => Effect.sync(() => calls.push(['seal', epoch])),
+        holdSealing: () => Effect.sync(() => calls.push(['hold'])),
+        releaseSealing: () => Effect.sync(() => calls.push(['release'])),
+        installSeed: async (value) => {
+          borrowed = value
+          seed = new Uint8Array(value)
+          calls.push(['seed'])
+        }
+      })
+      assert.deepEqual(report, {
+        installedEpochs: [0],
+        missingEpochs: [],
+        sealEpoch: 0,
+        mayWrite: true,
+        admittedDevices: 1
+      })
+      assert.deepEqual(calls.slice(0, 5), [
+        ['configure', prepared.genesisHashHex],
+        ['admit', [status.signingPublicKey]],
+        ['installEpoch', 0, 32],
+        ['seal', 0],
+        ['seed']
+      ])
+      assert.equal(calls[5][0], 'release')
+      const der = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed])
+      const publicKey = createPublicKey(
+        createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })
+      )
+        .export({ format: 'der', type: 'spki' })
+        .subarray(-32)
+      assert.equal(hex(publicKey), status.signingPublicKey)
+      assert.ok(epochKey.every((byte) => byte === 0))
+      assert.ok(borrowed.every((byte) => byte === 0))
+    })
+  )
+})

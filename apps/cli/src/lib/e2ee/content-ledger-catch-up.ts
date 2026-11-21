@@ -113,6 +113,14 @@ export function makeContentLedgerCatchUp(options: ContentLedgerCatchUpOptions) {
     close: () => {
       if (!stopped.signal.aborted) stopped.abort(new Error('e2ee_closed'));
     },
+    /**
+     * The native engine holds a room it cannot open yet (it reports no frame):
+     * one spaced, single-flight catch-up, as for a key-pending frame.
+     */
+    pending: () => {
+      if (options.isClosed() || stopped.signal.aborted) return;
+      void receive().catch(() => {});
+    },
     openWithCatchUp: async <A>(
       model: 'loro' | 'flock',
       frame: PayloadProtectionOpenInput,

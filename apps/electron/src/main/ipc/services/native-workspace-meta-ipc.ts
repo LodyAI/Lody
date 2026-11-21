@@ -3,8 +3,11 @@ import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
   connectNativeRepo,
   importLegacyRoom,
-  isNativeWorkspaceMetaEnabled
+  isNativeEncryptedWorkspaceEnabled,
+  isNativeWorkspaceMetaEnabled,
+  nativeRepoDataDir
 } from '@lody/shared/node/native-repo'
+import { finishPendingNativeWipes } from '@lody/shared/node/native-encrypted-workspace'
 import { commitFlockPayloads, observeNativeFlockDoc } from '@lody/shared/node/native-flock-docs'
 import {
   commitDocUpdates,
@@ -43,19 +46,79 @@ import {
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { isLocalPlatform, readLocalPlatformSnapshot } from '../../platform'
 import { bundledNativeRepoHostLauncher } from '../../services/cli-service'
+import {
+  admitNativeEncryptedReader,
+  removeNativeEncryptedWorkspace,
+  type NativeEncryptedAccess
+} from '../../services/native-encrypted-access'
+import { authorizeNativeSessionRead } from '../../services/native-session-read'
+import { onNativeAccessLost } from '../../services/native-encrypted-workspaces'
 
 class NotCommitted extends Error {}
 
-/** Host-controlled; renderer input cannot enable it or choose another workspace. */
-const enabled = () => isLocalPlatform() && isNativeWorkspaceMetaEnabled()
-async function admit(workspaceId: string, flockDocId?: string) {
+/**
+ * Host-controlled; renderer input cannot enable it or choose another workspace.
+ * Cloud builds serve encrypted workspaces only (specs/native-engine-cloud-e2ee.md,
+ * phase 1), behind their own switch.
+ */
+const encryptedMode = () => !isLocalPlatform() && isNativeEncryptedWorkspaceEnabled()
+const enabled = () => isNativeWorkspaceMetaEnabled() && (isLocalPlatform() || encryptedMode())
+
+/**
+ * Local: the single local workspace. Cloud: this window's E2EE reader lease for the
+ * signed-in account (the first admitted request attaches the namespace). Returns
+ * the encrypted access for the per-request session read check.
+ */
+async function admit(
+  workspaceId: string,
+  flockDocId?: string
+): Promise<NativeEncryptedAccess | undefined> {
   if (!enabled()) throw new Error('native_meta_disabled')
-  const snapshot = await readLocalPlatformSnapshot()
-  if (snapshot?.workspace.workspaceId !== workspaceId) throw new Error('native_meta_scope_denied')
   if (flockDocId !== undefined && !isNativeFlockDocId(workspaceId, flockDocId))
     throw new Error('native_meta_scope_denied')
+  if (encryptedMode())
+    return admitNativeEncryptedReader(getIpcContext().event.sender.id, workspaceId, await connect())
+  const snapshot = await readLocalPlatformSnapshot()
+  if (snapshot?.workspace.workspaceId !== workspaceId) throw new Error('native_meta_scope_denied')
+  return undefined
 }
-const connect = () => connectNativeRepo({ launcher: bundledNativeRepoHostLauncher })
+
+/** Admission plus, in an encrypted workspace, the session read rules for `docId`. */
+async function admitDoc(workspaceId: string, docId: string) {
+  const access = await admit(workspaceId)
+  if (access)
+    await authorizeNativeSessionRead(access, await workspaceMeta(workspaceId), workspaceId, docId)
+  return access
+}
+
+/** Encrypted namespaces bootstrap from the cloud; nothing local is imported into them. */
+function refuseEncryptedImport() {
+  if (encryptedMode()) throw new Error('native_meta_scope_denied')
+}
+
+let swept: Promise<unknown> | undefined
+const connect = async () => {
+  const connection = await connectNativeRepo({
+    launcher: bundledNativeRepoHostLauncher,
+    dataDir: nativeRepoDataDir(isLocalPlatform() ? 'local' : 'cloud')
+  })
+  if (encryptedMode())
+    await (swept ??= finishPendingNativeWipes(connection.client, connection.dataDir))
+  return connection
+}
+
+/**
+ * Durable encrypted access loss, from the E2EE removal path: every view of the
+ * workspace closes and late replies are discarded, then the namespace is retired
+ * or dropped.
+ */
+export function removeNativeWorkspace(
+  workspaceId: string,
+  reason: 'member_removed' | 'device_revoked'
+) {
+  if (!enabled() || !encryptedMode()) return Promise.resolve()
+  return removeNativeEncryptedWorkspace(workspaceId, reason, connect)
+}
 
 /** One shared connection and one Meta observation per workspace in main. */
 const metas = new Map<string, Promise<NativeWorkspaceMeta>>()
@@ -73,6 +136,43 @@ function workspaceMeta(workspaceId: string) {
 
 /** Window-owned view registrations; a closed or navigated window drops its own. */
 const views = new Map<WebContents, Map<string, () => void>>()
+/** Each view's workspace, so access loss closes exactly that workspace's views. */
+const viewWorkspaces = new WeakMap<() => void, string>()
+/** Bumped on access loss: a reply started before it is discarded. */
+const accessGeneration = new Map<string, number>()
+onNativeAccessLost((workspaceId) => {
+  accessGeneration.set(workspaceId, (accessGeneration.get(workspaceId) ?? 0) + 1)
+  metas
+    .get(workspaceId)
+    ?.then((meta) => meta.close())
+    .catch(() => {})
+  metas.delete(workspaceId)
+  for (const key of remoteDocs.keys())
+    if (key.startsWith(`${workspaceId}\0`)) remoteDocs.delete(key)
+  for (const owned of views.values())
+    for (const [observationId, release] of owned)
+      if (viewWorkspaces.get(release) === workspaceId) {
+        owned.delete(observationId)
+        release()
+      }
+})
+/** Runs one reply for `workspaceId`; an access loss meanwhile discards it. */
+async function fenced<A>(workspaceId: string, work: () => Promise<A>): Promise<A> {
+  const generation = accessGeneration.get(workspaceId) ?? 0
+  const result = await work()
+  if ((accessGeneration.get(workspaceId) ?? 0) !== generation) throw new Error('native_access_lost')
+  return result
+}
+/** Registers a view of `workspaceId`. */
+function own(
+  owned: Map<string, () => void>,
+  workspaceId: string,
+  observationId: string,
+  release: () => void
+) {
+  viewWorkspaces.set(release, workspaceId)
+  owned.set(observationId, release)
+}
 const watchedSenders = new WeakSet<WebContents>()
 
 /** Releases a window's views when its document goes away. */
@@ -107,7 +207,18 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async available(input: unknown) {
     if (!enabled()) return false
-    await admit(NativeMetaOpenSchema.pick({ workspaceId: true }).parse(input).workspaceId)
+    const { workspaceId } = NativeMetaOpenSchema.pick({ workspaceId: true }).parse(input)
+    if (encryptedMode())
+      return admit(workspaceId).then(
+        () => true,
+        (error: unknown) => {
+          console.warn('[native-meta] encrypted workspace stays on the legacy path', {
+            code: (error as Error | null)?.message?.slice(0, 64)
+          })
+          return false
+        }
+      )
+    await admit(workspaceId)
     return true
   }
 
@@ -126,7 +237,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
       opened.unsubscribe()
       throw new Error('native_meta_view_closed')
     }
-    owned.set(observationId, opened.unsubscribe)
+    own(owned, workspaceId, observationId, opened.unsubscribe)
     return opened.snapshot
   }
 
@@ -157,6 +268,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   async importLegacy(input: unknown) {
     const { workspaceId, flockDocId, source, bundle } = NativeMetaImportSchema.parse(input)
     await admit(workspaceId, flockDocId)
+    refuseEncryptedImport()
     const { client } = await connect()
     const room =
       flockDocId === undefined
@@ -191,7 +303,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
       release()
       throw new Error('native_meta_view_closed')
     }
-    owned.set(observationId, release)
+    own(owned, workspaceId, observationId, release)
     try {
       await observation.ready
     } catch (error) {
@@ -214,7 +326,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async openDoc(input: unknown) {
     const { workspaceId, docId, observationId, since } = NativeDocOpenSchema.parse(input)
-    await admit(workspaceId)
+    await admitDoc(workspaceId, docId)
     const sender = getIpcContext().event.sender
     const owned = windowViews(sender)
     if (owned.has(observationId) || owned.size >= 64) throw new Error('native_meta_view_denied')
@@ -233,7 +345,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
       release()
       throw new Error('native_meta_view_closed')
     }
-    owned.set(observationId, release)
+    own(owned, workspaceId, observationId, release)
     try {
       await observation.ready
     } catch (error) {
@@ -247,7 +359,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async commitDoc(input: unknown) {
     const { workspaceId, docId, updates } = NativeDocCommitSchema.parse(input)
-    await admit(workspaceId)
+    await admitDoc(workspaceId, docId)
     const { client } = await connect()
     await commitDocUpdates(client, workspaceId, docId, updates)
   }
@@ -256,7 +368,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async needsLegacyDoc(input: unknown) {
     const { workspaceId, docId, source } = NativeDocLegacyCheckSchema.parse(input)
-    await admit(workspaceId)
+    if (await admit(workspaceId)) return false
     const { client } = await connect()
     return !(await isLegacyDocPublished(client, workspaceId, docId, source))
   }
@@ -265,6 +377,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   async importLegacyDoc(input: unknown) {
     const { workspaceId, docId, source, snapshot, version } = NativeDocLegacySchema.parse(input)
     await admit(workspaceId)
+    refuseEncryptedImport()
     const { client } = await connect()
     return importLegacyDoc(client, workspaceId, docId, source, async () => ({
       snapshot,
@@ -276,23 +389,27 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async readDocPath(input: unknown) {
     const { workspaceId, docId, path } = NativeDocReadSchema.parse(input)
-    await admit(workspaceId)
-    return (await remoteDoc(workspaceId, docId)).readPathAt(path)
+    return fenced(workspaceId, async () => {
+      await admitDoc(workspaceId, docId)
+      return (await remoteDoc(workspaceId, docId)).readPathAt(path)
+    })
   }
 
   /** Bounded, field-aligned rows of a remote Session document's history. */
   @IpcMethod()
   async readDocListFields(input: unknown) {
     const { workspaceId, docId, start, end, fields } = NativeDocListFieldsSchema.parse(input)
-    await admit(workspaceId)
-    return (await remoteDoc(workspaceId, docId)).readListFields(start, end, fields)
+    return fenced(workspaceId, async () => {
+      await admitDoc(workspaceId, docId)
+      return (await remoteDoc(workspaceId, docId)).readListFields(start, end, fields)
+    })
   }
 
   /** A window's changed-path view of one remote Session document. */
   @IpcMethod()
   async observeDocPaths(input: unknown) {
     const { workspaceId, docId, observationId } = NativeDocObservePathsSchema.parse(input)
-    await admit(workspaceId)
+    await admitDoc(workspaceId, docId)
     const sender = getIpcContext().event.sender
     const owned = windowViews(sender)
     if (owned.has(observationId) || owned.size >= 64) throw new Error('native_meta_view_denied')
@@ -303,7 +420,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
       observation.close()
       throw new Error('native_meta_view_closed')
     }
-    owned.set(observationId, () => observation.close())
+    own(owned, workspaceId, observationId, () => observation.close())
     try {
       await observation.ready
     } catch (error) {
@@ -320,10 +437,10 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async applyDocPatch(input: unknown) {
     const { workspaceId, docId, ops, precondition } = NativeDocPatchSchema.parse(input)
-    await admit(workspaceId)
-    const snapshot = await readLocalPlatformSnapshot()
-    if (!snapshot) throw new Error('native_meta_scope_denied')
-    authorizeSessionPatch(ops, snapshot.userId)
+    const access = await admitDoc(workspaceId, docId)
+    const userId = access?.accountId ?? (await readLocalPlatformSnapshot())?.userId
+    if (!userId) throw new Error('native_meta_scope_denied')
+    authorizeSessionPatch(ops, userId)
     try {
       return await (await remoteDoc(workspaceId, docId)).applyPatch(ops, precondition)
     } catch (error) {

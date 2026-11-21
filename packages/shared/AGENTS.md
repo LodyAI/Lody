@@ -133,3 +133,5 @@ Encrypted attachment manifests contain secret per-file keys and belong only in p
 Native `local_attachment` inputs require exact submission scope and explicit inheritance. Never backfill or silently discard them. [Contract](../../.agents/docs/cli-lib-session-files.md#native-local-references).
 
 Shortcut sync preserves handled token/auth causes through SDK refresh, rather than producing new generic exceptions; [diagnostic ownership](../../.agents/notes/implemented/bug-fix/2026-11-17-shortcut-token-retry-diagnostics.md) remains with the client operation.
+
+Session visibility rules live in `session-visibility.ts`; the renderer and Electron main share them.

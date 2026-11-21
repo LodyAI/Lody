@@ -1,5 +1,6 @@
 import type { MachineId } from '@lody/shared';
 import type { E2eeMachineSharingView } from '@lody/platform';
+import { isUsableSharedMachineView } from '@lody/shared/session-visibility';
 
 /**
  * Visibility of other members' machines in an encrypted workspace, derived only from
@@ -26,16 +27,7 @@ export const ENCRYPTED_SHARED_MACHINE_REFRESH_MS = 10 * 60 * 1000;
 const READ_CONCURRENCY = 2;
 const EMPTY: EncryptedSharedMachines = new Map();
 
-/** Only a current, verified, permitted view is visible; Guest and denial come from core. */
-export function isUsableSharedMachineView(machineId: string, view: E2eeMachineSharingView) {
-  return (
-    view.machineId === machineId &&
-    view.sharedWithTeam &&
-    !view.deniedReason &&
-    !view.removed &&
-    !view.unavailable
-  );
-}
+export { isUsableSharedMachineView };
 
 export function createEncryptedSharedMachineStore(options: {
   workspaceId: string;

@@ -628,11 +628,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud' as const] },
   };
   const nativeMeta =
-    !protectedContent && deps.syncMode === 'local'
+    protectedContent || deps.syncMode === 'local'
       ? await openRendererNativeWorkspaceMeta(
           deps.workspaceId,
           repoStorage,
-          cacheIdentity.repoDbName
+          cacheIdentity.repoDbName,
+          protectedContent
         )
       : null;
   const repo = nativeMeta

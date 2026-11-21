@@ -381,6 +381,10 @@ then, after the caller's content-open admission:
    token, `aadDomain: lody-e2ee:<genesis>`, and the Lody route table, so rooms map to
    the same `<base>/ds/<bucket>/<ws>:s:<id>` streams legacy clients use.
 
+Opening never waits on the network. The engine persists the remote, and each
+install (attach, refresh or reconnect) configures it until a content token is
+issued; offline edits stay queued meanwhile.
+
 The keyring and snapshot policy live in engine memory, so they are reinstalled on
 every reconnect (host restart or build handoff). `refresh()` reruns the install
 for the Spec's notification table. Daemon and main share the namespace, and each
@@ -391,12 +395,22 @@ that installed its seed (K1), so every local write names this process's writer
 synced and never uploads them. The writer that may write registers its token at
 a higher priority, so an append never uses a read-only token.
 
+When the engine holds a room it cannot open yet (an unknown key, or a writer the
+installed ledger does not admit, because the Streams data arrived before the
+ledger), `onOpenPending` asks the caller for the same spaced, single-flight
+catch-up a key-pending JS frame gets. The daemon calls `contentCatchUp.pending()`;
+main calls `nativeCatchUp`, which ingests the ledger and receives keys. Both end
+in the notification table's reinstall. Forged frames (`invalid_frame`) never
+trigger it.
+
 Removal follows the whitepaper's split. Device revocation calls `retireWriter()`:
 it holds and removes only this device's writer, because another device of the
 member on this installation keeps using the namespace. Credential-confirmed
 member removal calls `wipe()`, which clears the keyring, removes the remote and
-drops the namespace. The pending-wipe marker (`nativePendingWipeMarker`) lives in
-the engine data directory, beside the namespace. The daemon writes it as soon as
+drops the namespace. With the host unreachable (removal while it is down),
+`wipeNativeNamespace` finishes the drop as soon as the connection is back. The
+pending-wipe marker (`nativePendingWipeMarker`) lives in the engine data
+directory, beside the namespace. The daemon writes it as soon as
 the removal is recorded. A removed workspace never attaches again, so the
 daemon's start-up refusal (`finishPendingNativeWipe`) finishes an interrupted
 wipe; only a completed drop clears the marker.
@@ -407,6 +421,30 @@ only in the cloud composition, with `LODY_NATIVE_WORKSPACE_META=1` and
 reaches the engine only through custody's purpose-limited `withEngineSeed`.
 Content-token refusals go to the same credential-failure handler as Streams
 tokens, and the install reruns after every verified background refresh.
+
+On the desktop, main attaches on the first native request a window makes while it
+holds the workspace's E2EE reader lease
+([`native-encrypted-access.ts`](../../apps/electron/src/main/services/native-encrypted-access.ts)).
+Its writer is `personal:<signing public key>`, and the desktop host's
+`syncEngineKeyring` installs the seed through the same `withEngineSeed`. The host
+reports every successful key round and ledger ingest, and main then reinstalls.
+When the last reader leaves, main stops reinstalling. Each Session document request
+is checked with the shared
+[`session-visibility.ts`](../../packages/shared/src/session-visibility.ts) rules,
+the same functions the renderer lists Sessions with. Their inputs are the
+Session's Meta row, its parent, its machine's owner, and the host's verified
+sharing view for that machine
+([`native-session-read.ts`](../../apps/electron/src/main/services/native-session-read.ts)).
+Once the removal receipt is durable, `removeLocalWorkspace` closes the workspace's
+views (late replies are discarded), then retires main's writer or drops the
+namespace. Main's first connection finishes any pending wipe
+(`finishPendingNativeWipes`). The renderer tries native Meta for protected
+content too. A window without a lease, or an attach that fails, stays on the
+legacy path, so the switch never blocks opening a workspace.
+
+Each client and namespace registers one token provider, because the client
+replays registrations and cannot remove one. It serves the current attachment's
+tokens, and a closed attachment (an account switch or a wipe) serves none.
 
 Limits: an encrypted namespace does not import the legacy local store. It
 bootstraps from the cloud, because re-uploading imported state would sign

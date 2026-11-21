@@ -19,7 +19,12 @@ import {
 import { createLoroStreamUrl, getLoroStreamIdForDocId, type WorkspaceId } from '../src';
 
 const hostScript = fileURLToPath(new URL('./fixtures/native-repo-host.mjs', import.meta.url));
-const launcher = () => ({ command: process.execPath, args: [hostScript] });
+/** While set, a relaunch starts nothing: the host stays down. */
+let hostBlocked = false;
+const launcher = () =>
+  hostBlocked
+    ? { command: process.execPath, args: ['-e', 'process.exit(1)'] }
+    : { command: process.execPath, args: [hostScript] };
 const ws = 'ws-e2ee-native';
 const bucketId = 'lody-e2ee-test';
 const genesis = new Uint8Array(32).fill(0x42);
@@ -44,6 +49,7 @@ const admitted = [publicKey(seeds.a), publicKey(seeds.b)];
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
+  hostBlocked = false;
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup().catch(() => {});
 });
 
@@ -86,28 +92,33 @@ async function device(name: 'a' | 'b', baseUrl: string) {
   const writer = `device-${name}`;
   let tokens = 0;
   let syncs = 0;
-  const attach = (pendingWipe: NativePendingWipe = memoryWipe()) =>
+  const network = { online: true };
+  /** The verified ledger's admitted devices, as this device last ingested them. */
+  const ledger = { admitted };
+  const attach = (pendingWipe: NativePendingWipe = memoryWipe(), onOpenPending?: () => void) =>
     attachNativeEncryptedWorkspace({
       client,
       workspaceId: ws,
       genesisHash,
       writer,
       contentToken: async () => {
+        if (!network.online) throw new Error('synthetic_offline');
         tokens += 1;
         return { token: `token-${tokens}`, bucketId, gatewayBaseUrl: baseUrl, expiresIn: 480 };
       },
       syncKeyring: async () => {
         syncs += 1;
         await client.keyringConfigure(ws, genesis);
-        await client.keyringAdmit(ws, admitted);
+        await client.keyringAdmit(ws, ledger.admitted);
         await client.keyringInstallEpoch(ws, 0, epochKey);
         await client.keyringSetSigner(ws, writer, seeds[name]);
         await client.keyringSetSealEpoch(ws, 0);
         return { mayWrite: true };
       },
       pendingWipe,
+      onOpenPending,
     });
-  return { dataDir, client, writer, attach, syncs: () => syncs };
+  return { dataDir, client, writer, attach, network, ledger, syncs: () => syncs };
 }
 
 /** A replica's local edit, committed as the daemon and desktop commit theirs. */
@@ -147,6 +158,82 @@ describe('native encrypted workspace', () => {
     expect(body.includes('sealed-in-a')).toBe(false);
     expect(body.includes(Buffer.from('LSCE'))).toBe(true);
   }, 60_000);
+
+  it('opens without a content token, keeps local writes, and uploads them once one is issued', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const b = await device('b', baseUrl);
+    a.network.online = false;
+    const wa = await a.attach();
+    cleanups.push(async () => wa.close());
+    await createDocRoom(a.client, ws, room.id);
+    await write(a.client, 'written-offline');
+    expect(JSON.stringify((await a.client.readDoc(ws, room)).value)).toContain('written-offline');
+
+    a.network.online = true;
+    await wa.refresh();
+    expect((await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0);
+    const wb = await b.attach();
+    cleanups.push(async () => wb.close());
+    await createDocRoom(b.client, ws, room.id);
+    await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
+    expect(JSON.stringify((await b.client.readDoc(ws, room)).value)).toContain('written-offline');
+  }, 60_000);
+
+  it('a frame from a writer the installed ledger does not admit yet asks for a catch-up, then opens', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const b = await device('b', baseUrl);
+    const wa = await a.attach();
+    cleanups.push(async () => wa.close());
+    await createDocRoom(a.client, ws, room.id);
+    await write(a.client, 'from-a');
+    await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID);
+
+    b.ledger.admitted = [publicKey(seeds.b)];
+    let asked = 0;
+    const caughtUp = Promise.withResolvers<void>();
+    const wb = await b.attach(memoryWipe(), () => {
+      asked += 1;
+      b.ledger.admitted = admitted;
+      void wb.refresh().then(caughtUp.resolve, caughtUp.reject);
+    });
+    cleanups.push(async () => wb.close());
+    await createDocRoom(b.client, ws, room.id);
+    await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
+    await caughtUp.promise;
+    expect(asked).toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () => {
+          await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
+          return JSON.stringify((await b.client.readDoc(ws, room)).value);
+        },
+        { timeout: 30_000 }
+      )
+      .toContain('from-a');
+  }, 60_000);
+
+  it('a removal while the host is down finishes once the host is back', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const marker = nativePendingWipeMarker(a.dataDir, ws);
+    const wa = await a.attach(marker);
+    await createDocRoom(a.client, ws, room.id);
+    await write(a.client, 'before-removal');
+    const nsFile = join(a.dataDir, 'namespaces', `ns_${Buffer.from(ws).toString('hex')}.sqlite3`);
+    expect(existsSync(nsFile)).toBe(true);
+
+    hostBlocked = true;
+    process.kill(await hostPid(a.dataDir), 'SIGKILL');
+    await expect.poll(() => a.client.connectionState, { timeout: 30_000 }).not.toBe('connected');
+    await expect(wa.wipe()).rejects.toThrow();
+    expect(await marker.read()).toBe(true);
+
+    hostBlocked = false;
+    await expect.poll(() => marker.read(), { timeout: 60_000 }).toBe(false);
+    expect(existsSync(nsFile)).toBe(false);
+  }, 90_000);
 
   it('reinstalls keys after the host restarts, and finishes a pending wipe before reopening', async () => {
     const baseUrl = await streamsServer();
