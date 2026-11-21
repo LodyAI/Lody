@@ -8441,6 +8441,8 @@ export class SessionExecutionService {
                   projectRun,
                   projectFileRoots,
                   gitRepository,
+                  // The same fact that puts the shim on PATH: managed broker credentials.
+                  managedGhShim: session.getGitHubCredentials().mode === 'managed',
                 }
               ),
             });

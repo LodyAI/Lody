@@ -4,6 +4,7 @@ import {
   LODY_HELP_INSTRUCTIONS,
   LODY_LONG_RUN_GUIDANCE,
   LODY_PR_LINK_GUIDANCE,
+  LODY_PR_LINK_GUIDANCE_WITHOUT_GH_SHIM,
 } from '../mcp/tool-help';
 
 export {
@@ -85,6 +86,8 @@ export const buildPrompt = (
     projectFileRoots?: readonly SessionFileRoot[];
     /** The Session's working directory is a git repository. */
     gitRepository?: boolean;
+    /** The managed `gh` shim, which links PRs from `gh pr create`, is on the Session's PATH. */
+    managedGhShim?: boolean;
   }
 ): string => {
   const group = options?.projectRun;
@@ -113,7 +116,7 @@ export const buildPrompt = (
     : '';
 
   const toolsReminder = options?.gitRepository
-    ? `${LODY_MCP_TOOLS_REMINDER} ${LODY_PR_LINK_GUIDANCE}`
+    ? `${LODY_MCP_TOOLS_REMINDER} ${options.managedGhShim ? LODY_PR_LINK_GUIDANCE : LODY_PR_LINK_GUIDANCE_WITHOUT_GH_SHIM}`
     : LODY_MCP_TOOLS_REMINDER;
   return `${promptWithReferences}${feedbackInstruction}${systemCommands}${toolsReminder}`;
 };

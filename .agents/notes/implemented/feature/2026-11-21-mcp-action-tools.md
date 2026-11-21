@@ -14,7 +14,8 @@ tools whose eager schema is only an `action` enum and an `arguments` object, wit
 per-action detail served by `lody_help`. That gives 21 tools and 27,541 bytes. Reads stay
 in read-only tools, so this costs two tools more than the design's estimate of about 19.
 The same change gives agents `pr_link` / `pr_unlink` / `pr_list` for their own Session,
-plus one owner-approved prompt sentence for git working directories. Whether agents
+plus one owner-approved prompt sentence for git working directories, worded by
+whether the Session's managed `gh` shim already links PRs. Whether agents
 follow that sentence, or read action help as reliably as full schemas, is unmeasured.
 
 ## Decision
@@ -40,10 +41,21 @@ follow that sentence, or read action help as reliably as full schemas, is unmeas
   source `agent` ([explicit links](2026-11-21-session-explicit-pr-links.md)).
 - **Standing guidance, one sentence per surface (owner-approved 2026-11-21, only
   when the working directory has git).**
-  - Per-prompt Lody tools reminder: `LODY_PR_LINK_GUIDANCE` in
-    `apps/cli/src/mcp/tool-help.ts`. The prompt builder adds it when the project is
-    a GitHub project or the working directory contains `.git` (a stat, not a git
-    process).
+  - Per-prompt Lody tools reminder, one sentence per Session. The owner approved
+    both variants on 2026-11-21:
+    - With the managed `gh` shim on the Session's PATH, `gh pr create` already
+      links its PR, so `LODY_PR_LINK_GUIDANCE` covers the other paths: "A pull or
+      merge request this Session opened without gh pr create is linked to it with
+      lody_session_manage action pr_link."
+    - Without the shim (local projects on native credentials), `gh pr create`
+      links nothing, so `LODY_PR_LINK_GUIDANCE_WITHOUT_GH_SHIM` covers every PR:
+      "A pull or merge request this Session opens is linked to it with
+      lody_session_manage action pr_link."
+  - The variant follows the same fact that puts the shim on PATH, managed broker
+    credentials (`session.getGitHubCredentials().mode === 'managed'`), not the
+    project kind. The sentence is added when the project is a GitHub project or the
+    working directory contains `.git` (a stat, not a git process). Both constants
+    are in `apps/cli/src/mcp/tool-help.ts`.
   - The `gh` shim's "not linked" stderr line names `lody_session_manage` action
     `pr_link`.
 
@@ -75,6 +87,6 @@ on Linux; iOS preview is absent there.
 - `apps/cli/src/mcp/lody-mcp-server.test.ts`: exact tool names and the read-only set.
 - `apps/cli/src/mcp/daemon-session-tools.test.ts`: `pr_link`, `pr_list` and
   `pr_unlink` act on the calling Session as agent records; `share` never runs over IPC.
-- `apps/cli/tests/session-execution-helpers.test.ts` (sentence only with git) and
+- `apps/cli/tests/session-execution-helpers.test.ts` (each variant, none without git) and
   `apps/cli/tests/gh-shim-script.test.ts` (stderr line).
 - Not verified: agent compliance in a live provider session.

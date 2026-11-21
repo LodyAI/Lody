@@ -17,11 +17,14 @@ export const LODY_LONG_RUN_GUIDANCE =
   'An idle Session may be reclaimed, which ends background processes you started; run long commands with lody_automation `run`, which resumes this Session when they exit.';
 
 /**
- * Approved owner guidance (2026-11-21), sent only to Sessions whose working directory has
- * git: the managed `gh pr create` links its PR, every other path needs this action.
+ * Approved owner guidance (2026-11-21), one sentence per Session and only when its working
+ * directory has git. With the managed `gh` shim, `gh pr create` links its PR, so only other
+ * paths need the action; without the shim (native credentials) every PR needs it.
  */
 export const LODY_PR_LINK_GUIDANCE =
   'A pull or merge request this Session opened without gh pr create is linked to it with lody_session_manage action pr_link.';
+export const LODY_PR_LINK_GUIDANCE_WITHOUT_GH_SHIM =
+  'A pull or merge request this Session opens is linked to it with lody_session_manage action pr_link.';
 
 export const commandHelpReminder = (name: string): string =>
   `Before using this command, read lody_help({command:"${name}"}) and follow its parameter and retry rules.`;

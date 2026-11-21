@@ -13,15 +13,32 @@ describe('session execution prompt helpers', () => {
     );
   });
 
-  it('adds the approved PR-link sentence only when the working directory has git', () => {
-    const sentence =
-      'A pull or merge request this Session opened without gh pr create is linked to it with lody_session_manage action pr_link.';
-    const withGit = buildPrompt('fix it', undefined, undefined, undefined, { gitRepository: true });
-    expect(withGit.endsWith(`which resumes this Session when they exit. ${sentence}`)).toBe(true);
-    expect(buildPrompt('fix it', undefined, undefined, undefined, { gitRepository: false })).not.toContain(
-      'pr_link'
-    );
-    expect(buildPrompt('fix it')).not.toContain('pr_link');
+  describe('approved PR-link sentence', () => {
+    const tail = 'which resumes this Session when they exit.';
+    const build = (options: { gitRepository?: boolean; managedGhShim?: boolean }) =>
+      buildPrompt('fix it', undefined, undefined, undefined, options);
+
+    it('excludes gh pr create, which already links, when the managed gh shim is on PATH', () => {
+      expect(
+        build({ gitRepository: true, managedGhShim: true }).endsWith(
+          `${tail} A pull or merge request this Session opened without gh pr create is linked to it with lody_session_manage action pr_link.`
+        )
+      ).toBe(true);
+    });
+
+    it('covers every pull or merge request when the Session has no gh shim', () => {
+      expect(
+        build({ gitRepository: true, managedGhShim: false }).endsWith(
+          `${tail} A pull or merge request this Session opens is linked to it with lody_session_manage action pr_link.`
+        )
+      ).toBe(true);
+    });
+
+    it('adds no sentence when the working directory is not a git repository', () => {
+      for (const managedGhShim of [true, false])
+        expect(build({ gitRepository: false, managedGhShim })).not.toContain('pr_link');
+      expect(buildPrompt('fix it')).not.toContain('pr_link');
+    });
   });
 
   it('injects the frozen project group instructions and ordered member directories', () => {
