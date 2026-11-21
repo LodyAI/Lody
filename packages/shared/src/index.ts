@@ -533,6 +533,8 @@ export * from './workspace-project';
 export * from './project-path';
 
 export * from './session-pull-requests';
+export * from './session-pull-request-links';
+export * from './pull-request-url';
 
 export type * from './prompt-suggestions';
 
