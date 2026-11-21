@@ -50,6 +50,25 @@ import {
 } from '@/lib/prepared-session-input';
 import { automationIdentity, type AutomationLedger } from '../storage/ledger';
 import type { ActionResult, ActionAuthorization } from '../runtime/engine';
+
+const durableSessionDenials = new Set([
+  'invocation_revoked',
+  'authorization_revoked',
+  'target_not_granted',
+  'target_permission_revoked',
+  'target_deleted',
+  'pending_work_target_mismatch',
+  'pending_work_binding_changed',
+  'pending_work_superseded',
+  'pending_work_ended',
+  'pending_work_already_claimed',
+  'workflow_target_changed',
+]);
+// 'no' verdicts only new authority or target state could lift; callers converge, never re-verify.
+export const isDurableSessionDenial = (observation: ActionAuthorization): boolean =>
+  observation.terminalState !== undefined ||
+  durableSessionDenials.has(observation.reason) ||
+  observation.reason.startsWith('guard:');
 import { pullRequestCheckpointId } from '../sources/pull-requests';
 import { providerBindingFingerprint } from '@/session/automation-observations';
 import { retainsAutomationGrant } from './authorization';
@@ -110,7 +129,6 @@ export class AutomationSessionActionsLegacy {
     const current = ledger.rule(receipt.rule.id);
     if (
       !current?.enabled ||
-      current.ownerUserId !== auth.userId ||
       current.ownerMachineId !== auth.machineId ||
       current.scope.workspaceId !== workspace.id ||
       !retainsAutomationGrant(receipt, current)
@@ -186,6 +204,8 @@ export class AutomationSessionActionsLegacy {
         }
       }
       if (invocation.target.kind === 'new') {
+        if (current.ownerUserId !== auth.userId)
+          return { value: 'no', reason: 'target_permission_revoked' };
         if (
           !current.grants.agentRoleIds.includes(invocation.target.agentRoleId) ||
           invocation.target.machineId !== auth.machineId
@@ -211,7 +231,9 @@ export class AutomationSessionActionsLegacy {
       };
     if (meta.machineId !== auth.machineId)
       return { value: 'unknown', reason: 'target_owner_unavailable' };
-    if (meta.userId !== auth.userId) return { value: 'no', reason: 'target_permission_revoked' };
+    const access = await this.authority.canEdit(sessionId as SessionId, current.ownerUserId);
+    if (access === 'no') return { value: 'no', reason: 'target_permission_revoked' };
+    if (access === 'unknown') return { value: 'unknown', reason: 'target_permission_unconfirmed' };
     if (receipt.evidence?.length) {
       const linked = new Set(
         getCurrentPullRequestsByRepository(resolveSessionPullRequests(meta)).map((pr) => pr.url)
@@ -580,7 +602,7 @@ export class AutomationSessionActionsLegacy {
     );
     const meta = record?.meta as SessionMeta | undefined;
     if (record && isLoroRepoDocDeleted(record))
-      return { state: 'blocked', reason: 'target_deleted' };
+      return { state: 'cancelled', reason: 'target_deleted' };
     if (!meta) {
       if (
         receipt.prepared?.kind === 'create' &&
@@ -617,8 +639,10 @@ export class AutomationSessionActionsLegacy {
       if (read.turn.status !== 'prepared') return { state: 'queued' };
     }
     if ((await backend.getMessageQueue()).some((item) => item.operationId === receipt.id)) {
-      // The process may have stopped after writing the row but before publishing
-      // its activation. Re-signal the same row; never enqueue a second input.
+      const verdict = await this.authorize(receipt);
+      if (verdict.value === 'no' && isDurableSessionDenial(verdict))
+        return { state: 'cancelling', reason: verdict.reason, retryAt: Date.now() };
+      // A stopped process may have written the row pre-activation; re-signal, never re-enqueue.
       await this.signalQueue(doc);
       return { state: 'queued' };
     }
@@ -649,8 +673,7 @@ export class AutomationSessionActionsLegacy {
     if (pr.url !== prUrl) return { value: 'no', reason: 'pr_superseded' };
     const observation = this.options.ledger.checkpoint(pullRequestCheckpointId(sessionId, prUrl));
     if (!observation) return { value: 'unknown', reason: 'pr_observation_missing' };
-    // Merged is terminal provider evidence. The poller intentionally retires it;
-    // waiting for a busy group must not turn that fact into a permanent stale hold.
+    // Merged is terminal provider evidence; a busy group must not hold that stale forever.
     if (observation.data.status === 'merged' && pr.status === 'merged')
       return { value: 'yes', reason: 'merged' };
     if (Date.now() - observation.observedAt > 5 * 60_000)
@@ -671,9 +694,14 @@ export class AutomationSessionActionsLegacy {
       receipt.sessionId as SessionId,
       receipt.turnId
     );
+    const denied =
+      receipt.reason !== undefined &&
+      isDurableSessionDenial({ value: 'no', reason: receipt.reason })
+        ? receipt.reason
+        : undefined;
     return {
-      state: cancelled ? 'cancelled' : 'unknown',
-      reason: cancelled ? 'user_cancelled' : 'cancellation_unconfirmed',
+      state: cancelled ? (denied?.startsWith('guard:') ? 'superseded' : 'cancelled') : 'unknown',
+      reason: cancelled ? (denied ?? 'user_cancelled') : 'cancellation_unconfirmed',
     };
   }
 }

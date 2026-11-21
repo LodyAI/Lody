@@ -27,6 +27,13 @@ import { resolveCloudElectronUpdateConfig } from './sparkle-packaging.mjs'
 import { resolveElectronReleaseProfile } from './release-profile.mjs'
 
 const electronDir = __dirname
+const electronWorkspaceDeps = Object.keys(
+  (
+    JSON.parse(fs.readFileSync(resolve(electronDir, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+    }
+  ).dependencies ?? {}
+).filter((dep) => dep.startsWith('@lody/'))
 const componentsDir = resolve(__dirname, '../../packages/components')
 const repoRoot = resolve(__dirname, '../..')
 
@@ -177,7 +184,18 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
           formats: ['cjs']
         },
         externalizeDeps: {
-          exclude: ['@lody/cli-supervisor', '@lody/shared', 'effect'],
+          exclude: [
+            ...new Set([
+              '@devframes/agentic',
+              '@devframes/hub',
+              '@devframes/json-render',
+              '@lody/cli-supervisor',
+              '@lody/shared',
+              'devframe',
+              'effect',
+              ...electronWorkspaceDeps
+            ])
+          ],
           include: [
             'better-sqlite3',
             '@devframes/hub-ui',
@@ -201,7 +219,7 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
           formats: ['cjs']
         },
         externalizeDeps: {
-          exclude: ['@lody/shared']
+          exclude: [...new Set(['@lody/shared', ...electronWorkspaceDeps])]
         }
       }
     },

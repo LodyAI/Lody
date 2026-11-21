@@ -134,16 +134,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - name: Install validation dependencies
-        run: >
-          set -euo pipefail
-
-          if [[ "$CHECK" == typecheck-mobile ]]; then
-            corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
-          else
-            corepack pnpm install --frozen-lockfile --prefer-offline
-          fi
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
         env:
-          CHECK: ${{ matrix.check }}
           LODY_SKIP_ELECTRON_POSTINSTALL: '1'
       - name: Run independent validation
         env:
@@ -353,7 +345,7 @@ jobs:
           'next'
         }}
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: ${{ matrix.target == 'mac' && '--max-old-space-size=4096' || '--max-old-space-size=6144' }}
+      NODE_OPTIONS: --max-old-space-size=6144
       npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud

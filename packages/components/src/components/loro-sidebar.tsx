@@ -303,7 +303,7 @@ export interface LoroSidebarProps {
   onSettleUpdatedItem?: (id: string) => void;
   /** Restore a snoozed or settled session back into Status Focus. */
   onMoveUpdatedItemToFocus?: (id: string) => void;
-  /** Reorder (or restore via drag) a session into Status Focus at `toIndex`. */
+  /** Reorder, restore or unpin (via drag) a session into Status Focus at `toIndex`. */
   onDropFocusItem?: (id: string, toIndex: number) => void;
   /** Copy session URL for an Updated row. Mirrors `sessionListProps.onCopySessionUrl`. */
   onCopyUpdatedItemUrl?: (id: string) => void;
@@ -1633,6 +1633,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onToggleSection={onTogglePinSection}
                     headerAction={sectionHeaderFilterAction ?? undefined}
                     actions={pinSectionActions}
+                    onDropIntoFocus={organizeMode === 'status' ? onDropFocusItem : undefined}
                     emptyTitle={mergedLabels.updated.emptyTitle}
                     emptyDescription={mergedLabels.updated.emptyDescription}
                     listProps={pinnedListProps}
