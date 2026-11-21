@@ -5838,7 +5838,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     'Acts only on the calling Session (a child Tab resolves to its owner Session). A link is intent: the PR reconciler shows the PR after its provider confirms it. Only github.com pull request URLs are supported today; other URLs return reason unsupported. Other refusals: session_archived, not_this_machine, session_not_found, limit (32 links per Session).';
   const prLinkAction = defineToolAction({
     summary: 'Link a pull request (PR) this Session opened to it.',
-    description: `Link a pull request URL to the calling Session. Use it for a PR this Session opened without gh pr create (which links automatically), for example through a web page, an API or another tool. ${PR_LINK_FACTS} Linking an already linked URL is a no-op success.`,
+    description: `Link a pull request URL to the calling Session. Use it for a PR this Session opened that is not linked yet: gh pr create links automatically only in Sessions running Lody's managed GitHub credentials, and a PR opened through a web page, an API or another tool is never linked automatically. ${PR_LINK_FACTS} Linking an already linked URL is a no-op success.`,
     inputSchema: SessionPullRequestLinkInputSchema,
     run: async ({ url }) => {
       try {

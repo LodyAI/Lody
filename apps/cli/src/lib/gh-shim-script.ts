@@ -707,7 +707,7 @@ const reportCreatedPullRequest = async (url) => {
       return;
     }
   } catch {}
-  console.error('[Lody] ' + url + " was not linked to this Session. It can be linked with lody_session_manage action pr_link or from the Session's Link pull request entry.");
+  console.error('[Lody] ' + url + ' was not linked to this Session. It can be linked with lody_session_manage action pr_link.');
 };
 const createdPullRequestUrl = (stdout) => {
   const matches = stdout.match(/https:[/][/]github[.]com[/][^\\s/]+[/][^\\s/]+[/]pull[/][0-9]+/g);

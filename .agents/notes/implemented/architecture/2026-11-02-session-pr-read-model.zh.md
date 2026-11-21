@@ -22,7 +22,7 @@ Translation: current
 2. **统一读取**：`packages/shared/src/session-pull-requests.ts` 中的 `resolveSessionPullRequestViews(meta)` 按关联顺序返回全部关联 PR。每个视图含 URL、仓库、编号、解析后的状态、`ci`、`merge`、`readiness`，以及 `current`（是否为所属仓库的最后一个 PR）。`selectPrimarySessionPullRequest(views, repository?)` 沿用原有规则：不给仓库时取旧字段 `reportedAt` 最新的一项，没有则取最后一项；给定仓库名时只看该仓库的 PR；为 `null` 时没有 PR。`resolveSessionPrimaryPullRequest(meta, activeRepository?)` 应用 Info Bar 的仓库规则。侧边栏、任务列表、首页、聊天落地页、归档、项目成员行以及 `getSessionGitHubState` 都使用这些函数。
 3. **多仓库一致**：多仓库项目会话的侧边栏行显示其旧版仓库（`project` 的仓库，否则 `repoFullName`）的 PR，即 Info Bar 未选择成员时显示的那个 PR。
 4. **订阅接口点**：显式关联记录（`prLink:*`）已使用此接口点：`resolveSessionPullRequests` 对所有读取方隐藏已取消关联的 URL，`resolveSessionPullRequestLinkList` 列出已关联与待确认的关联。仍只有协调器把关联记录变成关联列表成员。见[显式 PR 关联](../feature/2026-11-21-session-explicit-pr-links.zh.md)。
-5. **Info Bar 标记显示主 PR**，点击后列出所有关联的 PR（关联、取消关联、打开）。单项目会话在其项目仓库有 PR 时，主 PR 始终来自该仓库。
+5. **Info Bar 标记显示主 PR**，点击后列出所有关联的 PR（打开、复制链接、取消关联）。单项目会话在其项目仓库有 PR 时，主 PR 始终来自该仓库。
 6. **CI 状态标记**：标记的结论和弹层标题使用元数据 CI 代码（`s` 通过；`f`/`e` 失败；`p`/`x` 运行中），与侧边栏图标和 Fix CI 的显示条件读取同一个代码。实时 run 只用于列出各项检查；元数据没有 CI 代码时，标记不给结论。
 7. **提速**：打开会话会发布查看状态，协调器把该会话放入高频档：到期的目标在约 1 秒防抖后立即查询，之后每 20 秒一次。托管 webhook 几乎即时写入生命周期寄存器。档位和协调器配置都没有改动。
 8. **拉取 hook**：每个分片的读取都传 `{ cache: 'reload' }`；hook 不再提供缓存模式参数，所以绕过缓存的读取不会并入一条走缓存的在途请求，也就不会把旧内容记成新读取。

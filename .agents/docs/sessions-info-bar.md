@@ -140,9 +140,9 @@ labelClassName`) so the stage diffstat never clips. Wired from
   (`resolveSessionPullRequestLinkList`): the primary first, other associations newest
   first, then links GitHub has not confirmed with their reason. The primary row opens
   the PR tab; other rows open on GitHub because the PR tab is bound to the primary PR.
-  Each row can be unlinked and a pasted URL links another; the renderer writes only
-  `prLink:*` records ([decision](../notes/implemented/feature/2026-11-21-session-explicit-pr-links.md)).
-  With no primary PR, the session menu offers the same list as "Link pull request…".
+  Each row's menu opens it on GitHub, copies its link, or unlinks it; the renderer
+  writes only unlink `prLink:*` records. Links come from the `gh` shim and agents,
+  not from a UI entry ([decision](../notes/implemented/feature/2026-11-21-session-explicit-pr-links.md)).
   The context stage is also the single owner of agent-driven GitHub/worktree actions:
   a changed GitHub-capable workspace without a PR shows `Create PR` + `Commit & Push`,
   including a direct Local Project with a resolved GitHub repository. For an open

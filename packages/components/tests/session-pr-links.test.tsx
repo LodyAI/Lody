@@ -6,7 +6,6 @@ import { resolveSessionPullRequestLinkList, type SessionMeta } from '@lody/share
 
 import {
   SessionPullRequestLinksPanel,
-  linkSessionPullRequestFromUi,
   unlinkSessionPullRequestFromUi,
 } from '../src/components/sessions/session-pr-links';
 import { initI18n } from '../src/i18n';
@@ -36,11 +35,6 @@ async function renderPanel(meta: Record<string, unknown>) {
     root!.render(
       createElement(SessionPullRequestLinksPanel, {
         items: resolveSessionPullRequestLinkList(state.meta as SessionMeta),
-        onLink: async (url: string) => {
-          const outcome = await linkSessionPullRequestFromUi(state.meta, url, write, () => 1_000);
-          draw();
-          return outcome;
-        },
         onUnlink: async (url: string) => {
           await unlinkSessionPullRequestFromUi(state.meta, url, write, () => 2_000);
           draw();
@@ -51,56 +45,50 @@ async function renderPanel(meta: Record<string, unknown>) {
   document.body.append(container);
   root = createRoot(container);
   await act(async () => draw());
-  return { writes, state, container };
-}
-
-async function paste(container: HTMLElement, value: string) {
-  const input = container.querySelector('input')!;
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-    setter.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await act(async () => {
-    container
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  });
+  return { writes, container };
 }
 
 describe('linked pull requests panel', () => {
-  it('links a pasted GitHub URL as a user record and lists it as pending', async () => {
-    const view = await renderPanel({ machineId: 'm1' });
-    await paste(view.container, 'github.com/LodyAI/Lody/pull/3019/files');
-    expect(view.writes).toEqual([
-      { 'prLink:https://github.com/lodyai/lody/pull/3019': { k: 'l', o: 'u', t: 1_000 } },
-    ]);
-    expect(view.container.textContent).toContain('lodyai/lody#3019');
-    expect(view.container.textContent).toContain('Checking');
-  });
+  const url = 'https://github.com/o/r/pull/12';
 
-  it('refuses an unsupported URL without writing', async () => {
-    const view = await renderPanel({});
-    await paste(view.container, 'https://gitlab.com/a/b/-/merge_requests/1');
-    expect(view.writes).toEqual([]);
-    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
-      'not supported yet'
-    );
-  });
-
-  it('unlinks an associated PR, leaving the list without it', async () => {
-    const url = 'https://github.com/o/r/pull/12';
+  it('unlinks a PR from its row menu as a user record, leaving the list without it', async () => {
     const view = await renderPanel({
       project: { kind: 'github', repoFullName: 'o/r' },
       pullRequests: [{ url, status: 'open' }],
     });
     expect(view.container.textContent).toContain('o/r#12');
     expect(view.container.textContent).toContain('Primary');
-    const unlink = view.container.querySelector<HTMLButtonElement>('button[aria-label^="Unlink"]')!;
-    await act(async () => unlink.click());
+    const trigger = view.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="More actions: o/r#12"]'
+    )!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      trigger.click();
+    });
+    const items = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Open on GitHub',
+      'Copy link',
+      'Unlink',
+    ]);
+    await act(async () => items[2]!.click());
     expect(view.writes).toEqual([
       { 'prLink:https://github.com/o/r/pull/12': { k: 'u', o: 'u', t: 2_000 } },
     ]);
     expect(view.container.textContent).not.toContain('o/r#12');
+  });
+
+  it('shows agent- or shim-written links the machine has not confirmed, with their reason', async () => {
+    const view = await renderPanel({
+      'prLink:https://github.com/o/r/pull/77': { k: 'l', o: 's', t: 1 },
+      'prLink:https://github.com/o/r/pull/78': { k: 'l', o: 'a', t: 2 },
+      'prLinkCheck:https://github.com/o/r/pull/78': { r: 'u', t: 3 },
+      'prLink:https://gitlab.com/a/b/-/merge_requests/1': { k: 'l', o: 'a', t: 4 },
+    });
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('o/r#77');
+    expect(text).toContain('Checking');
+    expect(text).toContain('GitHub did not return this pull request');
+    expect(text).toContain('This provider is not supported yet.');
   });
 });
