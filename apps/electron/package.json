@@ -10,7 +10,7 @@
   "homepage": "https://github.com/LodyAI/Lody",
   "scripts": {
     "format": "oxfmt",
-    "test": "node scripts/run-tests.mjs",
+    "test": "node scripts/run-tests.mjs && pnpm run test:release",
     "typecheck:node": "tsgo --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsgo --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "node scripts/run-typecheck.mjs",
@@ -30,7 +30,8 @@
     "build:mac": "pnpm run build && node scripts/package-electron.mjs --mac",
     "build:linux": "pnpm run build && node scripts/package-electron.mjs --linux",
     "format:check": "oxfmt --check",
-    "build:app:test": "node scripts/build-test-app.mjs"
+    "build:app:test": "node scripts/build-test-app.mjs",
+    "test:release": "node --test *.test.mjs"
   },
   "dependencies": {
     "@better-auth/electron": "catalog:",
@@ -96,6 +97,9 @@
     "@lody/e2ee-machine-sharing": "workspace:*",
     "@lody/e2ee-client": "workspace:*",
     "@tanstack/react-router": "catalog:",
-    "jotai": "catalog:"
+    "jotai": "catalog:",
+    "semver": "^7.7.4",
+    "yaml": "2.8.2",
+    "fast-xml-parser": "5.11.1"
   }
 }

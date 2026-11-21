@@ -23,7 +23,7 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   bare specifier only, so the bundle can import `loro-crdt/bundler/*` to read the shared memory
   ([decision](../../.agents/notes/implemented/bug-fix/2026-11-09-loro-wasm-heap-exhaustion.md)).
 
-- The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
+- The CLI defaults to local; explicit `LODY_PLATFORM=cloud` consumes caller deployment values without dotenv discovery. It must
   never initialize telemetry in local mode even if PostHog env vars are set.
 - INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling
   `claude-acp.js` / `codex-acp.js` / `*-worker.js` — because worker owners resolve their child by
