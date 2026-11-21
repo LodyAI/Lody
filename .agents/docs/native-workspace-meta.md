@@ -60,8 +60,9 @@ in any order because they are Flock records with clocks.
 
 ## Named Flock documents
 
-The workspace catalog (`<ws>:wf:workspace`) is owned natively by the same
-switch. Its consumers keep using `repo.openFlockDoc` and the in-memory wasm
+The workspace catalog (`<ws>:wf:workspace`), every machine Flock
+(`<ws>:mf:<machine>`) and the schedule registry (`<ws>:sr`) are owned natively by
+the same switch (`isNativeFlockDocId`). Its consumers keep using `repo.openFlockDoc` and the in-memory wasm
 Flock: the repo is given loro-repo's external Flock owner
 ([`native-flock-docs.ts`](../../packages/shared/src/node/native-flock-docs.ts)), so the
 replica is loaded from the native room's raw export, receives changes with clocks,
@@ -69,7 +70,10 @@ and commits local changes on the existing persistence barriers (`flush`,
 `persistFlockDocNow`, `syncOnce`) with `importRoomState`. Owned documents are never
 written to local storage and never routed to the local data plane. The renderer
 opens and commits them through main (`openFlockDoc`/`commitFlockDoc`), which admits
-only the workspace's owned ids (`nativeFlockDocIds`).
+only the workspace's owned ids. Migration imports the fixed ids plus every owned
+document in each legacy replica's inventory; write-back walks the Flock registry
+in the written-back Meta, so documents first created in native mode (a new
+machine's Flock) return too.
 
 Writers: the daemon and each renderer hold their own replica and commit
 independently. The same key resolves by Flock clock (last writer wins) in every
@@ -140,9 +144,9 @@ handling; a failed write-back is logged and retried on the next start.
 | -------- | ----------------------------------------------------------------------------------------------------- | --------------------- |
 | 1 (this) | Host, shared connection, observation, Meta adapter, migration, daemon/main/renderer wiring, packaging | 1,500 (actual ≈1,300) |
 | 2        | Write-back on flag-off                                                                                | 400 (actual ≈60)      |
-| 3        | Workspace catalog (`wf`) on the same lifecycle                                                        | 600 (actual ≈330)     |
+| 3        | Workspace catalog (`wf`) on the same lifecycle                                                        | 600 (actual ≈390 net) |
 | —        | Switch to the released SDK packages when loro-repo #290/#308 ship                                     | manifests only        |
-| 4        | Machine Flock (`mf`) and schedule registry (`sr`)                                                     | 800                   |
+| 4        | Machine Flock (`mf`) and schedule registry (`sr`)                                                     | 800 (actual ≈40)      |
 | 5        | Cloud replication of native rooms (needs remote Meta design)                                          | separate proposal     |
 
 ## Performance

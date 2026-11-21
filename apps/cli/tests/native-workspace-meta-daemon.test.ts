@@ -4,7 +4,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createLocalCloudPort } from '@lody/platform';
-import { getSessionRoomId, getWorkspaceFlockDocId, type WorkspaceId } from '@lody/shared';
+import {
+  getMachineFlockDocId,
+  getScheduleRegistryFlockDocId,
+  getSessionRoomId,
+  getWorkspaceFlockDocId,
+  type MachineId,
+  type WorkspaceId,
+} from '@lody/shared';
 import { connectNativeRepo, nativeRepoDataDir } from '@lody/shared/node/native-repo';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import {
@@ -112,14 +119,23 @@ describe('native Workspace Meta in the CLI daemon', () => {
     const kept = await legacy.manager.createSession('local-machine', 'builtin', 'claude');
     const removed = await legacy.manager.createSession('local-machine', 'builtin', 'claude');
     await legacy.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'kept' });
-    const catalogId = getWorkspaceFlockDocId(workspace.id as WorkspaceId);
-    const catalog = async (manager: LoroDocumentManager) =>
-      (await manager.repo.openFlockDoc(catalogId)).flock;
+    const wsId = workspace.id as WorkspaceId;
+    const ownedIds = [
+      getWorkspaceFlockDocId(wsId),
+      getMachineFlockDocId(wsId, 'local-machine' as MachineId),
+      getScheduleRegistryFlockDocId(wsId),
+    ];
+    const rows = async (manager: LoroDocumentManager, key: string[]) =>
+      Promise.all(ownedIds.map(async (id) => (await manager.repo.openFlockDoc(id)).flock.get(key)));
     const putRow = async (manager: LoroDocumentManager, key: string[], value: unknown) => {
-      const flock = await catalog(manager);
-      flock.put(key, value as never);
-      await manager.repo.persistFlockDocNow(catalogId, flock);
+      for (const id of ownedIds) {
+        const flock = (await manager.repo.openFlockDoc(id)).flock;
+        flock.put(key, value as never);
+        await manager.repo.persistFlockDocNow(id, flock);
+      }
     };
+    const everywhere = (value: unknown) => ownedIds.map(() => value);
+    const newMachineId = getMachineFlockDocId(wsId, 'native-machine' as MachineId);
     await putRow(legacy.manager, ['mcpServer', 'legacy'], { name: 'legacy' });
     await legacy.manager.repo.deleteDoc(getSessionRoomId(removed));
     await legacy.close();
@@ -140,10 +156,13 @@ describe('native Workspace Meta in the CLI daemon', () => {
       ]);
 
       await daemon.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'renamed' });
-      expect((await catalog(daemon.manager)).get(['mcpServer', 'legacy'])).toEqual({
-        name: 'legacy',
-      });
+      expect(await rows(daemon.manager, ['mcpServer', 'legacy'])).toEqual(
+        everywhere({ name: 'legacy' })
+      );
       await putRow(daemon.manager, ['mcpServer', 'native'], { name: 'native' });
+      const created = (await daemon.manager.repo.openFlockDoc(newMachineId)).flock;
+      created.put(['machine'], 'new');
+      await daemon.manager.repo.persistFlockDocNow(newMachineId, created);
     } finally {
       await daemon.close();
     }
@@ -168,9 +187,12 @@ describe('native Workspace Meta in the CLI daemon', () => {
       expect(
         (await legacyAgain.manager.repo.getDocMeta(getSessionRoomId(nativeOnly)))?.deleted
       ).toBe(false);
-      expect((await catalog(legacyAgain.manager)).get(['mcpServer', 'native'])).toEqual({
-        name: 'native',
-      });
+      expect(await rows(legacyAgain.manager, ['mcpServer', 'native'])).toEqual(
+        everywhere({ name: 'native' })
+      );
+      expect(
+        (await legacyAgain.manager.repo.openFlockDoc(newMachineId)).flock.get(['machine'])
+      ).toBe('new');
       await legacyAgain.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'offline' });
       await putRow(legacyAgain.manager, ['mcpServer', 'offline'], { name: 'offline' });
     } finally {
@@ -183,9 +205,9 @@ describe('native Workspace Meta in the CLI daemon', () => {
       expect((await nativeAgain.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
         'offline'
       );
-      expect((await catalog(nativeAgain.manager)).get(['mcpServer', 'offline'])).toEqual({
-        name: 'offline',
-      });
+      expect(await rows(nativeAgain.manager, ['mcpServer', 'offline'])).toEqual(
+        everywhere({ name: 'offline' })
+      );
     } finally {
       await nativeAgain.close();
       await connection.close();

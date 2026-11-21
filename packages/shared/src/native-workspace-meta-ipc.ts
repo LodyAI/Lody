@@ -3,10 +3,30 @@ import type { ExternalMetadataCommand, IncrementalExternalMetadataUpdate, JsonOb
 import type { FlockRegisterEntry } from '@loro-dev/loro-repo-client';
 import type { WorkspaceId } from './ids';
 import { getWorkspaceFlockDocId } from './workspace-flock';
+import { getScheduleRegistryFlockDocId } from './schedule-registry';
+import { MACHINE_FLOCK_DOC_STREAM_SEGMENT } from './machine-flock';
 
-/** Named Flock documents the native mode owns in a workspace. */
+/** Fixed named Flock documents the native mode owns in a workspace. */
 export const nativeFlockDocIds = (workspaceId: string): string[] => [
   getWorkspaceFlockDocId(workspaceId as WorkspaceId),
+  getScheduleRegistryFlockDocId(workspaceId as WorkspaceId),
+];
+
+/** Every owned named Flock document: the fixed ones plus each machine's Flock. */
+export const isNativeFlockDocId = (workspaceId: string, flockDocId: string): boolean => {
+  const machinePrefix = `${workspaceId}:${MACHINE_FLOCK_DOC_STREAM_SEGMENT}:`;
+  return (
+    nativeFlockDocIds(workspaceId).includes(flockDocId) ||
+    (flockDocId.startsWith(machinePrefix) && flockDocId.length > machinePrefix.length)
+  );
+};
+
+/** Owned ids among a legacy replica's documents, plus the fixed ones. */
+export const ownedLegacyFlockDocIds = (workspaceId: string, stored: readonly string[]) => [
+  ...new Set([
+    ...nativeFlockDocIds(workspaceId),
+    ...stored.filter((id) => isNativeFlockDocId(workspaceId, id)),
+  ]),
 ];
 
 /** Renderer ↔ main contract for native Workspace Meta. No raw engine access. */

@@ -6465,6 +6465,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       : {}),
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
     cloudStreamsEnabled: cloudPlaneEnabled && !protectedContent,
+    engineOwnsMachineFlocks: nativeMeta !== null && !protectedContent && deps.syncMode === 'local',
     ...(cloudPlaneEnabled && !protectedContent ? { getWorkspaceStreamsGrant } : {}),
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     ...(protectedContent && deps.e2ee?.signScheduleDeclaration

@@ -243,6 +243,11 @@ export type WorkspaceRuntime = {
    */
   isMachineRpcUnreachable?: (machineId: MachineId) => boolean;
   readonly repo: LoroRepo;
+  /**
+   * This machine's native engine owns the Machine Flock documents of this local-only
+   * workspace: a write persisted to the engine is the confirmed state, with no room to sync.
+   */
+  readonly engineOwnsMachineFlocks?: boolean;
   /** Read targets from the ready metadata source, independently of UI projection. */
   readSessionOperationTargets: (
     sessionId: SessionId,

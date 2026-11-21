@@ -226,6 +226,28 @@ describe('useMachineFlockRows', () => {
     ).rejects.toThrow(`Failed to sync Machine Flock rows for ${machineId}`);
   });
 
+  it('confirms an engine-owned Machine Flock once the write reaches the native engine', async () => {
+    const machineId = 'machine-flock-engine-owned-test' as MachineId;
+    const runtimeFor = (engineOwnsMachineFlocks: boolean) =>
+      ({
+        workspaceId: `workspace-flock-engine-owned-${engineOwnsMachineFlocks}` as WorkspaceId,
+        engineOwnsMachineFlocks,
+        repo: {
+          openFlockDoc: vi.fn(async () => ({
+            flock: { scan: vi.fn(() => []) },
+            syncOnce: vi.fn(async () => ({ ok: true, outcome: 'no-route', transports: [] })),
+          })),
+        },
+      }) as unknown as WorkspaceRuntime;
+
+    await expect(
+      resyncMachineFlockRows(runtimeFor(true), machineId, { requireRemoteSync: true })
+    ).resolves.toBeUndefined();
+    await expect(
+      resyncMachineFlockRows(runtimeFor(false), machineId, { requireRemoteSync: true })
+    ).rejects.toThrow(`Failed to sync Machine Flock rows for ${machineId}`);
+  });
+
   it('keeps a freshly returned ACP capability when remote resync reads the previous snapshot', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

@@ -566,7 +566,7 @@ function acquireMachineFlockEvents(
 async function syncMachineFlockRowsOnce(
   cacheKey: string,
   handle: MachineFlockDocHandle,
-  options: { force?: boolean } = {}
+  options: { force?: boolean; engineOwned?: boolean } = {}
 ): Promise<MachineFlockRowsSyncResult> {
   const entry = getMachineFlockRowsSyncEntry(cacheKey);
   if (!options.force && entry.syncPromise) {
@@ -581,6 +581,8 @@ async function syncMachineFlockRowsOnce(
     // "reached a remote" — and treat a zero-transport (offline) report as
     // unconfirmed.
     const report = await handle.syncOnce();
+    if (options.engineOwned && report.ok && report.outcome === 'no-route')
+      return { syncedRemote: true };
     const cloud = report.transports.find((transport) => transport.transportId === 'cloud');
     return {
       syncedRemote: cloud ? cloud.ok : report.transports.length > 0 && report.ok,
@@ -656,7 +658,10 @@ function readMachineFlockRowsSnapshot(
  * `requireRemoteSync` when the caller retries on a stale read.
  */
 export async function resyncMachineFlockRows(
-  runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'> | null | undefined,
+  runtime:
+    | Pick<WorkspaceRuntime, 'repo' | 'workspaceId' | 'engineOwnsMachineFlocks'>
+    | null
+    | undefined,
   machineId: MachineId | string | null | undefined,
   options: {
     requireRemoteSync?: boolean;
@@ -670,7 +675,10 @@ export async function resyncMachineFlockRows(
   if (!runtime || !normalizedMachineId) return;
   const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, normalizedMachineId);
   const handle = await openMachineFlockDoc(runtime, normalizedMachineId);
-  const syncResult = await syncMachineFlockRowsOnce(cacheKey, handle, { force: true });
+  const syncResult = await syncMachineFlockRowsOnce(cacheKey, handle, {
+    force: true,
+    engineOwned: runtime.engineOwnsMachineFlocks === true,
+  });
   const version = readMachineFlockVersion(handle.flock);
   notifyMachineFlockRowsCache(cacheKey, {
     rows: (readOptions) => readMachineFlockRowsSnapshot(handle, readOptions, 'resync'),
@@ -961,7 +969,9 @@ export function useMachineFlockRowsByMachineIdsState(
               presenceAware,
               () => handle.joinRoom(),
               async () => {
-                const result = await syncMachineFlockRowsOnce(cacheKey, handle);
+                const result = await syncMachineFlockRowsOnce(cacheKey, handle, {
+                  engineOwned: runtime.engineOwnsMachineFlocks === true,
+                });
                 if (!result.syncedRemote) {
                   throw new Error(`Failed to sync Machine Flock rows for ${machineId}`);
                 }
