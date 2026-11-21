@@ -71,7 +71,10 @@ import {
   type ValidatedUploadFile,
   type UploadedSessionFile,
 } from './session-attachment-transfer';
-import { handleMemoryProviderRequest } from './memory-providers';
+import {
+  handleMemoryProviderRequest,
+  handleRelayedMemoryProviderRequest,
+} from './memory-providers';
 import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
@@ -3936,7 +3939,7 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             agentType,
           }),
-        memoryProvider: handleMemoryProviderRequest,
+        memoryProvider: handleRelayedMemoryProviderRequest,
         listMachinePiExtensions: async ({ configId }) =>
           await this.executionService.listMachinePiExtensions(configId),
         installMachineAcpBinary: async ({ agentType, onAcpBinaryProgress }) =>
