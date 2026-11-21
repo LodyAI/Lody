@@ -32,6 +32,8 @@ import {
 function coveredPackages(waves) {
   const candidates = [
     '@lody/components',
+    '@lody/client-e2ee',
+    '@lody/mobile',
     'lody',
     '@lody/electron',
     '@lody/site-docs',
