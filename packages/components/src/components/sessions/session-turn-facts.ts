@@ -105,33 +105,31 @@ export type SessionTurnFacts = {
   fileDiff: SessionHistory['fileDiff'];
 };
 
-export const deriveSessionTurnFacts: DeriveTurnFact<SessionTurnFacts> = (
-  turn,
-  _row,
-  _index,
-  previous
-) => {
-  const items = Array.isArray(turn.items) ? (turn.items as unknown as MessageContent[]) : [];
-  const scheduling = items.filter(isSchedulingToolCall);
-  const next: SessionTurnFacts = {
-    id: turn.id,
-    role: turn.role,
-    goal: resolveLatestSessionGoalFromHistory([turn]),
-    scheduling:
-      scheduling.length > 0
-        ? {
-            timestamp: turn.timestamp,
-            startedAt: turn.startedAt,
-            endedAt: turn.endedAt,
-            items: scheduling,
-          }
-        : null,
-    proposedPlan: findLatestCompletedCodexProposedPlan([turn] as never),
-    permissionRequests: scanPermissionRequests([turn]),
-    fileDiff: turn.fileDiff,
-  };
-  return previous && jsonValueEqual(previous, next) ? previous : next;
-};
+export const deriveSessionTurnFacts: DeriveTurnFact<SessionTurnFacts> = Object.assign(
+  (turn: SessionHistory, _row: TurnIndexRow, _index: number, previous?: SessionTurnFacts) => {
+    const items = Array.isArray(turn.items) ? (turn.items as unknown as MessageContent[]) : [];
+    const scheduling = items.filter(isSchedulingToolCall);
+    const next: SessionTurnFacts = {
+      id: turn.id,
+      role: turn.role,
+      goal: resolveLatestSessionGoalFromHistory([turn]),
+      scheduling:
+        scheduling.length > 0
+          ? {
+              timestamp: turn.timestamp,
+              startedAt: turn.startedAt,
+              endedAt: turn.endedAt,
+              items: scheduling,
+            }
+          : null,
+      proposedPlan: findLatestCompletedCodexProposedPlan([turn] as never),
+      permissionRequests: scanPermissionRequests([turn]),
+      fileDiff: turn.fileDiff,
+    };
+    return previous && jsonValueEqual(previous, next) ? previous : next;
+  },
+  { itemTypes: ['goal', 'tool_call', 'proposed_plan'] as const }
+);
 
 export type SessionTurnFactsResult = {
   /** Facts in conversation order; turns not yet derived are absent. */

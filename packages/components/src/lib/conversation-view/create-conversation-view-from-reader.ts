@@ -71,6 +71,15 @@ export type CreateConversationViewFromReaderOptions = {
 /** Item budget for deferred tail hydration. */
 const IDLE_CHUNK_ITEMS = 1_200;
 const DIRECTORY_PAGE_SIZE = 40;
+/**
+ * Older pages a whole-directory lease reads, doubling per page up to the cap.
+ * Each applied page is a structural change every whole-conversation consumer
+ * re-renders in full, so a lease walking a long history in fixed small pages
+ * costs quadratic work; doubling keeps it to a logarithmic number of changes.
+ * The reader bounds bytes on its own side.
+ */
+const DIRECTORY_LEASE_FIRST_PAGE = 500;
+const DIRECTORY_LEASE_MAX_PAGE = 8_000;
 const unloadedTurnId = (position: number): string => `${UNLOADED_TURN_PREFIX}${position}`;
 
 /** Sentinel: the change carried no `to`, so the whole directory is re-read. */
@@ -910,6 +919,17 @@ export function createConversationViewFromReader(
         (position, index) => position !== nextLoaded[index] || ids[position] !== nextIds[position]
       );
     const structuralSignal = structureChanged || pageOptions.refreshSurvivors === true;
+    let structureFrom = pageOptions.clearFrom ?? 0;
+    if (absoluteStart !== nextAbsoluteStart)
+      structureFrom = Math.min(structureFrom, absoluteStart, nextAbsoluteStart);
+    for (const position of previousLoaded) {
+      if (position >= structureFrom) break;
+      if (ids[position] !== nextIds[position]) structureFrom = position;
+    }
+    for (const position of nextLoaded) {
+      if (position >= structureFrom) break;
+      if (ids[position] !== nextIds[position]) structureFrom = position;
+    }
     const touchedSurvivors: string[] = [];
     for (const index of nextLoaded) {
       const row = nextRows[index]!;
@@ -949,7 +969,7 @@ export function createConversationViewFromReader(
     bump();
     emit(
       structuralSignal
-        ? { kind: 'structure', from: 0, to: ids.length }
+        ? { kind: 'structure', from: structureFrom, to: ids.length }
         : {
             kind: 'changed',
             ids: touchedSurvivors,
@@ -1042,7 +1062,7 @@ export function createConversationViewFromReader(
     // A content notification must not move membership. If the length changed
     // anyway, re-key structurally rather than splicing rows from a sparse read.
     if (count !== (pagedReader ? pageTotalCount : ids.length)) {
-      mergeDirty(pagedReader ? 0 : lowest, pagedReader ? ids.length : Math.max(count, ids.length));
+      mergeDirty(lowest, pagedReader ? ids.length : Math.max(count, ids.length));
       return;
     }
     for (const [lo, hi] of runsOf(positions)) {
@@ -1183,7 +1203,7 @@ export function createConversationViewFromReader(
     }
   };
 
-  const loadOlder = (): Promise<boolean> => {
+  const loadOlder = (limit = DIRECTORY_PAGE_SIZE): Promise<boolean> => {
     if (!pagedReader || !hasMoreOlder || !olderCursor || disposed) return Promise.resolve(false);
     if (olderPageRequest) return olderPageRequest;
     const cursor = olderCursor;
@@ -1191,7 +1211,7 @@ export function createConversationViewFromReader(
     const request = (async () => {
       let page: SessionHistoryDirectoryPage;
       try {
-        page = await pagedReader.readOlder(cursor, DIRECTORY_PAGE_SIZE);
+        page = await pagedReader.readOlder(cursor, limit);
         validatePage(page);
       } catch (error) {
         if (disposed || structureEpoch !== structureBefore) return false;
@@ -1220,6 +1240,40 @@ export function createConversationViewFromReader(
     return wrapped;
   };
 
+  const readDetached = async (
+    positions: readonly number[],
+    options: { readonly itemTypes?: readonly string[] } = {}
+  ) => {
+    const itemTypes = options.itemTypes;
+    const selectItems = reader.readTurnSelectingItems?.bind(reader);
+    const read = (id: string) =>
+      itemTypes && selectItems ? selectItems(id, itemTypes) : readBody(id);
+    await ready;
+    const bodies = new Map<string, SessionHistory>();
+    const pending: { id: string; token: { structure: number; turn: number } }[] = [];
+    for (const position of positions) {
+      const id = ids[position];
+      if (id === undefined || isUnloadedTurnId(id)) continue;
+      const held = hydrated.get(id);
+      if (held) bodies.set(id, held);
+      else pending.push({ id, token: turnToken(id) });
+    }
+    let stale = false;
+    const reads = await Promise.all(pending.map(({ id }) => read(id)));
+    reads.forEach((result, index) => {
+      const { id, token } = pending[index]!;
+      if (!acceptsToken(id, token)) stale = true;
+      else if (result.state === 'ready')
+        bodies.set(
+          id,
+          itemTypes && selectItems
+            ? (result.turn as unknown as SessionHistory)
+            : displayBody(result)
+        );
+    });
+    return { bodies, stale };
+  };
+
   const acquireDirectory = (throughTurnId?: string) => {
     let released = false;
     let wake: (() => void) | undefined;
@@ -1242,6 +1296,7 @@ export function createConversationViewFromReader(
     const loading = (async () => {
       await ready;
       let retryDelay = 50;
+      let pageSize = DIRECTORY_LEASE_FIRST_PAGE;
       for (;;) {
         if (released || disposed) return;
         if (
@@ -1250,10 +1305,11 @@ export function createConversationViewFromReader(
         )
           return;
         try {
-          const progressed = directoryInitialized && (await loadOlder());
+          const progressed = directoryInitialized && (await loadOlder(pageSize));
           if (released || disposed) return;
           if (progressed) {
             retryDelay = 50;
+            pageSize = Math.min(DIRECTORY_LEASE_MAX_PAGE, pageSize * 2);
             await yieldToEventLoop();
             continue;
           }
@@ -1363,7 +1419,8 @@ export function createConversationViewFromReader(
       })();
       return { ready: hydrationReady, release };
     },
-    loadOlder,
+    loadOlder: () => loadOlder(),
+    readDetached,
     acquireDirectory,
     subscribe: (listener: ConversationViewListener) => {
       listeners.add(listener);

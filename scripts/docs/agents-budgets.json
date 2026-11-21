@@ -12,6 +12,8 @@
     "apps/cli/src/session/AGENTS.md": 1340,
     "apps/cli/src/mcp/AGENTS.md": 1320,
     "apps/cli/src/commands/AGENTS.md": 1280,
+    "packages/shared/AGENTS.md": 1280,
+    "packages/shared/src/session-data/AGENTS.md": 1240,
     "packages/components/src/hooks/AGENTS.md": 1280,
     "packages/e2ee-client/AGENTS.md": 1400,
     "apps/electron/src/main/services/AGENTS.md": 1290,

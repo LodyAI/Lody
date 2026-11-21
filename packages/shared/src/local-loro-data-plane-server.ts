@@ -412,6 +412,8 @@ export class LocalLoroDataPlaneServerLegacy {
         case 'detach':
           this.detachPeer(message.peerId);
           return;
+        case 'subscribe':
+          return;
         case 'machine-monitor':
           this.registerMachineMonitorReceiver(connection);
           this.options.machineMonitorSource?.apply(base64ToBytes(message.dataBase64));

@@ -182,7 +182,25 @@ export const NativeDocReadSchema = SessionDocTarget.extend({ path: DocPath }).st
 export const NativeDocListFieldsSchema = SessionDocTarget.extend({
   start: z.number().int(),
   end: z.number().int().optional(),
-  fields: z.array(z.object({ path: DocPath, shape: z.boolean().optional() }).strict()).max(64),
+  fields: z
+    .array(
+      z
+        .object({
+          path: DocPath,
+          shape: z.boolean().optional(),
+          where: z
+            .object({
+              key: z.string().max(256),
+              in: z.array(z.string().max(256)).max(32).optional(),
+              notIn: z.array(z.string().max(256)).max(32).optional(),
+            })
+            .strict()
+            .optional(),
+          omit: z.array(DocPath).max(8).optional(),
+        })
+        .strict()
+    )
+    .max(64),
 }).strict();
 export const NativeDocObservePathsSchema = SessionDocTarget.extend({
   observationId: Observation,

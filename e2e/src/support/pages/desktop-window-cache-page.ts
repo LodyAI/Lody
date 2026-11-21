@@ -29,6 +29,7 @@ export class DesktopWindowCachePage {
     const auxiliaryPage = this.requireAuxiliaryPage();
     await expect(auxiliaryPage.locator('#chat-prompt')).toBeEditable({ timeout: 60_000 });
 
+    const native = process.env.LODY_NATIVE_WORKSPACE_META === '1';
     await expect
       .poll(
         async () => {
@@ -36,8 +37,7 @@ export class DesktopWindowCachePage {
           return (
             snapshot.windowId !== null &&
             snapshot.repoDbName !== null &&
-            snapshot.highWaterDbOpened &&
-            snapshot.highWaterNamespaceObserved
+            (native || (snapshot.highWaterDbOpened && snapshot.highWaterNamespaceObserved))
           );
         },
         {
@@ -53,7 +53,8 @@ export class DesktopWindowCachePage {
     expect(snapshot.namespace).toBeTruthy();
     expect(snapshot.repoDbName).toBe(`${REPO_DB_PREFIX}${snapshot.namespace}`);
     expect(snapshot.namespace).toMatch(new RegExp(`:${snapshot.windowId}$`, 'u'));
-    expect(snapshot.highWaterNamespaceObserved).toBe(true);
+    expect(snapshot.highWaterDbOpened).toBe(!native);
+    expect(snapshot.highWaterNamespaceObserved).toBe(!native);
   }
 
   private async installCacheObserverForFutureRenderers(): Promise<void> {

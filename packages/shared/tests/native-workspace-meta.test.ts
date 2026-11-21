@@ -4,7 +4,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { META_ROOM, type RepoClient } from '@loro-dev/loro-repo-client';
-import { connectEngine } from '@loro-dev/loro-repo-client/node';
+import {
+  connectEngine,
+  engineIsOlder,
+  engineSatisfies,
+  readEngineEndpoint,
+} from '@loro-dev/loro-repo-client/node';
+import { startProcessLegacy } from '../src/node/process';
 import {
   ExternalMetadataNotCommittedError,
   LoroRepo,
@@ -47,6 +53,9 @@ import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule
 import { isNativeDocId } from '../src/native-workspace-meta-ipc';
 
 const hostScript = fileURLToPath(new URL('./fixtures/native-repo-host.mjs', import.meta.url));
+const earlierHostScript = fileURLToPath(
+  new URL('./fixtures/native-repo-host-earlier.mjs', import.meta.url)
+);
 const launcher = () => ({ command: process.execPath, args: [hostScript] });
 const ns = 'ws-native-meta';
 
@@ -181,6 +190,94 @@ describe('native Workspace Meta', () => {
     await connection.close();
     await main.repo.deleteDoc('session-1');
     expect((await main.repo.getDocMeta('session-1'))?.deleted).toBe(true);
+  });
+
+  it("takes over an earlier build's host that is still running, keeping its data and clients", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'lody-native-upgrade-'));
+    cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
+    cleanups.push(() => killHost(dataDir, 'SIGTERM'));
+    const earlierHost = startProcessLegacy({
+      command: process.execPath,
+      args: [earlierHostScript, dataDir],
+      options: {
+        stdio: 'ignore',
+        env: { ...process.env, LODY_TEST_EARLIER_CAPABILITIES: 'doc_list_fields,engine_handoff' },
+      },
+    });
+    earlierHost.child.once('error', () => {});
+    const earlier = await connectEngine(dataDir, { waitForEndpointMs: 10_000 });
+    cleanups.push(() => earlier.close());
+    const earlierPid = await hostPid(dataDir);
+    expect(engineSatisfies(await readEngineEndpoint(dataDir))).toBe(false);
+    const earlierMeta = createNativeWorkspaceMeta(earlier, ns, notCommitted);
+    cleanups.push(() => earlierMeta.close());
+    await earlierMeta.open(() => {});
+    await earlierMeta.commit({
+      kind: 'upsert-doc',
+      docId: 'session-1',
+      patch: { title: 'before' },
+    });
+
+    const connection = await connectNativeRepo({ launcher, dataDir });
+    cleanups.push(() => connection.close());
+    const endpoint = await readEngineEndpoint(dataDir);
+    expect(engineSatisfies(endpoint)).toBe(true);
+    expect(endpoint.pid).not.toBe(earlierPid);
+    await untilGone(earlierPid);
+    const current = await nativeRepo(connection.client);
+    expect((await current.repo.getDocMeta('session-1'))?.meta).toEqual({ title: 'before' });
+
+    await earlier.whenConnected();
+    const seen = nextEvent(
+      current.events,
+      (e) => e.kind === 'doc-metadata' && e.docId === 'session-2'
+    );
+    await earlierMeta.commit({ kind: 'upsert-doc', docId: 'session-2', patch: { title: 'after' } });
+    await seen;
+    expect((await current.repo.getDocMeta('session-2'))?.meta).toEqual({ title: 'after' });
+  });
+
+  it('moves to its own release when an earlier release with the same capabilities still runs', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'lody-native-fix-'));
+    cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
+    cleanups.push(() => killHost(dataDir, 'SIGTERM'));
+    const earlierHost = startProcessLegacy({
+      command: process.execPath,
+      args: [earlierHostScript, dataDir],
+      options: { stdio: 'ignore', env: { ...process.env, LODY_TEST_EARLIER_VERSION: '0.0.9' } },
+    });
+    earlierHost.child.once('error', () => {});
+    const earlier = await connectEngine(dataDir, { waitForEndpointMs: 10_000 });
+    cleanups.push(() => earlier.close());
+    const earlierEndpoint = await readEngineEndpoint(dataDir);
+    expect(engineSatisfies(earlierEndpoint)).toBe(true);
+    expect(engineIsOlder(earlierEndpoint)).toBe(true);
+    const earlierMeta = createNativeWorkspaceMeta(earlier, ns, notCommitted);
+    cleanups.push(() => earlierMeta.close());
+    await earlierMeta.open(() => {});
+    await earlierMeta.commit({
+      kind: 'upsert-doc',
+      docId: 'session-1',
+      patch: { title: 'before' },
+    });
+
+    const connection = await connectNativeRepo({ launcher, dataDir });
+    cleanups.push(() => connection.close());
+    await untilGone(earlierEndpoint.pid);
+    await connection.client.whenConnected();
+    const current = await readEngineEndpoint(dataDir);
+    expect(engineIsOlder(current)).toBe(false);
+    expect(current.pid).not.toBe(earlierEndpoint.pid);
+    const repo = await nativeRepo(connection.client);
+    expect((await repo.repo.getDocMeta('session-1'))?.meta).toEqual({ title: 'before' });
+    await earlier.whenConnected();
+    const seen = nextEvent(
+      repo.events,
+      (e) => e.kind === 'doc-metadata' && e.docId === 'session-2'
+    );
+    await earlierMeta.commit({ kind: 'upsert-doc', docId: 'session-2', patch: { title: 'after' } });
+    await seen;
+    expect((await repo.repo.getDocMeta('session-2'))?.meta).toEqual({ title: 'after' });
   });
 
   it('recovers every view from a new snapshot after the host crashes', async () => {
@@ -403,6 +500,95 @@ describe('remote Session history reader', () => {
     expect(await remote.readTurnOutput('turn-88')).toEqual(data.history.readTurnOutput('turn-88'));
   });
 
+  it('serves concurrent turn reads past the page byte limit as the in-process reader does', async () => {
+    const { data, commit, remote } = await open();
+    const body = 'y'.repeat(48 * 1024);
+    for (let i = 0; i < 60; i++)
+      await data.commands.appendTurn(
+        turn(i, { items: [{ type: 'text', text: `${i}:${body}` }] } as never)
+      );
+    await commit();
+    await remote.readDirectory(0, 60);
+    const ids = ['turn-2', 'turn-3', 'turn-4', 'turn-3', 'turn-30', 'turn-59', 'turn-404'];
+    const [reads, range] = await Promise.all([
+      Promise.all(ids.map((id) => remote.readTurn(id))),
+      remote.readRange(55, 62),
+    ]);
+    expect(reads).toEqual(ids.map((id) => data.history.readTurn(id)));
+    expect(range).toEqual(data.history.readRange(55, 62));
+  });
+
+  it('reads display turns, one child run and selected items as the in-process reader does', async () => {
+    const { data, commit, remote } = await open();
+    const body = 'transcript '.repeat(2000);
+    const task = (taskId: string) => ({
+      type: 'subagent_task',
+      taskId,
+      status: 'in_progress',
+      run: {
+        sessionId: 'root',
+        snapshot: {
+          state: 'running',
+          support: { stream: ['text', 'tool'], progress: false, cancel: false, outputRead: 'none' },
+        },
+        items: [
+          { type: 'tool_call', toolCallId: taskId, status: 'completed', kind: 'edit' },
+          { type: 'text', text: `${body}\nLatest action ${taskId}` },
+          { type: 'text', text: '   ' },
+        ],
+      },
+    });
+    const goal = {
+      type: 'goal',
+      threadId: 'thread-1',
+      turnId: null,
+      objective: 'ship',
+      status: 'active',
+      tokenBudget: null,
+      tokensUsed: 1,
+      timeUsedSeconds: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    await data.commands.appendTurn(turn(0));
+    data.writer.append(
+      turn(1, {
+        items: [
+          { type: 'text', text: 'prose' },
+          task('a'),
+          goal,
+          {
+            type: 'tool_call',
+            toolCallId: 'top',
+            status: 'completed',
+            kind: 'read',
+            title: 'Read',
+          },
+          task('b'),
+        ],
+      } as never)
+    );
+    await commit();
+    await remote.readDirectory(0, 2);
+    const display = await remote.readTurnForDisplay!('turn-1');
+    expect(display).toEqual(data.history.readTurnForDisplay!('turn-1'));
+    expect(JSON.stringify(display)).not.toContain(body);
+    expect(JSON.stringify(display)).toContain('Latest action b');
+    expect(await remote.readSubagentRun!('turn-1', 'root', 'a')).toEqual(
+      data.history.readSubagentRun!('turn-1', 'root', 'a')
+    );
+    expect(await remote.readSubagentRun!('turn-1', 'other-root', 'a')).toBeUndefined();
+    const selected = await remote.readTurnSelectingItems!('turn-1', ['goal', 'tool_call']);
+    const whole = data.history.readTurn('turn-1');
+    if (selected.state !== 'ready' || whole.state !== 'ready') throw new Error('turn missing');
+    expect(selected.turn).toEqual({
+      ...whole.turn,
+      items: (whole.turn.items as { type: string }[]).filter((item) =>
+        ['goal', 'tool_call'].includes(item.type)
+      ),
+    });
+  });
+
   it('reads a whole directory past the page byte limit and the newest goal as the in-process reader does', async () => {
     const { data, commit, remote, port } = await open();
     const goal = (status: string) => ({
@@ -429,6 +615,15 @@ describe('remote Session history reader', () => {
     const whole = await remote.readDirectory(0, 400);
     expect(whole.map((row) => row.turnId)).toEqual(
       data.history.readDirectory(0, 400).map((row) => row.turnId)
+    );
+    const latest = await remote.readLatestDirectoryPage!(300);
+    expect(latest.rows.map((row) => row.turnId)).toEqual(
+      (await data.history.readLatestDirectoryPage!(300)).rows.map((row) => row.turnId)
+    );
+    const older = await remote.readOlderDirectoryPage!(latest.cursor!, 300);
+    expect(older).toMatchObject({ startPosition: 0, hasMoreOlder: false });
+    expect(older.rows.map((row) => row.turnId)).toEqual(
+      data.history.readDirectory(0, 100).map((row) => row.turnId)
     );
     expect(await readRemoteLatestGoal(port)).toEqual(data.readLatestGoal());
     expect(data.readLatestGoal()).toMatchObject({ status: 'active' });
