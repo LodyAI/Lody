@@ -1164,6 +1164,18 @@ const SessionCancelToolInputSchema = z
   })
   .strict();
 
+/**
+ * Some Agent runtimes send every declared field, so a first-page read arrives as
+ * null or blank text instead of an omitted cursor; all three mean the first page.
+ */
+const OptionalPageCursorSchema = z
+  .string()
+  .trim()
+  .nullable()
+  .optional()
+  .transform((cursor) => cursor || undefined)
+  .describe('Opaque nextCursor from the previous page. Omit, null or empty reads the first page.');
+
 const SessionListToolInputSchema = z
   .object({
     ...SessionDiscoveryFilterShape,
@@ -1202,7 +1214,7 @@ const SessionListToolInputSchema = z
       .max(MAX_MCP_SESSION_LIST_LIMIT)
       .optional()
       .describe(`Maximum sessions to return. Defaults to ${DEFAULT_MCP_SESSION_LIST_LIMIT}.`),
-    cursor: z.string().trim().min(1).optional(),
+    cursor: OptionalPageCursorSchema,
   })
   .strict();
 
@@ -1216,7 +1228,7 @@ const SessionHistoryToolInputSchema = z
       .describe(
         'Target session id, or current. Defaults to current. Accepts a full lody://session/<sessionId>?workspace=<workspaceId> link (workspace must match this tool context), or a legacy session:// URI.'
       ),
-    cursor: z.string().trim().min(1).optional(),
+    cursor: OptionalPageCursorSchema,
     limit: z
       .number()
       .int()

@@ -983,6 +983,43 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(remote.content[0]?.text).not.toContain('owner local history');
   });
 
+  it('reads the first history page when an agent runtime that forces every field fills cursor with null or blank text', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
+    await backend.appendHistoryTurn({
+      id: 'first-page-context',
+      role: 'user',
+      timestamp: '2026-11-10T00:00:00Z',
+      items: [{ type: 'text', text: 'first page context' }],
+      fileDiff: [],
+    } as never);
+    const call = async (args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), 'lody_session_history', { sessionId, ...args })
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+
+    const omitted = await call({});
+    expect(omitted.isError, omitted.text).toBe(false);
+    expect(omitted.text).toContain('first page context');
+    for (const direction of ['backward', 'forward'] as const) {
+      for (const cursor of [null, '', '   ']) {
+        const read = await call({ direction, cursor });
+        expect(read.isError, `${direction} ${JSON.stringify(cursor)}: ${read.text}`).toBe(false);
+        expect(JSON.parse(read.text).items).toEqual(JSON.parse(omitted.text).items);
+      }
+    }
+    const placeholder = await call({ cursor: 'none' });
+    expect(placeholder.isError).toBe(true);
+    expect(placeholder.text).toContain('CURSOR_INVALID');
+  });
+
   it('reports the latest failed turn and marks its history entry', async () => {
     stubCreateOptionsReaders();
     const doc = await manager.getOrCreateSessionDoc(sessionId);

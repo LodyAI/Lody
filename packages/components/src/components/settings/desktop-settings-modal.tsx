@@ -19,9 +19,7 @@ import {
   loadWorkspaceDataSetting,
   preloadSettingsPanel,
 } from './settings-code';
-const WorkspaceSettings = lazy(loadWorkspaceSettings);
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
-const MemorySetting = lazy(loadMemorySetting);
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import {
   lazy,
@@ -62,6 +60,8 @@ import {
   type SettingsTabId,
 } from './settings-tabs';
 import { SettingsAccountEntry } from './settings-account-entry';
+const WorkspaceSettings = lazy(loadWorkspaceSettings);
+const MemorySetting = lazy(loadMemorySetting);
 const GeneralSettingsComponent = lazy(loadGeneralSettingsComponent);
 const AppearanceSettingsComponent = lazy(loadAppearanceSettingsComponent);
 const AccountSettingsComponent = lazy(loadAccountSettingsComponent);
