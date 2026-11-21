@@ -75,6 +75,7 @@ import {
   GitBranch,
   GitBranchPlus,
   GitFork,
+  GitPullRequest,
   Github,
   History,
   Image,
@@ -181,6 +182,8 @@ import {
   type McpServerId,
   type ScheduleDocument,
   type SessionPullRequestView,
+  type SessionPullRequestLinkListItem,
+  resolveSessionPullRequestLinkList,
 } from '@lody/shared';
 import { encryptedRemoteEditAndResendAvailable } from '../../lib/encrypted-machine-controls';
 import { useIsMobile } from '../../hooks/use-mobile';
@@ -279,6 +282,12 @@ import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
+import {
+  SessionPullRequestLinksDialog,
+  linkSessionPullRequestFromUi,
+  unlinkSessionPullRequestFromUi,
+  type SessionPullRequestLinksProps,
+} from './session-pr-links';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import {
@@ -1358,6 +1367,7 @@ export function SessionHeaderMenu({
   openInFileManager,
   isLauncherPillVisible,
   pullRequest,
+  pullRequestLinks,
   continuationTweaks,
   t,
 }: {
@@ -1414,6 +1424,8 @@ export function SessionHeaderMenu({
   isLauncherPillVisible?: () => boolean;
   /** The session's current pull request, listed in the info dialog. */
   pullRequest?: SessionInfoPullRequest;
+  /** Offered as "Link pull request…" while the Info Bar shows no PR. */
+  pullRequestLinks?: SessionPullRequestLinksProps;
   t: SessionSharingTranslator;
 }) {
   const rpcReason = useMachineRpcFeatureReason(session.machineId);
@@ -1458,6 +1470,7 @@ export function SessionHeaderMenu({
   const conversationWide = useAtomValue(conversationWideModeAtom);
   const setConversationWide = useSetAtom(conversationWideModeAtom);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [prLinksOpen, setPrLinksOpen] = useState(false);
   const [launcherPillVisible, setLauncherPillVisible] = useState(false);
   const infoOwner = isArchived ? undefined : owner;
   const sessionPlacement =
@@ -1660,6 +1673,12 @@ export function SessionHeaderMenu({
               }}
             >
               {t('sidebar.renameChat.title', 'Rename Chat')}
+            </Menu.Item>
+          )}
+
+          {pullRequestLinks && !isArchived && (
+            <Menu.Item icon={GitPullRequest} onClick={() => setPrLinksOpen(true)}>
+              {t('sessions.prLinks.menu', 'Link pull request…')}
             </Menu.Item>
           )}
 
@@ -2027,6 +2046,13 @@ export function SessionHeaderMenu({
           now={statusNow}
           onClose={() => setCustomSnoozeTarget(null)}
           onConfirm={(_sessionId, snoozedUntil) => void onSnooze(snoozedUntil)}
+        />
+      ) : null}
+      {pullRequestLinks ? (
+        <SessionPullRequestLinksDialog
+          open={prLinksOpen}
+          onOpenChange={setPrLinksOpen}
+          links={pullRequestLinks}
         />
       ) : null}
       <SessionInfoDialog
@@ -3096,6 +3122,39 @@ export const SessionChatInterface = memo(
       settleSession,
       moveSessionToFocus,
     } = useSessionActions();
+    // Linked pull requests: the user's own link/unlink records (the reconciler
+    // alone publishes `pullRequests`). Rows open the primary PR's tab, others on GitHub.
+    const prOwnerMeta = workspaceSession ?? session;
+    const hasPrLinkSurface = !!(prOwnerMeta.project || prOwnerMeta.projectRun);
+    const prLinkItems = useMemo(
+      () => resolveSessionPullRequestLinkList(prOwnerMeta, activeProjectRepository),
+      [prOwnerMeta, activeProjectRepository]
+    );
+    const writePrLink = useStableCallback(async (patch: Record<string, unknown>) => {
+      if (!prSessionId) throw new Error('Session is not ready');
+      await updateSessionMetadata(prSessionId, patch);
+    });
+    const linkPrFromUi = useStableCallback((url: string) =>
+      linkSessionPullRequestFromUi(prOwnerMeta, url, writePrLink)
+    );
+    const unlinkPrFromUi = useStableCallback(async (url: string) => {
+      await unlinkSessionPullRequestFromUi(prOwnerMeta, url, writePrLink).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
+    });
+    const openLinkedPr = useStableCallback((item: SessionPullRequestLinkListItem) => {
+      if (item.kind === 'associated' && item.primary && prLinkHandler) prLinkHandler();
+      else void openExternalUrl(item.url);
+    });
+    const prLinks = useMemo<SessionPullRequestLinksProps>(
+      () => ({
+        items: prLinkItems,
+        onOpen: openLinkedPr,
+        onUnlink: unlinkPrFromUi,
+        onLink: linkPrFromUi,
+      }),
+      [prLinkItems, openLinkedPr, unlinkPrFromUi, linkPrFromUi]
+    );
     const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
     const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
     const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
@@ -7291,6 +7350,7 @@ export const SessionChatInterface = memo(
             ? { number: latestPrNumber ?? null, status: latestPr.status, onOpen: openLatestPr }
             : undefined
         }
+        pullRequestLinks={!latestPr && hasPrLinkSurface ? prLinks : undefined}
         openInIde={
           shouldShowOpenInIdeButton && isElectronRendererForPathLaunch
             ? {
@@ -7753,6 +7813,7 @@ export const SessionChatInterface = memo(
                         onOpenPr={prLinkHandler}
                         prHistory={canShowGitHubActions ? pullRequestHistory : undefined}
                         onOpenHistoryPr={openHistoryPr}
+                        prLinks={canShowGitHubActions ? prLinks : undefined}
                         contextActions={infoBarContextActions}
                         onOpenAllChanges={onOpenAllChanges}
                         // Opener + every Session/Tab created here: the in-stream
