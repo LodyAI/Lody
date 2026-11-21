@@ -51,7 +51,7 @@ history compatibility and writer ownership continue to apply.
 
 Native iOS and Android clients keep the same snapshot, projection, capability and
 history guarantees but use a touch-first composer form. Long-press selection in
-one message offers Quote in the system text menu; it opens a bottom sheet with the
+one Agent message offers Quote (user messages are not quotable) in the system text menu; it opens a bottom sheet with the
 read-only snapshot and an optional comment. Each quote and its comment become one
 card in the composer attachment strip, which reopens the sheet for editing the
 comment or removing the card. Inline caret insertion does not apply there.
