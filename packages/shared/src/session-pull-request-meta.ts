@@ -160,3 +160,7 @@ export type SessionPullRequestLinkFields = {
   [field: `prLink:${string}`]: SessionPullRequestLink | undefined;
   [field: `prLinkCheck:${string}`]: SessionPullRequestLinkCheck | undefined;
 };
+
+/** Per-PR records stored as top-level Session metadata keys (lifecycle and links). */
+export type SessionPullRequestRecordFields = SessionPullRequestLifecycleFields &
+  SessionPullRequestLinkFields;
