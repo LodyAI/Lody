@@ -63,6 +63,7 @@ import {
 import { cn } from '@/lib/utils';
 import { usePrLinkInterceptor } from './pr-link-context';
 import { parseSessionLinkHref, useSessionLinkNavigator } from './session-link-context';
+import { useCoordinatorConversation } from '@/components/project-mode/coordinator-conversation';
 import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
 import {
   SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
@@ -400,6 +401,7 @@ function MarkdownExternalLink({
   ...rest
 }: MarkdownExternalLinkProps) {
   const prHandler = usePrLinkInterceptor(href);
+  const coordinator = useCoordinatorConversation();
   const navigateSession = useSessionLinkNavigator();
   const readonly = useContext(SessionReadonlyContext);
   const store = useStore();
@@ -422,11 +424,18 @@ function MarkdownExternalLink({
         navigateSession({ sessionId: session.sessionId as SessionId, workspaceId });
         return;
       }
+      if (coordinator?.openExternalLink && href) {
+        const label = markdownLinkText(children).trim() || undefined;
+        if (coordinator.openExternalLink(href, label)) {
+          event.preventDefault();
+          return;
+        }
+      }
       if (!prHandler) return;
       event.preventDefault();
       prHandler();
     },
-    [href, navigateSession, onClick, prHandler, readonly, store]
+    [children, coordinator, href, navigateSession, onClick, prHandler, readonly, store]
   );
   return (
     <a {...rest} href={href} target="_blank" rel={ensureLinkRel(rel)} onClick={handleClick}>

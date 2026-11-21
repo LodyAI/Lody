@@ -16,6 +16,7 @@ import {
   FileDiff,
   Files,
   GitPullRequest,
+  LayoutList,
   MessageSquare,
   MonitorPlay,
   Plus,
@@ -42,7 +43,9 @@ export type SessionSidePanelTabItem = {
     | 'android-emulator'
     | 'session'
     | 'file'
-    | 'diff';
+    | 'diff'
+    /** Project mode: the coordinator's resident board of its conversations. */
+    | 'board';
   filePath?: string;
   closeable?: boolean;
   dirty?: boolean;
@@ -75,7 +78,10 @@ export const parseSideSessionPanelTabId = (tabId: string): string | null =>
     : null;
 
 export const isViewerTabId = (tabId: string): boolean =>
-  tabId.startsWith('file:') || tabId.startsWith('diff:');
+  tabId.startsWith('file:') ||
+  tabId.startsWith('diff:') ||
+  tabId.startsWith('pr:') ||
+  tabId.startsWith('url:');
 
 export type SidePanelTabSelection = {
   activeSidebarTabId: string | null;
@@ -654,6 +660,8 @@ function SidePanelTabIcon({ tab }: { tab: SessionSidePanelTabItem }) {
       return <Smartphone {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'session':
       return <MessageSquare {...stylex.props(styles.tabGlyphDimmed)} />;
+    case 'board':
+      return <LayoutList {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'file':
       return tab.filePath ? (
         <FileIcon filePath={tab.filePath} {...stylex.props(styles.tabGlyph)} />

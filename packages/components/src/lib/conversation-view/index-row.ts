@@ -48,6 +48,9 @@ export function pickIndexScalars(source: Record<string, unknown>): TurnIndexRow 
   if (typeof source.acpTurnId === 'string') row.acpTurnId = source.acpTurnId;
   if (typeof source.startedAt === 'number') row.startedAt = source.startedAt;
   if (typeof source.permissionWaitMs === 'number') row.permissionWaitMs = source.permissionWaitMs;
+  if (typeof source.threadRoots === 'string' && source.threadRoots.length > 0) {
+    row.threadRoots = source.threadRoots;
+  }
   return row;
 }
 

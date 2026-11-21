@@ -91,7 +91,8 @@ export function eagerInputJsonSchema(schema: JsonSchemaNode): JsonSchemaNode {
 /** The SDK validates before callbacks; preserve the validator and append a recovery hint to issues. */
 function inputWithHelp<T extends z.ZodObject>(
   schema: T,
-  name: string
+  name: string,
+  exemptFromHelp?: boolean
 ): StandardSchemaWithJSON<
   StandardSchemaWithJSON.InferInput<T>,
   StandardSchemaWithJSON.InferOutput<T>
@@ -101,12 +102,15 @@ function inputWithHelp<T extends z.ZodObject>(
     '~standard': {
       ...standard,
       jsonSchema: {
-        input: (options) => eagerInputJsonSchema(standard.jsonSchema.input(options)),
+        input: (options) =>
+          exemptFromHelp
+            ? standard.jsonSchema.input(options)
+            : eagerInputJsonSchema(standard.jsonSchema.input(options)),
         output: (options) => standard.jsonSchema.output(options),
       },
       validate: async (value, options) => {
         const result = await standard.validate(value, options);
-        return result.issues
+        return result.issues && !exemptFromHelp
           ? { issues: [...result.issues, { message: commandHelpReminder(name) }] }
           : result;
       },
@@ -188,6 +192,8 @@ export type LodyToolConfig<T extends z.ZodObject> = {
   annotations?: ToolAnnotations;
   /** Action tools: per-action documentation served by `lody_help({command, action})`. */
   actions?: Record<string, LodyToolAction>;
+  /** Simple coordinator UI tools include complete documentation inline without a help preflight. */
+  exemptFromHelp?: boolean;
 };
 
 export type LodyToolServer = {
@@ -279,11 +285,11 @@ export function createToolHelpServer(server: McpServer): LodyToolServer {
   );
 
   return {
-    registerTool(name, { summary, actions, ...config }, callback) {
-      const inputSchema = inputWithHelp(config.inputSchema, name);
+    registerTool(name, { summary, actions, exemptFromHelp, ...config }, callback) {
+      const inputSchema = inputWithHelp(config.inputSchema, name, exemptFromHelp);
       const execute: ToolCallback<typeof inputSchema> = async (args, context) => {
         const result = await callback(args, context);
-        return isFailedToolResult(result)
+        return !exemptFromHelp && isFailedToolResult(result)
           ? {
               ...result,
               content: [...result.content, { type: 'text', text: commandHelpReminder(name) }],
@@ -298,7 +304,7 @@ export function createToolHelpServer(server: McpServer): LodyToolServer {
           inputSchema,
           // The help-first rule lives once in the server instructions and the Lody prompt,
           // and every failure appends commandHelpReminder; repeating it per tool cost ~4 KB.
-          description: summary,
+          description: exemptFromHelp ? (config.description ?? summary) : summary,
         },
         execute
       );

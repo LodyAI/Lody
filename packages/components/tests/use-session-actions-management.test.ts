@@ -47,7 +47,10 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionToCreate,
-  type WorkspaceId} from '@lody/shared';
+  type WorkspaceId,
+  readSessionCoordinatorKind,
+  SESSION_COORDINATOR_MARKER,
+} from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
@@ -719,6 +722,27 @@ describe('useSessionActions', () => {
     expect(meta.project).toMatchObject({ branch: selector });
   });
 
+  it('writes the coordinator marker with the first turn and leaves ordinary sessions unmarked', async () => {
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime);
+    const coordinatorId = 'session-coordinator' as SessionId;
+    const ordinaryId = 'session-ordinary' as SessionId;
+
+    const coordinator = await actions.startSession(
+      { ...createSessionPayload(coordinatorId), coordinator: SESSION_COORDINATOR_MARKER },
+      userInput('plan the release')
+    );
+    await actions.startSession(createSessionPayload(ordinaryId), userInput('fix the bug'));
+
+    expect(metaRepo.getSession(coordinatorId)).toMatchObject({
+      coordinator: { version: 1 },
+      latestUserMsgId: coordinator.historyEntry.id,
+    });
+    expect(readSessionCoordinatorKind(metaRepo.getSession(coordinatorId))).toBe('v1');
+    expect(metaRepo.getSession(ordinaryId)).not.toHaveProperty('coordinator');
+  });
+
   it('writes a Focus orderKey below every existing key so a new top-level session leads 进行中', async () => {
     const sessionId = 'session-focus-order' as SessionId;
     const metaRepo = createSessionMetaRepo([]);
@@ -768,7 +792,6 @@ describe('useSessionActions', () => {
       });
     }
   );
-
   const userInput = (text: string) =>
     ({
       role: 'user',

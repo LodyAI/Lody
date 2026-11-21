@@ -21,11 +21,19 @@ const SessionLinkContext = createContext<
   ((target: SessionNavigationTarget & Pick<SessionLink, 'workspaceId'>) => void) | null
 >(null);
 
-export function SessionLinkProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+export function SessionLinkProvider({
+  enabled,
+  onNavigate,
+  children,
+}: {
+  enabled: boolean;
+  onNavigate?: (target: SessionNavigationTarget & Pick<SessionLink, 'workspaceId'>) => void;
+  children: ReactNode;
+}) {
   // Resource links always select their exact target, including in this workspace.
   // Ordinary related-session navigation may instead restore the last active tab.
   return (
-    <SessionLinkContext.Provider value={enabled ? openSessionDeepLink : null}>
+    <SessionLinkContext.Provider value={enabled ? (onNavigate ?? openSessionDeepLink) : null}>
       {children}
     </SessionLinkContext.Provider>
   );

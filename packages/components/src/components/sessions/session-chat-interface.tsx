@@ -1,4 +1,9 @@
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
+import { isCoordinatorSession, type CoordinatorReplyRef } from '@lody/shared';
+import {
+  buildCoordinatorThreadDirectoryIndex,
+  type CoordinatorThreadDirectoryIndex,
+} from '@/components/project-mode/coordinator-thread-model';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
@@ -58,6 +63,7 @@ import { useOpenSettings } from '../../hooks/use-open-settings';
 import { v4 as uuidv4 } from 'uuid';
 import {
   AlarmClock,
+  Network,
   ArrowDown,
   ArrowUp,
   ArrowUpCircle,
@@ -95,6 +101,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { useChangeCoordinatorAction } from '@/components/project-mode/use-change-coordinator';
 import { buildSnoozePresets, sidebarStatusGroup } from '@/lib/sidebar-status-group';
 import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
 import { useRouter } from '@tanstack/react-router';
@@ -238,6 +245,7 @@ import { zhCN } from 'date-fns/locale/zh-CN';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
+import { useCoordinatorConversation } from '@/components/project-mode/coordinator-conversation';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
   normalizeSessionFileActionPlatform,
@@ -1349,6 +1357,7 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
   onRename,
+  onChangeCoordinator,
   onSnooze,
   onSettle,
   onMoveToFocus,
@@ -1386,6 +1395,8 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkMenuOpen?: () => void;
   onRename?: () => void | Promise<void>;
+  /** Project mode (Developer mode): leave this coordinator and start a new one for the project. */
+  onChangeCoordinator?: () => void;
   onSnooze?: (snoozedUntil: number) => void | Promise<void>;
   onSettle?: () => void | Promise<void>;
   onMoveToFocus?: () => void | Promise<void>;
@@ -1761,6 +1772,12 @@ export function SessionHeaderMenu({
           {openInFileManager ? (
             <Menu.Item icon={FolderOpen} onClick={() => void openInFileManager.onOpen()}>
               {openInFileManager.label}
+            </Menu.Item>
+          ) : null}
+
+          {onChangeCoordinator && !isArchived ? (
+            <Menu.Item icon={Network} onClick={onChangeCoordinator}>
+              {t('projectMode.changeCoordinator', 'Change coordinator')}
             </Menu.Item>
           ) : null}
 
@@ -2318,6 +2335,10 @@ export interface SessionChatInterfaceProps {
   forkingAssistantMessageId?: string | null;
   /** Opens another session from an in-conversation link (e.g. a fork's origin). */
   onNavigateSession?: (target: SessionNavigationTarget) => void;
+  coordinatorReplyDraft?: CoordinatorReplyRef | null;
+  onClearCoordinatorReplyDraft?: () => void;
+  onOpenCoordinatorThread?: (threadRootId: string, previewHint?: string) => void;
+  onCoordinatorThreadHostStateChange?: (state: CoordinatorThreadHostState) => void;
   /** Signals when this mounted conversation surface has loaded durable history. */
   onConversationPrepared?: () => void;
   /** Signals a terminal failure while preparing this conversation surface. */
@@ -2355,9 +2376,17 @@ export type SessionChatToolbar = {
   };
 };
 
+export type CoordinatorThreadHostState = {
+  readonly conversationView: import('@/lib/conversation-view').ConversationView | null;
+  readonly threadIndex: CoordinatorThreadDirectoryIndex;
+  readonly agentActivityLabel: string | null;
+  readonly agentActivityTone: 'primary' | 'warning';
+};
+
 export type SessionChatInterfaceHandle = {
   addDocumentSelection: (selection: DocumentSelection) => boolean;
   focusInput: () => void;
+  sendCoordinatorThreadReply: (prompt: string, replyTo: CoordinatorReplyRef) => Promise<boolean>;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
@@ -2405,6 +2434,7 @@ export type DispatchInputBlocksOptions = {
   /** The MCP selection captured when the user pressed send. */
   mcpServerIds?: readonly McpServerId[];
   skipMcpOnce?: boolean;
+  replyTo?: CoordinatorReplyRef;
 };
 
 function buildEditedMessageQueueItem(item: MessageQueueItem, task: string): MessageQueueItem {
@@ -2499,6 +2529,10 @@ export const SessionChatInterface = memo(
       onForkWorktreeMenuOpen,
       forkingAssistantMessageId,
       onNavigateSession,
+      coordinatorReplyDraft = null,
+      onClearCoordinatorReplyDraft,
+      onOpenCoordinatorThread,
+      onCoordinatorThreadHostStateChange,
       onConversationPrepared,
       onConversationPrepareError,
     },
@@ -3159,6 +3193,7 @@ export const SessionChatInterface = memo(
       [session.id, t, transferSessionOwner, workspaceMembers]
     );
     const getOwnerAccessReason = useSessionOwnerAccess();
+    const changeCoordinator = useChangeCoordinatorAction(session);
     const ownerMenuState = useMemo<SessionOwnerMenuState | undefined>(
       () =>
         isMultiMember
@@ -3926,7 +3961,9 @@ export const SessionChatInterface = memo(
         t,
       ]
     );
-    const searchBlocks = useIncrementalSearchBlocks(conversationView, isSearchOpen);
+    const searchBlocks = useIncrementalSearchBlocks(conversationView, isSearchOpen, {
+      coordinator: isCoordinatorSession(session),
+    });
     const normalizedSearchQuery = useMemo(
       () => normalizeSessionSearchQuery(deferredSearchQuery),
       [deferredSearchQuery]
@@ -4553,8 +4590,24 @@ export const SessionChatInterface = memo(
       liveSessionStatus ?? undefined,
       permissionSessionHistory
     );
-    const agentActivityLabel =
-      initStatusLabel && !isEmptyConversation
+    const isCoordinatorConversation = isCoordinatorSession(session);
+    const coordinatorDefaultStatusLabel = t(
+      'projectMode.coordinator.defaultStatus',
+      'Looking into it…'
+    );
+    const agentActivityLabel = isCoordinatorConversation
+      ? isSessionActive
+        ? isAwaitingQuestion
+          ? t('sessions.statusIndicator.waitingForAnswer')
+          : liveSessionStatus?.type === 'requestPermission'
+            ? t('sessions.statusIndicator.requestPermission')
+            : isFinalizing
+              ? null
+              : coordinatorDefaultStatusLabel
+        : (hasPendingDispatch || pendingMessages.isSending) && statusStripState == null
+          ? coordinatorDefaultStatusLabel
+          : null
+      : initStatusLabel && !isEmptyConversation
         ? initStatusLabel
         : isSessionActive
           ? isAwaitingQuestion
@@ -4582,15 +4635,46 @@ export const SessionChatInterface = memo(
       isSessionActive && (isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission')
         ? 'warning'
         : 'primary';
+    const coordinatorThreadIndex = useMemo(
+      () =>
+        isCoordinatorConversation
+          ? buildCoordinatorThreadDirectoryIndex(conversationIndexRows)
+          : null,
+      [conversationIndexRows, isCoordinatorConversation]
+    );
+    useEffect(() => {
+      if (!isCoordinatorConversation || !coordinatorThreadIndex || !onCoordinatorThreadHostStateChange) {
+        return;
+      }
+      onCoordinatorThreadHostStateChange({
+        conversationView: conversationView ?? null,
+        threadIndex: coordinatorThreadIndex,
+        agentActivityLabel: agentActivityLabel ?? null,
+        agentActivityTone,
+      });
+    }, [
+      agentActivityLabel,
+      agentActivityTone,
+      conversationView,
+      coordinatorThreadIndex,
+      isCoordinatorConversation,
+      onCoordinatorThreadHostStateChange,
+    ]);
     // Waiting on the user is not work in progress: that status does not shimmer.
     const agentActivityShimmer = agentActivityTone !== 'warning';
     // Presence, not the history's `finished` flag: a turn whose daemon died
     // before finalizing stays unfinished forever but is not running.
-    const liveTurnActivity: LiveTurnActivity | null = isSessionActive
-      ? isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission'
-        ? 'awaitingUser'
-        : 'working'
-      : null;
+    const liveTurnActivity: LiveTurnActivity | null = isCoordinatorConversation
+      ? isSessionActive && !isFinalizing && liveSessionStatus?.type !== 'initializing'
+        ? isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission'
+          ? 'awaitingUser'
+          : 'working'
+        : null
+      : isSessionActive
+        ? isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission'
+          ? 'awaitingUser'
+          : 'working'
+        : null;
     const historyLive = useHistoryLiveWindow(
       resolveHistoryLiveSync(sessionDocSyncState, browserOnline)
     );
@@ -4627,6 +4711,7 @@ export const SessionChatInterface = memo(
           configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
           agentRole?: SessionTurnAgentRoleSelection;
           mcpServerIds?: readonly McpServerId[];
+          replyTo?: CoordinatorReplyRef;
         }
       ): Promise<boolean> => {
         try {
@@ -4651,6 +4736,7 @@ export const SessionChatInterface = memo(
             modelId: turnModelId,
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
+            replyTo: options?.replyTo,
             mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
@@ -4791,6 +4877,7 @@ export const SessionChatInterface = memo(
           | 'agentRole'
           | 'attachments'
           | 'mcpServerIds'
+          | 'replyTo'
         >
       ): Promise<boolean> => {
         try {
@@ -4825,6 +4912,7 @@ export const SessionChatInterface = memo(
                 : options.agentRole?.memory,
             agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
+            replyTo: options?.replyTo,
           });
           const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
             prompt: inputConfig.prompt,
@@ -4841,6 +4929,7 @@ export const SessionChatInterface = memo(
             memory: inputConfig.memory,
             agentRoleSnapshot: inputConfig.agentRoleSnapshot,
             resume: inputConfig.resume ?? undefined,
+            ...(inputConfig.replyTo ? { replyTo: inputConfig.replyTo } : {}),
             chainDepth: 0,
           };
 
@@ -4909,6 +4998,7 @@ export const SessionChatInterface = memo(
           | 'agentRole'
           | 'attachments'
           | 'mcpServerIds'
+          | 'replyTo'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -4921,6 +5011,7 @@ export const SessionChatInterface = memo(
           agentRole: options?.agentRole,
           attachments: options?.attachments,
           mcpServerIds: options?.mcpServerIds,
+          replyTo: options?.replyTo,
         });
       },
       [configOptionValues, enqueueInputBlocks]
@@ -4991,6 +5082,7 @@ export const SessionChatInterface = memo(
             agentRole: options?.agentRole,
             attachments: options?.attachments,
             mcpServerIds: options?.mcpServerIds,
+            replyTo: options?.replyTo,
           });
           captureSessionEvent(
             accepted ? 'session/message_queued' : 'session/message_submit_failed',
@@ -5014,6 +5106,7 @@ export const SessionChatInterface = memo(
             agentRole: options?.agentRole,
             attachments: options?.attachments,
             mcpServerIds: options?.mcpServerIds,
+            replyTo: options?.replyTo,
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -5045,6 +5138,7 @@ export const SessionChatInterface = memo(
           agentRole: options?.agentRole,
           attachments: options?.attachments,
           mcpServerIds: options?.mcpServerIds,
+          replyTo: options?.replyTo,
         });
         // A held send (attachments still preparing) dispatches itself later;
         // the composer is free again now.
@@ -5932,6 +6026,20 @@ export const SessionChatInterface = memo(
         }),
       [docMetaCacheReady, openerRootSessionMeta, openerSessionMeta, session]
     );
+    const coordinatorConversation = useCoordinatorConversation();
+    const handleSessionLinkNavigate = useCallback(
+      (target: SessionNavigationTarget & { workspaceId?: string }) => {
+        if (!coordinatorConversation || (target.workspaceId && target.workspaceId !== workspaceId)) {
+          openSessionDeepLink(target);
+          return;
+        }
+        const targetId = target.tabSessionId ?? target.sessionId;
+        if (targetId && targetId !== session.id) {
+          coordinatorConversation.openTask(targetId);
+        }
+      },
+      [coordinatorConversation, session.id, workspaceId]
+    );
     const handleOpenRelatedSession = useCallback(
       (target: SessionNavigationTarget & { workspaceId?: string }) => {
         if (target.workspaceId && target.workspaceId !== workspaceId) {
@@ -6261,6 +6369,11 @@ export const SessionChatInterface = memo(
         focusInput: () => {
           inputAreaRef.current?.focusInput();
         },
+        sendCoordinatorThreadReply: async (prompt, replyTo) => {
+          const trimmed = prompt.trim();
+          if (!trimmed) return false;
+          return await dispatchPrompt(trimmed, { replyTo });
+        },
         addCommentReference: (reference) => {
           return inputAreaRef.current?.addCommentReference(reference) ?? false;
         },
@@ -6301,6 +6414,7 @@ export const SessionChatInterface = memo(
         },
       }),
       [
+        dispatchPrompt,
         handleCopyConversationHistory,
         shareSelection.start,
         shareSelection.cancel,
@@ -7294,6 +7408,7 @@ export const SessionChatInterface = memo(
                   });
                 }
         }
+        onChangeCoordinator={changeCoordinator}
         onSnooze={
           headerSharing?.access !== 'read'
             ? (snoozedUntil) =>
@@ -7412,7 +7527,10 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-        <SessionLinkProvider enabled={!!onNavigateSession}>
+        <SessionLinkProvider
+          enabled={!!onNavigateSession}
+          onNavigate={coordinatorConversation ? handleSessionLinkNavigate : undefined}
+        >
           {plaintextCopyConfirmation}
           {autoDeliveryDialogOpen ? (
             <AutoDeliveryDialog
@@ -7988,6 +8106,9 @@ export const SessionChatInterface = memo(
                             onVisualAnnotationReferencesSubmitted={
                               onVisualAnnotationReferencesSubmitted
                             }
+                            coordinatorReplyDraft={coordinatorReplyDraft}
+                            onClearCoordinatorReplyDraft={onClearCoordinatorReplyDraft}
+                            onOpenCoordinatorReplyThread={onOpenCoordinatorThread}
                           />
                         )}
                       </div>

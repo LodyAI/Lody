@@ -335,6 +335,8 @@ export interface ChatComposerProps {
   visualAnnotationReferenceItems?: VisualAnnotationReferenceChipItem[];
   /** Remove a visual annotation reference by localId */
   onVisualAnnotationReferenceRemove?: (localId: string) => void;
+  /** Optional reply banner rendered at the top inside the composer container. */
+  replyBanner?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, agent) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -450,6 +452,7 @@ export function ChatComposer({
   revealCommentReferenceRemoveOnClick = false,
   visualAnnotationReferenceItems = [],
   onVisualAnnotationReferenceRemove,
+  replyBanner,
   topSelector,
   footerSelector,
   bottomBar,
@@ -1016,6 +1019,7 @@ export function ChatComposer({
         ? landingContainerClassName
         : sessionContainerClassName;
   const composerHasAttachments =
+    Boolean(replyBanner) ||
     imageItems.length > 0 ||
     fileItems.length > 0 ||
     commentReferenceItems.length > 0 ||
@@ -1118,6 +1122,9 @@ export function ChatComposer({
                   : undefined
               }
             >
+              {replyBanner ? (
+                <div className={cn(isSheet && 'px-5 pt-3')}>{replyBanner}</div>
+              ) : null}
               {commentReferenceItems.length > 0 ? (
                 <div className={cn('flex flex-wrap gap-2 pb-1', isSheet && 'px-5 pt-3')}>
                   {commentReferenceItems.map((item) => (

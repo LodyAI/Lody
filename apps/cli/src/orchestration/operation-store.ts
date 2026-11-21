@@ -60,6 +60,7 @@ const FrozenConfigSchema = z
     agentConfigId: z.string().optional(),
     inputConfig: z.record(z.string(), z.unknown()),
     sourceTurnId: z.string().trim().min(1).optional(),
+    originThreadId: z.string().trim().min(1).max(320).optional(),
     notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
     targetDispatchConfigs: z
       .array(
@@ -263,6 +264,7 @@ const boundCompletionFreeText = (
           ...(label !== undefined ? { label } : {}),
           output: {
             text: boundedOutput.value,
+            ...(item.output.attachments?.length ? { attachments: item.output.attachments } : {}),
             ...(outputOmittedBytes > 0
               ? { truncated: true as const, omittedBytes: outputOmittedBytes }
               : {}),

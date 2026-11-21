@@ -28,6 +28,8 @@ export interface SessionCommandHost {
   }): Promise<SessionWithdrawInputResponse>;
   /** The running turn an Agent chat may steer; undefined unless it runs on this daemon. */
   readActiveTurnId(sessionId: SessionId): string | undefined;
+  /** The open assistant history entry owned by this daemon's active turn, if any. */
+  readActiveAssistantTurnId?(sessionId: SessionId): string | undefined;
   steerSession(input: {
     sessionId: SessionId;
     expectedTurnId: string;
@@ -94,6 +96,7 @@ export interface DaemonWorkspace {
   machineId: MachineId;
   manager: LoroDocumentManager;
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
+  readActiveAssistantTurnId?(sessionId: SessionId): string | undefined;
   readAccess?(): DaemonWorkspaceAccess;
   /**
    * Encrypted only: classify an Agent-delegated input by its verified driving Turn.
@@ -172,6 +175,12 @@ export const getDaemonWorkspace = (): DaemonWorkspace | undefined => {
     machineId: environment.auth.machineId,
     manager: environment.manager,
     readInvocation: (sessionId) => environment.host.readInvocation(sessionId),
+    ...(environment.host.readActiveAssistantTurnId
+      ? {
+          readActiveAssistantTurnId: (sessionId: SessionId) =>
+            environment.host.readActiveAssistantTurnId?.(sessionId),
+        }
+      : {}),
   };
 };
 

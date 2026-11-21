@@ -23,6 +23,7 @@ export const SESSION_DIRECTORY_SCALAR_KEYS = [
   'acpTurnId',
   'startedAt',
   'permissionWaitMs',
+  'threadRoots',
 ] as const;
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -50,6 +51,8 @@ export function pickDirectoryScalars(source: unknown): SessionDirectoryScalars |
   if (typeof source.startedAt === 'number') scalars.startedAt = source.startedAt;
   if (typeof source.permissionWaitMs === 'number')
     scalars.permissionWaitMs = source.permissionWaitMs;
+  if (typeof source.threadRoots === 'string' && source.threadRoots.length > 0)
+    scalars.threadRoots = source.threadRoots;
   return scalars as SessionDirectoryScalars;
 }
 

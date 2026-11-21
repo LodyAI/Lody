@@ -8,6 +8,7 @@ import {
   normalizeLegacyAcpSessionConfig,
 } from './message-schemas';
 import { SessionTurnTokenUsageSchema } from './session-data/token-usage';
+import { COORDINATOR_THREAD_ROOTS_MAX_CHARS } from './coordinator-threads';
 
 /** New writes only. Never parse/rewrite the stored history through this schema. */
 export const HistoryEntryWriteSchema = z.object({
@@ -21,6 +22,7 @@ export const HistoryEntryWriteSchema = z.object({
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
   permissionWaitMs: z.number().optional(),
+  threadRoots: z.string().max(COORDINATOR_THREAD_ROOTS_MAX_CHARS).optional(),
   status: z
     .enum([
       'prepared',

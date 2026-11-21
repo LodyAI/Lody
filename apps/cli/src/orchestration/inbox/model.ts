@@ -31,6 +31,7 @@ export type InboxMember = {
   createdAt?: string;
   completedAt?: string;
   sourceTurnId?: string;
+  originThreadId?: string;
   chainDepth: number;
   completion: unknown;
 };
@@ -81,6 +82,7 @@ export const batchHistoryMembers = (
       deliveryId: `operation:${batch.sessionId}:${member.operationId}:completion`,
       operationId: member.operationId,
       operationKind: member.operationKind,
+      ...(member.originThreadId ? { originThreadId: member.originThreadId } : {}),
       completion: member.completion as OperationCompletionContent['completion'],
     };
     const size = Buffer.byteLength(JSON.stringify(item), 'utf8');

@@ -36,10 +36,14 @@ export function createSessionToolRegistrar(
     handlers?.set(name, async (args) => {
       const parsed = await config.inputSchema.safeParseAsync(args);
       if (!parsed.success) {
-        throw new z.ZodError([
-          ...parsed.error.issues,
-          { code: 'custom', path: [], message: commandHelpReminder(name) },
-        ]);
+        throw new z.ZodError(
+          config.exemptFromHelp
+            ? parsed.error.issues
+            : [
+                ...parsed.error.issues,
+                { code: 'custom', path: [], message: commandHelpReminder(name) },
+              ]
+        );
       }
       if (executeLocally?.(parsed.data))
         throw new Error(`Unsupported daemon Session tool call: ${name}`);

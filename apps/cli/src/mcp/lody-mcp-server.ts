@@ -1,6 +1,16 @@
 import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
 import { LODY_AUTH_URL } from '@/utils/const';
-import { isContainedSession, type ScheduleCommand } from '@lody/shared';
+import {
+  COORDINATOR_ANCHOR_ID_MAX_CHARS,
+  extractLinkedSessionIdsFromText,
+  isContainedSession,
+  isCoordinatorSession,
+  type ScheduleCommand,
+} from '@lody/shared';
+import {
+  resolveCoordinatorOperationOriginThreadId,
+  resolveCoordinatorOutboundReplyRef,
+} from '@/lib/coordinator-reply-context';
 import {
   createSessionPullRequestLinks,
   type SessionPullRequestLinkResult,
@@ -30,7 +40,10 @@ import {
   MACHINE_PROTOCOL_CAPABILITIES,
   parseGitHubPullRequestUrl,
 } from '@lody/shared';
-import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
+import {
+  resolveOrPrepareSessionAttachments,
+  type AttachmentHistoryTurn,
+} from '@/lib/session-attachment-reuse';
 import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
 import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
@@ -99,7 +112,9 @@ import {
   type LodyOperationItemResult,
   type LodyOperationSnapshot,
   type SessionTurnInputConfig,
+  type SessionFilePayload,
   type SessionHistoryInput,
+  type SessionImagePayload,
   hasPendingUserTurnActivation,
   normalizeSessionTurnInputConfig,
   describeChatFailure,
@@ -232,6 +247,52 @@ const OPERATION_TOOL_NAME = 'lody_operation';
 const CATALOG_TOOL_NAME = 'lody_catalog';
 const SESSION_MANAGE_TOOL_NAME = 'lody_session_manage';
 const OPERATION_CANCEL_TOOL_NAME = 'lody_operation_cancel';
+const COORDINATOR_SEND_MESSAGE_TOOL_NAME = 'lody_coordinator_send_message';
+const COORDINATOR_SET_STATUS_TOOL_NAME = 'lody_coordinator_set_status';
+const MAX_COORDINATOR_MESSAGE_CHARS = 64 * 1024;
+const MAX_COORDINATOR_STATUS_CHARS = 240;
+
+const CoordinatorSendMessageInputSchema = z
+  .object({
+    markdown: z
+      .string()
+      .trim()
+      .max(MAX_COORDINATOR_MESSAGE_CHARS)
+      .optional()
+      .describe('Markdown content to display to the user as a single chat bubble.'),
+    attachments: z
+      .array(z.string().trim().min(1))
+      .max(SESSION_FILE_MAX_COUNT)
+      .optional()
+      .describe(
+        'Optional images, videos, or documents to display in this bubble. Accepts zero-copy references from delegated results or this conversation ("image:<id>", "file:<id>") or file paths inside this workspace.'
+      ),
+    threadId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(COORDINATOR_ANCHOR_ID_MAX_CHARS)
+      .optional()
+      .describe(
+        "Optional thread root identifier (e.g. from a delegated completion item's originThreadId) when routing bubbles to distinct threads. Omitted calls automatically inherit the active turn's thread."
+      ),
+  })
+  .strict()
+  .refine((value) => Boolean(value.markdown?.trim()) || Boolean(value.attachments?.length), {
+    message: 'Provide markdown text or at least one attachment',
+  });
+
+const CoordinatorSetStatusInputSchema = z
+  .object({
+    status: z
+      .string()
+      .trim()
+      .max(MAX_COORDINATOR_STATUS_CHARS)
+      .describe(
+        'Short single-line working status shown in the coordinator conversation while working.'
+      ),
+  })
+  .strict();
 const SESSION_FILE_MAX_SIZE_MB = Math.floor(SESSION_FILE_MAX_SIZE_BYTES / (1024 * 1024));
 const SESSION_CONTROL_TIMEOUT_MS = 30_000;
 const MAX_MCP_SESSION_WAIT_TIMEOUT_SECONDS = 3_600;
@@ -505,7 +566,7 @@ const InputAttachmentPathsSchema = z
   .max(SESSION_FILE_MAX_COUNT)
   .optional()
   .describe(
-    'Caller-machine files inside its Session workspace; absolute/relative paths. Uploaded as target input.'
+    'Caller-machine files inside its Session workspace (absolute/relative paths) or zero-copy attachment references ("image:<id>", "file:<id>") from this conversation or its delegated results.'
   );
 const SessionCreateCommandInputShape = {
   attachments: InputAttachmentPathsSchema,
@@ -2797,6 +2858,7 @@ type InvokingTurnContext = {
   frozenInputConfig: SessionTurnInputConfig;
   notificationOriginTurnIds: string[];
   identity: InvocationIdentity;
+  originThreadId?: string;
   sender?: Extract<SessionActiveInvocationContextResult, { active: true }>['sender'];
 };
 
@@ -2914,10 +2976,21 @@ const resolveInvokingTurnContext = async (
       false
     );
   }
+  let originThreadId = source.inputConfig.replyTo?.threadRootId?.trim();
+  if (!originThreadId && isCoordinatorSession(session)) {
+    const doc = await manager.getOrCreateSessionDoc(session.id);
+    const backend = await createSessionBackend(doc, session);
+    originThreadId = await resolveCoordinatorOperationOriginThreadId({
+      history: backend.history,
+      sourceTurnId: source.id,
+      sourceReplyTo: source.inputConfig.replyTo,
+    });
+  }
   return {
     chainDepth,
     identity: buildInvocationIdentity(source),
     sender: source.sender,
+    ...(originThreadId ? { originThreadId } : {}),
     notificationOriginTurnIds: [...new Set(notificationOriginTurnIds)],
     frozenInputConfig: {
       ...source.inputConfig,
@@ -3506,12 +3579,13 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         throw new Error('Update the calling machine daemon before sending input attachments');
       }
     }
-    const inputAttachments = await prepareSessionInputAttachments({
-      paths: args.attachments ?? [],
+    const inputAttachments = await resolveOrPrepareSessionAttachments({
+      inputs: args.attachments ?? [],
       cwd: ctx.workdir,
       containWithin: ctx.workdir,
       workspaceId: workspace.id as WorkspaceId,
-      sessionId: preallocatedSessionId,
+      callerSessionId: ctx.sessionId,
+      targetSessionId: preallocatedSessionId,
       sourceMachineId: ctx.machineId as MachineId,
       targetMachineId,
       ...(args.attachments?.length
@@ -3522,6 +3596,9 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
             ),
           }
         : {}),
+      readCallerHistory: () => readCallerAttachmentHistory(manager, ctx.sessionId, currentSession),
+      readDelegatedTurn: (sessionId, turnId) =>
+        readDelegatedAttachmentTurn(manager, sessionId, turnId, ctx.machineId as MachineId),
     });
     await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
@@ -3545,6 +3622,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
               : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            ...(invoking.originThreadId ? { originThreadId: invoking.originThreadId } : {}),
             notificationOriginTurnIds: invoking.notificationOriginTurnIds,
             targetDispatchConfigs: [effectiveDispatchConfig],
           },
@@ -3808,12 +3886,13 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         throw new Error('Update the calling machine daemon before sending input attachments');
       }
     }
-    const inputAttachments = await prepareSessionInputAttachments({
-      paths: args.attachments ?? [],
+    const inputAttachments = await resolveOrPrepareSessionAttachments({
+      inputs: args.attachments ?? [],
       cwd: ctx.workdir,
       containWithin: ctx.workdir,
       workspaceId: workspace.id as WorkspaceId,
-      sessionId: targetSession.id,
+      callerSessionId: ctx.sessionId,
+      targetSessionId: targetSession.id,
       sourceMachineId: ctx.machineId as MachineId,
       targetMachineId: targetSession.machineId,
       ...(args.attachments?.length
@@ -3824,8 +3903,21 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
             ),
           }
         : {}),
+      readCallerHistory: () => readCallerAttachmentHistory(manager, ctx.sessionId, currentSession),
+      readDelegatedTurn: (sessionId, turnId) =>
+        readDelegatedAttachmentTurn(manager, sessionId, turnId, ctx.machineId as MachineId),
     });
     await freezeInvokingAuthor(manager, currentSession, invoking);
+    let chatOriginThreadId = invoking.originThreadId;
+    if (!chatOriginThreadId && isCoordinatorSession(currentSession)) {
+      const callerDoc = await manager.getOrCreateSessionDoc(currentSession.id);
+      const callerBackend = await createSessionBackend(callerDoc, currentSession);
+      chatOriginThreadId = await resolveCoordinatorOperationOriginThreadId({
+        history: callerBackend.history,
+        sourceTurnId: invoking.identity.sourceTurnId,
+        targetSessionId: args.sessionId as SessionId,
+      });
+    }
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -3846,6 +3938,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
               : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            ...(chatOriginThreadId ? { originThreadId: chatOriginThreadId } : {}),
             targetDispatchConfigs: [targetDispatchConfig],
             notificationOriginTurnIds: invoking.notificationOriginTurnIds,
           },
@@ -4013,6 +4106,58 @@ const renameSessionItems = async (
       assertSessionManagementAccess({ auth, workspace, manager, sessionId, delegatedRequester })
     );
   });
+};
+
+const MAX_ATTACHMENT_REUSE_HISTORY_TURNS = 200;
+
+const readCallerAttachmentHistory = async (
+  manager: LoroDocumentManager,
+  sessionId: SessionId,
+  meta?: SessionMeta
+): Promise<AttachmentHistoryTurn[]> => {
+  const doc = await manager.getOrCreateSessionDoc(sessionId);
+  const history = (await createSessionBackend(doc, meta)).history;
+  const total = await history.count();
+  const rows = await history.readDirectory(
+    Math.max(0, total - MAX_ATTACHMENT_REUSE_HISTORY_TURNS),
+    total
+  );
+  const turns: AttachmentHistoryTurn[] = [];
+  for (const row of rows) {
+    const turnId = row.turnId ?? row.scalars?.id;
+    if (!turnId) continue;
+    const read = await history.readTurn(turnId);
+    if (read.state === 'ready') turns.push(read.turn);
+  }
+  return turns;
+};
+
+const readDelegatedAttachmentTurn = async (
+  manager: LoroDocumentManager,
+  targetSessionId: SessionId,
+  turnId: string,
+  callerMachineId: MachineId
+): Promise<AttachmentHistoryTurn | undefined> => {
+  const row = await manager.repo.getDocMeta(getSessionRoomId(targetSessionId));
+  const targetMeta =
+    row?.meta && !isLoroRepoDocDeleted(row) ? (row.meta as SessionMeta) : undefined;
+  if (targetMeta?.id && targetMeta.machineId) {
+    return await readSessionDocForMcp(
+      manager,
+      targetMeta,
+      callerMachineId,
+      async (sessionDoc) => {
+        const read = await (
+          await createSessionBackend(sessionDoc, targetMeta)
+        ).history.readTurn(turnId);
+        return read.state === 'ready' ? read.turn : undefined;
+      },
+      REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
+    );
+  }
+  const doc = await manager.getOrCreateSessionDoc(targetSessionId);
+  const read = await (await createSessionBackend(doc)).history.readTurn(turnId);
+  return read.state === 'ready' ? read.turn : undefined;
 };
 
 /** Cancel through the daemon's workspace replica, never a child CLI with its own. */
@@ -4452,6 +4597,7 @@ const startSessionCreateManyOperation = async (
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            ...(invoking.originThreadId ? { originThreadId: invoking.originThreadId } : {}),
             notificationOriginTurnIds: invoking.notificationOriginTurnIds,
             targetDispatchConfigs,
           },
@@ -4684,6 +4830,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            ...(invoking.originThreadId ? { originThreadId: invoking.originThreadId } : {}),
             targetDispatchConfigs,
             notificationOriginTurnIds: invoking.notificationOriginTurnIds,
           },
@@ -4852,6 +4999,10 @@ const OPERATION_SNAPSHOT_GUIDANCE = [
   'Delivery: completion is stored before being injected into the requester conversation at a permitted input boundary. A finished snapshot does not prove the agent has already received that notification. Take an occasional diagnostic snapshot when necessary; let automatic delivery handle normal waiting. Do not poll or recreate work to recover a missing notification.',
 ].join('\n\n');
 
+export interface LodyMcpServerOptions {
+  coordinator?: boolean;
+}
+
 /**
  * Deferring clients search server instructions to decide when to load tools, so the
  * first sentences name what the tools cover; the rules after it stay verbatim.
@@ -4859,11 +5010,14 @@ const OPERATION_SNAPSHOT_GUIDANCE = [
 const LODY_MCP_COVERAGE =
   'Lody tools coordinate work across Lody conversations (Sessions) in this workspace: delegate to new Sessions on any machine and directory, chat with or steer existing ones, read their history and status, track asynchronous Operations and their results; propose Schedules and Agent Roles; run and watch long commands with automations; discover machines, projects, agent configurations and MCP servers; report web or native simulator previews; upload images and files into this chat; send product feedback.';
 
-export function buildLodyMcpServer(): McpServer {
-  return buildSessionToolServer();
+export function buildLodyMcpServer(options?: LodyMcpServerOptions): McpServer {
+  return buildSessionToolServer(undefined, options);
 }
 
-export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServer {
+export function buildSessionToolServer(
+  handlers?: SessionToolHandlers,
+  options?: LodyMcpServerOptions
+): McpServer {
   // The HTTP host is long-lived and the stdio server normally lives for the
   // Agent session. Initialization is idempotent and local-platform telemetry
   // remains hard-disabled inside the analytics layer.
@@ -4956,6 +5110,163 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     },
     handlers
   );
+
+  if (options?.coordinator === true) {
+    const applyCoordinatorTurnOutput = async (
+      output:
+        | { kind: 'message'; markdown?: string; attachments?: string[]; threadId?: string }
+        | { kind: 'status'; status: string }
+    ) => {
+      const ctx = getSessionContext();
+      const daemon = getDaemonWorkspace();
+      if (!daemon) throw new Error('Coordinator tools require an active daemon session');
+      const row = await daemon.manager.repo.getDocMeta(getSessionRoomId(ctx.sessionId));
+      const meta = row?.meta && !isLoroRepoDocDeleted(row) ? (row.meta as SessionMeta) : undefined;
+      if (!isCoordinatorSession(meta)) {
+        throw new Error('Coordinator tools are available only inside a coordinator conversation');
+      }
+      const sessionDoc = await daemon.manager.getOrCreateSessionDoc(ctx.sessionId);
+      const backend = await createSessionBackend(sessionDoc, meta);
+      const now = getServerNow();
+      const turnId = daemon.readActiveAssistantTurnId?.(ctx.sessionId);
+      const messageId = output.kind === 'message' ? randomUUID() : undefined;
+      const normalizedStatus =
+        output.kind === 'status' ? output.status.replace(/\s+/g, ' ').trim() : '';
+
+      let images: SessionImagePayload[] | undefined;
+      let files: SessionFilePayload[] | undefined;
+      if (output.kind === 'message' && output.attachments?.length) {
+        let relay: ReturnType<typeof createCommandAttachmentTransfer>;
+        try {
+          const auth = getCliAuthContextOrThrow('mcp');
+          relay = createCommandAttachmentTransfer(
+            auth.token,
+            Boolean(getSessionCommandEnvironment())
+          );
+        } catch {
+          relay = undefined;
+        }
+        const resolvedAttachments = await resolveOrPrepareSessionAttachments({
+          inputs: output.attachments,
+          cwd: ctx.workdir,
+          containWithin: ctx.workdir,
+          workspaceId: getMcpWorkspaceId(ctx) as WorkspaceId,
+          callerSessionId: ctx.sessionId,
+          targetSessionId: ctx.sessionId,
+          sourceMachineId: ctx.machineId as MachineId,
+          relay,
+          readCallerHistory: () => readCallerAttachmentHistory(daemon.manager, ctx.sessionId, meta),
+          readDelegatedTurn: (sessionId, delegatedTurnId) =>
+            readDelegatedAttachmentTurn(
+              daemon.manager,
+              sessionId,
+              delegatedTurnId,
+              ctx.machineId as MachineId
+            ),
+        });
+        const nextImages: SessionImagePayload[] = [];
+        const nextFiles: SessionFilePayload[] = [];
+        for (const attachment of resolvedAttachments) {
+          if (attachment.type === 'image') {
+            const { type: _, ...imagePayload } = attachment;
+            nextImages.push(imagePayload);
+          } else {
+            nextFiles.push(attachment);
+          }
+        }
+        if (nextImages.length > 0) images = nextImages;
+        if (nextFiles.length > 0) files = nextFiles;
+      }
+
+      const replyTo =
+        output.kind === 'message'
+          ? await resolveCoordinatorOutboundReplyRef({
+              history: backend.history,
+              activeAssistantTurnId: turnId,
+              explicitThreadId: output.threadId,
+            })
+          : undefined;
+      const linkedSessionIds =
+        output.kind === 'message' && output.markdown
+          ? extractLinkedSessionIdsFromText(output.markdown)
+          : undefined;
+
+      const result = await backend.applyHistoryAction({
+        kind: 'coordinator-output',
+        ...(turnId ? { turnId } : {}),
+        output:
+          output.kind === 'message'
+            ? {
+                kind: 'message',
+                id: messageId!,
+                body: output.markdown ?? '',
+                ...(images ? { images } : {}),
+                ...(files ? { files } : {}),
+                ...(replyTo ? { replyTo } : {}),
+                ...(linkedSessionIds?.length ? { linkedSessionIds } : {}),
+                createdAt: now,
+              }
+            : { kind: 'status', status: normalizedStatus, updatedAt: now },
+      });
+      if (!result.matched) {
+        throw new Error('No open assistant turn is available for coordinator output');
+      }
+      if (output.kind === 'message') {
+        await sessionDoc.setLastMessageAt(now);
+        return jsonTextResult({
+          ok: true,
+          messageId,
+          ...(replyTo ? { threadId: replyTo.threadRootId } : {}),
+          ...(images ? { imageCount: images.length } : {}),
+          ...(files ? { fileCount: files.length } : {}),
+        });
+      }
+      return jsonTextResult({ ok: true, status: normalizedStatus });
+    };
+
+    registerSessionTool(
+      COORDINATOR_SEND_MESSAGE_TOOL_NAME,
+      {
+        summary: 'Send one Markdown chat bubble (optionally with attachments) to the user.',
+        title: 'Send message to user',
+        description:
+          'Send one Markdown chat bubble to the user in this coordinator conversation, optionally attaching images, videos, or documents via zero-copy references ("image:<id>", "file:<id>") from delegated results or this conversation, or workspace file paths. Plain assistant text and thoughts are hidden from the user; every message you want the user to read must be sent with this tool. Ready to call directly without lody_help.',
+        inputSchema: CoordinatorSendMessageInputSchema,
+        exemptFromHelp: true,
+      },
+      async (args) => {
+        try {
+          return await applyCoordinatorTurnOutput({
+            kind: 'message',
+            markdown: args.markdown,
+            attachments: args.attachments,
+            threadId: args.threadId,
+          });
+        } catch (error) {
+          return mcpErrorResult(error);
+        }
+      }
+    );
+
+    registerSessionTool(
+      COORDINATOR_SET_STATUS_TOOL_NAME,
+      {
+        summary: 'Show a live working status indicator in a coordinator conversation.',
+        title: 'Set coordinator working status',
+        description:
+          'Update the live working status shown in this coordinator conversation while you look up information, inspect tasks, or prepare and dispatch conversations. Pass a short single-line status phrase in the user language (or an empty string to clear). Replaced by newer calls and automatically hidden once your turn finishes. Ready to call directly without lody_help.',
+        inputSchema: CoordinatorSetStatusInputSchema,
+        exemptFromHelp: true,
+      },
+      async (args) => {
+        try {
+          return await applyCoordinatorTurnOutput({ kind: 'status', status: args.status });
+        } catch (error) {
+          return mcpErrorResult(error);
+        }
+      }
+    );
+  }
 
   registerAgentRoleTools(
     registerSessionTool,

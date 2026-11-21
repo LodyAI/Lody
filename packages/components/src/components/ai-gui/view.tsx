@@ -5,13 +5,19 @@ import { shareFileBytesNatively } from '@/lib/session-file-native-save';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { localMachineIdAtom } from '@/atoms/local-probe';
-import type { SessionLocalAttachment } from '@lody/shared';
+import {
+  createCoordinatorReplyRef,
+  formatCoordinatorAnchorId,
+  isCoordinatorSession,
+  normalizeSessionTurnInputConfig,
+  type SessionLocalAttachment,
+} from '@lody/shared';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
 import { useSessionLinkNavigator } from './session-link-context';
 import * as stylex from '@stylexjs/stylex';
-import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { radius, space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   type ComponentPropsWithoutRef,
@@ -77,6 +83,7 @@ import {
   isSessionHistoryDelivered,
   type AcpConfigOptionValue,
   type MessageContent,
+  type OperationCompletionContent,
   type SessionHistoryParsed,
   type SessionId,
   type SessionInputBlock,
@@ -150,6 +157,7 @@ import {
   ListChecks,
   MoveRight,
   PencilLine,
+  Reply,
   Search,
   Sparkles,
   Target,
@@ -238,6 +246,7 @@ import {
 import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
 import { conversationSurface } from './surface';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
   isMessageActionsToggleTap,
   toggleMobileMessageActions,
@@ -296,6 +305,15 @@ import { SessionLimitContinueAction } from '@/components/schedules/quota-continu
 import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
 import {
+  CoordinatorTaskChangeStrip,
+  useCoordinatorConversation,
+} from '@/components/project-mode/coordinator-conversation';
+import {
+  CoordinatorBubbleFooterActions,
+  CoordinatorInlineQuoteChip,
+  CoordinatorThreadReplyCountPill,
+} from '@/components/project-mode/coordinator-reply-ui';
+import {
   getOperationCompletionItems,
   hasVisibleOperationContent,
 } from './operation-completion-visibility';
@@ -340,6 +358,7 @@ import {
   type SessionImageGalleryEntry,
 } from '@/lib/session-image-gallery';
 import {
+  getCoordinatorMessageSearchBlockId,
   getMessageItemPrefix,
   getProposedPlanSearchBlockId,
   getTextSearchBlockId,
@@ -436,6 +455,18 @@ export type ChatStreamItem = SessionMessageItem | EmptySessionItem | Placeholder
 
 type AssistantVirtualContent =
   | { kind: 'plan' }
+  /** Coordinator conversation: one chat bubble per `lody_coordinator_send_message` call. */
+  | {
+      kind: 'coordinator_bubble';
+      entry: Extract<MessageContent, { type: 'coordinator_message' }>;
+      itemIndex: number;
+    }
+  /** Coordinator conversation: error/warning notice attached to a coordinator turn. */
+  | {
+      kind: 'coordinator_notice';
+      notice: Extract<MessageContent, { type: 'system_notice' }>;
+      itemIndex: number;
+    }
   | {
       kind: 'worked_group_header';
       segmentKey: string;
@@ -1182,6 +1213,7 @@ export const buildChatVirtualRows = ({
   expansionVersion,
   copyContextAvailable = false,
   groupCreatedSessions = true,
+  coordinatorBubbles = false,
   selectionLayouts,
 }: {
   selectionLayouts?: ReadonlyMap<string, SelectionTurnLayout>;
@@ -1194,6 +1226,8 @@ export const buildChatVirtualRows = ({
   expansionVersion: number;
   copyContextAvailable?: boolean;
   groupCreatedSessions?: boolean;
+  /** Coordinator conversation: one reply bubble per coordinator_message, without work or duration. */
+  coordinatorBubbles?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
@@ -1271,6 +1305,51 @@ export const buildChatVirtualRows = ({
     const selectionSearchBlockId = selectionLayout
       ? selectionLayout.activeSearchBlockId
       : activeSearchBlockId;
+    if (coordinatorBubbles) {
+      const coordinatorEntries: Array<{
+        key: string;
+        itemIndex: number;
+        content: Extract<
+          AssistantVirtualContent,
+          { kind: 'coordinator_bubble' | 'coordinator_notice' }
+        >;
+      }> = [];
+      message.items.forEach((entry, itemIndex) => {
+        if (
+          entry.type === 'coordinator_message' &&
+          (entry.body.trim().length > 0 ||
+            (entry.images?.length ?? 0) > 0 ||
+            (entry.files?.length ?? 0) > 0)
+        ) {
+          coordinatorEntries.push({
+            key: `assistant:${message.id}:bubble:${entry.id}`,
+            itemIndex,
+            content: { kind: 'coordinator_bubble', entry, itemIndex },
+          });
+        } else if (entry.type === 'system_notice') {
+          coordinatorEntries.push({
+            key: `assistant:${message.id}:notice:${itemIndex}`,
+            itemIndex,
+            content: { kind: 'coordinator_notice', notice: entry, itemIndex },
+          });
+        }
+      });
+      coordinatorEntries.forEach((entry, index) => {
+        const isLast = index === coordinatorEntries.length - 1;
+        rows.push({
+          type: 'assistant',
+          key: entry.key,
+          messageIndex,
+          item,
+          itemIndex: entry.itemIndex,
+          content: entry.content,
+          isFirstRowForMessage: index === 0,
+          isLastRowForMessage: isLast,
+          endsRound: isLast && nextIsUser,
+        });
+      });
+      continue;
+    }
     const cachedRows = assistantTurnRowsCache.get(item);
     if (
       cachedRows &&
@@ -1654,6 +1733,23 @@ const engineRowOf = (row: ChatVirtualRow): EngineRow => {
       };
     case 'worked_group_header':
       return { ...base, turnId, estimate: ENGINE_ROW_ESTIMATE_PX.compact };
+    case 'coordinator_bubble':
+      return {
+        ...base,
+        turnId,
+        itemIndex: content.itemIndex,
+        itemIdentity: content.entry.id,
+        firstItemIndex: content.itemIndex,
+        estimate: ENGINE_ROW_ESTIMATE_PX.content,
+      };
+    case 'coordinator_notice':
+      return {
+        ...base,
+        turnId,
+        itemIndex: content.itemIndex,
+        firstItemIndex: content.itemIndex,
+        estimate: ENGINE_ROW_ESTIMATE_PX.compact,
+      };
     case 'plan':
       return { ...base, turnId, estimate: ENGINE_ROW_ESTIMATE_PX.plan };
     case 'subagent_tasks':
@@ -1797,6 +1893,14 @@ export const SessionChatStreamView = forwardRef<
     },
     ref
   ) => {
+    const coordinatorSessionAtom = useMemo(
+      () =>
+        selectAtom(sessionMetaAtomFamily(getSessionRoomId(sessionId)), (meta) =>
+          isCoordinatorSession(meta)
+        ),
+      [sessionId]
+    );
+    const isMetaCoordinator = useAtomValue(coordinatorSessionAtom);
     const listRef = useRef<ConversationListHandle>(null);
     const messageSelection = useContext(MessageSelectionContext);
     const nativeTextSelectionActiveRef = useRef(false);
@@ -1886,6 +1990,7 @@ export const SessionChatStreamView = forwardRef<
 
     const copyContextAvailable = onCopyContext !== undefined;
     const selectionLayouts = selectionLayoutsRef.current;
+    const coordinatorBubbles = isMetaCoordinator || useCoordinatorConversation() !== null;
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -1901,6 +2006,7 @@ export const SessionChatStreamView = forwardRef<
         copyContextAvailable,
         selectionLayouts,
         groupCreatedSessions: messageSelection === null,
+        coordinatorBubbles,
       });
       if (!localUserMessages?.length) return rows;
       const local = new Map(localUserMessages.map((message) => [message.id, message]));
@@ -1928,6 +2034,7 @@ export const SessionChatStreamView = forwardRef<
       }
       return merged;
     }, [
+      coordinatorBubbles,
       messageSelection,
       selectionLayouts,
       activeSearchBlockId,
@@ -1944,7 +2051,7 @@ export const SessionChatStreamView = forwardRef<
     // a collapsed activity group carries the status itself: that label
     // shimmers and no separate status row is added below it.
     const liveGroupHeaderRowKey = useMemo(() => {
-      if (!agentActivityLabel || !agentActivityShimmer) return null;
+      if (coordinatorBubbles || !agentActivityLabel || !agentActivityShimmer) return null;
       for (let index = virtualRows.length - 1; index >= 0; index -= 1) {
         const row = virtualRows[index];
         if (row?.type !== 'assistant') return null;
@@ -1956,7 +2063,7 @@ export const SessionChatStreamView = forwardRef<
           : null;
       }
       return null;
-    }, [agentActivityLabel, agentActivityShimmer, virtualRows]);
+    }, [agentActivityLabel, agentActivityShimmer, coordinatorBubbles, virtualRows]);
     // Keep the live status inside the final expanding assistant row's measurement
     // boundary. Streaming Markdown can grow between list commits; a separate
     // absolute status row would retain the previous offset until ResizeObserver
@@ -1965,7 +2072,7 @@ export const SessionChatStreamView = forwardRef<
     // back to those specialized rows. A collapsed live activity group owns the
     // label itself above.
     const liveStatusRowKey = useMemo(() => {
-      if (!agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
+      if (coordinatorBubbles || !agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
       const lastIndex = virtualRows.length - 1;
       const last = virtualRows[lastIndex];
       if (last?.type !== 'assistant' || last.item.message.finished === true) return null;
@@ -1988,16 +2095,46 @@ export const SessionChatStreamView = forwardRef<
         return beforeTrailingFooter.key;
       }
       return last.key;
-    }, [agentActivityLabel, liveGroupHeaderRowKey, virtualRows]);
+    }, [agentActivityLabel, coordinatorBubbles, liveGroupHeaderRowKey, virtualRows]);
     const liveTurnStatus = useMemo<AgentActivityStatusProps | null>(
       () =>
-        agentActivityLabel
+        !coordinatorBubbles && agentActivityLabel
           ? { label: agentActivityLabel, tone: agentActivityTone, shimmer: agentActivityShimmer }
           : null,
-      [agentActivityLabel, agentActivityShimmer, agentActivityTone]
+      [agentActivityLabel, agentActivityShimmer, agentActivityTone, coordinatorBubbles]
     );
     const shouldShowAgentActivityRow =
       shouldShowAgentActivity && liveGroupHeaderRowKey === null && liveStatusRowKey === null;
+    const coordinatorDefaultWorkingLabel = t(
+      'projectMode.coordinator.defaultStatus',
+      'Looking into it…'
+    );
+    const activeCoordinatorStatus = useMemo(
+      () =>
+        coordinatorBubbles
+          ? resolveActiveCoordinatorStatus({
+              items,
+              localUserMessagesCount: localUserMessages?.length ?? 0,
+              agentActivityLabel,
+              agentActivityTone,
+              defaultWorkingLabel: coordinatorDefaultWorkingLabel,
+            })
+          : null,
+      [
+        agentActivityLabel,
+        agentActivityTone,
+        coordinatorBubbles,
+        coordinatorDefaultWorkingLabel,
+        items,
+        localUserMessages?.length,
+      ]
+    );
+    const hasActivityRow = coordinatorBubbles
+      ? activeCoordinatorStatus !== null
+      : Boolean(shouldShowAgentActivityRow && agentActivityLabel);
+    const isScrollToLatestWorking = coordinatorBubbles
+      ? Boolean(activeCoordinatorStatus && activeCoordinatorStatus.tone !== 'warning')
+      : Boolean(agentActivityLabel && agentActivityShimmer);
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
@@ -2060,16 +2197,10 @@ export const SessionChatStreamView = forwardRef<
     const engineRowMeta = useMemo(() => {
       const meta = virtualRows.map(engineRowOf);
       if (leadingContent != null) meta.unshift(LEADING_ENGINE_ROW);
-      if (shouldShowAgentActivityRow && agentActivityLabel) meta.push(AGENT_ACTIVITY_ENGINE_ROW);
+      if (hasActivityRow) meta.push(AGENT_ACTIVITY_ENGINE_ROW);
       if (trailingContent != null) meta.push(TRAILING_ENGINE_ROW);
       return meta;
-    }, [
-      agentActivityLabel,
-      leadingContent,
-      shouldShowAgentActivityRow,
-      trailingContent,
-      virtualRows,
-    ]);
+    }, [hasActivityRow, leadingContent, trailingContent, virtualRows]);
 
     /**
      * A sent message waiting for its row. The send path learns the turn id
@@ -2483,15 +2614,27 @@ export const SessionChatStreamView = forwardRef<
                     {leadingContent}
                   </div>
                 )}
-                {agentActivityLabel && (
-                  <div className="shrink-0 pt-2">
-                    <AgentActivityRow
-                      label={agentActivityLabel}
-                      tone={agentActivityTone}
-                      shimmer={agentActivityShimmer}
-                      conversationFontSize={conversationFontSize}
-                    />
-                  </div>
+                {coordinatorBubbles ? (
+                  activeCoordinatorStatus ? (
+                    <div className="shrink-0 pt-2">
+                      <CoordinatorWorkingRow
+                        label={activeCoordinatorStatus.label}
+                        tone={activeCoordinatorStatus.tone}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </div>
+                  ) : null
+                ) : (
+                  agentActivityLabel && (
+                    <div className="shrink-0 pt-2">
+                      <AgentActivityRow
+                        label={agentActivityLabel}
+                        tone={agentActivityTone}
+                        shimmer={agentActivityShimmer}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </div>
+                  )
                 )}
                 <div className="min-h-0 flex-1">
                   {emptyState ?? (
@@ -2601,19 +2744,27 @@ export const SessionChatStreamView = forwardRef<
           </MessageSelectionRow>
         );
       }),
-      shouldShowAgentActivityRow && agentActivityLabel ? (
+      hasActivityRow ? (
         <div
           key={AGENT_ACTIVITY_ROW_KEY}
           className="shrink-0 pt-1"
           data-agent-activity-row-spacer=""
         >
-          <AgentActivityRow
-            label={agentActivityLabel}
-            tone={agentActivityTone}
-            shimmer={agentActivityShimmer}
-            message={liveAgentActivityMessage}
-            conversationFontSize={conversationFontSize}
-          />
+          {coordinatorBubbles && activeCoordinatorStatus ? (
+            <CoordinatorWorkingRow
+              label={activeCoordinatorStatus.label}
+              tone={activeCoordinatorStatus.tone}
+              conversationFontSize={conversationFontSize}
+            />
+          ) : (
+            <AgentActivityRow
+              label={agentActivityLabel!}
+              tone={agentActivityTone}
+              shimmer={agentActivityShimmer}
+              message={liveAgentActivityMessage}
+              conversationFontSize={conversationFontSize}
+            />
+          )}
         </div>
       ) : null,
       trailingContent == null ? null : (
@@ -2711,7 +2862,7 @@ export const SessionChatStreamView = forwardRef<
                       onClick={scrollToBottom}
                       aria-label={t('sessions.scrollToLatest')}
                     >
-                      {agentActivityLabel && agentActivityShimmer ? (
+                      {isScrollToLatestWorking ? (
                         <Spinner
                           {...stylex.props(
                             scrollToLatestStyles.icon,
@@ -2723,9 +2874,7 @@ export const SessionChatStreamView = forwardRef<
                       <ArrowDown
                         {...stylex.props(
                           scrollToLatestStyles.icon,
-                          !!agentActivityLabel &&
-                            agentActivityShimmer &&
-                            scrollToLatestStyles.workingArrow
+                          isScrollToLatestWorking && scrollToLatestStyles.workingArrow
                         )}
                         aria-hidden="true"
                       />
@@ -2831,6 +2980,65 @@ export const MessageRowView = memo(function MessageRowView({
  * Renders system messages (e.g., system notices like resume_from_external_chat_history)
  */
 const SystemMessageRowView = ({
+  message,
+  sessionId,
+  onNavigateSession,
+  capacityRetry,
+}: {
+  message: SessionHistoryParsed;
+  sessionId: SessionId;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
+  capacityRetry?: CapacityRetryControl;
+}) => {
+  const coordinator = useCoordinatorConversation();
+  const original = (
+    <SystemMessageRowContent
+      message={message}
+      sessionId={sessionId}
+      onNavigateSession={onNavigateSession}
+      capacityRetry={capacityRetry}
+    />
+  );
+  if (coordinator) {
+    const targets = collectOperationTaskTargets(message);
+    if (targets.size > 0) {
+      return (
+        <CoordinatorTaskChangeStrip
+          sessionIds={[...targets.keys()]}
+          fallbackTitles={targets}
+          details={original}
+        />
+      );
+    }
+  }
+  return original;
+};
+
+/** Child conversations a system row reports on, with the titles it carries. */
+function collectOperationTaskTargets(message: SessionHistoryParsed): Map<string, string> {
+  const targets = new Map<string, string>();
+  const add = (sessionId: string | undefined, label: string | undefined) => {
+    if (sessionId && !targets.has(sessionId)) targets.set(sessionId, label ?? '');
+  };
+  for (const card of getCreatedSessionCards(message) ?? []) add(card.sessionId, card.fallbackTitle);
+  const addCompletion = (completion: OperationCompletionContent) => {
+    for (const item of getOperationCompletionItems(completion)) {
+      add(item.target?.sessionId, item.label);
+    }
+  };
+  for (const item of message.items) {
+    if (item.type === 'operation_progress') {
+      for (const entry of item.items) add(entry.target.sessionId, entry.label);
+    } else if (item.type === 'operation_completion') {
+      addCompletion(item);
+    } else if (item.type === 'operation_completion_batch') {
+      for (const member of item.members ?? []) addCompletion(member);
+    }
+  }
+  return targets;
+}
+
+const SystemMessageRowContent = ({
   message,
   sessionId,
   onNavigateSession,
@@ -4013,6 +4221,22 @@ const UserMessageRowView = ({
   }
 
   const isPinned = pinCtx?.pinnedHistoryId === message.id;
+  const coordinator = useCoordinatorConversation();
+  const userReplyTo = useMemo(
+    () => normalizeSessionTurnInputConfig(message.inputConfig)?.replyTo,
+    [message.inputConfig]
+  );
+  const userAnchorId = useMemo(
+    () => formatCoordinatorAnchorId({ kind: 'user_turn', turnId: message.id }),
+    [message.id]
+  );
+  const userReplyCount = coordinator?.activeThreadRootId
+    ? 0
+    : (coordinator?.replyCountByRootId?.get(userAnchorId) ?? 0);
+  const showUserInlineQuote =
+    Boolean(userReplyTo) &&
+    (!coordinator?.activeThreadRootId ||
+      formatCoordinatorAnchorId(userReplyTo!.target) !== coordinator.activeThreadRootId);
 
   const handleCopy = useCallback(async () => {
     if (!hasTextContent) return;
@@ -4227,11 +4451,23 @@ const UserMessageRowView = ({
                     />
                   </div>
                 ) : (
-                  <UserChatBubble
-                    sessionId={sessionId}
-                    message={message}
-                    conversationFontSize={conversationFontSize}
-                  />
+                  <div className="flex min-w-0 max-w-full flex-col items-end gap-1.5">
+                    {showUserInlineQuote && userReplyTo ? (
+                      <CoordinatorInlineQuoteChip
+                        replyTo={userReplyTo}
+                        onOpenThread={
+                          coordinator?.activeThreadRootId === userReplyTo.threadRootId
+                            ? undefined
+                            : coordinator?.onOpenThread
+                        }
+                      />
+                    ) : null}
+                    <UserChatBubble
+                      sessionId={sessionId}
+                      message={message}
+                      conversationFontSize={conversationFontSize}
+                    />
+                  </div>
                 )}
               </div>
             </div>
@@ -4239,16 +4475,33 @@ const UserMessageRowView = ({
         </div>
         {/* While editing, the row's own actions (edit/pin/copy) would compete with
             the editor's Cancel / Save & resend — hide them until it closes. */}
-        {(hasTextContent || copyContext) && !isEditing ? (
+        {(hasTextContent ||
+          copyContext ||
+          Boolean(coordinator?.onReplyToBubble) ||
+          userReplyCount > 0) &&
+        !isEditing ? (
           <div
             {...withClassName(
               stylex.props(conversationSurface.userActions),
               /* Touch has no hover: a tap on the message reveals its actions. */
-              isMobile && !mobileActionsRevealed ? 'invisible' : undefined
+              isMobile && !mobileActionsRevealed && userReplyCount === 0 ? 'invisible' : undefined
             )}
             data-user-message-actions=""
-            data-mobile-actions-hidden={isMobile && !mobileActionsRevealed ? '' : undefined}
+            data-mobile-actions-hidden={
+              isMobile && !mobileActionsRevealed && userReplyCount === 0 ? '' : undefined
+            }
           >
+            {userReplyCount > 0 && coordinator?.onOpenThread ? (
+              <CoordinatorThreadReplyCountPill
+                count={userReplyCount}
+                onClick={() =>
+                  coordinator.onOpenThread!(
+                    userAnchorId,
+                    getCopyTextFromMessageItems(message.items, copyWorkspaceId)
+                  )
+                }
+              />
+            ) : null}
             {copyContext && (
               <AssistantForkButton
                 turnId={message.id}
@@ -4356,9 +4609,46 @@ const UserMessageRowView = ({
                     </Button>
                   }
                 />
-                <Tooltip.Content>{didCopy ? 'Copied' : 'Copy message'}</Tooltip.Content>
+                 <Tooltip.Content>{didCopy ? 'Copied' : 'Copy message'}</Tooltip.Content>
               </Tooltip.Root>
             </Tooltip.Provider>
+            {coordinator?.onReplyToBubble ? (
+              <Tooltip.Provider>
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    delay={500}
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        className={cn(
+                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                          !isMobile &&
+                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                        )}
+                        onClick={() => {
+                          coordinator.onReplyToBubble!(
+                            createCoordinatorReplyRef({
+                              target: { kind: 'user_turn', turnId: message.id },
+                              existingThreadRootId:
+                                coordinator.activeThreadRootId ?? userReplyTo?.threadRootId,
+                              author: 'user',
+                              text: getCopyTextFromMessageItems(message.items, copyWorkspaceId),
+                            })
+                          );
+                        }}
+                        aria-label={t('projectMode.reply.action', 'Reply')}
+                        data-user-message-reply=""
+                      >
+                        <Reply className="h-3.5 w-3.5" />
+                      </Button>
+                    }
+                  />
+                  <Tooltip.Content>{t('projectMode.reply.action', 'Reply')}</Tooltip.Content>
+                </Tooltip.Root>
+              </Tooltip.Provider>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -5398,6 +5688,8 @@ const assistantRowPaintsSurface = (row: ChatVirtualRow | undefined): boolean => 
   switch (row.content.kind) {
     case 'plan':
     case 'subagent_tasks':
+    case 'coordinator_bubble':
+    case 'coordinator_notice':
       return true;
     case 'content':
       return isCardContentBlock(row.content.block);
@@ -5942,6 +6234,17 @@ const areAssistantVirtualContentsEqual = (
     case 'plan':
     case 'subagent_tasks':
       return true;
+    case 'coordinator_bubble':
+      return (
+        b.kind === 'coordinator_bubble' &&
+        a.itemIndex === b.itemIndex &&
+        a.entry.id === b.entry.id &&
+        a.entry.body === b.entry.body
+      );
+    case 'coordinator_notice':
+      return (
+        b.kind === 'coordinator_notice' && a.itemIndex === b.itemIndex && a.notice === b.notice
+      );
     case 'worked_group_header':
       return (
         b.kind === 'worked_group_header' &&
@@ -6062,6 +6365,26 @@ const AssistantChatItem = memo(function AssistantChatItem({
   const isWorkedDetail = row.isWorkedDetail === true;
   const rowBody = (() => {
     switch (content.kind) {
+      case 'coordinator_bubble':
+        return (
+          <CoordinatorReplyBubble
+            messageId={message.id}
+            entry={content.entry}
+            itemIndex={content.itemIndex}
+            sessionId={row.item.sessionId}
+            onFilePathClick={onFilePathClick}
+            conversationFontSize={conversationFontSize}
+          />
+        );
+      case 'coordinator_notice':
+        return (
+          <SystemNoticeView
+            notice={content.notice}
+            entryId={message.id}
+            sessionId={row.item.sessionId}
+            inTurn
+          />
+        );
       case 'plan':
         return message.plan ? (
           <AssistantPlanVirtualRow messageId={message.id} entries={message.plan} />
@@ -6204,6 +6527,10 @@ const AssistantChatItem = memo(function AssistantChatItem({
     switch (content.kind) {
       case 'content':
         return isCardContentBlock(content.block) ? cardSiblingGap : turnSiblingGap;
+      case 'coordinator_bubble':
+        return coordinatorBubbleStyles.siblingGap;
+      case 'coordinator_notice':
+        return cardSiblingGap;
       case 'plan':
         return cardSiblingGap;
       case 'worked_group_header':
@@ -6450,6 +6777,381 @@ const formatJsonValue = (value: unknown) => {
   }
 };
 
+const coordinatorDotWave = stylex.keyframes({
+  '0%, 80%, 100%': { opacity: 0.3, transform: 'scale(0.85)' },
+  '40%': { opacity: 1, transform: 'scale(1.12)' },
+});
+
+/**
+ * Coordinator conversation: each `lody_coordinator_send_message` call renders as
+ * its own reply bubble on the left rail. Plain assistant text, thoughts, tool
+ * calls, and duration stay hidden.
+ */
+function CoordinatorReplyBubble({
+  messageId,
+  entry,
+  itemIndex,
+  sessionId,
+  onFilePathClick,
+  conversationFontSize,
+}: {
+  messageId: string;
+  entry: Extract<MessageContent, { type: 'coordinator_message' }>;
+  itemIndex: number;
+  sessionId: SessionId;
+  onFilePathClick?: (filePath: string) => void;
+  conversationFontSize: ConversationFontSize;
+}) {
+  const coordinator = useCoordinatorConversation();
+  const isMobile = useIsMobile();
+  const [isBubbleHovered, setIsBubbleHovered] = useState(false);
+  const hasBody = entry.body.trim().length > 0;
+  const hasImages = (entry.images?.length ?? 0) > 0;
+  const hasFiles = (entry.files?.length ?? 0) > 0;
+  const anchorId = useMemo(
+    () =>
+      formatCoordinatorAnchorId({
+        kind: 'coordinator_bubble',
+        turnId: messageId,
+        bubbleId: entry.id,
+      }),
+    [entry.id, messageId]
+  );
+  const mobileActionsRevealed = useMobileMessageActionsRevealed(anchorId);
+  const replyCount = coordinator?.activeThreadRootId
+    ? 0
+    : (coordinator?.replyCountByRootId?.get(anchorId) ?? 0);
+  const showInlineQuote =
+    Boolean(entry.replyTo) &&
+    (!coordinator?.activeThreadRootId ||
+      formatCoordinatorAnchorId(entry.replyTo!.target) !== coordinator.activeThreadRootId);
+
+  return (
+    <div
+      {...stylex.props(coordinatorBubbleStyles.column)}
+      data-coordinator-reply-bubble=""
+      data-coordinator-anchor-id={anchorId}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== 'touch') setIsBubbleHovered(true);
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType !== 'touch') setIsBubbleHovered(false);
+      }}
+      onClick={
+        isMobile
+          ? (event) => {
+              if (isMessageActionsToggleTap(event.target)) toggleMobileMessageActions(anchorId);
+            }
+          : undefined
+      }
+    >
+      <div {...stylex.props(coordinatorBubbleStyles.row)}>
+        <div {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}>
+          <div className="flex flex-col gap-2.5">
+            {showInlineQuote && entry.replyTo ? (
+              <CoordinatorInlineQuoteChip
+                replyTo={entry.replyTo}
+                onOpenThread={
+                  coordinator?.activeThreadRootId === entry.replyTo.threadRootId
+                    ? undefined
+                    : coordinator?.onOpenThread
+                }
+              />
+            ) : null}
+            {hasBody ? (
+              <MarkdownBlock
+                text={entry.body}
+                size={conversationFontSize}
+                isStreaming={false}
+                onFilePathClick={onFilePathClick}
+                searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
+              />
+            ) : null}
+            {hasImages ? (
+              <ImageGroupBubble
+                content={{ type: 'image_group', images: entry.images! }}
+                sessionId={sessionId}
+                messageId={messageId}
+                itemIndex={itemIndex}
+                align="start"
+              />
+            ) : null}
+            {hasFiles ? (
+              <SessionFileGroup files={entry.files!} sessionId={sessionId} align="start" />
+            ) : null}
+          </div>
+        </div>
+      </div>
+      <CoordinatorBubbleFooterActions
+        copyText={entry.body}
+        replyCount={replyCount}
+        isHovered={isBubbleHovered}
+        alwaysRevealActions={isMobile && mobileActionsRevealed}
+        onOpenThread={
+          coordinator?.onOpenThread
+            ? () => coordinator.onOpenThread!(anchorId, entry.body)
+            : undefined
+        }
+        onReply={
+          coordinator?.onReplyToBubble
+            ? () =>
+                coordinator.onReplyToBubble!(
+                  createCoordinatorReplyRef({
+                    target: {
+                      kind: 'coordinator_bubble',
+                      turnId: messageId,
+                      bubbleId: entry.id,
+                    },
+                    existingThreadRootId:
+                      coordinator.activeThreadRootId ?? entry.replyTo?.threadRootId,
+                    author: 'coordinator',
+                    text: entry.body,
+                  })
+                )
+            : undefined
+        }
+      />
+    </div>
+  );
+}
+
+export type ActiveCoordinatorStatus = {
+  readonly label: string;
+  readonly tone: AgentActivityTone;
+};
+
+/**
+ * Resolves the coordinator's live working pill.
+ *
+ * - Before the coordinator emits its first bubble or explicit status in an
+ *   active round (optimistic send, pending dispatch, ACP startup/resume, or
+ *   initial model reasoning), immediately show `defaultWorkingLabel` so the
+ *   user gets instant feedback without mechanical harness jargon.
+ * - Once `lody_coordinator_set_status` sets a non-empty phrase, show that phrase.
+ * - Once the coordinator has emitted at least one visible bubble and has no
+ *   active explicit status (or cleared it), hide the pill; also stay hidden
+ *   after the assistant turn finishes while presence drains, even if a passive
+ *   `operation_progress` row sits at the tail of history.
+ */
+export function resolveActiveCoordinatorStatus({
+  items,
+  localUserMessagesCount = 0,
+  agentActivityLabel,
+  agentActivityTone = 'primary',
+  defaultWorkingLabel,
+}: {
+  items: readonly ChatStreamItem[];
+  localUserMessagesCount?: number;
+  agentActivityLabel?: string | null;
+  agentActivityTone?: AgentActivityTone;
+  defaultWorkingLabel: string;
+}): ActiveCoordinatorStatus | null {
+  if (agentActivityTone === 'warning' && agentActivityLabel) {
+    return { label: agentActivityLabel, tone: 'warning' };
+  }
+  if (!agentActivityLabel) {
+    return null;
+  }
+  if (localUserMessagesCount > 0) {
+    return { label: defaultWorkingLabel, tone: agentActivityTone };
+  }
+
+  let unfinishedAssistant: SessionHistoryParsed | null = null;
+  let sawFinishedAssistant = false;
+  let sawWakeAfterFinishedAssistant = false;
+
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const candidate = items[i];
+    if (!candidate || candidate.type !== 'message') continue;
+    const msg = candidate.message;
+    if (msg.role === 'user') {
+      break;
+    }
+    if (msg.role === 'assistant') {
+      if (msg.finished !== true && typeof msg.endedAt !== 'number') {
+        unfinishedAssistant = msg;
+      } else {
+        sawFinishedAssistant = true;
+      }
+      break;
+    }
+    if (msg.role === 'system') {
+      const isWakeReceipt = msg.items.some(
+        (item) =>
+          item.type === 'operation_completion' || item.type === 'operation_completion_batch'
+      );
+      if (isWakeReceipt) {
+        sawWakeAfterFinishedAssistant = true;
+      }
+    }
+  }
+
+  if (!unfinishedAssistant) {
+    if (sawFinishedAssistant && !sawWakeAfterFinishedAssistant) {
+      return null;
+    }
+    return { label: defaultWorkingLabel, tone: agentActivityTone };
+  }
+
+  let explicitStatus: string | null = null;
+  let hasStatusEntry = false;
+  let hasVisibleCoordinatorMessage = false;
+  for (let i = unfinishedAssistant.items.length - 1; i >= 0; i -= 1) {
+    const entry = unfinishedAssistant.items[i];
+    if (!entry) continue;
+    if (!hasStatusEntry && entry.type === 'coordinator_status') {
+      hasStatusEntry = true;
+      explicitStatus = entry.status.trim() || null;
+    }
+    if (
+      !hasVisibleCoordinatorMessage &&
+      entry.type === 'coordinator_message' &&
+      (entry.body.trim().length > 0 ||
+        (entry.images?.length ?? 0) > 0 ||
+        (entry.files?.length ?? 0) > 0)
+    ) {
+      hasVisibleCoordinatorMessage = true;
+    }
+  }
+
+  if (explicitStatus) {
+    return { label: explicitStatus, tone: agentActivityTone };
+  }
+  if (!hasVisibleCoordinatorMessage) {
+    return { label: defaultWorkingLabel, tone: agentActivityTone };
+  }
+  return null;
+}
+
+/**
+ * Live working state emitted via `lody_coordinator_set_status` (or while the
+ * coordinator's turn starts up). Sits on the coordinator's left rail as a soft
+ * dynamic pill until the turn finishes.
+ */
+function CoordinatorWorkingRow({
+  label,
+  tone = 'primary',
+  conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+}: {
+  label: string;
+  tone?: AgentActivityTone;
+  conversationFontSize?: ConversationFontSize;
+}) {
+  const isWarning = tone === 'warning';
+  return (
+    <ConversationColumn className="pb-2 sm:pb-3" data-coordinator-working-row="">
+      <div style={conversationTextFontSizeStyle(conversationFontSize)}>
+        <div
+          role="status"
+          aria-live="polite"
+          data-coordinator-working-status=""
+          {...stylex.props(coordinatorBubbleStyles.statusPill)}
+        >
+          <span {...stylex.props(coordinatorBubbleStyles.dots)} aria-hidden="true">
+            <span
+              {...stylex.props(
+                coordinatorBubbleStyles.dot,
+                isWarning ? coordinatorBubbleStyles.dotWarning : coordinatorBubbleStyles.dotPrimary
+              )}
+            />
+            <span
+              {...stylex.props(
+                coordinatorBubbleStyles.dot,
+                isWarning ? coordinatorBubbleStyles.dotWarning : coordinatorBubbleStyles.dotPrimary,
+                coordinatorBubbleStyles.dotDelay1
+              )}
+            />
+            <span
+              {...stylex.props(
+                coordinatorBubbleStyles.dot,
+                isWarning ? coordinatorBubbleStyles.dotWarning : coordinatorBubbleStyles.dotPrimary,
+                coordinatorBubbleStyles.dotDelay2
+              )}
+            />
+          </span>
+          <span
+            {...stylex.props(coordinatorBubbleStyles.statusLabel)}
+            className={cn(isWarning ? 'text-status-warning' : 'agent-shimmer')}
+          >
+            {label}
+          </span>
+        </div>
+      </div>
+    </ConversationColumn>
+  );
+}
+
+const coordinatorBubbleStyles = stylex.create({
+  siblingGap: {
+    paddingBlock: 0,
+  },
+  column: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 2,
+    width: 'fit-content',
+    maxWidth: '88%',
+  },
+  row: {
+    display: 'flex',
+    justifyContent: 'flex-start',
+    maxWidth: '100%',
+  },
+  bubble: { display: 'flex', flexDirection: 'column', gap: 8, maxWidth: '100%' },
+  statusPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[2],
+    maxWidth: '88%',
+    paddingBlock: 6,
+    paddingInline: space[3],
+    borderRadius: radius.full,
+    backgroundColor: colors.wellBackground,
+  },
+  dots: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+  },
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: radius.full,
+    animationName: coordinatorDotWave,
+    animationDuration: '1.3s',
+    animationIterationCount: 'infinite',
+    animationTimingFunction: 'ease-in-out',
+    '@media (prefers-reduced-motion: reduce)': {
+      animationPlayState: 'paused',
+      opacity: 0.75,
+      transform: 'none',
+    },
+  },
+  dotPrimary: {
+    backgroundColor: colors.accent,
+  },
+  dotWarning: {
+    backgroundColor: colors.warning,
+  },
+  dotDelay1: {
+    animationDelay: '0.18s',
+  },
+  dotDelay2: {
+    animationDelay: '0.36s',
+  },
+  statusLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: textScale.subheadlineSize,
+    lineHeight: textScale.subheadlineLeading,
+    color: colors.secondaryLabel,
+  },
+});
+
 const renderAssistantContent = (
   content: MessageContent,
   sessionId: SessionId,
@@ -6558,7 +7260,34 @@ const renderAssistantContent = (
         />
       );
     case 'available_commands':
+    case 'coordinator_status':
       return null;
+    case 'coordinator_message':
+      return (
+        <div className="flex flex-col gap-2.5">
+          {content.body.trim().length > 0 ? (
+            <MarkdownBlock
+              text={content.body}
+              size={conversationFontSize}
+              isStreaming={false}
+              onFilePathClick={options?.onFilePathClick}
+              searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
+            />
+          ) : null}
+          {content.images?.length ? (
+            <ImageGroupBubble
+              content={{ type: 'image_group', images: content.images }}
+              sessionId={sessionId}
+              messageId={messageId}
+              itemIndex={itemIndex}
+              align="start"
+            />
+          ) : null}
+          {content.files?.length ? (
+            <SessionFileGroup files={content.files} sessionId={sessionId} align="start" />
+          ) : null}
+        </div>
+      );
     // A warning/failure the stream folded back onto its emitting turn. Only the
     // agent's own notices arrive here; `buildChatStreamItems` leaves every other
     // kind on its own system row, where `SystemMessageItems` renders it.
@@ -7577,7 +8306,32 @@ const renderUserContent = (
         </div>
       );
     case 'available_commands':
+    case 'coordinator_status':
       return null;
+    case 'coordinator_message':
+      return (
+        <div className="flex flex-col gap-2.5">
+          {content.body.trim().length > 0 ? (
+            <MarkdownBlock
+              text={content.body}
+              size={options.conversationFontSize}
+              searchBlockId={getCoordinatorMessageSearchBlockId(options.messageId, options.itemIndex)}
+            />
+          ) : null}
+          {content.images?.length ? (
+            <ImageGroupBubble
+              content={{ type: 'image_group', images: content.images }}
+              sessionId={sessionId}
+              messageId={options.messageId}
+              itemIndex={options.itemIndex}
+              align="start"
+            />
+          ) : null}
+          {content.files?.length ? (
+            <SessionFileGroup files={content.files} sessionId={sessionId} align="start" />
+          ) : null}
+        </div>
+      );
     default:
       return null;
   }

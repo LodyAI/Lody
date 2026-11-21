@@ -706,6 +706,7 @@ export const buildSessionTurnInputConfig = (args: {
   agentRoleRevision?: number;
   agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
   issuePRMentions?: IssuePRMention[];
+  replyTo?: import('./coordinator-threads').CoordinatorReplyRef;
   resume?: ACPSessionConfig['resume'];
   prompt?: string;
 }): ACPSessionConfig => {
@@ -733,6 +734,7 @@ export const buildSessionTurnInputConfig = (args: {
       ? { agentRoleSnapshot: args.agentRoleSnapshot }
       : {}),
     issuePRMentions: args.issuePRMentions,
+    ...(args.replyTo ? { replyTo: args.replyTo } : {}),
     resume: args.resume,
   };
 };
@@ -849,6 +851,8 @@ export const buildPendingUserHistoryEntry = (args: {
     return null;
   }
 
+  const compactedConfig = compactRedundantUserTurnInputBlocks(args.inputConfig, args.inputBlocks);
+  const threadRoots = compactedConfig?.replyTo?.threadRootId?.trim();
   return {
     userId,
     role: 'user',
@@ -856,7 +860,8 @@ export const buildPendingUserHistoryEntry = (args: {
     items,
     timestamp: args.timestamp,
     status: args.status ?? 'pending',
-    inputConfig: compactRedundantUserTurnInputBlocks(args.inputConfig, args.inputBlocks),
+    inputConfig: compactedConfig,
+    ...(threadRoots ? { threadRoots } : {}),
     read: false,
     fileDiff: [],
     finished: true,

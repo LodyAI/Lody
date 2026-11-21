@@ -2,6 +2,7 @@ import { decodeSessionFilePath } from './project-path';
 import type { AgentRoleProposalMeta } from './agent-role-proposal';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import type { MemoryBinding } from './memory-provider';
+import type { CoordinatorReplyRef } from './coordinator-threads';
 import type { AcpModelControls } from './acp-model-capabilities';
 import {
   AvailableCommand,
@@ -485,6 +486,11 @@ export type AcpCapabilityCacheEntry = {
   sessionFork?: boolean;
   /** Runtime advertised Core sessionTitle v1 (automatic, tagged title updates). */
   sessionTitle?: boolean;
+  /**
+   * True only when the runtime advertised standard ACP `sessionCapabilities.systemPrompt`,
+   * which a coordinator conversation requires. Absent means unknown or unsupported.
+   */
+  systemPrompt?: boolean;
   rateLimits?: LodyRateLimitsCapability;
   /** True only when the runtime advertised Lody's acknowledged steering extension. */
   acknowledgedSteer?: boolean;
@@ -2013,7 +2019,22 @@ export type MessageContent =
     } & CommentReferencePayload)
   | ({
       type: 'visual_annotation_reference';
-    } & VisualAnnotationReferencePayload);
+    } & VisualAnnotationReferencePayload)
+  | {
+      type: 'coordinator_message';
+      id: string;
+      body: string;
+      images?: SessionImagePayload[];
+      files?: SessionFilePayload[];
+      replyTo?: CoordinatorReplyRef;
+      linkedSessionIds?: SessionId[];
+      createdAt?: number;
+    }
+  | {
+      type: 'coordinator_status';
+      status: string;
+      updatedAt?: number;
+    };
 
 export type TerminalExitStatus = {
   exitCode?: number | null;
@@ -2095,6 +2116,8 @@ export type ACPTurnConfig = {
   agentRoleRevision?: number;
   agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
   issuePRMentions?: IssuePRMention[];
+  /** Coordinator bubble/message reply reference chosen in the composer. */
+  replyTo?: CoordinatorReplyRef;
   // continue to chat
   resume?: ACPSessionId;
   /** Lody-originated execution-chain depth. Human input omits this or uses zero. */

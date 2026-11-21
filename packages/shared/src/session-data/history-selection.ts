@@ -247,6 +247,14 @@ export function selectHistoryActionRows(
     case 'assistant-file-diff':
       last((row) => row.role === 'assistant' && (!action.turnId || row.id === action.turnId));
       break;
+    case 'coordinator-output':
+      if (action.turnId) addWhere((row) => row.id === action.turnId && row.role === 'assistant');
+      else
+        last(
+          (row) =>
+            row.role === 'assistant' && row.finished !== true && typeof row.endedAt !== 'number'
+        );
+      break;
     case 'assistant-items':
     case 'assistant-token-usage':
     case 'user-status':

@@ -91,11 +91,20 @@ export const shouldCollapseAssistantMessageItem = ({
 const getCopyableItemText = (content: MessageContent): string =>
   content.type === 'text' ? content.text : content.type === 'proposed_plan' ? content.markdown : '';
 
-export const getTextContentFromMessageItems = (items: MessageContent[]): string =>
-  items
+export const getTextContentFromMessageItems = (items: MessageContent[]): string => {
+  const coordinatorBodies = items
+    .filter(
+      (item): item is Extract<MessageContent, { type: 'coordinator_message' }> =>
+        item.type === 'coordinator_message'
+    )
+    .map((item) => item.body.trim())
+    .filter((text) => text.length > 0);
+  if (coordinatorBodies.length > 0) return coordinatorBodies.join('\n\n');
+  return items
     .map(getCopyableItemText)
     .filter((text) => text.trim().length > 0)
     .join('\n\n');
+};
 
 export function getMessageQuoteEditDraft(items: MessageContent[]): {
   text: string;

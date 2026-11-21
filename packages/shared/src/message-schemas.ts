@@ -8,6 +8,11 @@ import { automationOriginSchema } from './automations/contracts';
 import { AgentRoleProposalMetaSchema } from './agent-role-proposal';
 import { isMagpieGatewayUrl } from './magpie-import';
 import { MemoryBindingSchema } from './memory-provider';
+import {
+  COORDINATOR_ANCHOR_ID_MAX_CHARS,
+  CoordinatorLinkedSessionIdsSchema,
+  CoordinatorReplyRefSchema,
+} from './coordinator-threads';
 import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
 import { SessionHistoryContentPatchSchema } from './session-data/history-patches';
@@ -434,6 +439,7 @@ export const ACPTurnConfigSchema = z
     agentRoleRevision: z.number().int().nonnegative().optional(),
     agentRoleSnapshot: AgentRoleSnapshotSchema.optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
+    replyTo: CoordinatorReplyRefSchema.optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
   })
@@ -577,6 +583,11 @@ export const normalizeSessionTurnInputConfig = (
   const issuePRMentions = maybeParseField(z.array(IssuePRMentionSchema), record.issuePRMentions);
   if (issuePRMentions) {
     normalized.issuePRMentions = issuePRMentions;
+  }
+
+  const replyTo = maybeParseField(CoordinatorReplyRefSchema, record.replyTo);
+  if (replyTo) {
+    normalized.replyTo = replyTo;
   }
 
   const resume = maybeParseField(ACPSessionIdSchema, record.resume, (parsed) => {
@@ -1274,6 +1285,7 @@ const AcpCapabilityCacheEntrySchema = z
     sessionFork: z.boolean().optional(),
     acknowledgedSteer: z.boolean().optional(),
     sessionTitle: z.boolean().optional(),
+    systemPrompt: z.boolean().optional(),
     rateLimits: z.object({ version: z.literal(1), query: z.literal(true).optional() }).optional(),
     goalActions: z.array(z.enum(SESSION_GOAL_ACTIONS)).optional(),
     sessionForkWorktree: z.boolean().optional(),
@@ -3740,6 +3752,7 @@ export const OperationCompletionContentSchema = z.object({
     'session_chat_many',
   ]),
   progressMessageId: z.string().trim().min(1).optional(),
+  originThreadId: z.string().trim().min(1).max(COORDINATOR_ANCHOR_ID_MAX_CHARS).optional(),
   completion: LodyOperationCompletionSchema,
 });
 
@@ -3842,6 +3855,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
     type: z.literal('operation_progress'),
     operationId: LodyOperationIdSchema,
     operationKind: z.enum(['session_create', 'session_create_many']),
+    originThreadId: z.string().trim().min(1).max(COORDINATOR_ANCHOR_ID_MAX_CHARS).optional(),
     items: z.array(
       z
         .object({
@@ -3857,6 +3871,25 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
         .strict()
     ),
   }),
+  z
+    .object({
+      type: z.literal('coordinator_message'),
+      id: SharedTrimmedNonEmptyStringSchema.max(128),
+      body: SharedStringSchema.max(64 * 1024),
+      images: z.array(SessionImagePayloadSchema).min(1).max(SESSION_FILE_MAX_COUNT).optional(),
+      files: z.array(SessionFileBlockSchema).min(1).max(SESSION_FILE_MAX_COUNT).optional(),
+      replyTo: CoordinatorReplyRefSchema.optional(),
+      linkedSessionIds: CoordinatorLinkedSessionIdsSchema.optional(),
+      createdAt: z.number().finite().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('coordinator_status'),
+      status: SharedStringSchema.max(240),
+      updatedAt: z.number().finite().optional(),
+    })
+    .strict(),
 ]);
 
 export const SessionForkOriginMetaSchema = z.object({

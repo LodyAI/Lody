@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
-import { getMessageItemPrefix } from '../src/lib/session-chat-search';
-import { buildChatVirtualRows, type ChatStreamItem } from '../src/components/ai-gui/view';
+import type { MessageContent, SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
+import {
+  extractSessionSearchBlocks,
+  getCoordinatorMessageSearchBlockId,
+  getMessageItemPrefix,
+} from '../src/lib/session-chat-search';
+import {
+  buildChatVirtualRows,
+  resolveActiveCoordinatorStatus,
+  type ChatStreamItem,
+} from '../src/components/ai-gui/view';
+import {
+  buildCoordinatorThreadDirectoryIndex,
+  collectThreadLinkedSessionIds,
+  filterThreadStreamItems,
+} from '../src/components/project-mode/coordinator-thread-model';
+import type { TurnIndexRow } from '../src/lib/conversation-view';
 
 // Guards the per-turn row cache behind view.tsx `buildChatVirtualRows`: rows for
 // unchanged turns must be reference-stable across rebuilds, or the shallow-compare
@@ -24,7 +38,7 @@ const toolCall = (): MessageContent =>
 
 const makeMessage = (
   id: string,
-  role: 'user' | 'assistant',
+  role: 'user' | 'assistant' | 'system',
   items: MessageContent[],
   finished?: boolean
 ): SessionHistoryParsed =>
@@ -219,5 +233,473 @@ describe('Thought visibility', () => {
     const args = fixture('interrupted', [thought, toolCall(), nextThought], true);
     expect(visibleContents(buildChatVirtualRows(args))).toEqual([]);
     expect(headers(buildChatVirtualRows(args))).toHaveLength(1);
+  });
+});
+
+describe('coordinator conversation bubbles and search', () => {
+  it('renders one virtual row per coordinator_message while hiding raw text, thoughts, and tool calls', () => {
+    const turnWithBubbles = wrap(
+      makeMessage(
+        'coord-turn-1',
+        'assistant',
+        [
+          { type: 'thought', text: 'Internal reasoning' },
+          text('Internal plain text that must never show'),
+          toolCall(),
+          { type: 'coordinator_status', status: '正在查看可用 Role…' },
+          { type: 'coordinator_message', id: 'b1', body: '我先查一下合适的 Role，马上派发。' },
+          toolCall(),
+          { type: 'coordinator_message', id: 'b2', body: '已经交给 **天才程序员** 处理。' },
+          {
+            type: 'coordinator_message',
+            id: 'b3',
+            body: '',
+            images: [
+              {
+                imageId: 'img-1',
+                mimeType: 'image/png',
+                fileName: 'shot.png',
+                sizeBytes: 512,
+                uploadedAt: 1000,
+                storageSessionId: 'child-s1' as SessionId,
+              },
+            ],
+          },
+        ],
+        true
+      )
+    );
+    const turnWithoutBubbles = wrap(
+      makeMessage(
+        'coord-turn-2',
+        'assistant',
+        [{ type: 'thought', text: 'Working silently' }, text('Hidden text'), toolCall()],
+        false
+      )
+    );
+
+    const rows = buildChatVirtualRows({
+      items: [turnWithBubbles, turnWithoutBubbles],
+      lastAssistantMessageId: 'coord-turn-2',
+      expansionVersion: 0,
+      coordinatorBubbles: true,
+    });
+
+    expect(rows).toHaveLength(3);
+    expect(rows.map((row) => row.key)).toEqual([
+      'assistant:coord-turn-1:bubble:b1',
+      'assistant:coord-turn-1:bubble:b2',
+      'assistant:coord-turn-1:bubble:b3',
+    ]);
+    expect(
+      rows.map((row) =>
+        row.type === 'assistant' && row.content.kind === 'coordinator_bubble'
+          ? row.content.entry.body
+          : null
+      )
+    ).toEqual(['我先查一下合适的 Role，马上派发。', '已经交给 **天才程序员** 处理。', '']);
+
+    const searchBlocks = extractSessionSearchBlocks(
+      [
+        makeMessage('user-1', 'user', [text('帮我修一下这个问题')]) as unknown as SessionHistory,
+        turnWithBubbles.message as unknown as SessionHistory,
+      ],
+      { coordinator: true }
+    );
+    expect(searchBlocks.map((block) => block.blockId)).toEqual([
+      `${getMessageItemPrefix('user-1', 0)}:text`,
+      getCoordinatorMessageSearchBlockId('coord-turn-1', 4),
+      getCoordinatorMessageSearchBlockId('coord-turn-1', 6),
+    ]);
+  });
+
+  it('shows instant fallback status before the first coordinator output, switches to explicit status, and avoids end-of-turn or stale-daemon flashes', () => {
+    const defaultWorkingLabel = '正在看…';
+    const userTurn = wrap(makeMessage('u-1', 'user', [text('帮我看看 PR 状态')], true));
+
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [],
+        localUserMessagesCount: 1,
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+
+    const thinkingTurn = wrap(
+      makeMessage('a-1', 'assistant', [{ type: 'thought', text: 'Planning' }, toolCall()], false)
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, thinkingTurn],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+
+    const dispatchingTurn = wrap(
+      makeMessage(
+        'a-1',
+        'assistant',
+        [
+          { type: 'coordinator_message', id: 'b-open', body: '收到，我去查一下并派发任务。' },
+          { type: 'coordinator_status', status: '正在派发子对话…' },
+        ],
+        false
+      )
+    );
+    const progressSystemRow = wrap(
+      makeMessage(
+        'sys-progress',
+        'system',
+        [
+          {
+            type: 'operation_progress',
+            operationId: 'op-1',
+            operationKind: 'session_create',
+            items: [
+              {
+                target: { sessionId: 'child-1' as SessionId, userTurnId: 'cu-1' },
+                status: 'running',
+              },
+            ],
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, dispatchingTurn, progressSystemRow],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在派发子对话…', tone: 'primary' });
+
+    const directReplyTurn = wrap(
+      makeMessage(
+        'a-1',
+        'assistant',
+        [{ type: 'coordinator_message', id: 'b-ans', body: '目前没有未合并的 PR。' }],
+        false
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, directReplyTurn],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toBeNull();
+
+    const finishedTurn = wrap(
+      makeMessage(
+        'a-1',
+        'assistant',
+        [
+          { type: 'coordinator_status', status: '正在派发子对话…' },
+          { type: 'coordinator_message', id: 'b-done', body: '已交给天才程序员处理。' },
+        ],
+        true
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, finishedTurn, progressSystemRow],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toBeNull();
+
+    const completionReceiptRow = wrap(
+      makeMessage(
+        'sys-complete',
+        'system',
+        [
+          {
+            type: 'operation_completion',
+            deliveryId: 'del-1',
+            operationId: 'op-1',
+            operationKind: 'session_create',
+            completion: {},
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, finishedTurn, progressSystemRow, completionReceiptRow],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, dispatchingTurn],
+        agentActivityLabel: null,
+        defaultWorkingLabel,
+      })
+    ).toBeNull();
+
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, directReplyTurn],
+        agentActivityLabel: '等待授权',
+        agentActivityTone: 'warning',
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '等待授权', tone: 'warning' });
+  });
+
+  it('indexes thread reply counts from directory scalars, preserves colon-prefixed root bubbles and causal opening turns, and collects linked child sessions', () => {
+    const rootA = 'bubble:assistant:user-open-1:bubble-1';
+    const rootB = 'bubble:assistant:user-open-1:bubble-2';
+    const rootUser = 'turn:user-open-1';
+
+    const indexRows: TurnIndexRow[] = [
+      { id: 'user-open-1', role: 'user', timestamp: '1' } as TurnIndexRow,
+      {
+        id: 'assistant:user-open-1',
+        userTurnId: 'user-open-1',
+        role: 'assistant',
+        timestamp: '2',
+      } as TurnIndexRow,
+      {
+        id: 'user-reply-a',
+        role: 'user',
+        timestamp: '3',
+        threadRoots: rootA,
+      } as TurnIndexRow,
+      {
+        id: 'sys-progress-a',
+        role: 'system',
+        timestamp: '4',
+        threadRoots: rootA,
+      } as TurnIndexRow,
+      {
+        id: 'assistant:user-reply-a',
+        userTurnId: 'user-reply-a',
+        role: 'assistant',
+        timestamp: '5',
+        threadRoots: `${rootA}\n${rootB}`,
+      } as TurnIndexRow,
+      {
+        id: 'user-reply-root-user',
+        role: 'user',
+        timestamp: '6',
+        threadRoots: rootUser,
+      } as TurnIndexRow,
+    ];
+
+    const directoryIndex = buildCoordinatorThreadDirectoryIndex(indexRows);
+    expect(directoryIndex.replyCountByRootId.get(rootA)).toBe(2);
+    expect(directoryIndex.replyCountByRootId.get(rootB)).toBe(1);
+    expect(directoryIndex.replyCountByRootId.get(rootUser)).toBe(1);
+    expect(directoryIndex.turnIdsByRootId.get(rootA)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-a',
+      'sys-progress-a',
+      'assistant:user-reply-a',
+    ]);
+    expect(directoryIndex.turnIdsByRootId.get(rootUser)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-root-user',
+    ]);
+
+    const stream: ChatStreamItem[] = [
+      wrap(makeMessage('user-open-1', 'user', [text('Please check Task 1 and Task 2')], true)),
+      wrap({
+        ...makeMessage(
+          'assistant:user-open-1',
+          'assistant',
+          [
+            {
+              type: 'coordinator_message',
+              id: 'bubble-1',
+              body: 'Root A asks about [Task 1](lody://session/child-1)',
+              linkedSessionIds: ['child-1' as SessionId],
+            },
+            {
+              type: 'coordinator_message',
+              id: 'bubble-2',
+              body: 'Root B talks about [Task 2](lody://session/child-2)',
+              linkedSessionIds: ['child-2' as SessionId],
+            },
+          ],
+          true
+        ),
+        userTurnId: 'user-open-1',
+      }),
+      wrap({
+        ...makeMessage('user-reply-a', 'user', [text('Go ahead with 7 days')], true),
+        threadRoots: rootA,
+        inputConfig: {
+          prompt: 'Go ahead with 7 days',
+          replyTo: {
+            target: {
+              kind: 'coordinator_bubble',
+              turnId: 'assistant:user-open-1',
+              bubbleId: 'bubble-1',
+            },
+            threadRootId: rootA,
+            author: 'coordinator',
+            previewText: 'Root A asks',
+          },
+        },
+      }),
+      wrap(
+        makeMessage(
+          'sys-batch',
+          'system',
+          [
+            {
+              type: 'operation_completion_batch',
+              batchId: 'batch-mixed',
+              memberCount: 2,
+              deliveryStatus: 'settled',
+              members: [
+                {
+                  type: 'operation_completion',
+                  deliveryId: 'd-a',
+                  operationId: 'op-a',
+                  operationKind: 'session_chat',
+                  originThreadId: rootA,
+                  completion: {
+                    type: 'result',
+                    value: {
+                      items: [
+                        {
+                          status: 'succeeded',
+                          target: { sessionId: 'child-3' as SessionId, userTurnId: 'u3' },
+                          output: { text: 'Done A' },
+                        },
+                      ],
+                    },
+                  },
+                },
+                {
+                  type: 'operation_completion',
+                  deliveryId: 'd-b',
+                  operationId: 'op-b',
+                  operationKind: 'session_chat',
+                  originThreadId: rootB,
+                  completion: {
+                    type: 'result',
+                    value: {
+                      items: [
+                        {
+                          status: 'succeeded',
+                          target: { sessionId: 'child-2' as SessionId, userTurnId: 'u2' },
+                          output: { text: 'Done B' },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            } as unknown as MessageContent,
+          ],
+          true
+        )
+      ),
+      wrap({
+        ...makeMessage(
+          'assistant:user-reply-a',
+          'assistant',
+          [
+            {
+              type: 'coordinator_message',
+              id: 'reply-a',
+              body: 'Forwarded to Task 1',
+              replyTo: {
+                target: { kind: 'user_turn', turnId: 'user-reply-a' },
+                threadRootId: rootA,
+                author: 'user',
+              },
+            },
+            {
+              type: 'coordinator_message',
+              id: 'reply-b',
+              body: 'Task 2 finished',
+              replyTo: {
+                target: {
+                  kind: 'coordinator_bubble',
+                  turnId: 'assistant:user-open-1',
+                  bubbleId: 'bubble-2',
+                },
+                threadRootId: rootB,
+                author: 'coordinator',
+              },
+            },
+          ],
+          true
+        ),
+        userTurnId: 'user-reply-a',
+        threadRoots: `${rootA}\n${rootB}`,
+      }),
+      wrap({
+        ...makeMessage('user-reply-root-user', 'user', [text('Also check Task 3')], true),
+        threadRoots: rootUser,
+        inputConfig: {
+          prompt: 'Also check Task 3',
+          replyTo: {
+            target: { kind: 'user_turn', turnId: 'user-open-1' },
+            threadRootId: rootUser,
+            author: 'user',
+            previewText: 'Please check Task 1 and Task 2',
+          },
+        },
+      }),
+      wrap(makeMessage('unrelated-user', 'user', [text('Something else')], true)),
+    ];
+
+    const projectedA = filterThreadStreamItems(stream, rootA);
+    expect(projectedA).toHaveLength(5);
+    const projectedMessagesA = projectedA.flatMap((item) =>
+      item.type === 'message' ? [item.message] : []
+    );
+    expect(projectedMessagesA.map((m) => m.id)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-a',
+      'sys-batch',
+      'assistant:user-reply-a',
+    ]);
+    expect(projectedMessagesA[1]?.items).toEqual([
+      expect.objectContaining({ type: 'coordinator_message', id: 'bubble-1' }),
+    ]);
+    expect(projectedMessagesA[3]?.items).toEqual([
+      expect.objectContaining({
+        type: 'operation_completion_batch',
+        memberCount: 1,
+        members: [expect.objectContaining({ deliveryId: 'd-a' })],
+      }),
+    ]);
+    expect(projectedMessagesA[4]?.items).toEqual([
+      expect.objectContaining({ type: 'coordinator_message', id: 'reply-a' }),
+    ]);
+
+    expect(collectThreadLinkedSessionIds(projectedMessagesA)).toEqual(['child-1', 'child-3']);
+
+    const projectedUserRoot = filterThreadStreamItems(stream, rootUser).flatMap((item) =>
+      item.type === 'message' ? [item.message] : []
+    );
+    expect(projectedUserRoot.map((m) => m.id)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-root-user',
+    ]);
+    expect(projectedUserRoot[1]?.items).toHaveLength(2);
   });
 });

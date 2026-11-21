@@ -129,6 +129,12 @@ const collapseWhitespace = (value: string): string => value.replace(/\s+/g, ' ')
 
 export const firstTextOf = (items: readonly MessageContent[]): string | null => {
   for (const item of items) {
+    if (item.type !== 'coordinator_message') continue;
+    const raw = item.body;
+    if (typeof raw !== 'string' || !raw.trim()) continue;
+    return raw.slice(0, SUMMARY_SOURCE_WINDOW);
+  }
+  for (const item of items) {
     if (item.type !== 'text') continue;
     const raw = item.text;
     if (typeof raw !== 'string' || !raw.trim()) continue;
@@ -149,6 +155,8 @@ export const proseLengthOf = (message: Pick<SessionHistoryParsed, 'items'>): num
       total += typeof item.text === 'string' ? item.text.length : 0;
     } else if (item.type === 'proposed_plan') {
       total += typeof item.markdown === 'string' ? item.markdown.length : 0;
+    } else if (item.type === 'coordinator_message') {
+      total += typeof item.body === 'string' ? item.body.length : 0;
     }
   }
   return total;

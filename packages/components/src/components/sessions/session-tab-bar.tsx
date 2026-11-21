@@ -2,7 +2,17 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { space, radius } from '@lody/ui/tokens/scales.stylex';
 import { tabPillStyles } from '../shared/tab-pill-strip';
-import { Plus, X, History, Undo2, FileDiff, Hand, ArchiveRestore } from 'lucide-react';
+import {
+  Plus,
+  X,
+  History,
+  Undo2,
+  FileDiff,
+  GitPullRequest,
+  Globe,
+  Hand,
+  ArchiveRestore,
+} from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
@@ -54,7 +64,7 @@ import {
 /** A viewer tab item (file or diff) displayed in the tab bar. */
 export interface ViewerTabItem {
   id: string;
-  type: 'file' | 'diff';
+  type: 'file' | 'diff' | 'pr' | 'url';
   label: string;
   filePath?: string;
   dirty?: boolean;
@@ -711,6 +721,10 @@ function ViewerTabContent({
       <span {...stylex.props(styles.iconContainer)}>
         {tab.type === 'file' && tab.filePath ? (
           <FileIcon filePath={tab.filePath} {...stylex.props(styles.compactIcon)} />
+        ) : tab.type === 'pr' ? (
+          <GitPullRequest {...stylex.props(styles.agentIcon)} />
+        ) : tab.type === 'url' ? (
+          <Globe {...stylex.props(styles.agentIcon)} />
         ) : (
           <FileDiff {...stylex.props(styles.agentIcon)} />
         )}

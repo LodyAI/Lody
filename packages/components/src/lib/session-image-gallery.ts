@@ -96,6 +96,22 @@ export const collectSessionImageGalleryEntries = (
         return;
       }
 
+      if (item.type === 'coordinator_message') {
+        item.images?.forEach((image, imageIndex) => {
+          entries.push(
+            createSessionImageGalleryEntry({
+              sessionId,
+              messageId: message.id,
+              galleryGroupId,
+              itemIndex,
+              imageIndex,
+              image,
+            })
+          );
+        });
+        return;
+      }
+
       if (item.type !== 'image_group') {
         return;
       }
