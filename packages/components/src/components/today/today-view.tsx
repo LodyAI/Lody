@@ -118,8 +118,6 @@ const styles = stylex.create({
     paddingInlineStart: `calc(${space[6]} + ${todayOutline.foldOverhang})`,
     paddingInlineEnd: space[6],
     paddingBottom: space[8],
-    // The surface takes focus while blocks are selected (it owns their keys);
-    // the selected rows show that, not the app's keyboard focus ring.
     boxShadow: { ':focus-visible': 'none' },
   },
   // The pinned column is narrow: a tighter end gutter.
@@ -751,7 +749,6 @@ export function TodayNodeActions(props: {
   } | null>(null);
   return (
     <>
-      {/* The dialog covers the selection it was opened from. */}
       {converting ? null : (
         <TodaySelectionBar
           onConvert={(store, nodeId) => {

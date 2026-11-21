@@ -151,7 +151,6 @@ export class TodayEditorController {
   private dropIndicator: TodayDropIndicator | null = null;
   private dragGhost: TodayDragGhost | null = null;
   private cancelSettle: (() => void) | null = null;
-  /** A drag-selection is under way: the selection bar waits for the release. */
   private pointerSelecting = false;
   /** Workspace whose session links may be pasted into a node. */
   workspaceId: string | null = null;
@@ -455,8 +454,6 @@ export class TodayEditorController {
         );
       } else if (wasDragging) this.notify();
       if (drop) this.dropAt(store, drop, ids);
-      // A click selects the node (its subtree shows selected), which brings up
-      // the selection bar; a node already in the selection keeps it whole.
       if (commit && !wasDragging && !this.isBlockSelected(store, nodeId)) {
         this.selectBlocks(store, [nodeId]);
       }
@@ -798,11 +795,6 @@ export class TodayEditorController {
     return true;
   }
 
-  /**
-   * Mod+Enter (or the selection bar) on selected blocks: each selected row
-   * advances from its own state. Rows only shown selected under a selected
-   * parent keep theirs.
-   */
   cycleSelectionTodo() {
     const selection = this.selection;
     if (!selection) return;
@@ -810,7 +802,6 @@ export class TodayEditorController {
     store.undo.structural(() => store.outline.cycleTodo(ids));
   }
 
-  /** The checkbox of a to-do row: to-do and done swap. */
   toggleDone(store: TodayPageStore, nodeId: TodayNodeId) {
     const state = store.outline.getNode(nodeId)?.todo;
     if (!state) return;
@@ -819,18 +810,12 @@ export class TodayEditorController {
     );
   }
 
-  /**
-   * Copy the selected blocks (the selection bar) through the surface's own
-   * `copy` event, so the clipboard gets the same text and structured payload
-   * as the keyboard shortcut.
-   */
   copySelection() {
     if (!this.selection || !this.surface) return;
     this.surface.focus({ preventScroll: true });
     this.surface.ownerDocument.execCommand('copy');
   }
 
-  /** Delete the selected blocks with their subtrees (the selection bar). */
   deleteSelection() {
     const selection = this.selection;
     if (!selection) return;

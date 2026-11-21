@@ -154,10 +154,7 @@ export function todayRichToPlain(
   return out;
 }
 
-/**
- * Plain-text form: `- ` bullets, two spaces per level, mentions as links, and
- * Markdown task markers (`- [ ]`, `- [x]`) for to-dos.
- */
+/** Plain-text form: `- ` bullets, two spaces per level, mentions as links. */
 export function serializeTodayFragments(
   fragments: readonly TodayFragment[],
   mentionText: TodayMentionText,

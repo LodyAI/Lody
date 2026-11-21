@@ -16,8 +16,7 @@ import {
  *
  * Structure lives in the `outline` LoroTree; each node's data map holds a
  * `text` LoroText created in the same commit as the node and `collapsed: true`
- * when folded, and `todo: 'todo' | 'done'` when the node is a to-do (absent
- * for plain text). A conversation mention is one U+FFFC character of that text
+ * when folded (`todo` holds a to-do's state). A conversation mention is one U+FFFC character of that text
  * carrying the `mention = {kind, id}` mark (expand `none`). Unknown root
  * containers and data keys are ignored. Every structural operation validates
  * first, then mutates and commits once, because a Loro transaction cannot be
@@ -46,12 +45,10 @@ export type TodayRichText = { text: string; mentions: TodayMention[] };
 
 export type TodayNodeId = TreeID;
 
-/** A to-do node's state; a plain node has none. */
 export type TodayTodoState = 'todo' | 'done';
 const TODO_STATES: readonly unknown[] = ['todo', 'done'];
 export const isTodayTodoState = (value: unknown): value is TodayTodoState =>
   TODO_STATES.includes(value);
-/** The cycle `Mod+Enter` walks: plain text, to-do, done, plain text. */
 export const nextTodayTodoState = (
   state: TodayTodoState | undefined
 ): TodayTodoState | undefined =>
@@ -111,9 +108,7 @@ export type TodayOutline = {
   moveUp(ids: readonly TodayNodeId[]): boolean;
   moveDown(ids: readonly TodayNodeId[]): boolean;
   moveTo(ids: readonly TodayNodeId[], target: TodayMoveTarget): boolean;
-  /** Advance each node from its own state: plain, to-do, done, plain. One undo step. */
   cycleTodo(ids: readonly TodayNodeId[]): boolean;
-  /** Set every node's to-do state (`undefined`: plain text). One undo step. */
   setTodo(ids: readonly TodayNodeId[], state: TodayTodoState | undefined): boolean;
   /**
    * Fold or unfold a node for this viewer and in the document. Not an undo
@@ -530,7 +525,6 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       const text = node && textOf(node);
       if (!node || !text) return null;
       const length = text.length;
-      // A to-do's new line is a to-do too, not yet done.
       const todo = todoOf(node) ? ('todo' as const) : undefined;
       if (offset <= 0 && length > 0) {
         create(node.parent(), indexOf(node), { todo });
@@ -550,7 +544,6 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     enterOnEmpty: (id) => {
       const node = live(id);
       if (!node) return null;
-      // Enter on an empty to-do ends the list: the line turns back into text.
       if (writeTodo(node, undefined)) {
         commit();
         return { nodeId: id, offset: 0 };
@@ -821,7 +814,6 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
 
 const FENCE_PATTERN = /^(```|~~~)/;
 const BULLET_PATTERN = /^[-*+•]\s+/;
-/** A Markdown task marker after the bullet: `[ ]` to-do, `[x]` done. */
 const TASK_PATTERN = /^\[([ xX])\]\s+/;
 
 function indentWidth(line: string): number {

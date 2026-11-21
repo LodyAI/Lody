@@ -108,8 +108,6 @@ const styles = stylex.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
-  // The bullet is a control (click: select the node and show its actions; drag:
-  // move it): a halo under the pointer says so, as Logseq and Workflowy do.
   halo: {
     width: 16,
     height: 16,
@@ -117,7 +115,6 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    // Above the bullet's hit area, so the circle itself takes the hover.
     position: 'relative',
     pointerEvents: 'auto',
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
@@ -126,15 +123,11 @@ const styles = stylex.create({
   },
   dot: { width: 6, height: 6, borderRadius: radius.full, backgroundColor: colors.secondaryLabel },
   dotFolded: { boxShadow: `0 0 0 4px ${colors.selectedFill}` },
-  // An empty line shows no dot until its row is hovered (or it is being
-  // edited or selected), so blank lines read as space, not as items.
   dotQuiet: {
     opacity: { default: 0, [stylex.when.ancestor(':hover')]: 1 },
     transitionProperty: 'opacity',
     transitionDuration: '100ms',
   },
-  // A to-do's checkbox sits between the bullet and the text, so the bullet
-  // stays the one handle every node has.
   check: {
     width: 16,
     height: 28,
@@ -161,7 +154,6 @@ const styles = stylex.create({
     backgroundColor: colors.accent,
     borderColor: { default: colors.accent, ':hover': colors.accent },
   },
-  // Done reads like a settled conversation's mention: struck and dimmed.
   textDone: { color: colors.secondaryLabel, textDecorationLine: 'line-through' },
   text: {
     flex: 1,
@@ -298,7 +290,6 @@ function TodayRow(props: {
   const active = !!node && !!controller?.isActive(store, node.id);
   const selected = !!node && !!controller?.isBlockSelected(store, node.id);
   const done = node?.todo === 'done';
-  // Nothing to mark yet: no text, no children, not a to-do.
   const blank = !!node && !node.text.trim() && !node.hasChildren && !node.todo;
   return (
     <div
@@ -365,7 +356,6 @@ function TodayRow(props: {
           role="checkbox"
           aria-checked={done}
           aria-label={t('today.todo.done', 'Done')}
-          // The press must not take focus (and the caret) from the editor.
           onPointerDown={(event) => event.preventDefault()}
           onClick={() => controller?.toggleDone(store, node.id)}
         >

@@ -47,13 +47,7 @@ const styles = stylex.create({
   tip: { display: 'flex', alignItems: 'center', gap: space[1] },
 });
 
-/**
- * The actions of a block selection, floating above it: to-do state, Convert to
- * task, Copy and Delete. A bullet click selects its node, so this is also the
- * bullet's menu. It waits for a drag-selection to finish, and never takes
- * focus: the surface keeps the selection's keys.
- * Behavior: specs/today-outline.md (Outline editing, Convert to task).
- */
+/** Block-selection actions. Behavior: specs/today-outline.md (Outline editing). */
 export function TodaySelectionBar(props: {
   onConvert: (store: TodayPageStore, nodeId: TodayNodeId) => void;
 }) {
@@ -61,12 +55,10 @@ export function TodaySelectionBar(props: {
   const controller = useTodayEditor();
   const ref = useRef<HTMLDivElement | null>(null);
   const [place, setPlace] = useState<{ top: number; left: number } | null>(null);
-  // Bumped while the page scrolls or resizes under an open bar.
   const [layout, setLayout] = useState(0);
   const selection =
     controller && !controller.isSelectingByPointer() ? controller.getBlockSelection() : null;
   const version = controller?.getVersion() ?? 0;
-  // The page changes under a standing selection (a to-do cycled, a peer's edit).
   const snapshot = useSyncExternalStore(
     selection?.store.subscribe ?? noopSubscribe,
     selection?.store.getSnapshot ?? noSnapshot
@@ -102,7 +94,6 @@ export function TodaySelectionBar(props: {
       bounds.left + 4,
       Math.min(bullet.getBoundingClientRect().left, bounds.right - width - 4)
     );
-    // Above the selection; below it when its top is scrolled out of view.
     setPlace({
       top: top >= bounds.top ? top : Math.min(below, bounds.bottom - BAR_HEIGHT - 4),
       left,
@@ -115,9 +106,7 @@ export function TodaySelectionBar(props: {
   const visible = snapshot?.visible ?? [];
   const roots = topLevelSelection(visible, selection.ids);
   const root = roots.length === 1 ? store.outline.getNode(roots[0]!) : undefined;
-  // Offered for one node that says something besides its mentions.
   const canConvert = !!root && root.text.replaceAll(TODAY_MENTION_CHAR, '').trim().length > 0;
-  // Each row advances from its own state; the button shows the first row's step.
   const state = visible.find((node) => node.id === selection.ids[0])?.todo;
   const todo =
     state === undefined
@@ -134,7 +123,6 @@ export function TodaySelectionBar(props: {
         aria-label={t('today.selectionActions', 'Selected nodes')}
         {...stylex.props(styles.bar)}
         style={place ? place : { visibility: 'hidden', top: 0, left: 0 }}
-        // Presses act on the selection: they must not move focus off the surface.
         onPointerDown={(event) => event.preventDefault()}
         onMouseDown={(event) => event.preventDefault()}
       >

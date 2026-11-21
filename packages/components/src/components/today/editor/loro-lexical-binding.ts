@@ -53,8 +53,7 @@ export function $readTodayEditorRich(): TodayRichText {
  *
  * Outbound: each committed editor change becomes one rich LoroText splice
  * (positions compare character and mention) through the page undo (so typing groups into undo steps). Nothing is written while an
- * IME composition is open; disposing the binding writes whatever the
- * composition still held.
+ * IME composition is open.
  * Inbound: any LoroText change the editor does not already show (a peer, an
  * undo, a structural op on this node) realigns the editor to the text and
  * moves the caret through the event delta. During composition inbound deltas
@@ -105,7 +104,6 @@ export function bindLoroText(options: {
     tag: INBOUND_TAGS,
   });
 
-  /** Write what the editor shows and the text does not hold yet, as one rich splice. */
   const commit = (showPeerEdits: boolean) => {
     const next = editorRich();
     let splice = safeRichDiff(base, next);
@@ -178,9 +176,7 @@ export function bindLoroText(options: {
       stopEditor();
       stopRoot();
       stopText();
-      // Leaving a node while an IME still composes (a click on another node)
-      // ends the composition with no further editor update: keep its text, as
-      // a browser commits the preedit on blur.
+      // Leaving a node mid-composition: keep the preedit, as a browser does on blur.
       if (!text.isDeleted()) commit(false);
     },
   };

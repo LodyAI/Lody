@@ -20,7 +20,6 @@ export type OutlineIntent =
   | { type: 'focus-previous-end' }
   | { type: 'focus-next-start' }
   | { type: 'block-select' }
-  /** Mod+Enter: plain text, to-do, done, plain text. */
   | { type: 'cycle-todo' }
   /** Shift+Up/Down reached the first/last line: select to the node edge. */
   | { type: 'extend-text'; anchor: number; focus: number }

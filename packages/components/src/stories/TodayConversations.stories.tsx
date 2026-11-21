@@ -118,7 +118,6 @@ const PAGE: TodayFragment[] = [
   ...parseTodayPasteText(
     'Prompt for later\n  Make Today remember the last calendar month\n  Keep the change small'
   ),
-  // To-dos (Mod+Enter cycles text, to-do, done) and a blank line, whose dot stays hidden.
   ...parseTodayPasteText('- [ ] Reply to the plugin thread\n- [x] Book the review slot'),
   { text: '', children: [] },
   ...parseTodayPasteText('After the blank line'),
