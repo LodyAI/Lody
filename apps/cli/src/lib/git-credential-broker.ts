@@ -76,6 +76,11 @@ export const createGitCredentialBrokerHandler = (options: {
   logger: Logger;
   resolveContext?: (contextToken: string) => GitCredentialBrokerSessionContext | null;
   ownerUserId?: string;
+  /** Link a PR the managed `gh` shim created to the context's Session (provider-neutral). */
+  reportPullRequest?: (
+    context: GitCredentialBrokerSessionContext,
+    url: string
+  ) => Promise<{ linked: boolean; reason?: string; sessionId?: string; url?: string }>;
 }): http.RequestListener => {
   const handleRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     const requestId = randomBytes(8).toString('hex');
@@ -90,6 +95,7 @@ export const createGitCredentialBrokerHandler = (options: {
             '/github-token',
             '/git-credential/reject',
             '/github-token/reject',
+            '/pull-request/report',
           ].includes(req.url ?? ''))
       ) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -118,6 +124,29 @@ export const createGitCredentialBrokerHandler = (options: {
 
       const body = await readJson(req);
       const obj = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
+      if (req.url === '/pull-request/report') {
+        // The Session comes only from the host-authored context token; nothing
+        // else in the child's request can choose which Session is linked.
+        const token = typeof obj?.contextToken === 'string' ? obj.contextToken : null;
+        const context = token ? (options.resolveContext?.(token) ?? null) : null;
+        const url = typeof obj?.url === 'string' ? obj.url.slice(0, 2048) : null;
+        const result = !options.reportPullRequest
+          ? { linked: false, reason: 'unavailable' }
+          : !context
+            ? { linked: false, reason: 'invalid_context' }
+            : !url
+              ? { linked: false, reason: 'bad_request' }
+              : await options.reportPullRequest(context, url);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify(
+            result.linked
+              ? { linked: true, sessionId: result.sessionId, url: result.url }
+              : { linked: false, reason: result.reason }
+          )
+        );
+        return;
+      }
       const repoFullName = obj && typeof obj.repoFullName === 'string' ? obj.repoFullName : null;
       const contextToken = obj && typeof obj.contextToken === 'string' ? obj.contextToken : null;
       if (!repoFullName) {
@@ -337,6 +366,9 @@ export class GitCredentialBroker {
   private readonly workspaceId: string | undefined;
   private readonly ownerUserId: string | undefined;
   private readonly contexts = new Map<string, GitCredentialBrokerSessionContext>();
+  private readonly reportPullRequest: Parameters<
+    typeof createGitCredentialBrokerHandler
+  >[0]['reportPullRequest'];
   private server: http.Server | null = null;
   private env: GitCredentialBrokerEnv | null = null;
 
@@ -345,7 +377,9 @@ export class GitCredentialBroker {
     workspaceId?: string;
     ownerUserId?: string;
     logger?: Logger;
+    reportPullRequest?: Parameters<typeof createGitCredentialBrokerHandler>[0]['reportPullRequest'];
   }) {
+    this.reportPullRequest = options.reportPullRequest;
     this.logger = options.logger ?? getLogger('git-cred-broker');
     this.tokenManager = options.tokenManager;
     this.workspaceId = options.workspaceId;
@@ -373,6 +407,7 @@ export class GitCredentialBroker {
       logger: this.logger,
       resolveContext: this.resolveContext,
       ownerUserId: this.ownerUserId,
+      reportPullRequest: this.reportPullRequest,
     });
   }
 
