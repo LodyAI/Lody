@@ -173,6 +173,39 @@ describe('Focus wake-up', () => {
       )
     ).toBe(true);
   });
+
+  it('keeps a woken row placed by a Focus reorder at its key and still unread', () => {
+    const tenDaysAgo = NOW - 10 * 86_400_000;
+    const wokeAt = NOW - 5_000;
+    const items: SidebarUpdatedItem[] = [
+      {
+        id: 'focus-a',
+        kind: 'chat',
+        title: 'A',
+        sectionLabel: 'Chats',
+        latestMessageAt: NOW,
+        orderKey: '80',
+      },
+      {
+        id: 'placed-woken',
+        kind: 'chat',
+        title: 'Placed',
+        sectionLabel: 'Chats',
+        latestMessageAt: tenDaysAgo,
+        orderKey: '82',
+        snoozedUntil: wokeAt,
+        focusRestoredAt: wokeAt,
+      },
+    ];
+    const focus = buildSidebarUpdatedBuckets(items, 'status', NOW).find((b) => b.key === 'focus')!;
+    expect(focus.items.map((i) => i.id)).toEqual(['focus-a', 'placed-woken']);
+    expect(
+      sessionHasUnreadMessages(
+        { lastMessageAt: tenDaysAgo, lastReadAt: tenDaysAgo, snoozedUntil: wokeAt },
+        NOW
+      )
+    ).toBe(true);
+  });
 });
 
 describe('Status view row actions', () => {

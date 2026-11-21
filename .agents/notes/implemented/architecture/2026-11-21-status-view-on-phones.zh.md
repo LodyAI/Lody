@@ -100,7 +100,7 @@ type StatusViewCommand =
 进行中排序时为已到期的稍后条目落地真实的键，把行拖进进行中时一并恢复它的 opened-by 子对话，
 `settledAt = max(now, lastMessageAt)`，取消 pin 保留 `orderKey`。
 
-**测试样例** — `vectors/layout.json`（8 个用例）和 `vectors/commands.json`（28 个用例，固定的
+**测试样例** — `vectors/layout.json`（11 个用例）和 `vectors/commands.json`（33 个用例，固定的
 `nowMs` 和随机字节）在 `packages/shared` 里运行，在 `packages/components` 里针对桌面和手机 WebView
 的适配层运行，也在 iOS 和 Android 的 runtime 测试里运行。
 
@@ -162,7 +162,7 @@ type StatusViewCommand =
   非拥有者成员加密写入 `pinSection` 行和新会话字段，已在房间层测试
   （`apps/electron/src/main/services/e2ee-runtime.test.mjs`）；托管网关是否接受，从本仓库无法查看。
 - Android 在前台打开对话时把它标为已读，所以到期唤醒对话的未读状态在那里也会清除。
-- 在进行中排序会清除已到期的稍后时间，连带清除被唤醒行的未读标记，这是每个界面上已有的 Spec 规则。
+- 放置和恢复都不会消耗唤醒，只有打开、发送或标记为已完成才会。在进行中排序时，被唤醒的行落地真实排序键，并把 `focusRestoredAt` 记为唤醒时间；恢复到进行中（从「稍后」「已完成」或置顶区拖入、移回进行中，以及跟随的 opened-by 子对话）时把 `focusRestoredAt` 记为当前时间，只清除仍在未来的稍后时间。无论哪种情况，已过期的 `snoozedUntil` 都会保留，所以这一行停在被放置的位置，并保持未读直到被阅读。不需要新字段：`focusRestoredAt` 只由这些放置和恢复写入，而稍后命令总把 `snoozedUntil` 设在未来，所以再次稍后的对话到期时会重新浮上来。早于这条规则的客户端（重新复制前的原生 runtime 快照、更早的桌面版本）会把放置过的被唤醒行重新浮到最前面；两种数据都有效。
 - 已知的小缺口：iOS WebView 没有触感反馈，Chrome 在首次轻点之前拒绝震动；折叠屏的分栏之间不能拖拽；
   手机 WebView 不显示被可见范围隐藏的 pin 行数；三个手机界面（WebView、Android、iOS）的长按菜单都在松手时打开；Android
   只在连接时读取一次只读标记；iOS 首次安装时，只读成员在成员列表加载前能看到这些操作。
@@ -171,7 +171,7 @@ type StatusViewCommand =
 
 已验证：
 
-- 测试样例（8 个布局用例、28 个命令用例）在 `packages/shared` 里运行，在 `packages/components` 里
+- 测试样例（11 个布局用例、33 个命令用例；原生 runtime 的副本在重新复制前仍是之前的 8 个和 28 个）在 `packages/shared` 里运行，在 `packages/components` 里
   针对桌面和手机的适配层运行，也在 iOS 和 Android 的 runtime 测试里运行。
 - 桌面：进行中拖放的 Storybook 端到端测试
   （`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`，5 个用例）。

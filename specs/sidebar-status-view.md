@@ -81,10 +81,16 @@ and what can wait or has settled.
 - Sending a message in a snoozed or settled conversation clears its
   `snoozedUntil` / `settledAt` state so it returns to Focus.
 - Dragging a row in Focus materializes real `orderKey`s for any expired-snooze
-  rows at the top of Focus (clearing their expired `snoozedUntil` while
-  preserving `focusRestoredAt`) so the user's explicit drag placement always
-  wins cleanly. Dragging a row from Later or Settled into Focus clears its
-  snooze/settled state and places it at the dropped `orderKey`.
+  rows at the top of Focus so the user's explicit drag placement always wins
+  cleanly. Dragging a row from Later, Settled or the Pinned area (which unpins
+  it) into Focus restores it at the dropped `orderKey`, and Move to Focus
+  restores it in place; its opened sub-conversations follow when included. Placement and
+  restore never consume a wake-up; only opening the conversation, sending in it
+  or settling it does. A placed or restored row records `focusRestoredAt` and
+  keeps an expired `snoozedUntil`, so it stays where it was put and stays unread
+  until it is read; a snooze still in the future is cleared on restore. A woken
+  row floats to the top of Focus only while its expired `snoozedUntil` is later
+  than its `focusRestoredAt`, so a new snooze floats it again when it expires.
 
 ### Phones
 
@@ -174,7 +180,8 @@ Implementation:
   shared runtime and lists in the `apps/mobile/ios` and `apps/mobile/android`
   submodules.
 
-Executed validation: the golden vectors (8 layout and 28 command cases) in
+Executed validation: the golden vectors (11 layout and 33 command cases; the native runtime
+copies carry the earlier 8 and 28 until they re-vendor) in
 `packages/shared/tests/status-view.test.ts`, against the desktop and phone adapters
 in `packages/components` and in the iOS and Android runtime tests; the Storybook
 end-to-end suite `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`

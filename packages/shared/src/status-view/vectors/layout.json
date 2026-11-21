@@ -1478,6 +1478,286 @@
         "canManageSections": false,
         "nextChangeAt": 1795222800000
       }
+    },
+    {
+      "name": "placed-woken-row-keeps-unread-at-its-place",
+      "description": "A woken row placed by a Focus reorder (focusRestoredAt at its wake-up, expired snoozedUntil kept) orders by its key and stays unread; an unplaced woken row still floats.",
+      "input": {
+        "sessions": [
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "placed-woken",
+            "title": "placed-woken",
+            "lastMessageAt": 1794960000000,
+            "lastReadAt": 1794960000000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": 1795212000000,
+            "settledAt": null,
+            "focusRestoredAt": 1795212000000,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f3",
+            "title": "f3",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "fresh-woken",
+            "title": "fresh-woken",
+            "lastMessageAt": 1794960000000,
+            "lastReadAt": 1794960000000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": 1795215600000,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "expected": {
+        "pinned": [
+          {
+            "sectionId": null,
+            "name": null,
+            "rows": [],
+            "hiddenCount": 0
+          }
+        ],
+        "focus": [
+          {
+            "id": "fresh-woken",
+            "tier": "focus",
+            "children": [],
+            "activityAt": 1795215600000,
+            "unread": true,
+            "snoozedUntil": null,
+            "woken": true,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "tier": "focus",
+            "children": [],
+            "activityAt": 1795215600000,
+            "unread": false,
+            "snoozedUntil": null,
+            "woken": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "placed-woken",
+            "tier": "focus",
+            "children": [],
+            "activityAt": 1795212000000,
+            "unread": true,
+            "snoozedUntil": null,
+            "woken": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f3",
+            "tier": "focus",
+            "children": [],
+            "activityAt": 1795215600000,
+            "unread": false,
+            "snoozedUntil": null,
+            "woken": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "later": [],
+        "settled": [],
+        "canManageSections": true,
+        "nextChangeAt": 1795816800000
+      }
+    },
+    {
+      "name": "placed-woken-row-read-clears-unread",
+      "description": "Opening the placed row moves the read receipt past its wake-up and clears unread.",
+      "input": {
+        "sessions": [
+          {
+            "id": "placed-woken",
+            "title": "placed-woken",
+            "lastMessageAt": 1794960000000,
+            "lastReadAt": 1795219140000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": 1795212000000,
+            "settledAt": null,
+            "focusRestoredAt": 1795212000000,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "expected": {
+        "pinned": [
+          {
+            "sectionId": null,
+            "name": null,
+            "rows": [],
+            "hiddenCount": 0
+          }
+        ],
+        "focus": [
+          {
+            "id": "placed-woken",
+            "tier": "focus",
+            "children": [],
+            "activityAt": 1795212000000,
+            "unread": false,
+            "snoozedUntil": null,
+            "woken": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "later": [],
+        "settled": [],
+        "canManageSections": true,
+        "nextChangeAt": 1795816800000
+      }
+    },
+    {
+      "name": "placed-row-re-snoozed-floats-again",
+      "description": "A placed row snoozed again wakes past its earlier placement, so it floats to the top again.",
+      "input": {
+        "sessions": [
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "re-woken",
+            "title": "re-woken",
+            "lastMessageAt": 1794960000000,
+            "lastReadAt": 1795046400000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": 1795218600000,
+            "settledAt": null,
+            "focusRestoredAt": 1795046400000,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "expected": {
+        "pinned": [
+          {
+            "sectionId": null,
+            "name": null,
+            "rows": [],
+            "hiddenCount": 0
+          }
+        ],
+        "focus": [
+          {
+            "id": "re-woken",
+            "tier": "focus",
+            "children": [],
+            "activityAt": 1795218600000,
+            "unread": true,
+            "snoozedUntil": null,
+            "woken": true,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "tier": "focus",
+            "children": [],
+            "activityAt": 1795215600000,
+            "unread": false,
+            "snoozedUntil": null,
+            "woken": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "later": [],
+        "settled": [],
+        "canManageSections": true,
+        "nextChangeAt": 1795820400000
+      }
     }
   ]
 }
