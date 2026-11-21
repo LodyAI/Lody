@@ -25,6 +25,14 @@ import type { LoroDoc } from 'loro-crdt';
  * notes local-only.
  * Behavior: specs/today-outline.md (Page stream and dates, Data ownership).
  */
+/**
+ * Where a page stands with its room. `local`: unregistered, so there is
+ * nothing remote to wait for. `syncing`: registered and not yet synced.
+ * `retrying`: a failed register or join is waiting out its backoff. `synced`:
+ * the room has synced with a peer at least once.
+ */
+export type TodayPageSyncStatus = 'local' | 'syncing' | 'retrying' | 'synced';
+
 export type TodayPageStore = {
   readonly docId: string;
   readonly userId: string;
@@ -34,6 +42,8 @@ export type TodayPageStore = {
   /** Resolves once the page's room has synced with a peer; never while unregistered. */
   readonly synced: Promise<void>;
   getSnapshot(): TodayPageSnapshot;
+  /** Read with `subscribe`; listeners also run when only this changes. */
+  getSyncStatus(): TodayPageSyncStatus;
   subscribe(listener: () => void): () => void;
   /** A peer registered this page: join its room. */
   markRegistered(): void;
@@ -80,15 +90,26 @@ export function createTodayPageStore(options: {
   let failures = 0;
   let cancelRetry: (() => void) | undefined;
   let retryStage: 'register' | 'join' | undefined;
+  let isSynced = false;
   let markSynced: () => void = () => {};
   const synced = new Promise<void>((resolve) => {
     markSynced = resolve;
   });
+  const syncStatus = (): TodayPageSyncStatus =>
+    isSynced ? 'synced' : cancelRetry ? 'retrying' : registered ? 'syncing' : 'local';
+  let notifiedStatus: TodayPageSyncStatus | undefined;
+  const notifySyncStatus = () => {
+    const status = syncStatus();
+    if (status === notifiedStatus) return;
+    notifiedStatus = status;
+    for (const listener of listeners) listener();
+  };
 
   const clearRetry = () => {
     cancelRetry?.();
     cancelRetry = undefined;
     retryStage = undefined;
+    notifySyncStatus();
   };
   // One pending retry at a time; it re-runs whichever step is still missing.
   const retryLater = (stage: 'register' | 'join', error: unknown) => {
@@ -100,8 +121,10 @@ export function createTodayPageStore(options: {
     cancelRetry = options.setTimer(() => {
       cancelRetry = undefined;
       retryStage = undefined;
+      notifySyncStatus();
       advance();
     }, delay);
+    notifySyncStatus();
   };
 
   const ensureJoined = () => {
@@ -117,7 +140,10 @@ export function createTodayPageStore(options: {
         room = joined.room;
         failures = 0;
         void joined.synced.then(() => {
-          if (!disposed) markSynced();
+          if (disposed) return;
+          isSynced = true;
+          markSynced();
+          notifySyncStatus();
         });
       })
       .catch((error: unknown) => retryLater('join', error))
@@ -133,6 +159,7 @@ export function createTodayPageStore(options: {
       .then(() => {
         registered = true;
         failures = 0;
+        notifySyncStatus();
         ensureJoined();
       })
       .catch((error: unknown) => retryLater('register', error))
@@ -165,6 +192,7 @@ export function createTodayPageStore(options: {
     clearRetry();
     advance();
   });
+  notifiedStatus = syncStatus();
   advance();
 
   return {
@@ -175,6 +203,7 @@ export function createTodayPageStore(options: {
     undo,
     synced,
     getSnapshot: () => snapshot,
+    getSyncStatus: syncStatus,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -182,6 +211,7 @@ export function createTodayPageStore(options: {
     markRegistered: () => {
       registered = true;
       clearRetry();
+      notifySyncStatus();
       ensureJoined();
     },
     dispose: () => {

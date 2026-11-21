@@ -65,6 +65,11 @@ any time; when off it changes none of the app's existing behavior.
 - A page is created and registered on the first input of that day; viewing alone creates nothing. At midnight a
   new today appears on top and the current scroll position stays put.
 - Every date's content is directly editable.
+- A page that is still opening shows a faint placeholder bar, only after a short delay so a local-cache open does
+  not flash. A registered page that is empty locally says "Syncing…" in place of "Write something…" until its room
+  first syncs, and says it cannot sync while a failed join waits to retry; the line stays editable throughout
+  (edits merge on sync). An unregistered day has nothing remote to wait for and keeps "Write something…". A page
+  with local content shows no sync state.
 - Your own Today shows by default. The top more menu has "View a member's Today", which switches to any member's
   Today and allows editing; it takes no permanent space. The member list reuses the workspace's existing member
   source; with a single member (such as a local OSS workspace) the item is hidden. The more menu also offers

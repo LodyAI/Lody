@@ -188,6 +188,20 @@ describe('Today page store', () => {
     expect(calls.joins).toBe(2);
   });
 
+  it('reports an unregistered day as local and a registered one as syncing, retrying, then synced', async () => {
+    expect(harness().store.getSyncStatus()).toBe('local');
+    const { store, timers } = harness({ registered: true, joins: ['fail'] });
+    const seen: string[] = [];
+    store.subscribe(() => seen.push(store.getSyncStatus()));
+    expect(store.getSyncStatus()).toBe('syncing');
+    await flush();
+    expect(store.getSyncStatus()).toBe('retrying');
+    timers.fireAll();
+    await flush();
+    expect(store.getSyncStatus()).toBe('synced');
+    expect(seen).toEqual(['retrying', 'syncing', 'synced']);
+  });
+
   it('marks a room whose first sync failed as synced once it heals', async () => {
     let healed = () => {};
     const heal = { promise: new Promise<void>((resolve) => (healed = resolve)) };
@@ -196,9 +210,11 @@ describe('Today page store', () => {
     void store.synced.then(() => (synced = true));
     await flush();
     expect(synced).toBe(false);
+    expect(store.getSyncStatus()).toBe('syncing');
     healed();
     await flush();
     expect(synced).toBe(true);
+    expect(store.getSyncStatus()).toBe('synced');
   });
 
   it('keeps a room whose first sync failed instead of joining again, and releases it on dispose', async () => {
