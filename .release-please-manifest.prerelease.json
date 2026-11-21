@@ -1,0 +1,5 @@
+{
+  "apps/cli": "0.111.2-next.2",
+  "apps/electron": "0.111.2-next.2",
+  "apps/mobile-capacitor": "0.111.2-next.2"
+}
