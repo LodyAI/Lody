@@ -1,4 +1,4 @@
-import type { TodayDate } from '@lody/shared';
+import { parseTodayDate, type TodayDate } from '@lody/shared';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 
 /**
@@ -53,6 +53,18 @@ export function todayRouteOutcome(input: {
 }): 'redirect' | 'to-column' | 'page' {
   if (!input.enabled) return 'redirect';
   return input.pinned && !input.compact ? 'to-column' : 'page';
+}
+
+export type TodaySearch = { member?: string; date?: string };
+
+/** The member/date search shared by the Today page and the Today window routes. */
+export function validateTodaySearch(search: Record<string, unknown>): TodaySearch {
+  return {
+    ...(typeof search.member === 'string' && search.member ? { member: search.member } : {}),
+    ...(typeof search.date === 'string' && parseTodayDate(search.date)
+      ? { date: search.date }
+      : {}),
+  };
 }
 
 /**

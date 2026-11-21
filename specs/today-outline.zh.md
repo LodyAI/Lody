@@ -37,6 +37,10 @@ Today 是每个成员按天分页的极简大纲笔记。节点可以引用一�
   窗口变窄时随之收窄并保留两侧留白；嵌套缩进占用列内宽度。「更多」菜单的「全宽」开关改为铺满整个主区域，
   这是本机的全局偏好，不按日期区分。拖入对话时落在列旁空白处，也落到同一高度的那一天。固定时打开同一工作区的 Today 链接或点侧栏的 Today 入口，
   只让 Today 栏跳到对应日期，主区域同样保持当前内容。
+- 桌面端在图钉旁（整页或固定栏）有一个按钮，用独立窗口打开当前显示日期的 Today，每个工作区一个窗口（再次打开只把它提到前面），
+  原窗口不变。该窗口只显示日期流，其图钉改为让窗口置顶于所有窗口之上。从其中的引用（单击或 Enter）打开的对话显示在主窗口；
+  转为任务后 Today 留在原处。该窗口不加载工作区外壳（侧栏、通知、角标、命令面板），也不启动对话的后台预取：
+  只同步它显示的页面、元数据与实时状态。关闭实验功能时窗口随之关闭。
 
 ### 页面流与日期
 
@@ -181,3 +185,4 @@ Today 是每个成员按天分页的极简大纲笔记。节点可以引用一�
   `packages/components/src/components/chat/chat-landing-selectors.tsx`
 - 侧栏拖拽桥：`packages/components/src/lib/session-mention-drag.ts`
 - 实时状态：`packages/shared/src/live-activity-summary.ts`；状态分组见 PR #2948
+- Today 窗口：`apps/electron/src/main/today-windows.ts`、`packages/components/src/routes/$workspaceName/today-window.tsx`

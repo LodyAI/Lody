@@ -29,7 +29,9 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { userAtom } from '@/atoms';
 import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
-import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { openTodayWindow } from '@/lib/desktop-window';
+import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { withClassName } from '@/lib/stylex';
 import {
@@ -72,6 +74,9 @@ import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-st
 import { useTodayClock } from './use-today-clock';
 
 export type TodayViewTarget = { member?: string; date?: string };
+
+/** Opens a conversation a mention points at; the host decides where it shows. */
+export type TodayOpenSession = (target: { sessionId: SessionId; workspaceId: string }) => void;
 
 /** Default max width of the Today page's text column, in px. */
 export const TODAY_READABLE_WIDTH = 720;
@@ -192,9 +197,15 @@ const styles = stylex.create({
 export function TodayView(props: {
   target: TodayViewTarget;
   onNavigate: (target: TodayViewTarget) => void;
-  /** Rendered as the pinned column (vs the full page). */
+  /**
+   * Rendered as the pinned column (vs the full page). In the standalone window
+   * it is instead whether the window stays above all others.
+   */
   pinned?: boolean;
   onTogglePin?: () => void;
+  /** Rendered as the desktop's standalone Today window. */
+  standalone?: boolean;
+  onOpenSession?: TodayOpenSession;
 }) {
   const { t, i18n } = useTranslation();
   const scope = useResolvedWorkspaceScope();
@@ -212,6 +223,11 @@ export function TodayView(props: {
   const [fullWidth, setFullWidth] = useAtom(todayFullWidthAtom);
   const [empty, setEmpty] = useState<ReadonlySet<TodayDate>>(new Set());
   const { members, isMultiMember } = useWorkspaceMembers();
+  const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const standalone = props.standalone ?? false;
+  const pinnedColumn = !standalone && (props.pinned ?? false);
+  const openSession = useRef<TodayOpenSession>(openSessionDeepLink);
+  openSession.current = props.onOpenSession ?? openSessionDeepLink;
 
   useEffect(() => {
     setRegistered([]);
@@ -250,7 +266,7 @@ export function TodayView(props: {
             : null,
       });
     created.onOpenSession = (sessionId) => {
-      if (workspaceId) openSessionDeepLink({ sessionId: sessionId as SessionId, workspaceId });
+      if (workspaceId) openSession.current({ sessionId: sessionId as SessionId, workspaceId });
     };
     setController(created);
     return () => {
@@ -268,7 +284,8 @@ export function TodayView(props: {
     <TodayEditorContext.Provider value={controller}>
       <div {...stylex.props(styles.root)} data-testid="today-view">
         <TodayToolbar
-          pinned={props.pinned ?? false}
+          pinned={pinnedColumn}
+          standalone={standalone}
           title={
             memberName ? t('today.memberTitle', '{{name}}’s Today', { name: memberName }) : null
           }
@@ -282,6 +299,17 @@ export function TodayView(props: {
               props.onNavigate({ ...props.target, date: date === today ? undefined : date })
             }
           />
+          {!standalone && workspaceSlug && isElectronRenderer() ? (
+            <Button
+              variant="ghost"
+              size="small"
+              icon
+              aria-label={t('today.openWindow', 'Open Today in a new window')}
+              onClick={() => openTodayWindow({ workspace: workspaceSlug, ...props.target })}
+            >
+              <OpenWindowIcon />
+            </Button>
+          ) : null}
           {props.onTogglePin ? (
             <Button
               variant="ghost"
@@ -289,9 +317,13 @@ export function TodayView(props: {
               icon
               aria-pressed={props.pinned ?? false}
               aria-label={
-                props.pinned
-                  ? t('today.unpin', 'Unpin Today')
-                  : t('today.pin', 'Pin Today beside the sidebar')
+                standalone
+                  ? props.pinned
+                    ? t('today.unpinWindow', 'Stop keeping on top')
+                    : t('today.pinWindow', 'Keep on top of other windows')
+                  : props.pinned
+                    ? t('today.unpin', 'Unpin Today')
+                    : t('today.pin', 'Pin Today beside the sidebar')
               }
               onClick={props.onTogglePin}
             >
@@ -333,7 +365,7 @@ export function TodayView(props: {
                   </Menu.Content>
                 </Menu.Submenu>
               ) : null}
-              {props.pinned ? null : (
+              {pinnedColumn || standalone ? null : (
                 <Menu.CheckboxItem
                   checked={fullWidth}
                   indicatorSide="end"
@@ -358,8 +390,16 @@ export function TodayView(props: {
         </TodayToolbar>
         <TodayOutlineSurface
           controller={controller}
-          fullWidth={props.pinned || fullWidth}
-          placement={props.pinned ? (sidebarVisible ? 'pinned' : 'pinnedAtWindowEdge') : 'page'}
+          fullWidth={pinnedColumn || standalone || fullWidth}
+          placement={
+            standalone
+              ? 'pinned'
+              : pinnedColumn
+                ? sidebarVisible
+                  ? 'pinned'
+                  : 'pinnedAtWindowEdge'
+                : 'page'
+          }
         >
           {days.map((date, index) => (
             <TodayDaySection
@@ -374,7 +414,7 @@ export function TodayView(props: {
           ))}
         </TodayOutlineSurface>
         <TodayLiveSessionPicker />
-        <TodayNodeActions pinned={props.pinned ?? false} />
+        <TodayNodeActions pinned={pinnedColumn} />
         <TodayMentionStatusMenuHost />
         {anchor && anchor !== today ? (
           <div {...stylex.props(styles.back)}>
@@ -402,7 +442,13 @@ export function TodayView(props: {
  * the sidebar's toggle and Back/Forward, which would otherwise be unreachable.
  * The pinned column is not at the window top and needs none of this.
  */
-export function TodayToolbar(props: { pinned: boolean; title: ReactNode; children: ReactNode }) {
+export function TodayToolbar(props: {
+  pinned: boolean;
+  /** The standalone Today window's top row: window chrome without sidebar controls. */
+  standalone?: boolean;
+  title: ReactNode;
+  children: ReactNode;
+}) {
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
   const showSidebar = useSetAtom(showNavigationSidebarAtom);
   const fullscreen = useElectronFullscreen();
@@ -418,7 +464,10 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
   // controls; only the page is window chrome (drag region, caption buttons).
   const exemptClassName = page && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
   const besideTrafficLights =
-    !sidebarVisible && !isNativeAppShell() && isMacOSElectronRenderer() && !fullscreen;
+    (props.standalone || !sidebarVisible) &&
+    !isNativeAppShell() &&
+    isMacOSElectronRenderer() &&
+    !fullscreen;
   const chromeClassName = (
     page
       ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
@@ -441,12 +490,32 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
     >
       {/* With the sidebar hidden, Today (page or pinned column) is the window's
           leftmost surface and carries the sidebar toggle and Back/Forward. */}
-      {!sidebarVisible ? (
+      {!sidebarVisible && !props.standalone ? (
         <SidebarHistoryControls onToggleSidebar={showSidebar} className={exemptClassName} />
       ) : null}
       <span {...stylex.props(styles.title)}>{props.title}</span>
       <div {...withClassName(stylex.props(styles.controls), exemptClassName)}>{props.children}</div>
     </div>
+  );
+}
+
+/** Two stacked windows, the front one lower left: opens Today on its own. */
+function OpenWindowIcon() {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x={3} y={7} width={14} height={14} rx={2} />
+      <path d="M7 7V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2" />
+    </svg>
   );
 }
 
