@@ -696,7 +696,8 @@ send intake. Detailed decision and verification:
 
 Initial population and missing or rejected coverage read only the latest coherent window.
 An explicit reset atomically replaces the active cache in the other slot even when its
-Native publication revision is equal or consecutive, provided the captured head has not changed.
+Native publication revision is equal or lower after an explicit reset, provided the
+captured head has not changed.
 Last-change hints cannot repair unknown coverage. Older pages load on demand, using a
 checkpoint-protected absolute range where supported; ordinary refresh never sweeps the
 whole history. Genuine reset invalidates old pages until fetched again, including for
@@ -708,15 +709,22 @@ pending until explicit identity or the session's selected metadata source restor
 An empty history list is not legacy evidence. Owner capabilities remain live.
 Restoration is a finite identity barrier; a still-missing owner or a known Roost
 cursor waits for metadata changes rather than selecting legacy history.
-Independently negotiated `sessionHistoryWatch` v1 observes the committed checkpoint
-through local `watchChanges` or encrypted remote `session/history-watch`. Publication
-wakes the wait immediately; a 15-second deadline bounds idle waits without occupying
-the native Worker or writer queue. Actual body reads acquire bounded read capacity after
-waking, and idle replies transfer no history bodies. Active readers therefore recover
-through Native publications, independently of the session control document. Each bridge owns one refresh; release and
-hidden/offline remote views stop new observations. Local IPC remains usable offline.
+Independently negotiated `sessionHistorySubscription` sends committed checkpoints
+over local `session/history-subscription` and remote `session/history-subscribe`.
+The owner wakes subscriptions on Native publication. A write failure also wakes
+them to reconcile a potentially committed result. Bounded leases release parked
+observers and renew from the reader's applied checkpoint. An exact-base delta can
+travel with the checkpoint. Subscription reads only prepare inline deltas. The
+reader's incremental request repairs larger intervals and resets lost coverage.
+After a body read times out, the reader can retry that request once at the same
+checkpoint and keep the pages it already verified. It commits the window
+atomically against its starting cache head. Readers sharing that cache can apply
+the recorded invalidation when it starts at their displayed checkpoint. A reset
+or a gap without a matching invalidation rebuilds the displayed range.
+One viewer's lease does not retain Native worker or writer capacity. Local IPC
+remains usable offline.
 [Peer-reader readiness and observation](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md)
-records the lifecycle, protocol limits and verification.
+records the lifecycle and limits.
 
 ### Immutable input acceptance
 
@@ -982,7 +990,7 @@ not trigger a reload loop. A fresh bootstrap hint closes the private-load/admiss
 Observers wait outside the serial Native request lane and never retain a SQLite transaction.
 Unsubscribe does not stop writers. These wakes cover the shared Store owner, not independent
 processes opening the same file. The command RPC reader and renderer resume from their
-persisted scoped checkpoints through the existing `watchChanges` transport.
+persisted scoped checkpoints through the owner subscription.
 
 ### Project worktree preparation
 

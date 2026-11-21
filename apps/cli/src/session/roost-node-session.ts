@@ -1301,22 +1301,20 @@ const createNodeServicesForLease = async (
       })
     );
   const history: SessionHistoryReader = {
-    waitForChanges: async (checkpoint, waitMs, signal) => {
-      if (closing || disposed || signal?.aborted) throw new Error('History observer closed');
+    waitForChanges: async (checkpoint, signal) => {
+      if (closing || disposed || signal.aborted) throw new Error('History observer closed');
       let wake!: () => void;
       const changed = new Promise<void>((observed) => {
         wake = observed;
       });
       checkpointObservers.add(wake);
-      const timer = setTimeout(wake, Math.min(15_000, Math.max(0, waitMs)));
-      signal?.addEventListener('abort', wake, { once: true });
+      signal.addEventListener('abort', wake, { once: true });
       try {
         if ((await history.getCheckpoint!()) === checkpoint) await changed;
-        if (closing || disposed || signal?.aborted) throw new Error('History observer closed');
+        if (closing || disposed || signal.aborted) throw new Error('History observer closed');
       } finally {
-        clearTimeout(timer);
         checkpointObservers.delete(wake);
-        signal?.removeEventListener('abort', wake);
+        signal.removeEventListener('abort', wake);
       }
     },
     getPublication: () =>
@@ -1990,6 +1988,9 @@ const createNodeServicesForLease = async (
           const stale = error instanceof Error && 'code' in error && error.code === 'stale';
           if (idempotent) idempotent.optimistic = false;
           if (!stale || attempt >= 2) {
+            // A failed reply can follow a durable commit. Wake the observers
+            // to read a verified head without replaying the operation.
+            for (const wake of checkpointObservers) wake();
             reportRoostHistoryFailure(error, {
               stage: 'write',
               sessionId: viewId,

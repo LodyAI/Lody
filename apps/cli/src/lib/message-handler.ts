@@ -5,9 +5,14 @@ import type { SessionDirectoryListRequest } from '@lody/shared';
 import {
   sessionHistoryWriteIntentDigest,
   SessionHistoryReadResponseSchema,
+  SESSION_HISTORY_SUBSCRIPTION_LEASE_MS,
+  type SessionHistoryPublication,
+  type SessionHistorySubscription,
+  type SessionHistorySubscriptionRequest,
   isContainedSession,
 } from '@lody/shared';
 import { setTimeout as backfillWait } from 'node:timers/promises';
+import { publishRoostHistorySubscription } from '@/session/roost-history-subscription';
 import {
   storeLocalSessionImage,
   readLocalSessionImage,
@@ -834,9 +839,10 @@ export class MessageHandler {
   private readonly sealMachineIdentityRestore?: () => boolean;
   private readonly store = new SessionTransientStore();
   private readonly historyOwnerAbort = new AbortController();
-  private readonly historyWatchAbort = new AbortController();
-  private readonly historyWatchReads = new ConcurrentQueue<string>(8);
-  private historyWatchWaiters = 0;
+  private readonly historySubscriptionAbort = new AbortController();
+  private readonly historySubscriptionReads = new ConcurrentQueue<string>(8);
+  private readonly historySubscriptions = new Map<string, AbortController>();
+  private readonly cancelledHistorySubscriptions = new Map<string, number>();
   private sessionActivePresence!: SessionActivePresenceControllerLegacy;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
   // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
@@ -4068,7 +4074,7 @@ export class MessageHandler {
         },
         readSessionHistory: async ({ sessionId, query, signal }) =>
           await this.readSessionHistoryForRpc(sessionId, query, signal),
-        waitForSessionHistoryChanges: async (args) => await this.waitForSessionHistoryChanges(args),
+        subscribeSessionHistory: (args) => this.subscribeSessionHistory(args),
         writeSessionHistory: async ({ sessionId, operation, payload }) =>
           await this.writeSessionHistoryForRpc(sessionId, operation, payload),
         resolveCodeCollabOwnerSessionId: config.encryptedWorkspace
@@ -8469,6 +8475,9 @@ export class MessageHandler {
       case 'session/history-read':
         await this.handleSessionHistoryRead(message, context);
         break;
+      case 'session/history-subscription':
+        await this.handleSessionHistorySubscription(message, context);
+        break;
       case 'session/history-write':
         await this.handleSessionHistoryWrite(message, context);
         break;
@@ -8561,34 +8570,73 @@ export class MessageHandler {
     );
   };
 
-  private async waitForSessionHistoryChanges(args: {
+  private async subscribeSessionHistory(args: {
     sessionId: SessionId;
-    checkpoint: string;
-    waitMs: number;
+    subscriber: string;
+    subscription: SessionHistorySubscription;
     signal?: AbortSignal;
+    admit?: () => Promise<void>;
+    publish: (publication: SessionHistoryPublication, signal: AbortSignal) => Promise<void>;
   }): Promise<void> {
-    if (this.historyWatchWaiters >= 128)
+    const { sessionId, subscriber, subscription } = args;
+    const key = JSON.stringify([subscriber, sessionId, subscription.id]);
+    if (subscription.action === 'close') {
+      const active = this.historySubscriptions.get(key);
+      if (active) active.abort();
+      // The reserved close lane can run ahead of an open whose admission is
+      // still pending. Keep that exact cancellation within the lease horizon.
+      const cancelled = this.cancelledHistorySubscriptions;
+      cancelled.delete(key);
+      cancelled.set(key, Date.now() + SESSION_HISTORY_SUBSCRIPTION_LEASE_MS);
+      if (cancelled.size > 128) cancelled.delete(cancelled.keys().next().value!);
+      return;
+    }
+    const cancelledUntil = this.cancelledHistorySubscriptions.get(key);
+    if (cancelledUntil !== undefined) {
+      if (cancelledUntil > Date.now()) return;
+      this.cancelledHistorySubscriptions.delete(key);
+    }
+    if (this.historySubscriptions.has(key) || this.historySubscriptions.size >= 128)
       throw new LoroStreamsRpcHandlerError(
         'rpc_request_capacity_exceeded',
-        'History observation capacity exceeded.'
+        'History subscription capacity exceeded.'
       );
-    this.historyWatchWaiters++;
+
+    const controller = new AbortController();
+    const deadline = AbortSignal.timeout(SESSION_HISTORY_SUBSCRIPTION_LEASE_MS);
+    const signal = AbortSignal.any([
+      this.historyOwnerAbort.signal,
+      this.historySubscriptionAbort.signal,
+      controller.signal,
+      deadline,
+      ...(args.signal ? [args.signal] : []),
+    ]);
+    this.historySubscriptions.set(key, controller);
     try {
-      const signal = AbortSignal.any([
-        this.historyOwnerAbort.signal,
-        this.historyWatchAbort.signal,
-        ...(args.signal ? [args.signal] : []),
-      ]);
-      await this.resolveSessionHistoryOwnerSessionId(args.sessionId, { signal });
-      this.touchSession(args.sessionId);
-      const doc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
+      signal.throwIfAborted();
+      await this.resolveSessionHistoryOwnerSessionId(sessionId, { signal });
+      this.touchSession(sessionId);
+      const doc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const backend = await this.getSessionBackend(doc);
-      if (backend.kind !== 'roost' || !backend.history.waitForChanges)
-        throw new Error('History observation unavailable');
-      await backend.flushLocalWrites();
-      await backend.history.waitForChanges(args.checkpoint, args.waitMs, signal);
+      const wait = backend.history.waitForChanges;
+      if (backend.kind !== 'roost' || !wait) throw new Error('History subscription unavailable');
+      await publishRoostHistorySubscription({
+        subscription,
+        signal,
+        read: (query) =>
+          this.historySubscriptionReads.enqueue(sessionId, async () => {
+            signal.throwIfAborted();
+            await args.admit?.();
+            signal.throwIfAborted();
+            return this.readSessionHistoryForRpc(sessionId, query, signal);
+          }),
+        waitForChange: (checkpoint) => wait(checkpoint, signal),
+        publish: (publication) => args.publish(publication, signal),
+      });
+    } catch (error) {
+      if (!signal.aborted) throw error;
     } finally {
-      this.historyWatchWaiters--;
+      this.historySubscriptions.delete(key);
     }
   }
 
@@ -8598,23 +8646,6 @@ export class MessageHandler {
     signal?: AbortSignal
   ): Promise<SessionHistoryReadResponse> {
     try {
-      if (query.kind === 'watchChanges') {
-        await this.waitForSessionHistoryChanges({
-          sessionId,
-          checkpoint: query.checkpoint,
-          waitMs: query.waitMs,
-          signal,
-        });
-        const read = {
-          kind: 'readChanges' as const,
-          checkpoint: query.checkpoint,
-          includeBodiesFrom: query.includeBodiesFrom,
-          ...(query.withPatches ? { withPatches: true as const } : {}),
-        };
-        return await this.historyWatchReads.enqueue(sessionId, () =>
-          this.readSessionHistoryForRpc(sessionId, read, signal)
-        );
-      }
       await this.resolveSessionHistoryOwnerSessionId(sessionId, { signal });
       this.touchSession(sessionId);
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -8988,6 +9019,34 @@ export class MessageHandler {
       return;
     }
     dispatchContext.send(await this.readSessionHistoryForRpc(message.sessionId, message.query));
+  }
+
+  private async handleSessionHistorySubscription(
+    message: SessionHistorySubscriptionRequest,
+    context: MessageDispatchContext
+  ): Promise<void> {
+    const { sessionId, subscription } = message;
+    const response = {
+      type: 'session/history-subscription_response' as const,
+      sessionId,
+      subscriptionId: subscription.id,
+    };
+    try {
+      if (message.workspaceId !== this.workspaceId || message.machineId !== this.machineId)
+        throw new Error('History subscription target mismatch');
+      if (this.encryptedAttachments) throw new Error('e2ee_history_backend_unavailable');
+      await this.subscribeSessionHistory({
+        sessionId,
+        subscriber: 'local',
+        subscription,
+        publish: async (publication) =>
+          context.send({ ...response, event: 'publication', publication }),
+      });
+      context.send({ ...response, event: 'closed' });
+    } catch (error) {
+      this.logger.debug(`History subscription closed: ${formatErrorMessage(error)}`);
+      context.send({ ...response, event: 'closed', error: 'History subscription unavailable' });
+    }
   }
 
   private async handleSessionHistoryWrite(
@@ -11954,8 +12013,9 @@ export class MessageHandler {
   /**
    * Release parked observers before the processor drains; shared writes keep their owner.
    */
-  cancelPendingHistoryWatches(): void {
-    this.historyWatchAbort.abort();
+  cancelPendingHistorySubscriptions(): void {
+    this.historySubscriptionAbort.abort();
+    this.cancelledHistorySubscriptions.clear();
   }
 
   inspectClientLoss() {
@@ -12000,7 +12060,7 @@ export class MessageHandler {
     void inboxShutdown.catch((cause) =>
       this.logger.error('Inbox shutdown retains resources', cause)
     );
-    this.cancelPendingHistoryWatches();
+    this.cancelPendingHistorySubscriptions();
     this.historyOwnerAbort.abort();
     await Promise.all([
       this.iosSimulatorService.closeAll(),

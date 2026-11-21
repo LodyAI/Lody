@@ -28,7 +28,11 @@ import {
   SorbetProvidersResultSchema,
 } from '@lody/shared/local-machine-rpc';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
-import type { PreviewControlOperation } from '@lody/shared';
+import type {
+  PreviewControlOperation,
+  SessionHistoryPublication,
+  SessionHistorySubscription,
+} from '@lody/shared';
 import { mintPreviewControlProof, mintSessionHistoryReadProof } from '@/lib/preview-control-api';
 import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import type { RemoteAutomationOperation, RemoteAutomationResult } from '@lody/shared/automations';
@@ -346,6 +350,39 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     });
     if (!response) throw new Error('Roost session history read request timed out.');
     return response;
+  };
+
+  const subscribeSessionHistory = async (
+    machineId: MachineId,
+    sessionId: SessionId,
+    subscription: Extract<SessionHistorySubscription, { action: 'open' }>,
+    onPublication: (publication: SessionHistoryPublication) => void,
+    signal: AbortSignal
+  ): Promise<void> => {
+    if (deps.protectedContent) throw new Error('e2ee_history_backend_unavailable');
+    await requireSessionHistoryCapability(machineId);
+    if ((await resolveMachineTargetPlane(machineId)) !== 'cloud')
+      throw new Error('Local Roost history must use the local session control bridge.');
+    signal.throwIfAborted();
+    const readProof = await mintSessionHistoryReadProof(
+      { workspaceId, machineId, sessionId },
+      deps.getSessionToken?.() ?? null
+    );
+    signal.throwIfAborted();
+    const response = await (
+      await getMachineRpcClient(machineId)
+    ).requestSessionHistorySubscription({
+      sessionId,
+      subscription,
+      readProof,
+      onPublication,
+      signal,
+    });
+    if (signal.aborted) return;
+    if (!response || response.event !== 'closed' || response.error)
+      throw new Error(
+        response?.event === 'closed' ? response.error : 'History subscription unavailable'
+      );
   };
 
   const requestSessionHistoryWrite = async (
@@ -2226,6 +2263,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionEditAndResend,
     requestSessionDispatchTurn,
     requestSessionHistoryRead,
+    subscribeSessionHistory,
     requestSessionHistoryWrite,
     requestFilePreview,
     requestFileDownloadChunk,

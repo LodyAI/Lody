@@ -230,7 +230,7 @@ describe('MessageHandler machine registration', () => {
         sessionHistory: 4,
         sessionHistoryIncremental: 1,
         sessionHistoryInspection: 2,
-        sessionHistoryWatch: 1,
+        sessionHistorySubscription: 1,
         sessionHistoryPatches: 1,
         sessionInputAcceptance: 1,
         localAttachmentDownload: 1,
