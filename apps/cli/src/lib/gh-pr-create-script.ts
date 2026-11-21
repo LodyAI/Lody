@@ -68,6 +68,7 @@ const createPrViaRest = async (ghCommand, target, parsed, env) => {
   }
   // Publish the durable result before any optional follow-up can fail.
   process.stdout.write(pr.html_url + '\n');
+  await reportCreatedPullRequest(pr.html_url);
   const editArgs = ['pr', 'edit', String(pr.number), '--repo', target.repo];
   for (const [key, flag] of Object.entries({ label: '--add-label', assignee: '--add-assignee',
     reviewer: '--add-reviewer', milestone: '--milestone', project: '--add-project' }))

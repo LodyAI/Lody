@@ -51,7 +51,7 @@ import type { messageQueueItemSchema, sessionDocSchema } from './session-doc-sch
 export * from './session-pull-request-meta';
 import type {
   SessionAutoDelivery,
-  SessionPullRequestLifecycleFields,
+  SessionPullRequestRecordFields,
   SessionPullRequestMeta,
   SessionPullRequestStateMeta,
 } from './session-pull-request-meta';
@@ -628,7 +628,7 @@ export function isScheduleImportFenced(
   return fence?.workspaceId === workspaceId && fence.activationId === activationId;
 }
 
-export type SessionMeta = SessionPullRequestLifecycleFields & {
+export type SessionMeta = SessionPullRequestRecordFields & {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
   id: SessionId;
