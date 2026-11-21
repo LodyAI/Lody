@@ -7,7 +7,8 @@ Settings owns the workspace catalog surfaces (Providers, MCP servers, Agent
 Roles). Before saving a catalog row, follow the durability rule in
 [shared source contracts](../../../../shared/src/AGENTS.md#workspace-mcp--roles).
 Lody Agent connections and Sorbet endpoints follow
-[Lody Agent setup](README.md#lody-agent-setup).
+[Lody Agent setup](README.md#lody-agent-setup) and the
+[harness surface](../harness/AGENTS.md).
 
 ## Layout and components
 
@@ -47,19 +48,6 @@ Lody Agent connections and Sorbet endpoints follow
   content width. Never size columns from viewport breakpoints: the panel
   clips controls. Desktop Settings nav follows panel width; keep categories/drafts,
   reveal the selection and wrap actions.
-- Settings > Lody Agent renders the harness surface (`components/harness`) in the
-  desktop pane: pairing, providers, models, plugins, permissions and the config
-  file. The surface draws no chrome of its own — the pane owns the page title,
-  close and scrolling, the device it is scoped to rides in that header, and the
-  harness navigation is one tab row inside the pane. Its styling is StyleX:
-  `harness.tokens.stylex.ts` holds the sheet's own ramp, `parts.ts` the atoms,
-  and each view its `*.styles.ts`. Its controls are `@lody/ui`'s where the design
-  system has one — button, input, select, switch, spinner, kbd — and hand-drawn
-  where it does not. Never give it a stylesheet of its own.
-  Its state is the local harness store (`lody-harness-v1`) until the provider and
-  machine RPC wiring lands. Both the desktop settings pane and the narrow
-  `/settings/lody-agent` route render this surface; keep it responsive rather than
-  introducing a second settings implementation.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
