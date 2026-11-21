@@ -1363,19 +1363,26 @@ async function openWorkspaceOwned(
       );
     })();
     removalReceipt = (async () => {
+      /** Recording or draining failed: nothing is erased. */
       const failures: unknown[] = [];
+      /** The engine failed (host down, drop busy): the marker finishes it later. */
+      const nativeFailures: unknown[] = [];
       const native = nativeEngine;
-      const retired = native?.handle.retireWriter().catch((cause: unknown) => {
-        failures.push(cause);
-      });
+      const retired = deviceRevoked
+        ? native?.handle.retireWriter().catch((cause: unknown) => {
+            nativeFailures.push(cause);
+          })
+        : undefined;
       let recorded = false;
       try {
         recorded = await removalRecorded;
-        if (recorded && memberRemoved && native)
-          await nativePendingWipeMarker(native.dataDir, options.workspaceId).write();
       } catch (cause) {
         failures.push(cause);
       }
+      if (recorded && memberRemoved && native)
+        await nativePendingWipeMarker(native.dataDir, options.workspaceId)
+          .write()
+          .catch((cause: unknown) => nativeFailures.push(cause));
       await retired;
       try {
         // Even a local persistence failure must stop the execution owner.
@@ -1388,14 +1395,21 @@ async function openWorkspaceOwned(
       } catch (cause) {
         if (!failures.includes(cause)) failures.push(cause);
       }
-      if (failures.length === 1) throw failures[0];
-      if (failures.length > 1) throw new AggregateError(failures, 'e2ee_removal_failed');
-      if (memberRemoved && recorded) await native?.handle.wipe();
-      if (memberRemoved)
-        await eraseRemovedWorkspace({
-          ...options,
-          expectedSigningPublicKey: opened.signingPublicKey,
-        });
+      if (failures.length === 0 && memberRemoved) {
+        if (recorded)
+          await native?.handle.wipe().catch((cause: unknown) => nativeFailures.push(cause));
+        try {
+          await eraseRemovedWorkspace({
+            ...options,
+            expectedSigningPublicKey: opened.signingPublicKey,
+          });
+        } catch (cause) {
+          failures.push(cause);
+        }
+      }
+      const all = [...failures, ...nativeFailures];
+      if (all.length === 1) throw all[0];
+      if (all.length > 1) throw new AggregateError(all, 'e2ee_removal_failed');
     })();
     void removalReceipt.catch(() => {
       try {
