@@ -77,7 +77,7 @@ Translation: current
 - 手机：`packages/components/src/components/mobile/`（WebView）；原生共享 runtime 和列表在
   `apps/mobile/ios`、`apps/mobile/android` 子模块里。
 
-已执行的验证：测试样例（11 个布局用例、33 个命令用例；原生 runtime 的副本在重新复制前仍是之前的 8 个和 28 个）在 `packages/shared/tests/status-view.test.ts`
+已执行的验证：测试样例（11 个布局用例、33 个命令用例）在 `packages/shared/tests/status-view.test.ts`
 里运行，也在 `packages/components` 的桌面和手机适配层、iOS 和 Android 的 runtime 测试里运行；Storybook
 端到端测试 `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`（5 个用例）；手机
 WebView 在 iOS 模拟器和 Android 模拟器上的 Storybook；原生列表在模拟器上用离线测试数据。没有验证：
