@@ -2,7 +2,7 @@ import { getSessionRoomId, isLoroRepoDocDeleted, type SessionMeta } from '@lody/
 import type { AutomationEvent, PendingWork } from '@lody/shared/automations';
 import type { SessionAutomationObservation } from '@/session/automation-observations';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
-import { createSessionBackend } from '@/session/session-backend';
+import { openSessionReadPort } from '@/session/session-backend';
 import { AutomationLedger, automationIdentity } from '../storage/ledger';
 import { observeCapacity } from './capacity';
 
@@ -85,8 +85,7 @@ export async function observeSessionTurnLegacy(
     (fact.capacityFailure === 'rate_limited' && exhausted);
   const overloaded = fact.capacityFailure === 'provider_overloaded';
   if ((quota || overloaded) && fact.binding && fact.nativeSessionId && fact.outcome === 'failed') {
-    const doc = await manager.getOrCreateSessionDoc(fact.sessionId);
-    const backend = await createSessionBackend(doc, meta);
+    const backend = await openSessionReadPort(manager, fact.sessionId, meta);
     const read = await backend.readTurn(fact.assistantTurnId);
     const unresolvedEffects =
       !fact.finalized || read.state !== 'ready' || hasUnresolvedToolEffects(read.turn.items);

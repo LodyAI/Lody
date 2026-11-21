@@ -1629,6 +1629,7 @@ function inboxExecutionFixture(
     workspaceDocument: {
       repo,
       getOrCreateSessionDoc: async () => doc,
+      openIdleSessionReader: async () => undefined,
       getOrOpenSessionCode: async () => null,
       updateAcpCapabilities: async () => {},
     } as never,
