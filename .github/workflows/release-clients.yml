@@ -134,16 +134,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - name: Install validation dependencies
-        run: >
-          set -euo pipefail
-
-          if [[ "$CHECK" == typecheck-mobile ]]; then
-            corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
-          else
-            corepack pnpm install --frozen-lockfile --prefer-offline
-          fi
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
         env:
-          CHECK: ${{ matrix.check }}
           LODY_SKIP_ELECTRON_POSTINSTALL: '1'
       - name: Run independent validation
         env:
