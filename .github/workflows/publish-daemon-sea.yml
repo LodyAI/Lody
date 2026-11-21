@@ -96,7 +96,7 @@ jobs:
       SITE_URL: ${{ vars.SITE_URL }}
       LODY_NIGHTLY_VERSION: ${{ inputs.version }}
       LODY_DAEMON_CHANNEL: ${{ inputs.channel || (github.ref_name == 'release' && 'stable' || 'next') }}
-      NODE_OPTIONS: --max-old-space-size=2048
+      NODE_OPTIONS: --max-old-space-size=4096
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
