@@ -33,7 +33,7 @@ type CachedChatStreamMessageItem = {
 
 const EMPTY_CHAT_STREAM_ITEM: ChatStreamItem = { type: 'empty' };
 
-const parseHistoryItemsForRender = (rawItems: unknown): MessageContent[] => {
+export const parseHistoryItemsForRender = (rawItems: unknown): MessageContent[] => {
   if (!Array.isArray(rawItems)) return [];
   return rawItems
     .map((item) => normalizeMessageContent(item))
@@ -77,6 +77,7 @@ function canReuseCachedMessageItem(
     cached.item.message.tokenUsage === entry.tokenUsage &&
     cached.rawFileDiff === entry.fileDiff &&
     cached.item.message.finished === entry.finished &&
+    cached.item.message.threadRoots === entry.threadRoots &&
     cached.rawPlan === entry.plan &&
     cached.rawTurnInputConfig === expectedInputConfig
   );
@@ -246,6 +247,7 @@ export function buildChatStreamItems(
       fileDiff: entry.fileDiff,
       finished: entry.finished,
       plan: entry.plan,
+      threadRoots: entry.threadRoots,
       // User turns keep their own config; assistant turns inherit the
       // preceding user's so the header can list mode / effort / plan / fast.
       inputConfig: expectedInputConfig,

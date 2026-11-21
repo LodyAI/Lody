@@ -47,6 +47,15 @@ describe('encrypted execution intent', () => {
       { ...config, modelId: 'other-model' },
       { ...config, modeId: 'bypassPermissions' },
       { ...config, agentType: 'claude' },
+      {
+        ...config,
+        replyTo: {
+          target: { kind: 'coordinator_bubble' as const, turnId: 't-1', bubbleId: 'b-1' },
+          threadRootId: 't-1:b-1',
+          author: 'coordinator' as const,
+          previewText: 'Need your decision',
+        },
+      },
     ])
       expect(turnExecutionDigest({ inputConfig: changed })).not.toBe(digest);
     expect(

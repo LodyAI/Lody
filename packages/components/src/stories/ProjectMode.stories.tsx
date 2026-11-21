@@ -8,7 +8,15 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useRef, useState } from 'react';
 import { ArrowUp } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/shared';
+import {
+  createCoordinatorReplyRef,
+  formatCoordinatorAnchorId,
+  type CoordinatorReplyRef,
+  type MachineId,
+  type SessionId,
+  type SessionMeta,
+  type SessionStatus,
+} from '@lody/shared';
 import {
   MessageRowView,
   SessionChatStreamView,
@@ -29,6 +37,9 @@ import {
 } from '@/components/project-mode/project-board-model';
 import { ProjectWorkspace } from '@/components/project-mode/project-workspace';
 import { CoordinatorConversationPreviewProvider } from '@/components/project-mode/coordinator-conversation';
+import { CoordinatorComposerReplyBanner } from '@/components/project-mode/coordinator-reply-ui';
+import { getCoordinatorThreadPanelTabId } from '@/components/project-mode/coordinator-thread-model';
+import { CoordinatorThreadPanel } from '@/components/project-mode/coordinator-thread-panel';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import {
   SessionSidePanelTabBar,
@@ -165,7 +176,8 @@ const turnItem = (
   role: 'user' | 'assistant' | 'system',
   minutes: number,
   items: unknown[],
-  finished = true
+  finished = true,
+  extra: Record<string, unknown> = {}
 ): ChatStreamItem =>
   ({
     turnIndex: 0,
@@ -179,12 +191,31 @@ const turnItem = (
       finished,
       modelInfo: role === 'assistant' ? { modelId: 'sonnet-5.5', name: 'Sonnet 5.5' } : undefined,
       items,
+      ...extra,
     },
   }) as ChatStreamItem;
 
 const target = (sessionId: string) => ({ sessionId, userTurnId: `${sessionId}-turn-1` });
 
-/** The rows a real coordinator conversation carries: intent + outcome bubbles, creation progress and a result batch. */
+const STORY_THREAD_ROOT_ANCHOR = {
+  kind: 'coordinator_bubble' as const,
+  turnId: 'turn-2',
+  bubbleId: 'msg-results-2',
+};
+const STORY_THREAD_ROOT_ID = formatCoordinatorAnchorId(STORY_THREAD_ROOT_ANCHOR);
+const STORY_REPLY_TO_RESULTS = createCoordinatorReplyRef({
+  target: STORY_THREAD_ROOT_ANCHOR,
+  author: 'coordinator',
+  text: turns[2]!.text,
+});
+const STORY_REPLY_TO_USER = createCoordinatorReplyRef({
+  target: { kind: 'user_turn', turnId: 'turn-reply-1' },
+  existingThreadRootId: STORY_THREAD_ROOT_ID,
+  author: 'user',
+  text: '旧的分享链接保留 7 天有效期，然后再自动失效。PR #2631 顺便帮我看下能不能直接合并。',
+});
+
+/** The rows a real coordinator conversation carries: intent + outcome bubbles, creation progress, a result batch, and an in-stream Feishu-style thread reply. */
 const streamItems: ChatStreamItem[] = [
   turnItem('turn-0', 'user', 30, [{ type: 'text', text: turns[0]!.text }]),
   turnItem('turn-1', 'assistant', 29, [
@@ -233,6 +264,7 @@ const streamItems: ChatStreamItem[] = [
           deliveryId: 'delivery-1',
           operationId: 'op-chat-1',
           operationKind: 'session_chat',
+          originThreadId: STORY_THREAD_ROOT_ID,
           completion: {
             type: 'result',
             value: {
@@ -261,9 +293,49 @@ const streamItems: ChatStreamItem[] = [
       type: 'coordinator_message',
       id: 'msg-results-2',
       body: turns[2]!.text,
+      linkedSessionIds: ['asks' as SessionId, 'unread-pr' as SessionId],
     },
   ]),
+  turnItem(
+    'turn-reply-1',
+    'user',
+    6,
+    [
+      {
+        type: 'text',
+        text: '旧的分享链接保留 7 天有效期，然后再自动失效。PR #2631 顺便帮我看下能不能直接合并。',
+      },
+    ],
+    true,
+    {
+      threadRoots: STORY_THREAD_ROOT_ID,
+      inputConfig: {
+        prompt: '旧的分享链接保留 7 天有效期，然后再自动失效。PR #2631 顺便帮我看下能不能直接合并。',
+        replyTo: STORY_REPLY_TO_RESULTS,
+      },
+    }
+  ),
+  turnItem(
+    'turn-reply-2',
+    'assistant',
+    5,
+    [
+      {
+        type: 'coordinator_message',
+        id: 'msg-reply-2',
+        body: '好，已经把「旧链接保留 7 天过渡期」转发给 **迁移 E2EE 会话分享** 继续实现了；**PR #2631** 单测全绿无冲突，你可以在右上角直接合并。',
+        replyTo: STORY_REPLY_TO_USER,
+        linkedSessionIds: ['asks' as SessionId, 'unread-pr' as SessionId],
+      },
+    ],
+    true,
+    {
+      threadRoots: STORY_THREAD_ROOT_ID,
+    }
+  ),
 ].map((item, turnIndex) => ({ ...item, turnIndex }));
+
+const storyReplyCountByRootId = new Map<string, number>([[STORY_THREAD_ROOT_ID, 2]]);
 
 const startingStreamItems: ChatStreamItem[] = [
   ...streamItems,
@@ -298,12 +370,18 @@ function ConversationPage({
   items,
   placeholder,
   agentActivityLabel = null,
+  replyDraft = null,
+  onClearReplyDraft,
+  onOpenReplyThread,
 }: {
   sessionId: SessionId;
   title: string;
   items: ChatStreamItem[];
   placeholder: string;
   agentActivityLabel?: string | null;
+  replyDraft?: CoordinatorReplyRef | null;
+  onClearReplyDraft?: () => void;
+  onOpenReplyThread?: (threadRootId: string, previewHint?: string) => void;
 }) {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [prompt, setPrompt] = useState('');
@@ -332,6 +410,15 @@ function ConversationPage({
               promptValue={prompt}
               onPromptChange={setPrompt}
               promptPlaceholder={placeholder}
+              replyBanner={
+                replyDraft ? (
+                  <CoordinatorComposerReplyBanner
+                    reply={replyDraft}
+                    onClear={onClearReplyDraft}
+                    onOpenThread={onOpenReplyThread}
+                  />
+                ) : undefined
+              }
               primaryAction={
                 <Button icon aria-label="Send">
                   <ArrowUp size={16} />
@@ -390,21 +477,51 @@ const coordinatorTasks = new Map(
 
 const BOARD_TAB = 'project-board';
 const CHILD_TAB = `side-session:${childId}`;
+const STORY_THREAD_TAB = getCoordinatorThreadPanelTabId(STORY_THREAD_ROOT_ID);
 
 /**
  * The coordinator's page as SessionDetail composes it: the conversation on the
  * left and the session's own right panel, whose resident first tab is the board.
- * A board row opens that conversation as another panel tab.
+ * A board row opens that conversation as another panel tab; clicking a bubble's
+ * reply count or quote chip opens its focused Thread tab.
  */
 function CoordinatorPage({
   mode = 'idle',
+  initialThreadOpen = false,
 }: {
   mode?: 'idle' | 'starting' | 'working';
+  initialThreadOpen?: boolean;
 }) {
   const [openedChild, setOpenedChild] = useState(true);
-  const [activeTab, setActiveTab] = useState(BOARD_TAB);
+  const [openedThreadRootId, setOpenedThreadRootId] = useState<string | null>(
+    initialThreadOpen ? STORY_THREAD_ROOT_ID : null
+  );
+  const [replyDraft, setReplyDraft] = useState<CoordinatorReplyRef | null>(null);
+  const [activeTab, setActiveTab] = useState(
+    initialThreadOpen ? STORY_THREAD_TAB : BOARD_TAB
+  );
+  const currentStreamItems =
+    mode === 'working'
+      ? workingStreamItems
+      : mode === 'starting'
+        ? startingStreamItems
+        : streamItems;
+  const openThread = (threadRootId: string) => {
+    setOpenedThreadRootId(threadRootId);
+    setActiveTab(getCoordinatorThreadPanelTabId(threadRootId));
+  };
   const tabs: SessionSidePanelTabItem[] = [
     { id: BOARD_TAB, label: '全部子对话', kind: 'board', closeable: false },
+    ...(openedThreadRootId
+      ? [
+          {
+            id: getCoordinatorThreadPanelTabId(openedThreadRootId),
+            label: '话串: 需要你决定：迁移 E2EE 会话分享…',
+            kind: 'session' as const,
+            closeable: true,
+          },
+        ]
+      : []),
     ...(openedChild
       ? [
           {
@@ -428,20 +545,20 @@ function CoordinatorPage({
               setOpenedChild(true);
               setActiveTab(CHILD_TAB);
             },
+            replyCountByRootId: storyReplyCountByRootId,
+            onReplyToBubble: setReplyDraft,
+            onOpenThread: openThread,
           }}
         >
           <ConversationPage
             sessionId={coordinatorId}
             title="项目协调者 · lody"
-            items={
-              mode === 'working'
-                ? workingStreamItems
-                : mode === 'starting'
-                  ? startingStreamItems
-                  : streamItems
-            }
+            items={currentStreamItems}
             agentActivityLabel={mode === 'idle' ? null : '正在看…'}
             placeholder="告诉协调者你想做什么"
+            replyDraft={replyDraft}
+            onClearReplyDraft={() => setReplyDraft(null)}
+            onOpenReplyThread={openThread}
           />
         </CoordinatorConversationPreviewProvider>
       }
@@ -454,6 +571,9 @@ function CoordinatorPage({
             onTabSelect={setActiveTab}
             onTabClose={(tabId) => {
               if (tabId === CHILD_TAB) setOpenedChild(false);
+              if (openedThreadRootId && tabId === getCoordinatorThreadPanelTabId(openedThreadRootId)) {
+                setOpenedThreadRootId(null);
+              }
               setActiveTab(BOARD_TAB);
             }}
             closeTabLabel={(label) => `关闭 ${label}`}
@@ -469,6 +589,18 @@ function CoordinatorPage({
                 }}
                 hideTitle
                 onAcceptTasks={() => {}}
+              />
+            ) : openedThreadRootId && activeTab === getCoordinatorThreadPanelTabId(openedThreadRootId) ? (
+              <CoordinatorThreadPanel
+                coordinatorSessionId={coordinatorId}
+                threadRootId={openedThreadRootId}
+                fallbackItems={currentStreamItems}
+                tasks={coordinatorTasks}
+                onOpenTask={() => {
+                  setOpenedChild(true);
+                  setActiveTab(CHILD_TAB);
+                }}
+                onSendReply={() => true}
               />
             ) : (
               <ConversationPage
@@ -491,15 +623,16 @@ function CoordinatorPage({
 function ProjectModePage({
   page = 'coordinator',
 }: {
-  page?: 'coordinator' | 'starting' | 'working' | 'start';
+  page?: 'coordinator' | 'thread' | 'starting' | 'working' | 'start';
 }) {
   const [view, setView] = useState<SidebarProjectView>('projects');
   const [selectedId, setSelectedId] = useState<string | null>(coordinatorProjectKeyId(project));
   const content = useMemo(
     () =>
-      page === 'coordinator' || page === 'starting' || page === 'working' ? (
+      page === 'coordinator' || page === 'thread' || page === 'starting' || page === 'working' ? (
         <CoordinatorPage
           mode={page === 'working' ? 'working' : page === 'starting' ? 'starting' : 'idle'}
+          initialThreadOpen={page === 'thread'}
         />
       ) : (
         <ProjectWorkspace
@@ -556,6 +689,10 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const LightZhCn: Story = { globals: { theme: 'light', locale: 'zh_CN' } };
+export const ThreadOpenZhCn: Story = {
+  args: { page: 'thread' },
+  globals: { theme: 'light', locale: 'zh_CN' },
+};
 export const DarkZhCn: Story = { globals: { theme: 'dark', locale: 'zh_CN' } };
 export const LightEn: Story = { globals: { theme: 'light', locale: 'en' } };
 export const StartingZhCn: Story = {

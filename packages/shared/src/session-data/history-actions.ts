@@ -1,6 +1,7 @@
 import { Immer, enablePatches, type Patch } from 'immer';
 import type { AgentHistoryMutationPath } from '../acp/history-apply';
 import { markAssistantTurnFinished } from './assistant-finalize';
+import { mergeThreadRootsScalar } from '../coordinator-threads';
 import { planOperationProgress, planOperationCompletion } from './operation-progress';
 import type { StoredLodyOperation } from '../session-orchestration';
 import type { OperationProgressStatus } from '../session-orchestration';
@@ -96,6 +97,8 @@ export type HistoryAction =
             body: string;
             images?: import('../ai').SessionImagePayload[];
             files?: import('../ai').SessionFilePayload[];
+            replyTo?: import('../coordinator-threads').CoordinatorReplyRef;
+            linkedSessionIds?: import('../ids').SessionId[];
             createdAt: number;
           }
         | { kind: 'status'; status: string; updatedAt: number };
@@ -404,9 +407,19 @@ export function applyHistoryAction(
             body: action.output.body,
             ...(action.output.images?.length ? { images: action.output.images } : {}),
             ...(action.output.files?.length ? { files: action.output.files } : {}),
+            ...(action.output.replyTo ? { replyTo: action.output.replyTo } : {}),
+            ...(action.output.linkedSessionIds?.length
+              ? { linkedSessionIds: action.output.linkedSessionIds }
+              : {}),
             createdAt: action.output.createdAt,
           },
         ];
+        if (action.output.replyTo?.threadRootId) {
+          const nextRoots = mergeThreadRootsScalar(entry.threadRoots, [
+            action.output.replyTo.threadRootId,
+          ]);
+          if (nextRoots) entry.threadRoots = nextRoots;
+        }
       } else {
         const withoutStatus = (entry.items ?? []).filter(
           (item) => item.type !== 'coordinator_status'

@@ -1,6 +1,15 @@
 import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
 import { LODY_AUTH_URL } from '@/utils/const';
-import { isContainedSession, isCoordinatorSession } from '@lody/shared';
+import {
+  COORDINATOR_ANCHOR_ID_MAX_CHARS,
+  extractLinkedSessionIdsFromText,
+  isContainedSession,
+  isCoordinatorSession,
+} from '@lody/shared';
+import {
+  resolveCoordinatorOperationOriginThreadId,
+  resolveCoordinatorOutboundReplyRef,
+} from '@/lib/coordinator-reply-context';
 import { createToolHelpServer, LODY_HELP_INSTRUCTIONS } from './tool-help';
 import { registerAndroidEmulatorPreviewTool } from './android-emulator-tool';
 import { resolveSessionPullRequests } from '@lody/shared';
@@ -251,6 +260,15 @@ const CoordinatorSendMessageInputSchema = z
       .optional()
       .describe(
         'Optional images, videos, or documents to display in this bubble. Accepts zero-copy references from delegated results or this conversation ("image:<id>", "file:<id>") or file paths inside this workspace.'
+      ),
+    threadId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(COORDINATOR_ANCHOR_ID_MAX_CHARS)
+      .optional()
+      .describe(
+        "Optional thread root identifier (e.g. from a delegated completion item's originThreadId) when routing bubbles to distinct threads. Omitted calls automatically inherit the active turn's thread."
       ),
   })
   .strict()
@@ -2696,6 +2714,7 @@ type InvokingTurnContext = {
   frozenInputConfig: SessionTurnInputConfig;
   notificationOriginTurnIds: string[];
   identity: InvocationIdentity;
+  originThreadId?: string;
   sender?: Extract<SessionActiveInvocationContextResult, { active: true }>['sender'];
 };
 
@@ -2813,10 +2832,21 @@ const resolveInvokingTurnContext = async (
       false
     );
   }
+  let originThreadId = source.inputConfig.replyTo?.threadRootId?.trim();
+  if (!originThreadId && isCoordinatorSession(session)) {
+    const doc = await manager.getOrCreateSessionDoc(session.id);
+    const backend = await createSessionBackend(doc, session);
+    originThreadId = await resolveCoordinatorOperationOriginThreadId({
+      history: backend.history,
+      sourceTurnId: source.id,
+      sourceReplyTo: source.inputConfig.replyTo,
+    });
+  }
   return {
     chainDepth,
     identity: buildInvocationIdentity(source),
     sender: source.sender,
+    ...(originThreadId ? { originThreadId } : {}),
     notificationOriginTurnIds: [...new Set(notificationOriginTurnIds)],
     frozenInputConfig: {
       ...source.inputConfig,
@@ -3448,6 +3478,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
               : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            ...(invoking.originThreadId ? { originThreadId: invoking.originThreadId } : {}),
             notificationOriginTurnIds: invoking.notificationOriginTurnIds,
             targetDispatchConfigs: [effectiveDispatchConfig],
           },
@@ -3733,6 +3764,16 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         readDelegatedAttachmentTurn(manager, sessionId, turnId, ctx.machineId as MachineId),
     });
     await freezeInvokingAuthor(manager, currentSession, invoking);
+    let chatOriginThreadId = invoking.originThreadId;
+    if (!chatOriginThreadId && isCoordinatorSession(currentSession)) {
+      const callerDoc = await manager.getOrCreateSessionDoc(currentSession.id);
+      const callerBackend = await createSessionBackend(callerDoc, currentSession);
+      chatOriginThreadId = await resolveCoordinatorOperationOriginThreadId({
+        history: callerBackend.history,
+        sourceTurnId: invoking.identity.sourceTurnId,
+        targetSessionId: args.sessionId as SessionId,
+      });
+    }
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -3753,6 +3794,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
               : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            ...(chatOriginThreadId ? { originThreadId: chatOriginThreadId } : {}),
             targetDispatchConfigs: [targetDispatchConfig],
             notificationOriginTurnIds: invoking.notificationOriginTurnIds,
           },
@@ -4411,6 +4453,7 @@ const startSessionCreateManyOperation = async (
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            ...(invoking.originThreadId ? { originThreadId: invoking.originThreadId } : {}),
             notificationOriginTurnIds: invoking.notificationOriginTurnIds,
             targetDispatchConfigs,
           },
@@ -4643,6 +4686,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
             sourceTurnId: invoking.identity.sourceTurnId,
+            ...(invoking.originThreadId ? { originThreadId: invoking.originThreadId } : {}),
             targetDispatchConfigs,
             notificationOriginTurnIds: invoking.notificationOriginTurnIds,
           },
@@ -4906,7 +4950,7 @@ export function buildSessionToolServer(
   if (options?.coordinator === true) {
     const applyCoordinatorTurnOutput = async (
       output:
-        | { kind: 'message'; markdown?: string; attachments?: string[] }
+        | { kind: 'message'; markdown?: string; attachments?: string[]; threadId?: string }
         | { kind: 'status'; status: string }
     ) => {
       const ctx = getSessionContext();
@@ -4970,6 +5014,19 @@ export function buildSessionToolServer(
         if (nextFiles.length > 0) files = nextFiles;
       }
 
+      const replyTo =
+        output.kind === 'message'
+          ? await resolveCoordinatorOutboundReplyRef({
+              history: backend.history,
+              activeAssistantTurnId: turnId,
+              explicitThreadId: output.threadId,
+            })
+          : undefined;
+      const linkedSessionIds =
+        output.kind === 'message' && output.markdown
+          ? extractLinkedSessionIdsFromText(output.markdown)
+          : undefined;
+
       const result = await backend.applyHistoryAction({
         kind: 'coordinator-output',
         ...(turnId ? { turnId } : {}),
@@ -4981,6 +5038,8 @@ export function buildSessionToolServer(
                 body: output.markdown ?? '',
                 ...(images ? { images } : {}),
                 ...(files ? { files } : {}),
+                ...(replyTo ? { replyTo } : {}),
+                ...(linkedSessionIds?.length ? { linkedSessionIds } : {}),
                 createdAt: now,
               }
             : { kind: 'status', status: normalizedStatus, updatedAt: now },
@@ -4993,6 +5052,7 @@ export function buildSessionToolServer(
         return jsonTextResult({
           ok: true,
           messageId,
+          ...(replyTo ? { threadId: replyTo.threadRootId } : {}),
           ...(images ? { imageCount: images.length } : {}),
           ...(files ? { fileCount: files.length } : {}),
         });
@@ -5016,6 +5076,7 @@ export function buildSessionToolServer(
             kind: 'message',
             markdown: args.markdown,
             attachments: args.attachments,
+            threadId: args.threadId,
           });
         } catch (error) {
           return mcpErrorResult(error);

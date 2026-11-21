@@ -5,7 +5,13 @@ import { shareFileBytesNatively } from '@/lib/session-file-native-save';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { localMachineIdAtom } from '@/atoms/local-probe';
-import { isCoordinatorSession, type SessionLocalAttachment } from '@lody/shared';
+import {
+  createCoordinatorReplyRef,
+  formatCoordinatorAnchorId,
+  isCoordinatorSession,
+  normalizeSessionTurnInputConfig,
+  type SessionLocalAttachment,
+} from '@lody/shared';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
@@ -151,6 +157,7 @@ import {
   ListChecks,
   MoveRight,
   PencilLine,
+  Reply,
   Search,
   Sparkles,
   Target,
@@ -301,6 +308,12 @@ import {
   CoordinatorTaskChangeStrip,
   useCoordinatorConversation,
 } from '@/components/project-mode/coordinator-conversation';
+import {
+  CoordinatorBubbleFooterActions,
+  CoordinatorInlineQuoteChip,
+  CoordinatorThreadReplyCountPill,
+  coordinatorBubbleHoverMarker,
+} from '@/components/project-mode/coordinator-reply-ui';
 import {
   getOperationCompletionItems,
   hasVisibleOperationContent,
@@ -4213,6 +4226,22 @@ const UserMessageRowView = ({
   }
 
   const isPinned = pinCtx?.pinnedHistoryId === message.id;
+  const coordinator = useCoordinatorConversation();
+  const userReplyTo = useMemo(
+    () => normalizeSessionTurnInputConfig(message.inputConfig)?.replyTo,
+    [message.inputConfig]
+  );
+  const userAnchorId = useMemo(
+    () => formatCoordinatorAnchorId({ kind: 'user_turn', turnId: message.id }),
+    [message.id]
+  );
+  const userReplyCount = coordinator?.activeThreadRootId
+    ? 0
+    : (coordinator?.replyCountByRootId?.get(userAnchorId) ?? 0);
+  const showUserInlineQuote =
+    Boolean(userReplyTo) &&
+    (!coordinator?.activeThreadRootId ||
+      formatCoordinatorAnchorId(userReplyTo!.target) !== coordinator.activeThreadRootId);
 
   const handleCopy = useCallback(async () => {
     if (!hasTextContent) return;
@@ -4427,11 +4456,23 @@ const UserMessageRowView = ({
                     />
                   </div>
                 ) : (
-                  <UserChatBubble
-                    sessionId={sessionId}
-                    message={message}
-                    conversationFontSize={conversationFontSize}
-                  />
+                  <div className="flex min-w-0 max-w-full flex-col items-end gap-1.5">
+                    {showUserInlineQuote && userReplyTo ? (
+                      <CoordinatorInlineQuoteChip
+                        replyTo={userReplyTo}
+                        onOpenThread={
+                          coordinator?.activeThreadRootId === userReplyTo.threadRootId
+                            ? undefined
+                            : coordinator?.onOpenThread
+                        }
+                      />
+                    ) : null}
+                    <UserChatBubble
+                      sessionId={sessionId}
+                      message={message}
+                      conversationFontSize={conversationFontSize}
+                    />
+                  </div>
                 )}
               </div>
             </div>
@@ -4439,16 +4480,33 @@ const UserMessageRowView = ({
         </div>
         {/* While editing, the row's own actions (edit/pin/copy) would compete with
             the editor's Cancel / Save & resend — hide them until it closes. */}
-        {(hasTextContent || copyContext) && !isEditing ? (
+        {(hasTextContent ||
+          copyContext ||
+          Boolean(coordinator?.onReplyToBubble) ||
+          userReplyCount > 0) &&
+        !isEditing ? (
           <div
             {...withClassName(
               stylex.props(conversationSurface.userActions),
               /* Touch has no hover: a tap on the message reveals its actions. */
-              isMobile && !mobileActionsRevealed ? 'invisible' : undefined
+              isMobile && !mobileActionsRevealed && userReplyCount === 0 ? 'invisible' : undefined
             )}
             data-user-message-actions=""
-            data-mobile-actions-hidden={isMobile && !mobileActionsRevealed ? '' : undefined}
+            data-mobile-actions-hidden={
+              isMobile && !mobileActionsRevealed && userReplyCount === 0 ? '' : undefined
+            }
           >
+            {userReplyCount > 0 && coordinator?.onOpenThread ? (
+              <CoordinatorThreadReplyCountPill
+                count={userReplyCount}
+                onClick={() =>
+                  coordinator.onOpenThread!(
+                    userAnchorId,
+                    getCopyTextFromMessageItems(message.items, copyWorkspaceId)
+                  )
+                }
+              />
+            ) : null}
             {copyContext && (
               <AssistantForkButton
                 turnId={message.id}
@@ -4556,9 +4614,46 @@ const UserMessageRowView = ({
                     </Button>
                   }
                 />
-                <Tooltip.Content>{didCopy ? 'Copied' : 'Copy message'}</Tooltip.Content>
+                 <Tooltip.Content>{didCopy ? 'Copied' : 'Copy message'}</Tooltip.Content>
               </Tooltip.Root>
             </Tooltip.Provider>
+            {coordinator?.onReplyToBubble ? (
+              <Tooltip.Provider>
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    delay={500}
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        className={cn(
+                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                          !isMobile &&
+                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                        )}
+                        onClick={() => {
+                          coordinator.onReplyToBubble!(
+                            createCoordinatorReplyRef({
+                              target: { kind: 'user_turn', turnId: message.id },
+                              existingThreadRootId:
+                                coordinator.activeThreadRootId ?? userReplyTo?.threadRootId,
+                              author: 'user',
+                              text: getCopyTextFromMessageItems(message.items, copyWorkspaceId),
+                            })
+                          );
+                        }}
+                        aria-label={t('projectMode.reply.action', 'Reply')}
+                        data-user-message-reply=""
+                      >
+                        <Reply className="h-3.5 w-3.5" />
+                      </Button>
+                    }
+                  />
+                  <Tooltip.Content>{t('projectMode.reply.action', 'Reply')}</Tooltip.Content>
+                </Tooltip.Root>
+              </Tooltip.Provider>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -6712,37 +6807,100 @@ function CoordinatorReplyBubble({
   onFilePathClick?: (filePath: string) => void;
   conversationFontSize: ConversationFontSize;
 }) {
+  const coordinator = useCoordinatorConversation();
+  const isMobile = useIsMobile();
+  const mobileActionsRevealed = useMobileMessageActionsRevealed(messageId);
   const hasBody = entry.body.trim().length > 0;
   const hasImages = (entry.images?.length ?? 0) > 0;
   const hasFiles = (entry.files?.length ?? 0) > 0;
+  const anchorId = useMemo(
+    () =>
+      formatCoordinatorAnchorId({
+        kind: 'coordinator_bubble',
+        turnId: messageId,
+        bubbleId: entry.id,
+      }),
+    [entry.id, messageId]
+  );
+  const replyCount = coordinator?.activeThreadRootId
+    ? 0
+    : (coordinator?.replyCountByRootId?.get(anchorId) ?? 0);
+  const showInlineQuote =
+    Boolean(entry.replyTo) &&
+    (!coordinator?.activeThreadRootId ||
+      formatCoordinatorAnchorId(entry.replyTo!.target) !== coordinator.activeThreadRootId);
 
   return (
-    <div {...stylex.props(coordinatorBubbleStyles.row)} data-coordinator-reply-bubble="">
-      <div {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}>
-        <div className="flex flex-col gap-2.5">
-          {hasBody ? (
-            <MarkdownBlock
-              text={entry.body}
-              size={conversationFontSize}
-              isStreaming={false}
-              onFilePathClick={onFilePathClick}
-              searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
-            />
-          ) : null}
-          {hasImages ? (
-            <ImageGroupBubble
-              content={{ type: 'image_group', images: entry.images! }}
-              sessionId={sessionId}
-              messageId={messageId}
-              itemIndex={itemIndex}
-              align="start"
-            />
-          ) : null}
-          {hasFiles ? (
-            <SessionFileGroup files={entry.files!} sessionId={sessionId} align="start" />
-          ) : null}
+    <div
+      {...stylex.props(coordinatorBubbleHoverMarker, coordinatorBubbleStyles.column)}
+      data-coordinator-reply-bubble=""
+      data-coordinator-anchor-id={anchorId}
+    >
+      <div {...stylex.props(coordinatorBubbleStyles.row)}>
+        <div {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}>
+          <div className="flex flex-col gap-2.5">
+            {showInlineQuote && entry.replyTo ? (
+              <CoordinatorInlineQuoteChip
+                replyTo={entry.replyTo}
+                onOpenThread={
+                  coordinator?.activeThreadRootId === entry.replyTo.threadRootId
+                    ? undefined
+                    : coordinator?.onOpenThread
+                }
+              />
+            ) : null}
+            {hasBody ? (
+              <MarkdownBlock
+                text={entry.body}
+                size={conversationFontSize}
+                isStreaming={false}
+                onFilePathClick={onFilePathClick}
+                searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
+              />
+            ) : null}
+            {hasImages ? (
+              <ImageGroupBubble
+                content={{ type: 'image_group', images: entry.images! }}
+                sessionId={sessionId}
+                messageId={messageId}
+                itemIndex={itemIndex}
+                align="start"
+              />
+            ) : null}
+            {hasFiles ? (
+              <SessionFileGroup files={entry.files!} sessionId={sessionId} align="start" />
+            ) : null}
+          </div>
         </div>
       </div>
+      <CoordinatorBubbleFooterActions
+        copyText={entry.body}
+        replyCount={replyCount}
+        alwaysRevealActions={isMobile && mobileActionsRevealed}
+        onOpenThread={
+          coordinator?.onOpenThread
+            ? () => coordinator.onOpenThread!(anchorId, entry.body)
+            : undefined
+        }
+        onReply={
+          coordinator?.onReplyToBubble
+            ? () =>
+                coordinator.onReplyToBubble!(
+                  createCoordinatorReplyRef({
+                    target: {
+                      kind: 'coordinator_bubble',
+                      turnId: messageId,
+                      bubbleId: entry.id,
+                    },
+                    existingThreadRootId:
+                      coordinator.activeThreadRootId ?? entry.replyTo?.threadRootId,
+                    author: 'coordinator',
+                    text: entry.body,
+                  })
+                )
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -6915,7 +7073,14 @@ function CoordinatorWorkingRow({
 
 const coordinatorBubbleStyles = stylex.create({
   siblingGap: {
-    paddingBlock: 3,
+    paddingBlock: 2,
+  },
+  column: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 2,
+    maxWidth: '100%',
   },
   row: {
     display: 'flex',

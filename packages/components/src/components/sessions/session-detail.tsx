@@ -55,6 +55,7 @@ import {
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsProtocolCapability,
   type CommentReferencePayload,
+  type CoordinatorReplyRef,
   type LocalProjectHistoryProvider,
   type LocalProjectId,
   type LocalProjectMeta,
@@ -68,6 +69,7 @@ import {
 } from '@lody/shared';
 import {
   SessionChatInterface,
+  type CoordinatorThreadHostState,
   type SessionChatInterfaceHandle,
   type SessionChatInterfaceProps,
   type SessionChatToolbar,
@@ -383,6 +385,11 @@ import { parseGitHubReferenceUrl } from '@/components/ai-gui/github-reference-li
 import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
 import { ProjectBoard } from '@/components/project-mode/project-board';
 import { CoordinatorConversationProvider } from '@/components/project-mode/coordinator-conversation';
+import { ConnectedCoordinatorThreadPanel } from '@/components/project-mode/coordinator-thread-panel';
+import {
+  getCoordinatorThreadPanelTabId,
+  parseCoordinatorThreadPanelTabId,
+} from '@/components/project-mode/coordinator-thread-model';
 import { getSessionCoordinatorProjectKey } from '@/components/project-mode/project-board-model';
 import {
   formatExternalUrlTabLabel,
@@ -1537,6 +1544,14 @@ const SessionDetail = ({
   // and stays mounted afterwards, so switching panels never tears down its state.
   /** Project mode: independent conversations opened from the board into the right panel. */
   const [panelSessionIds, setPanelSessionIds] = useState<SessionId[]>([]);
+  const [coordinatorReplyDraft, setCoordinatorReplyDraft] = useState<CoordinatorReplyRef | null>(
+    null
+  );
+  const [coordinatorThreadHostState, setCoordinatorThreadHostState] =
+    useState<CoordinatorThreadHostState | null>(null);
+  const [openedThreadTabs, setOpenedThreadTabs] = useState<
+    Array<{ threadRootId: string; previewHint?: string }>
+  >([]);
   const [mountedSideSessionIds, setMountedSideSessionIds] = useState<Set<SessionId>>(
     () => new Set()
   );
@@ -1579,6 +1594,9 @@ const SessionDetail = ({
     setClosingSideSessionIds(new Set());
     setMountedSideSessionIds(new Set());
     setPanelSessionIds([]);
+    setCoordinatorReplyDraft(null);
+    setCoordinatorThreadHostState(null);
+    setOpenedThreadTabs([]);
     setMountedChatSessionIds(new Set());
     setTabOrderState(readStoredTabOrder(sessionId));
     setViewerTabs(nextInitialTabState.viewerTabs);
@@ -4738,6 +4756,18 @@ const SessionDetail = ({
               kind: 'board' as const,
               closeable: false,
             },
+            ...openedThreadTabs.map((threadTab): SessionSidePanelTabItem => {
+              const shortHint = threadTab.previewHint?.trim()
+                ? threadTab.previewHint.trim().slice(0, 28)
+                : '';
+              const prefix = t('projectMode.thread.tabPrefix', 'Thread');
+              return {
+                id: getCoordinatorThreadPanelTabId(threadTab.threadRootId),
+                label: shortHint ? `${prefix}: ${shortHint}` : prefix,
+                kind: 'session',
+                closeable: true,
+              };
+            }),
           ]
         : []),
       ...fixedTabs,
@@ -4763,6 +4793,7 @@ const SessionDetail = ({
   }, [
     closingSideSessionIds,
     isProjectCoordinator,
+    openedThreadTabs,
     panelSessions,
     sidePanelFixedOptions,
     t,
@@ -5247,7 +5278,11 @@ const SessionDetail = ({
           : activeViewerTab,
       sidePanel: {
         open: isSidebarOpen,
-        tab: (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ? null : activeSidebarTab,
+        tab:
+          (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ||
+          Boolean(activeSidebarTab && parseCoordinatorThreadPanelTabId(activeSidebarTab as string))
+            ? null
+            : activeSidebarTab,
         tabs: openedSidebarTabs,
         sideSessionId:
           activeSideSessionId && panelSessionIdSet.has(activeSideSessionId)
@@ -5364,7 +5399,11 @@ const SessionDetail = ({
         handleViewerTabSelect(tabId);
         return;
       }
-      if (parseSideSessionPanelTabId(tabId) || tabId === PROJECT_BOARD_PANEL_TAB_ID) {
+      if (
+        parseSideSessionPanelTabId(tabId) ||
+        tabId === PROJECT_BOARD_PANEL_TAB_ID ||
+        parseCoordinatorThreadPanelTabId(tabId) !== null
+      ) {
         selectSidePanelTab(tabId);
         return;
       }
@@ -5375,6 +5414,17 @@ const SessionDetail = ({
 
   const handleSidePanelTabClose = useCallback(
     (tabId: string) => {
+      const threadRootId = parseCoordinatorThreadPanelTabId(tabId);
+      if (threadRootId) {
+        const { fallbackTabId } = getSidePanelTabStateAfterClose(sidePanelTabIds, tabId);
+        setOpenedThreadTabs((current) =>
+          current.filter((entry) => entry.threadRootId !== threadRootId)
+        );
+        if ((activeSidebarTab as string | null) === tabId) {
+          selectSidePanelTab(fallbackTabId);
+        }
+        return;
+      }
       const sideSessionId = parseSideSessionPanelTabId(tabId) as SessionId | null;
       if (sideSessionId && panelSessionIdSet.has(sideSessionId)) {
         // A board conversation is independent: closing its tab only hides it here.
@@ -5395,6 +5445,7 @@ const SessionDetail = ({
     },
     [
       activeSideSessionId,
+      activeSidebarTab,
       handleCloseSideSession,
       handleCloseSidebarTab,
       handleCloseViewerTab,
@@ -5450,6 +5501,55 @@ const SessionDetail = ({
       handleOpenPanelSession(targetId);
     },
     [handleOpenPanelSession, sessionId]
+  );
+
+  const handleReplyToCoordinatorBubble = useCallback(
+    (reply: CoordinatorReplyRef) => {
+      setCoordinatorReplyDraft(reply);
+      requestAnimationFrame(() => {
+        const handle = chatRefsMap.current.get(sessionId);
+        if (handle && 'focusInput' in handle) {
+          handle.focusInput();
+        }
+      });
+    },
+    [sessionId]
+  );
+
+  const handleClearCoordinatorReplyDraft = useCallback(() => {
+    setCoordinatorReplyDraft(null);
+  }, []);
+
+  const handleOpenCoordinatorThread = useCallback(
+    (threadRootId: string, previewHint?: string) => {
+      const tabId = getCoordinatorThreadPanelTabId(threadRootId);
+      setOpenedThreadTabs((current) => {
+        const existingIdx = current.findIndex((item) => item.threadRootId === threadRootId);
+        if (existingIdx !== -1) {
+          if (previewHint && !current[existingIdx]?.previewHint) {
+            const next = [...current];
+            next[existingIdx] = { ...current[existingIdx]!, previewHint };
+            return next;
+          }
+          return current;
+        }
+        return [...current, { threadRootId, previewHint }];
+      });
+      if (!isMobile) {
+        selectSidePanelTab(tabId);
+        setIsSidebarOpen(true);
+      }
+    },
+    [isMobile, selectSidePanelTab]
+  );
+
+  const handleSendCoordinatorThreadReply = useCallback(
+    async (prompt: string, replyTo: CoordinatorReplyRef): Promise<boolean> => {
+      const handle = chatRefsMap.current.get(sessionId);
+      if (!handle || !('sendCoordinatorThreadReply' in handle)) return false;
+      return handle.sendCoordinatorThreadReply(prompt, replyTo);
+    },
+    [sessionId]
   );
 
   const handleViewerUrlTabTitleChange = useCallback((tabId: string, title: string) => {
@@ -7430,11 +7530,15 @@ const SessionDetail = ({
 
   // Viewers and side chats render their own absolutely positioned surfaces on
   // top; the fixed-panel body only shows when neither owns the panel.
+  const activeCoordinatorThreadRootId = activeSidebarTab
+    ? parseCoordinatorThreadPanelTabId(activeSidebarTab as string)
+    : null;
   const showFixedSidePanelBody =
     effectiveActiveViewerTabId === null && effectiveActiveSideSessionId === null;
-  const defaultSizes = showFixedSidePanelBody
-    ? { main: 75, sidebar: 25 }
-    : { main: 60, sidebar: 40 };
+  const defaultSizes =
+    showFixedSidePanelBody && activeCoordinatorThreadRootId === null
+      ? { main: 75, sidebar: 25 }
+      : { main: 60, sidebar: 40 };
 
   const leftSidebarExpandButton = isLeftSidebarHidden ? (
     <Button
@@ -7539,6 +7643,14 @@ const SessionDetail = ({
         isProjectCoordinator && chatSession.id === sessionId
           ? handleCoordinatorNavigateSession
           : handleNavigateSession,
+      ...(isProjectCoordinator && chatSession.id === sessionId
+        ? {
+            coordinatorReplyDraft,
+            onClearCoordinatorReplyDraft: handleClearCoordinatorReplyDraft,
+            onOpenCoordinatorReplyThread: handleOpenCoordinatorThread,
+            onCoordinatorThreadHostStateChange: setCoordinatorThreadHostState,
+          }
+        : {}),
       onConversationPrepared: pendingForkSourceId
         ? () => handleForkedConversationPrepared(pendingForkSourceId, chatSession.id)
         : undefined,
@@ -7609,6 +7721,9 @@ const SessionDetail = ({
                   project={coordinatorProject}
                   onOpenTask={handleOpenPanelSession}
                   onOpenExternalLink={handleOpenCoordinatorExternalLink}
+                  replyCountByRootId={coordinatorThreadHostState?.threadIndex.replyCountByRootId}
+                  onReplyToBubble={handleReplyToCoordinatorBubble}
+                  onOpenThread={handleOpenCoordinatorThread}
                 >
                   {chatSurface}
                 </CoordinatorConversationProvider>
@@ -7762,37 +7877,76 @@ const SessionDetail = ({
       <div {...stylex.props(detailStyles.sidebarBody)}>
         {showFixedSidePanelBody &&
         activeSidebarTab !== null &&
-        (activeSidebarTab as string) !== PROJECT_BOARD_PANEL_TAB_ID
+        (activeSidebarTab as string) !== PROJECT_BOARD_PANEL_TAB_ID &&
+        activeCoordinatorThreadRootId === null
           ? sidebarContent
           : null}
         {isProjectCoordinator && activeSession ? (
-          <div
-            className={
-              stylex.props(
-                detailStyles.absoluteFill,
+          <>
+            <div
+              className={
+                stylex.props(
+                  detailStyles.absoluteFill,
+                  !(
+                    showFixedSidePanelBody &&
+                    (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID
+                  ) && detailStyles.hidden
+                ).className
+              }
+              aria-hidden={
                 !(
                   showFixedSidePanelBody &&
                   (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID
-                ) && detailStyles.hidden
-              ).className
-            }
-            aria-hidden={
-              !(
-                showFixedSidePanelBody &&
-                (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID
-              )
-            }
-          >
-            <ProjectBoard
-              coordinatorSessionId={activeSession.id}
-              project={coordinatorProject}
-              onOpenSession={handleOpenPanelSession}
-              onOpenPr={(ownerId, pr) => {
-                handleOpenOwnedPrTab(ownerId as SessionId, pr);
-              }}
-              hideTitle
-            />
-          </div>
+                )
+              }
+            >
+              <ProjectBoard
+                coordinatorSessionId={activeSession.id}
+                project={coordinatorProject}
+                onOpenSession={handleOpenPanelSession}
+                onOpenPr={(ownerId, pr) => {
+                  handleOpenOwnedPrTab(ownerId as SessionId, pr);
+                }}
+                hideTitle
+              />
+            </div>
+            {openedThreadTabs.map((threadTab) => {
+              const isThreadActive =
+                showFixedSidePanelBody && activeCoordinatorThreadRootId === threadTab.threadRootId;
+              return (
+                <div
+                  key={threadTab.threadRootId}
+                  className={
+                    stylex.props(
+                      detailStyles.absoluteFill,
+                      detailStyles.conversationContainment,
+                      !isThreadActive && detailStyles.hidden
+                    ).className
+                  }
+                  aria-hidden={!isThreadActive || !isSidebarVisible}
+                >
+                  <ConnectedCoordinatorThreadPanel
+                    coordinatorSessionId={activeSession.id}
+                    project={coordinatorProject}
+                    threadRootId={threadTab.threadRootId}
+                    previewHint={threadTab.previewHint}
+                    conversationView={coordinatorThreadHostState?.conversationView ?? null}
+                    threadIndex={coordinatorThreadHostState?.threadIndex}
+                    onOpenTask={handleOpenPanelSession}
+                    onOpenPr={(ownerId, pr) => {
+                      handleOpenOwnedPrTab(ownerId as SessionId, pr);
+                    }}
+                    onOpenExternalLink={handleOpenCoordinatorExternalLink}
+                    onNavigateSession={handleCoordinatorNavigateSession}
+                    onSendReply={handleSendCoordinatorThreadReply}
+                    agentActivityLabel={coordinatorThreadHostState?.agentActivityLabel ?? null}
+                    agentActivityTone={coordinatorThreadHostState?.agentActivityTone ?? 'primary'}
+                    isVisible={isThreadActive && isSidebarVisible}
+                  />
+                </div>
+              );
+            })}
+          </>
         ) : null}
         {showFixedSidePanelBody && activeSidebarTab === null && sidePanelTabs.length === 0 ? (
           <SessionSidePanelEmptyState

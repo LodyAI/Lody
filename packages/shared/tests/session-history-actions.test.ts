@@ -615,3 +615,145 @@ it('keeps update-interruption provenance on the user turn so peers can offer Con
     turn: { cancellationReason: 'machine_update' },
   });
 });
+
+it('syncs coordinator bubble replies, originThreadId progress, and shallow directory threadRoots without extra Loro containers', async () => {
+  const doc = new LoroDoc();
+  const data = createLoroSessionData({ sessionId: sid, doc });
+  const replyToRoot = {
+    target: { kind: 'coordinator_bubble' as const, turnId: 'root-turn', bubbleId: 'b-root' },
+    threadRootId: 'bubble:root-turn:b-root',
+    author: 'coordinator' as const,
+    previewText: '旧链接保留多久？',
+  };
+
+  await data.commands.appendTurn({
+    id: 'user-reply-1',
+    role: 'user',
+    timestamp: '2026-11-21T00:00:01.000Z',
+    threadRoots: 'bubble:root-turn:b-root',
+    inputConfig: {
+      prompt: '保留 7 天',
+      inputBlocks: [{ type: 'text', text: '保留 7 天' }],
+      cliType: 'builtin',
+      agentType: 'claude',
+      replyTo: replyToRoot,
+    },
+    items: [{ type: 'text', text: '保留 7 天' }],
+  });
+
+  await data.commands.appendTurn({
+    id: 'assistant-multi-thread',
+    role: 'assistant',
+    timestamp: '2026-11-21T00:00:02.000Z',
+    items: [],
+  });
+  await data.commands.applyHistoryAction({
+    kind: 'coordinator-output',
+    turnId: 'assistant-multi-thread',
+    output: {
+      kind: 'message',
+      id: 'b-reply-a',
+      body: '已转告子任务继续处理。',
+      replyTo: {
+        target: { kind: 'user_turn', turnId: 'user-reply-1' },
+        threadRootId: 'bubble:root-turn:b-root',
+        author: 'user',
+        previewText: '保留 7 天',
+      },
+      linkedSessionIds: ['child-task-1' as SessionId],
+      createdAt: 1001,
+    },
+  });
+  await data.commands.applyHistoryAction({
+    kind: 'coordinator-output',
+    turnId: 'assistant-multi-thread',
+    output: {
+      kind: 'message',
+      id: 'b-reply-b',
+      body: '另一条话串的任务也已完成。',
+      replyTo: {
+        target: { kind: 'coordinator_bubble', turnId: 'other-turn', bubbleId: 'b-other' },
+        threadRootId: 'bubble:other-turn:b-other',
+        author: 'coordinator',
+        previewText: '另一条话串',
+      },
+      createdAt: 1002,
+    },
+  });
+
+  await data.commands.applyHistoryAction({
+    kind: 'operation-progress',
+    operation: {
+      workspaceId: 'workspace' as StoredLodyOperation['workspaceId'],
+      ownerMachineId: 'machine' as StoredLodyOperation['ownerMachineId'],
+      requesterSessionId: sid,
+      requesterUserId: 'user',
+      operationId: 'op-thread-a',
+      kind: 'session_create',
+      fingerprint: 'synthetic-thread',
+      canonicalCommand: {},
+      frozenContinuationConfig: {
+        inputConfig: {},
+        originThreadId: 'bubble:other-turn:b-other',
+      },
+      initiatorChainDepth: 0,
+      createdAt: '2026-11-21T00:00:03.000Z',
+      deadlineAt: '2026-11-22T00:00:03.000Z',
+      state: 'active',
+      items: [
+        {
+          status: 'active',
+          inputDurable: true,
+          target: { sessionId: 'child-task-2' as SessionId, userTurnId: 'u-2' },
+        },
+      ],
+    },
+    timestamp: '2026-11-21T00:00:03.000Z',
+    statuses: [['child-task-2\0u-2', 'running']],
+  });
+
+  const peer = new LoroDoc();
+  peer.import(doc.export({ mode: 'snapshot' }));
+  const copy = createLoroSessionData({ sessionId: sid, doc: peer });
+
+  const directory = await copy.history.readDirectory(0, 10);
+  expect(
+    directory.map((row) => ({
+      threadRoots: row.state === 'ready' ? row.scalars.threadRoots : undefined,
+    }))
+  ).toEqual([
+    { threadRoots: 'bubble:root-turn:b-root' },
+    { threadRoots: 'bubble:root-turn:b-root\nbubble:other-turn:b-other' },
+    { threadRoots: 'bubble:other-turn:b-other' },
+  ]);
+
+  const userTurn = await copy.history.readTurn('user-reply-1');
+  expect(userTurn).toMatchObject({
+    state: 'ready',
+    turn: {
+      threadRoots: 'bubble:root-turn:b-root',
+      inputConfig: { replyTo: replyToRoot },
+    },
+  });
+
+  const assistantTurn = await copy.history.readTurn('assistant-multi-thread');
+  expect(assistantTurn).toMatchObject({
+    state: 'ready',
+    turn: {
+      threadRoots: 'bubble:root-turn:b-root\nbubble:other-turn:b-other',
+      items: [
+        {
+          type: 'coordinator_message',
+          id: 'b-reply-a',
+          linkedSessionIds: ['child-task-1'],
+          replyTo: { threadRootId: 'bubble:root-turn:b-root' },
+        },
+        {
+          type: 'coordinator_message',
+          id: 'b-reply-b',
+          replyTo: { threadRootId: 'bubble:other-turn:b-other' },
+        },
+      ],
+    },
+  });
+});

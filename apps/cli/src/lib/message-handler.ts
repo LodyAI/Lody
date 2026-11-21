@@ -1,5 +1,6 @@
 import type { MachineStatusResponse } from '@lody/shared';
 import { readManagedOperation } from './managed-daemon-release';
+import { resolveCoordinatorPromptReplyHeader } from './coordinator-reply-context';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import type { SessionDirectoryListRequest } from '@lody/shared';
 import {
@@ -2679,6 +2680,28 @@ export class MessageHandler {
     }
   }
 
+  private async readReplyContextHeader(
+    workspaceId: WorkspaceId,
+    sessionId: SessionId,
+    userTurnId: string | undefined
+  ): Promise<string | undefined> {
+    if (!userTurnId) return undefined;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      return await resolveCoordinatorPromptReplyHeader({
+        history: backend.history,
+        workspaceId,
+        userTurnId,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Omitting reply context for ${userTurnId}: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   private async buildAcpPromptBlocks(args: {
     requesterUserId?: string;
     workspaceId: WorkspaceId;
@@ -2823,9 +2846,13 @@ export class MessageHandler {
     });
 
     // Build the full text prompt: comment references first, then user text
-    const senderHeader = await this.readAgentSenderHeader(args.sessionId, args.userTurnId);
+    const [senderHeader, replyContextHeader] = await Promise.all([
+      this.readAgentSenderHeader(args.sessionId, args.userTurnId),
+      this.readReplyContextHeader(args.workspaceId, args.sessionId, args.userTurnId),
+    ]);
     const allTextParts = [
       ...(senderHeader ? [senderHeader] : []),
+      ...(replyContextHeader ? [replyContextHeader] : []),
       ...commentRefTexts,
       ...visualAnnotationRefTexts,
       ...textParts,

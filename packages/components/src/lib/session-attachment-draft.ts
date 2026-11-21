@@ -54,6 +54,7 @@ export function buildDraftUserHistoryEntry(
 ) {
   const existing = buildPendingUserHistoryEntry(args);
   if (existing || !attachments?.length || !args.userId?.trim()) return existing;
+  const threadRoots = args.inputConfig?.replyTo?.threadRootId?.trim();
   return {
     userId: args.userId.trim(),
     role: 'user' as const,
@@ -61,6 +62,7 @@ export function buildDraftUserHistoryEntry(
     timestamp: args.timestamp,
     status: args.status ?? ('pending' as const),
     inputConfig: args.inputConfig,
+    ...(threadRoots ? { threadRoots } : {}),
     read: false,
     fileDiff: [],
     finished: true,

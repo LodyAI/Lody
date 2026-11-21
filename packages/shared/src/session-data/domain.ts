@@ -57,6 +57,7 @@ export type SessionTurn = {
   readonly startedAt?: number;
   readonly endedAt?: number;
   readonly permissionWaitMs?: number;
+  readonly threadRoots?: string;
   readonly finished?: boolean;
   readonly sendStatus?: 'timeout';
 };
@@ -83,6 +84,7 @@ export interface SessionTurnWritableValues {
   startedAt: number | undefined;
   endedAt: number | undefined;
   permissionWaitMs: number | undefined;
+  threadRoots: string | undefined;
   plan: readonly unknown[] | undefined;
   finished: boolean | undefined;
   sendStatus: 'timeout' | undefined;
@@ -143,6 +145,7 @@ export type SessionDirectoryScalars = {
   readonly acpTurnId?: string;
   readonly startedAt?: number;
   readonly permissionWaitMs?: number;
+  readonly threadRoots?: string;
 };
 
 /** Detached identity, state and configuration fields. */

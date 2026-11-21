@@ -153,6 +153,7 @@ export type OperationProgressContent = {
   type: 'operation_progress';
   operationId: string;
   operationKind: OperationProgressKind;
+  originThreadId?: string;
   items: OperationProgressItem[];
 };
 
@@ -246,6 +247,8 @@ export type FrozenOperationContinuationConfig = {
   inputConfig: SessionTurnInputConfig;
   /** Frozen causal Turn for delegated Operations; recovery must not re-resolve it. */
   sourceTurnId?: string;
+  /** Coordinator thread root anchor (`turn:...` or `bubble:...`) active when dispatched. */
+  originThreadId?: string;
   /** Human requests whose result this requester is still assembling. Not authorization. */
   notificationOriginTurnIds?: string[];
   /**
@@ -305,6 +308,8 @@ export type OperationCompletionContent = {
   operationKind: LodyOperationKind;
   /** Stable system history entry id for the matching operation_progress card, when one exists. */
   progressMessageId?: string;
+  /** Coordinator thread root anchor under which this Operation was dispatched, when applicable. */
+  originThreadId?: string;
   completion: LodyOperationCompletion;
 };
 

@@ -391,6 +391,7 @@ const historyMessageItemSchema = schema
           case 'operation_progress':
             return typeof v.operationId === 'string' &&
               (v.operationKind === 'session_create' || v.operationKind === 'session_create_many') &&
+              (v.originThreadId === undefined || typeof v.originThreadId === 'string') &&
               Array.isArray(v.items) &&
               v.items.every(
                 (item) =>
@@ -449,6 +450,8 @@ const historyMessageItemSchema = schema
               typeof v.body === 'string' &&
               (v.images === undefined || Array.isArray(v.images)) &&
               (v.files === undefined || Array.isArray(v.files)) &&
+              (v.replyTo === undefined || isRecord(v.replyTo)) &&
+              (v.linkedSessionIds === undefined || Array.isArray(v.linkedSessionIds)) &&
               (v.createdAt === undefined || typeof v.createdAt === 'number')
               ? true
               : 'Missing coordinator message metadata';
@@ -599,6 +602,7 @@ const acpSessionConfigSchema = schema
       modeId: schema.String({ required: false }),
       modelId: schema.String({ required: false }),
       issuePRMentions: schema.LoroList(issuePrMentionSchema, undefined, { required: false }),
+      replyTo: schema.Any({ required: false, defaultLoroText: false }),
       resume: schema.String({ required: false }),
       /** Config option values (configId → value) for setSessionConfigOption */
       configOptionValues: schema.Any({ required: false }),
@@ -697,6 +701,9 @@ export const sessionHistorySchema = schema.LoroMap({
   // Total time in milliseconds spent waiting for permission approvals during this turn.
   // Effective agent working time = (endedAt - Date.parse(timestamp)) - permissionWaitMs
   permissionWaitMs: schema.Number({ required: false }),
+  // Newline-joined canonical coordinator thread root IDs touched by this turn.
+  // Kept as a primitive string so directory reads never cross a container boundary.
+  threadRoots: schema.String({ required: false }),
   role: schema.String<Role>(),
   status: schema.String<SessionHistoryStatus>({ required: false }),
   scheduleRun: schema.LoroMap(

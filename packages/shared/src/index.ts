@@ -36,6 +36,7 @@ export * from './acp-model-capabilities';
 export * from './acp-model-config-options';
 export * from './pi-provider-migration';
 export * from './message-quote';
+export * from './coordinator-threads';
 export * from './message-text-spans';
 export * from './deepseek-harness';
 export * from './acp-run-config';

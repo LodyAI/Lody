@@ -137,7 +137,9 @@ export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
 /** The daemon delivers the coordinator system prompt for `SessionMeta.coordinator` v1. */
 // v2 adds coordinator message/status MCP tools and structured turn items.
-export const COORDINATOR_SESSIONS_PROTOCOL_VERSION = 2;
+// v3 adds structured bubble replies, thread roots, and originThreadId propagation.
+export const COORDINATOR_SESSIONS_MIN_PROTOCOL_VERSION = 2;
+export const COORDINATOR_SESSIONS_PROTOCOL_VERSION = 3;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -273,6 +275,16 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
  * so creators must not write it there.
  */
 export function machineSupportsCoordinatorSessions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.coordinatorSessions,
+    COORDINATOR_SESSIONS_MIN_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsCoordinatorThreads(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
   return machineSupportsProtocolCapability(

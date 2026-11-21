@@ -1,5 +1,9 @@
 import { machineTurnInterruptionReason, reserveMachineTurn } from './machine-turn-admission';
-import { isMissingHistoryUserTurn, readSessionCoordinatorKind } from '@lody/shared';
+import {
+  isMissingHistoryUserTurn,
+  mergeThreadRootsScalar,
+  readSessionCoordinatorKind,
+} from '@lody/shared';
 import { verifyAutomationWorktreeHeads } from './automation-worktree';
 import { classifyCapacityFailure } from './acp-error-classification';
 import {
@@ -5508,6 +5512,10 @@ export class SessionExecutionService {
                   }
                 }
 
+                const batchThreadRoots = mergeThreadRootsScalar(
+                  undefined,
+                  members.map((member) => member.originThreadId)
+                );
                 yield* self.tryPromise(() =>
                   backend.applyHistoryAction({
                     kind: 'upsert-turn',
@@ -5520,6 +5528,7 @@ export class SessionExecutionService {
                       author: { v: 1, kind: 'system' },
                       userId: inboxBatch!.userId,
                       timestamp: new Date(getServerNow()).toISOString(),
+                      ...(batchThreadRoots ? { threadRoots: batchThreadRoots } : {}),
                       finished: true,
                       fileDiff: [],
                       items: [

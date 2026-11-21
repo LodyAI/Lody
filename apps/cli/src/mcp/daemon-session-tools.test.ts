@@ -47,6 +47,7 @@ import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
 import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
 import { LodyOperationStore, getLodyOperationStorePath } from '@/orchestration/operation-store';
+import { resolveCoordinatorPromptReplyHeader } from '@/lib/coordinator-reply-context';
 import { createSessionBackend } from '@/session/session-backend';
 import { LocalControlHandler } from '@/lib/local-control-handler';
 import { LoroDocumentManager, SessionDocument, TRANSIENT_DOC_ROOM_RETAIN_MS } from '@/lib/loro/doc';
@@ -2465,5 +2466,124 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       files: [{ ...childFile, storageSessionId: childSessionId }],
       createdAt: expect.any(Number),
     });
+
+    // Bubble-level reply context dereferencing + automatic thread inheritance + explicit threadId routing.
+    await backend.appendHistoryTurn({
+      id: 'coord-root-turn',
+      role: 'assistant',
+      timestamp: '2026-11-20T00:01:00.000Z',
+      finished: true,
+      items: [
+        {
+          type: 'coordinator_message',
+          id: 'bubble-ask',
+          body: '需要你决定：[迁移任务](lody://session/child-e2ee-share) 的旧链接保留多久？',
+          linkedSessionIds: ['child-e2ee-share' as SessionId],
+        },
+        {
+          type: 'coordinator_message',
+          id: 'bubble-other',
+          body: '另一项[分页测试](lody://session/child-pagination)也在跑。',
+        },
+      ],
+    });
+
+    await backend.appendHistoryTurn({
+      id: 'user-reply-turn',
+      role: 'user',
+      timestamp: '2026-11-20T00:02:00.000Z',
+      threadRoots: 'bubble:coord-root-turn:bubble-ask',
+      inputConfig: {
+        prompt: '保留 7 天即可',
+        inputBlocks: [{ type: 'text', text: '保留 7 天即可' }],
+        cliType: 'builtin',
+        agentType: 'claude',
+        replyTo: {
+          target: {
+            kind: 'coordinator_bubble',
+            turnId: 'coord-root-turn',
+            bubbleId: 'bubble-ask',
+          },
+          threadRootId: 'bubble:coord-root-turn:bubble-ask',
+          author: 'coordinator',
+          previewText: '需要你决定：迁移任务 的旧链接保留多久？',
+        },
+      },
+      items: [{ type: 'text', text: '保留 7 天即可' }],
+    });
+
+    const replyHeader = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-reply-turn',
+    });
+    expect(replyHeader).toContain('<reply_context thread_id="bubble:coord-root-turn:bubble-ask"');
+    expect(replyHeader).toContain('replied_author="coordinator"');
+    expect(replyHeader).toContain('related_sessions="lody://session/child-e2ee-share?workspace=');
+    expect(replyHeader).toContain('旧链接保留多久？');
+
+    await backend.openAssistantTurn({
+      turnId: 'coord-reply-assistant',
+      userTurnId: 'user-reply-turn',
+      timestamp: '2026-11-20T00:02:01.000Z',
+    });
+
+    const replyDaemon: DaemonWorkspace = {
+      ...daemon,
+      readActiveAssistantTurnId: () => 'coord-reply-assistant',
+    };
+
+    const inheritedBubble = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '好，这就转告 [迁移任务](lody://session/child-e2ee-share) 按 7 天实现。',
+      })
+    );
+    expect(inheritedBubble.isError).not.toBe(true);
+
+    const explicitOtherThreadBubble = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '顺便汇报：分页测试已经全绿了。',
+        threadId: 'bubble:coord-root-turn:bubble-other',
+      })
+    );
+    expect(explicitOtherThreadBubble.isError).not.toBe(true);
+
+    const storedReplyTurn = await backend.readTurn('coord-reply-assistant');
+    expect(storedReplyTurn.state).toBe('ready');
+    if (storedReplyTurn.state !== 'ready') throw new Error('Expected ready reply turn');
+    expect(storedReplyTurn.turn.threadRoots).toBe(
+      'bubble:coord-root-turn:bubble-ask\nbubble:coord-root-turn:bubble-other'
+    );
+    expect(storedReplyTurn.turn.items).toEqual([
+      {
+        type: 'coordinator_message',
+        id: expect.any(String),
+        body: '好，这就转告 [迁移任务](lody://session/child-e2ee-share) 按 7 天实现。',
+        replyTo: {
+          target: { kind: 'user_turn', turnId: 'user-reply-turn' },
+          threadRootId: 'bubble:coord-root-turn:bubble-ask',
+          author: 'user',
+          previewText: '保留 7 天即可',
+        },
+        linkedSessionIds: ['child-e2ee-share'],
+        createdAt: expect.any(Number),
+      },
+      {
+        type: 'coordinator_message',
+        id: expect.any(String),
+        body: '顺便汇报：分页测试已经全绿了。',
+        replyTo: {
+          target: {
+            kind: 'coordinator_bubble',
+            turnId: 'coord-root-turn',
+            bubbleId: 'bubble-other',
+          },
+          threadRootId: 'bubble:coord-root-turn:bubble-other',
+          author: 'coordinator',
+          previewText: '另一项分页测试也在跑。',
+        },
+        createdAt: expect.any(Number),
+      },
+    ]);
   });
 });

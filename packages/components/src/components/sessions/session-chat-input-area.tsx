@@ -93,6 +93,7 @@ import type {
   AgentRole,
   AgentRoleId,
   CommentReferencePayload,
+  CoordinatorReplyRef,
   SessionMeta,
   SessionId,
   SessionInputBlock,
@@ -112,6 +113,7 @@ import {
 } from '@/components/chat/visual-annotation-reference-state';
 import { SESSION_IMAGE_MAX_COUNT } from '@lody/shared';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { CoordinatorComposerReplyBanner } from '@/components/project-mode/coordinator-reply-ui';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type {
   AcpConfigOptionSelector,
@@ -541,6 +543,9 @@ export interface SessionChatInputAreaProps {
   onVisualAnnotationReferencesSubmitted?: (
     references: VisualAnnotationReferencePayload[]
   ) => void | Promise<void>;
+  coordinatorReplyDraft?: CoordinatorReplyRef | null;
+  onClearCoordinatorReplyDraft?: () => void;
+  onOpenCoordinatorReplyThread?: (threadRootId: string, previewHint?: string) => void;
 }
 
 export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
@@ -556,6 +561,7 @@ export type SessionSendMessageOptions = {
   mcpServerIds?: readonly McpServerId[];
   /** Local UI intent; never part of the durable input config. */
   skipMcpOnce?: boolean;
+  replyTo?: CoordinatorReplyRef;
 };
 
 export type SessionChatInputAreaHandle = {
@@ -641,12 +647,17 @@ export const SessionChatInputArea = memo(
       onCommentReferencesChange,
       onVisualAnnotationReferencesChange,
       onVisualAnnotationReferencesSubmitted,
+      coordinatorReplyDraft = null,
+      onClearCoordinatorReplyDraft,
+      onOpenCoordinatorReplyThread,
     }: SessionChatInputAreaProps,
     ref: React.ForwardedRef<SessionChatInputAreaHandle>
   ) {
     const { t, i18n } = useTranslation();
     const [restoring, setRestoring] = useState(false);
     const restoringRef = useRef(false);
+    const coordinatorReplyDraftRef = useRef(coordinatorReplyDraft);
+    coordinatorReplyDraftRef.current = coordinatorReplyDraft;
     const handleRestore = useCallback(async () => {
       if (!onRestoreSession || restoringRef.current) return;
       restoringRef.current = true;
@@ -2014,6 +2025,7 @@ export const SessionChatInputArea = memo(
           // Use the committed callback and Role after waiting: routing and run
           // config must come from the same current composer state.
           const role = agentRoleTurnSelectionRef.current;
+          const submittedReplyTo = coordinatorReplyDraftRef.current ?? undefined;
           accepted = scheduled.at
             ? await scheduledSaveRef.current({
                 inputBlocks,
@@ -2041,8 +2053,12 @@ export const SessionChatInputArea = memo(
                 ...options,
                 attachments,
                 ...(mcpServerIds ? { mcpServerIds } : {}),
+                ...(submittedReplyTo ? { replyTo: submittedReplyTo } : {}),
               });
           if (accepted) {
+            if (!scheduled.at && submittedReplyTo && coordinatorReplyDraftRef.current === submittedReplyTo) {
+              onClearCoordinatorReplyDraft?.();
+            }
             // A sent message answers the prediction shown before it; the next turn
             // publishes its own suggestion.
             if (!scheduled.at)
@@ -2104,6 +2120,7 @@ export const SessionChatInputArea = memo(
         isExternalHistoryRefreshing,
         isMachineRemoved,
         isVisible,
+        onClearCoordinatorReplyDraft,
         onVisualAnnotationReferencesSubmitted,
         pendingFiles,
         pendingImages,
@@ -2607,6 +2624,15 @@ export const SessionChatInputArea = memo(
         preservePromptFocus={usesMobileKeyboardAction && submissionPending && !isArchived}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
+        replyBanner={
+          !submissionPending && coordinatorReplyDraft ? (
+            <CoordinatorComposerReplyBanner
+              reply={coordinatorReplyDraft}
+              onClear={isArchived ? undefined : onClearCoordinatorReplyDraft}
+              onOpenThread={onOpenCoordinatorReplyThread}
+            />
+          ) : null
+        }
         commentReferenceItems={submissionPending ? [] : commentReferences}
         onCommentReferenceRemove={
           submissionPending || isArchived ? undefined : removeCommentReference

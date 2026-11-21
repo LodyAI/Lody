@@ -1,5 +1,9 @@
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
-import { isCoordinatorSession } from '@lody/shared';
+import { isCoordinatorSession, type CoordinatorReplyRef } from '@lody/shared';
+import {
+  buildCoordinatorThreadDirectoryIndex,
+  type CoordinatorThreadDirectoryIndex,
+} from '@/components/project-mode/coordinator-thread-model';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
@@ -2462,6 +2466,10 @@ export interface SessionChatInterfaceProps {
   forkingAssistantMessageId?: string | null;
   /** Opens another session from an in-conversation link (e.g. a fork's origin). */
   onNavigateSession?: (target: SessionNavigationTarget) => void;
+  coordinatorReplyDraft?: CoordinatorReplyRef | null;
+  onClearCoordinatorReplyDraft?: () => void;
+  onOpenCoordinatorThread?: (threadRootId: string, previewHint?: string) => void;
+  onCoordinatorThreadHostStateChange?: (state: CoordinatorThreadHostState) => void;
   /** Signals when this mounted conversation surface has loaded durable history. */
   onConversationPrepared?: () => void;
   /** Signals a terminal failure while preparing this conversation surface. */
@@ -2499,9 +2507,17 @@ export type SessionChatToolbar = {
   };
 };
 
+export type CoordinatorThreadHostState = {
+  readonly conversationView: import('@/lib/conversation-view').ConversationView | null;
+  readonly threadIndex: CoordinatorThreadDirectoryIndex;
+  readonly agentActivityLabel: string | null;
+  readonly agentActivityTone: 'primary' | 'warning';
+};
+
 export type SessionChatInterfaceHandle = {
   addDocumentSelection: (selection: DocumentSelection) => boolean;
   focusInput: () => void;
+  sendCoordinatorThreadReply: (prompt: string, replyTo: CoordinatorReplyRef) => Promise<boolean>;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
@@ -2549,6 +2565,7 @@ export type DispatchInputBlocksOptions = {
   /** The MCP selection captured when the user pressed send. */
   mcpServerIds?: readonly McpServerId[];
   skipMcpOnce?: boolean;
+  replyTo?: CoordinatorReplyRef;
 };
 
 function buildEditedMessageQueueItem(item: MessageQueueItem, task: string): MessageQueueItem {
@@ -2643,6 +2660,10 @@ export const SessionChatInterface = memo(
       onForkWorktreeMenuOpen,
       forkingAssistantMessageId,
       onNavigateSession,
+      coordinatorReplyDraft = null,
+      onClearCoordinatorReplyDraft,
+      onOpenCoordinatorThread,
+      onCoordinatorThreadHostStateChange,
       onConversationPrepared,
       onConversationPrepareError,
     },
@@ -4675,6 +4696,31 @@ export const SessionChatInterface = memo(
       isSessionActive && (isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission')
         ? 'warning'
         : 'primary';
+    const coordinatorThreadIndex = useMemo(
+      () =>
+        isCoordinatorConversation
+          ? buildCoordinatorThreadDirectoryIndex(conversationIndexRows)
+          : null,
+      [conversationIndexRows, isCoordinatorConversation]
+    );
+    useEffect(() => {
+      if (!isCoordinatorConversation || !coordinatorThreadIndex || !onCoordinatorThreadHostStateChange) {
+        return;
+      }
+      onCoordinatorThreadHostStateChange({
+        conversationView: conversationView ?? null,
+        threadIndex: coordinatorThreadIndex,
+        agentActivityLabel: agentActivityLabel ?? null,
+        agentActivityTone,
+      });
+    }, [
+      agentActivityLabel,
+      agentActivityTone,
+      conversationView,
+      coordinatorThreadIndex,
+      isCoordinatorConversation,
+      onCoordinatorThreadHostStateChange,
+    ]);
     // Waiting on the user is not work in progress: that status does not shimmer.
     const agentActivityShimmer = agentActivityTone !== 'warning';
     // Presence, not the history's `finished` flag: a turn whose daemon died
@@ -4727,6 +4773,7 @@ export const SessionChatInterface = memo(
           configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
           agentRole?: SessionTurnAgentRoleSelection;
           mcpServerIds?: readonly McpServerId[];
+          replyTo?: CoordinatorReplyRef;
         }
       ): Promise<boolean> => {
         try {
@@ -4751,6 +4798,7 @@ export const SessionChatInterface = memo(
             modelId: turnModelId,
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
+            replyTo: options?.replyTo,
             mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
@@ -4891,6 +4939,7 @@ export const SessionChatInterface = memo(
           | 'agentRole'
           | 'attachments'
           | 'mcpServerIds'
+          | 'replyTo'
         >
       ): Promise<boolean> => {
         try {
@@ -4925,6 +4974,7 @@ export const SessionChatInterface = memo(
                 : options.agentRole?.memory,
             agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
+            replyTo: options?.replyTo,
           });
           const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
             prompt: inputConfig.prompt,
@@ -4941,6 +4991,7 @@ export const SessionChatInterface = memo(
             memory: inputConfig.memory,
             agentRoleSnapshot: inputConfig.agentRoleSnapshot,
             resume: inputConfig.resume ?? undefined,
+            ...(inputConfig.replyTo ? { replyTo: inputConfig.replyTo } : {}),
             chainDepth: 0,
           };
 
@@ -5009,6 +5060,7 @@ export const SessionChatInterface = memo(
           | 'agentRole'
           | 'attachments'
           | 'mcpServerIds'
+          | 'replyTo'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -5021,6 +5073,7 @@ export const SessionChatInterface = memo(
           agentRole: options?.agentRole,
           attachments: options?.attachments,
           mcpServerIds: options?.mcpServerIds,
+          replyTo: options?.replyTo,
         });
       },
       [configOptionValues, enqueueInputBlocks]
@@ -5091,6 +5144,7 @@ export const SessionChatInterface = memo(
             agentRole: options?.agentRole,
             attachments: options?.attachments,
             mcpServerIds: options?.mcpServerIds,
+            replyTo: options?.replyTo,
           });
           captureSessionEvent(
             accepted ? 'session/message_queued' : 'session/message_submit_failed',
@@ -5114,6 +5168,7 @@ export const SessionChatInterface = memo(
             agentRole: options?.agentRole,
             attachments: options?.attachments,
             mcpServerIds: options?.mcpServerIds,
+            replyTo: options?.replyTo,
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -5145,6 +5200,7 @@ export const SessionChatInterface = memo(
           agentRole: options?.agentRole,
           attachments: options?.attachments,
           mcpServerIds: options?.mcpServerIds,
+          replyTo: options?.replyTo,
         });
         // A held send (attachments still preparing) dispatches itself later;
         // the composer is free again now.
@@ -6361,6 +6417,11 @@ export const SessionChatInterface = memo(
         focusInput: () => {
           inputAreaRef.current?.focusInput();
         },
+        sendCoordinatorThreadReply: async (prompt, replyTo) => {
+          const trimmed = prompt.trim();
+          if (!trimmed) return false;
+          return await dispatchPrompt(trimmed, { replyTo });
+        },
         addCommentReference: (reference) => {
           return inputAreaRef.current?.addCommentReference(reference) ?? false;
         },
@@ -6401,6 +6462,7 @@ export const SessionChatInterface = memo(
         },
       }),
       [
+        dispatchPrompt,
         handleCopyConversationHistory,
         shareSelection.start,
         shareSelection.cancel,
@@ -7999,6 +8061,9 @@ export const SessionChatInterface = memo(
                             onVisualAnnotationReferencesSubmitted={
                               onVisualAnnotationReferencesSubmitted
                             }
+                            coordinatorReplyDraft={coordinatorReplyDraft}
+                            onClearCoordinatorReplyDraft={onClearCoordinatorReplyDraft}
+                            onOpenCoordinatorReplyThread={onOpenCoordinatorThread}
                           />
                         )}
                       </div>

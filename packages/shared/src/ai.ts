@@ -2,6 +2,7 @@ import { decodeSessionFilePath } from './project-path';
 import type { AgentRoleProposalMeta } from './agent-role-proposal';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import type { MemoryBinding } from './memory-provider';
+import type { CoordinatorReplyRef } from './coordinator-threads';
 import type { AcpModelControls } from './acp-model-capabilities';
 import {
   AvailableCommand,
@@ -2025,6 +2026,8 @@ export type MessageContent =
       body: string;
       images?: SessionImagePayload[];
       files?: SessionFilePayload[];
+      replyTo?: CoordinatorReplyRef;
+      linkedSessionIds?: SessionId[];
       createdAt?: number;
     }
   | {
@@ -2113,6 +2116,8 @@ export type ACPTurnConfig = {
   agentRoleRevision?: number;
   agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
   issuePRMentions?: IssuePRMention[];
+  /** Coordinator bubble/message reply reference chosen in the composer. */
+  replyTo?: CoordinatorReplyRef;
   // continue to chat
   resume?: ACPSessionId;
   /** Lody-originated execution-chain depth. Human input omits this or uses zero. */

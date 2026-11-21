@@ -217,6 +217,8 @@ export const isMessageContent = (value: unknown): value is MessageContent => {
         typeof value.body === 'string' &&
         (value.images === undefined || Array.isArray(value.images)) &&
         (value.files === undefined || Array.isArray(value.files)) &&
+        (value.replyTo === undefined || isRecord(value.replyTo)) &&
+        (value.linkedSessionIds === undefined || Array.isArray(value.linkedSessionIds)) &&
         (value.createdAt === undefined || typeof value.createdAt === 'number')
       );
     case 'coordinator_status':

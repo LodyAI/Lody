@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { getSessionRoomId, type SessionId } from '@lody/shared';
+import { getSessionRoomId, type CoordinatorReplyRef, type SessionId } from '@lody/shared';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useAtomValue } from 'jotai';
@@ -27,6 +27,10 @@ type CoordinatorConversationValue = {
   tasks: ReadonlyMap<string, ProjectBoardRow>;
   openTask: (sessionId: string) => void;
   openExternalLink?: (href: string, label?: string) => boolean;
+  replyCountByRootId?: ReadonlyMap<string, number>;
+  activeThreadRootId?: string | null;
+  onReplyToBubble?: (reply: CoordinatorReplyRef) => void;
+  onOpenThread?: (threadRootId: string, previewHint?: string) => void;
 };
 
 const CoordinatorConversationContext = createContext<CoordinatorConversationValue | null>(null);
@@ -40,12 +44,20 @@ export function CoordinatorConversationProvider({
   project,
   onOpenTask,
   onOpenExternalLink,
+  replyCountByRootId,
+  activeThreadRootId = null,
+  onReplyToBubble,
+  onOpenThread,
   children,
 }: {
   coordinatorSessionId: string;
   project: CoordinatorProjectKey | null;
   onOpenTask: (sessionId: string) => void;
   onOpenExternalLink?: (href: string, label?: string) => boolean;
+  replyCountByRootId?: ReadonlyMap<string, number>;
+  activeThreadRootId?: string | null;
+  onReplyToBubble?: (reply: CoordinatorReplyRef) => void;
+  onOpenThread?: (threadRootId: string, previewHint?: string) => void;
   children: ReactNode;
 }) {
   const tasks = useCoordinatorTasksData(coordinatorSessionId, project);
@@ -54,8 +66,20 @@ export function CoordinatorConversationProvider({
       tasks,
       openTask: onOpenTask,
       openExternalLink: onOpenExternalLink,
+      replyCountByRootId,
+      activeThreadRootId,
+      onReplyToBubble,
+      onOpenThread,
     }),
-    [onOpenExternalLink, onOpenTask, tasks]
+    [
+      activeThreadRootId,
+      onOpenExternalLink,
+      onOpenTask,
+      onOpenThread,
+      onReplyToBubble,
+      replyCountByRootId,
+      tasks,
+    ]
   );
   return (
     <CoordinatorConversationContext.Provider value={value}>
