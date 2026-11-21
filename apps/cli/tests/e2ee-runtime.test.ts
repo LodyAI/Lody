@@ -74,6 +74,7 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { connectNativeRepo, nativeRepoDataDir } from '@lody/shared/node/native-repo';
 import { commitDocUpdates, createDocRoom } from '@lody/shared/node/native-docs';
 import {
+  finishPendingNativeWipes,
   NATIVE_CONTENT_REMOTE_ID,
   nativePendingWipeMarker,
 } from '@lody/shared/node/native-encrypted-workspace';
@@ -212,148 +213,182 @@ describe('machine E2EE local runtime', () => {
     }
   });
 
-  it('seals daemon writes with the machine writer and wipes the native namespace on member removal', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-native-engine-'));
-    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
-    const cleanups: (() => Promise<unknown>)[] = [];
-    let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
-    try {
-      const streams = await startDevServer({
-        host: '127.0.0.1',
-        port: 0,
-        dbPath: join(directory, 'riverrun.sqlite'),
-        protocol: 'http1',
-      });
-      cleanups.push(() => streams.close());
-      const bucketId = 'lody-e2ee-native';
-      await fetch(`${streams.baseUrl}/ds/${bucketId}`, { method: 'PUT' });
-      const dataDir = nativeRepoDataDir(getCliPlatformKind());
-      const { client } = await connectNativeRepo({
-        launcher: () => ({ command: process.execPath, args: [nativeHostFixture] }),
-        dataDir,
-      });
-      cleanups.push(async () => {
-        const { pid } = JSON.parse(await readFile(join(dataDir, 'engine.json'), 'utf8'));
-        process.kill(pid, 'SIGTERM');
-      });
+  it.each([{ hostDown: false }, { hostDown: true }])(
+    'seals daemon writes with the machine writer and, on member removal (host down: $hostDown), erases the identity and drops the namespace',
+    async ({ hostDown }) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-native-engine-'));
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      const cleanups: (() => Promise<unknown>)[] = [];
+      let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+      try {
+        const streams = await startDevServer({
+          host: '127.0.0.1',
+          port: 0,
+          dbPath: join(directory, 'riverrun.sqlite'),
+          protocol: 'http1',
+        });
+        cleanups.push(() => streams.close());
+        const bucketId = 'lody-e2ee-native';
+        await fetch(`${streams.baseUrl}/ds/${bucketId}`, { method: 'PUT' });
+        const dataDir = nativeRepoDataDir(getCliPlatformKind());
+        let hostBlocked = false;
+        const launcher = () =>
+          hostBlocked
+            ? { command: process.execPath, args: ['-e', 'process.exit(1)'] }
+            : { command: process.execPath, args: [nativeHostFixture] };
+        const connection = await connectNativeRepo({ launcher, dataDir });
+        const { client } = connection;
+        cleanups.push(async () => {
+          const { pid } = JSON.parse(await readFile(join(dataDir, 'engine.json'), 'utf8'));
+          process.kill(pid, 'SIGTERM');
+        });
 
-      const accountId = 'synthetic-native-account';
-      const root = join(
-        getLodyDataDir(),
-        'e2ee',
-        createHash('sha256').update(accountId).digest('hex'),
-        'workspace'
-      );
-      const fixture = await execute(setup(directory, 2, join(root, 'custody')));
-      const binding = {
-        workspaceId: 'workspace',
-        genesisHash: hex(fixture.genesis.toBytes()),
-        genesisRecordHex: hex(fixture.genesisRecord),
-      };
-      await retainCliE2eeWorkspaceBinding(accountId, binding);
-      const signingPublicKey = await execute(
-        Effect.gen(function* () {
-          const custody = yield* makeCliE2eeCustody({
-            directory: join(root, 'custody'),
-            keyring: noKeyring,
+        const accountId = 'synthetic-native-account';
+        const root = join(
+          getLodyDataDir(),
+          'e2ee',
+          createHash('sha256').update(accountId).digest('hex'),
+          'workspace'
+        );
+        const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+        const binding = {
+          workspaceId: 'workspace',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          genesisRecordHex: hex(fixture.genesisRecord),
+        };
+        await retainCliE2eeWorkspaceBinding(accountId, binding);
+        const signingPublicKey = await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({
+              directory: join(root, 'custody'),
+              keyring: noKeyring,
+            });
+            return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+          })
+        );
+        await fs.writeFile(
+          join(root, 'activation.json'),
+          JSON.stringify({ genesisHash: binding.genesisHash, signingPublicKey })
+        );
+        let removed = false;
+        const options = {
+          machineId: 'machine',
+          accountId,
+          ...binding,
+          keyring: noKeyring,
+          onUnavailable: () => {},
+          cloud: {
+            getHistory: async () => {
+              if (removed) throw new Error('unauthorized');
+              return page(fixture.records);
+            },
+            getContentToken: async () => {
+              if (removed) throw new CloudE2eeMemberRemoved();
+              return {
+                token: 'synthetic-content-token',
+                bucketId,
+                gatewayBaseUrl: streams.baseUrl,
+                expiresIn: 480,
+              };
+            },
+            mailboxCall: async (
+              method: keyof E2eeMailboxRequests,
+              input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+            ) => {
+              if (method === 'fetch')
+                return {
+                  items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
+                  next: null,
+                };
+              if (method === 'status')
+                return {
+                  ...(input as E2eeMailboxRequests['status']).slot,
+                  revision: 0,
+                  status: 'EnvelopeStored',
+                };
+              if (method === 'report') return null;
+              throw new Error('unexpected mailbox operation');
+            },
+          } as CloudE2eePort,
+        };
+        host = await openCliE2eeWorkspaceLegacy(options);
+        await host.refresh();
+        await host.attachNativeEngine(client, dataDir);
+
+        const room = { kind: 'loro_doc' as const, id: 'session-native' };
+        await createDocRoom(client, 'workspace', room.id);
+        const doc = new LoroDoc();
+        doc.getMap('session').set('note', 'native-daemon-plaintext');
+        doc.commit();
+        await commitDocUpdates(client, 'workspace', room.id, [doc.export({ mode: 'update' })]);
+        expect(
+          (await client.syncNamespace('workspace', NATIVE_CONTENT_REMOTE_ID)).blockedRooms
+        ).toBe(0);
+        const url = createLoroStreamUrl({
+          bucketId,
+          streamId: getLoroStreamIdForDocId('workspace' as WorkspaceId, room.id),
+          baseUrl: streams.baseUrl,
+        });
+        const body = Buffer.from(await (await fetch(`${url}?offset=-1`)).arrayBuffer());
+        expect(body.includes(Buffer.from('LSCE'))).toBe(true);
+        expect(body.includes('native-daemon-plaintext')).toBe(false);
+        expect(body.includes(Buffer.from(signingPublicKey, 'hex'))).toBe(true);
+
+        const namespaceFile = join(
+          dataDir,
+          'namespaces',
+          `ns_${Buffer.from('workspace').toString('hex')}.sqlite3`
+        );
+        expect(existsSync(namespaceFile)).toBe(true);
+        const marker = nativePendingWipeMarker(dataDir, 'workspace');
+        removed = true;
+        if (hostDown) {
+          hostBlocked = true;
+          const { pid } = JSON.parse(await readFile(join(dataDir, 'engine.json'), 'utf8'));
+          const lost = new Promise<void>((resolve) => {
+            const off = client.onConnectionStateChange((state) => {
+              if (state === 'connected') return;
+              off();
+              resolve();
+            });
           });
-          return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
-        })
-      );
-      await fs.writeFile(
-        join(root, 'activation.json'),
-        JSON.stringify({ genesisHash: binding.genesisHash, signingPublicKey })
-      );
-      let removed = false;
-      const options = {
-        machineId: 'machine',
-        accountId,
-        ...binding,
-        keyring: noKeyring,
-        onUnavailable: () => {},
-        cloud: {
-          getHistory: async () => {
-            if (removed) throw new Error('unauthorized');
-            return page(fixture.records);
-          },
-          getContentToken: async () => {
-            if (removed) throw new CloudE2eeMemberRemoved();
-            return {
-              token: 'synthetic-content-token',
-              bucketId,
-              gatewayBaseUrl: streams.baseUrl,
-              expiresIn: 480,
-            };
-          },
-          mailboxCall: async (
-            method: keyof E2eeMailboxRequests,
-            input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
-          ) => {
-            if (method === 'fetch')
-              return {
-                items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
-                next: null,
-              };
-            if (method === 'status')
-              return {
-                ...(input as E2eeMailboxRequests['status']).slot,
-                revision: 0,
-                status: 'EnvelopeStored',
-              };
-            if (method === 'report') return null;
-            throw new Error('unexpected mailbox operation');
-          },
-        } as CloudE2eePort,
-      };
-      host = await openCliE2eeWorkspaceLegacy(options);
-      await host.refresh();
-      await host.attachNativeEngine(client, dataDir);
+          process.kill(pid, 'SIGTERM');
+          await lost;
+          await host.refresh();
+          await expect(host.removalCleanup()).rejects.toThrow();
+          expect(existsSync(join(root, 'custody'))).toBe(false);
+          expect(existsSync(join(root, 'activation.json'))).toBe(false);
+          expect(existsSync(namespaceFile)).toBe(true);
+          expect(await marker.read()).toBe(true);
+          await connection.close();
+          hostBlocked = false;
+          const reconnected = await connectNativeRepo({ launcher, dataDir });
+          cleanups.push(() => reconnected.close());
+          await finishPendingNativeWipes(reconnected.client, dataDir);
+        } else {
+          await host.refresh();
+          await host.removalCleanup();
+          expect(existsSync(join(root, 'custody'))).toBe(false);
+        }
+        expect(existsSync(namespaceFile)).toBe(false);
+        expect(await marker.read()).toBe(false);
+        if (hostDown) return;
 
-      const room = { kind: 'loro_doc' as const, id: 'session-native' };
-      await createDocRoom(client, 'workspace', room.id);
-      const doc = new LoroDoc();
-      doc.getMap('session').set('note', 'native-daemon-plaintext');
-      doc.commit();
-      await commitDocUpdates(client, 'workspace', room.id, [doc.export({ mode: 'update' })]);
-      expect((await client.syncNamespace('workspace', NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(
-        0
-      );
-      const url = createLoroStreamUrl({
-        bucketId,
-        streamId: getLoroStreamIdForDocId('workspace' as WorkspaceId, room.id),
-        baseUrl: streams.baseUrl,
-      });
-      const body = Buffer.from(await (await fetch(`${url}?offset=-1`)).arrayBuffer());
-      expect(body.includes(Buffer.from('LSCE'))).toBe(true);
-      expect(body.includes('native-daemon-plaintext')).toBe(false);
-      expect(body.includes(Buffer.from(signingPublicKey, 'hex'))).toBe(true);
-
-      const namespaceFile = join(
-        dataDir,
-        'namespaces',
-        `ns_${Buffer.from('workspace').toString('hex')}.sqlite3`
-      );
-      expect(existsSync(namespaceFile)).toBe(true);
-      removed = true;
-      await host.refresh();
-      await host.removalCleanup();
-      expect(existsSync(namespaceFile)).toBe(false);
-      const marker = nativePendingWipeMarker(dataDir, 'workspace');
-      expect(await marker.read()).toBe(false);
-
-      await createDocRoom(client, 'workspace', room.id);
-      await marker.write();
-      await expect(openCliE2eeWorkspaceLegacy(options)).rejects.toThrow('e2ee_member_removed');
-      expect(await marker.read()).toBe(false);
-      await expect(client.readDoc('workspace', room)).rejects.toThrow();
-    } finally {
-      await host?.removalCleanup().catch(() => undefined);
-      await host?.close().catch(() => undefined);
-      for (const cleanup of cleanups.reverse()) await cleanup().catch(() => undefined);
-      vi.unstubAllEnvs();
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 90_000);
+        await createDocRoom(client, 'workspace', room.id);
+        await marker.write();
+        await expect(openCliE2eeWorkspaceLegacy(options)).rejects.toThrow('e2ee_member_removed');
+        expect(await marker.read()).toBe(false);
+        await expect(client.readDoc('workspace', room)).rejects.toThrow();
+      } finally {
+        await host?.removalCleanup().catch(() => undefined);
+        await host?.close().catch(() => undefined);
+        for (const cleanup of cleanups.reverse()) await cleanup().catch(() => undefined);
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    90_000
+  );
 
   it('signs local Schedule changes with machine custody and refuses other targets', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-local-schedules-'));
