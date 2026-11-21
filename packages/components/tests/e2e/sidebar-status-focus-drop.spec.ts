@@ -68,6 +68,25 @@ async function centerOf(locator: Locator): Promise<Point> {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
+/**
+ * The pointer Y that drops into Focus slot `index` (>= 1): halfway between the
+ * untransformed centers of the rows around it, the geometry the drop index reads.
+ * Entering Focus closes a pinned row's home gap and shifts Focus, so callers
+ * read it until it settles.
+ */
+const focusSlotY = (page: Page, index: number) =>
+  page.evaluate(
+    ({ focus, index }) => {
+      const rows = document.querySelector(`${focus} [data-pin-rows]`)!;
+      const nodes = Array.from(rows.children) as HTMLElement[];
+      const center = (node: HTMLElement) => node.offsetTop + node.offsetHeight / 2;
+      return Math.round(
+        rows.getBoundingClientRect().top + (center(nodes[index - 1]!) + center(nodes[index]!)) / 2
+      );
+    },
+    { focus: FOCUS, index }
+  );
+
 const nodeIds = (page: Page, section: string) =>
   page
     .locator(`[data-pin-section="${section}"] [data-pin-node]`)
@@ -140,4 +159,37 @@ test('a Later row dropped between two Focus rows is restored at that slot', asyn
   });
 
   await expect.poll(order).toEqual([before[0], 'later-1', ...before.slice(1)]);
+});
+
+test('a pinned row dragged into Focus is unpinned at the dropped slot', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.goto('/iframe.html?id=sidebar-status-view--default&viewMode=story');
+  const focusRows = page.locator(`${FOCUS} [data-pin-node]`);
+  await expect(focusRows.first()).toBeVisible();
+  const focusOrder = () =>
+    focusRows.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-pin-node')));
+  const before = await focusOrder();
+  expect(before.length).toBeGreaterThan(1);
+
+  const start = await centerOf(
+    page.locator('[data-pin-section="default"] [data-pin-node="pin-2"]')
+  );
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x, start.y + 10, { steps: 5 });
+  const entry = (await focusRows.nth(0).boundingBox())!;
+  await page.mouse.move(start.x, entry.y + entry.height / 2, { steps: 20 });
+  let y = await focusSlotY(page, 1);
+  await expect
+    .poll(async () => {
+      const previous = y;
+      y = await focusSlotY(page, 1);
+      return y === previous;
+    })
+    .toBe(true);
+  await page.mouse.move(start.x, y, { steps: 20 });
+  await page.mouse.up();
+
+  await expect.poll(focusOrder).toEqual([before[0], 'pin-2', ...before.slice(1)]);
+  await expect(page.locator('[data-pin-section="default"] [data-pin-node="pin-2"]')).toHaveCount(0);
 });

@@ -538,12 +538,18 @@ export class AutomationLedger {
   wait(id: string): AutomationWait | undefined {
     return this.read('waits', id);
   }
-  waits(userId: string, sessionId?: string): AutomationWait[] {
+  waits(userId: string | undefined, sessionId?: string): AutomationWait[] {
+    const filters = [
+      ...(userId === undefined ? [] : ['owner_user_id=?']),
+      ...(sessionId === undefined ? [] : ['session_id=?']),
+    ];
+    const args = [userId, sessionId].filter((value): value is string => value !== undefined);
     return (
       this.connection.raw
-        .prepare(`SELECT payload FROM waits WHERE owner_user_id=?
-      ${sessionId === undefined ? '' : 'AND session_id=?'} ORDER BY created_at DESC,id`)
-        .all(...(sessionId === undefined ? [userId] : [userId, sessionId])) as JsonRow[]
+        .prepare(
+          `SELECT payload FROM waits ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''} ORDER BY created_at DESC,id`
+        )
+        .all(...args) as JsonRow[]
     ).map((row) => JSON.parse(row.payload) as AutomationWait);
   }
   dueWaits(now: number, limit = 4): AutomationWait[] {
@@ -1156,32 +1162,38 @@ export class AutomationLedger {
     return !!receipt || !!work || !!wait;
   }
   activityPage(
-    userId: string,
+    userId: string | undefined,
     sessionId: string | undefined,
     limit: number,
     before?: { updatedAt: number; id: string }
   ) {
-    const sessionClause = (column: string) => (sessionId === undefined ? '' : `AND ${column}=?`);
-    const args = (user: string) => (sessionId === undefined ? [user] : [user, sessionId]);
+    const where = (ownerColumn: string, sessionColumn: string) => {
+      const filters = [
+        ...(userId === undefined ? [] : [`${ownerColumn}=?`]),
+        ...(sessionId === undefined ? [] : [`${sessionColumn}=?`]),
+      ];
+      return filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    };
+    const args = [userId, sessionId].filter((value): value is string => value !== undefined);
     const rows = this.connection.raw
       .prepare(`SELECT * FROM (
       SELECT 'action' AS kind,id,updated_at AS updatedAt,payload FROM receipts
-      WHERE owner_user_id=? ${sessionClause('scope_session_id')}
+      ${where('owner_user_id', 'scope_session_id')}
       UNION ALL
       SELECT 'handler' AS kind,id,updated_at AS updatedAt,payload FROM deliveries
-      WHERE owner_user_id=? ${sessionClause('scope_session_id')}
+      ${where('owner_user_id', 'scope_session_id')}
       UNION ALL
       SELECT 'work' AS kind,id,updated_at AS updatedAt,payload FROM work
-      WHERE owner_user_id=? ${sessionClause('session_id')}
+      ${where('owner_user_id', 'session_id')}
       UNION ALL
       SELECT 'release' AS kind,id,observed_at AS updatedAt,payload FROM turn_observations
-      WHERE user_id=? ${sessionClause('session_id')}
+      ${where('user_id', 'session_id')}
     ) WHERE (updatedAt<? OR (updatedAt=? AND id>?)) ORDER BY updatedAt DESC,id LIMIT ?`)
       .all(
-        ...args(userId),
-        ...args(userId),
-        ...args(userId),
-        ...args(userId),
+        ...args,
+        ...args,
+        ...args,
+        ...args,
         before?.updatedAt ?? Number.MAX_SAFE_INTEGER,
         before?.updatedAt ?? Number.MAX_SAFE_INTEGER,
         before?.id ?? '',
@@ -1393,26 +1405,25 @@ export class AutomationLedger {
   configureSession(
     action: () => void,
     sessionId: string,
-    userId: string,
     turnId: string | undefined,
     now: number
   ): void {
     this.connection.withImmediate(() => {
       action();
-      if (turnId) this.activateCurrentCapacityFailure(sessionId, userId, turnId, now);
+      if (turnId) this.activateCurrentCapacityFailure(sessionId, turnId, now);
     });
   }
-  activateCurrentCapacityFailure(
-    sessionId: string,
-    userId: string,
-    turnId: string,
-    now: number
-  ): void {
+  activateCurrentCapacityFailure(sessionId: string, turnId: string, now: number): void {
     this.connection.withImmediate(() => {
-      const work = this.sessionWork(sessionId, userId).find(
-        (item) =>
-          item.turnId === turnId && item.state === 'blocked_on_capacity' && !item.invocationId
-      );
+      const work = (
+        this.connection.raw
+          .prepare(
+            "SELECT payload FROM work WHERE session_id=? AND state='blocked_on_capacity' AND turn_id=?"
+          )
+          .all(sessionId, turnId) as JsonRow[]
+      )
+        .map((row) => JSON.parse(row.payload) as PendingWork)
+        .find((item) => !item.invocationId);
       if (!work) return;
       const existing = this.connection.raw
         .prepare('SELECT 1 FROM deliveries WHERE event_work_id=? AND rule_id=? LIMIT 1')

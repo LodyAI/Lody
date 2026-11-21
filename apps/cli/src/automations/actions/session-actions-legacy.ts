@@ -129,7 +129,6 @@ export class AutomationSessionActionsLegacy {
     const current = ledger.rule(receipt.rule.id);
     if (
       !current?.enabled ||
-      current.ownerUserId !== auth.userId ||
       current.ownerMachineId !== auth.machineId ||
       current.scope.workspaceId !== workspace.id ||
       !retainsAutomationGrant(receipt, current)
@@ -205,6 +204,8 @@ export class AutomationSessionActionsLegacy {
         }
       }
       if (invocation.target.kind === 'new') {
+        if (current.ownerUserId !== auth.userId)
+          return { value: 'no', reason: 'target_permission_revoked' };
         if (
           !current.grants.agentRoleIds.includes(invocation.target.agentRoleId) ||
           invocation.target.machineId !== auth.machineId
@@ -230,7 +231,9 @@ export class AutomationSessionActionsLegacy {
       };
     if (meta.machineId !== auth.machineId)
       return { value: 'unknown', reason: 'target_owner_unavailable' };
-    if (meta.userId !== auth.userId) return { value: 'no', reason: 'target_permission_revoked' };
+    const access = await this.authority.canEdit(sessionId as SessionId, current.ownerUserId);
+    if (access === 'no') return { value: 'no', reason: 'target_permission_revoked' };
+    if (access === 'unknown') return { value: 'unknown', reason: 'target_permission_unconfirmed' };
     if (receipt.evidence?.length) {
       const linked = new Set(
         getCurrentPullRequestsByRepository(resolveSessionPullRequests(meta)).map((pr) => pr.url)

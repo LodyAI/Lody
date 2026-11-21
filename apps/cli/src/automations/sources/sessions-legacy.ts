@@ -26,7 +26,7 @@ export async function observeSessionTurnLegacy(
   const record = await manager.repo.getDocMeta(getSessionRoomId(fact.sessionId));
   if (!record || isLoroRepoDocDeleted(record)) return;
   const meta = record.meta as SessionMeta;
-  if (meta.machineId !== ledger.machineId || meta.userId !== fact.userId) return;
+  if (meta.machineId !== ledger.machineId) return;
   const scope = {
     workspaceId: ledger.workspaceId,
     sessionId: fact.sessionId,
