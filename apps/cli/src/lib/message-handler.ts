@@ -671,6 +671,18 @@ export interface MessageHandlerConfig {
       providerId: string,
       signal?: AbortSignal
     ) => Promise<void>;
+    refreshProviders: (
+      configId: AgentConfigId,
+      providerId?: string,
+      signal?: AbortSignal
+    ) => Promise<void>;
+    listModels: (
+      configId: AgentConfigId,
+      providerId?: string,
+      signal?: AbortSignal
+    ) => Promise<
+      Array<{ selector: string; providerId: string; modelId: string; displayName: string }>
+    >;
   };
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
@@ -7959,7 +7971,9 @@ export class MessageHandler {
       case 'sorbet/credentials-logout':
       case 'sorbet/providers-list':
       case 'sorbet/providers-create':
-      case 'sorbet/providers-delete': {
+      case 'sorbet/providers-delete':
+      case 'sorbet/providers-refresh':
+      case 'sorbet/models-list': {
         if (
           request.workspaceId !== this.workspaceId ||
           request.machineId !== this.machineId ||
@@ -8008,8 +8022,30 @@ export class MessageHandler {
               ),
             });
           }
-          await this.sorbetCredentials.deleteProvider(configId, request.params.providerId, signal);
-          return { type: 'sorbet/providers-delete' };
+          if (request.method === 'sorbet/providers-delete') {
+            await this.sorbetCredentials.deleteProvider(
+              configId,
+              request.params.providerId,
+              signal
+            );
+            return { type: 'sorbet/providers-delete' };
+          }
+          if (request.method === 'sorbet/providers-refresh') {
+            await this.sorbetCredentials.refreshProviders(
+              configId,
+              request.params.providerId,
+              signal
+            );
+            return { type: 'sorbet/providers-refresh' };
+          }
+          return SorbetProvidersResultSchema.parse({
+            type: 'sorbet/models-list',
+            models: await this.sorbetCredentials.listModels(
+              configId,
+              request.params.providerId,
+              signal
+            ),
+          });
         } catch {
           throw new Error('Sorbet provider operation failed');
         }

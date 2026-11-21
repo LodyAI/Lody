@@ -36,8 +36,8 @@ export const loadProjectSettingsComponent = settingsCodeLoader(() =>
 export const loadMachineAgentSettings = settingsCodeLoader(() =>
   import('./machine-agent-settings').then((module) => ({ default: module.MachineAgentSettings }))
 );
-export const loadLodyAgentSetting = settingsCodeLoader(() =>
-  import('./lody-agent-setting').then((module) => ({ default: module.LodyAgentSetting }))
+export const loadHarness = settingsCodeLoader(() =>
+  import('@/components/harness').then((module) => ({ default: module.Harness }))
 );
 export const loadIntegrationsSettingsComponent = settingsCodeLoader(() =>
   import('./integrations-setting').then((module) => ({
@@ -85,7 +85,7 @@ const panels = {
   projects: loadProjectSettingsComponent,
   agents: loadMachineAgentSettings,
   machines: loadMachineAgentSettings,
-  'lody-agent': loadLodyAgentSetting,
+  'lody-agent': loadHarness,
   memory: loadMemorySetting,
   'agent-roles': loadAgentRolesSetting,
   'prompt-shortcuts': loadPromptShortcutsSetting,

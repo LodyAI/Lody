@@ -1,21 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, MachineId } from '@lody/shared';
-import type { Logger } from '@/utils/logger';
 import { createSorbetCredentialsHandler } from './sorbet-credentials';
-import { acquireSorbetCredentialMutation } from '@/agent/sorbet-credential-mutation';
 
-const run = vi.hoisted(() => vi.fn());
-vi.mock('@/agent/acp-runner', () => ({ runLocalSorbetCredentials: run }));
+const openSorbetControl = vi.hoisted(() => vi.fn());
+vi.mock('@sorbetai/control', () => ({ openSorbetControl }));
 
 const id = 'provider' as AgentConfigId;
 const machine = 'machine' as MachineId;
-const logger = {} as Logger;
+
+function control(overrides: Record<string, unknown> = {}) {
+  return {
+    credentials: {
+      list: vi.fn(async () => []),
+      logout: vi.fn(async () => {}),
+    },
+    providers: {
+      listCustom: vi.fn(async () => []),
+      createCustom: vi.fn(async (provider) => ({ ...provider, id: 'custom' })),
+      deleteCustom: vi.fn(async () => {}),
+      refresh: vi.fn(async () => ({ refreshed: [], errors: new Map() })),
+      availableModels: vi.fn(async () => []),
+    },
+    close: vi.fn(async () => {}),
+    ...overrides,
+  };
+}
 
 describe('daemon Sorbet credentials', () => {
-  // Queued once-values would otherwise leak into the next test's first call.
-  beforeEach(() => run.mockReset());
+  beforeEach(() => openSorbetControl.mockReset());
 
-  it('uses only the selected local builtin identity, never persisted launch inputs', async () => {
+  it('uses only the selected local builtin identity and calls Sorbet control directly', async () => {
     const config = {
       id,
       machineId: machine,
@@ -26,69 +40,117 @@ describe('daemon Sorbet credentials', () => {
       runtimeOverrides: { command: 'untrusted' },
     };
     const document = { getAgentConfigForMachineLaunch: vi.fn(async () => config as never) };
-    const handler = createSorbetCredentialsHandler(document, machine, logger);
-    run
-      .mockResolvedValueOnce({
-        kind: 'credentials',
-        credentials: [{ providerId: 'x', type: 'oauth' }],
-      })
-      .mockResolvedValueOnce({ kind: 'credentials', credentials: [] });
+    const first = control({
+      credentials: {
+        list: vi.fn(async () => [{ providerId: 'x', type: 'oauth' }]),
+        logout: vi.fn(async () => {}),
+      },
+    });
+    const second = control();
+    openSorbetControl.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const handler = createSorbetCredentialsHandler(document, machine);
+
     expect(await handler.list(id)).toEqual([{ providerId: 'x', type: 'oauth' }]);
     await handler.logout(id, 'x');
+
     expect(document.getAgentConfigForMachineLaunch).toHaveBeenCalledWith(id, machine);
-    expect(run).toHaveBeenNthCalledWith(1, logger, { type: 'list' }, undefined);
-    expect(run).toHaveBeenNthCalledWith(2, logger, { type: 'logout', providerId: 'x' }, undefined);
+    expect(openSorbetControl).toHaveBeenCalledTimes(2);
+    expect(openSorbetControl).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ dataDirectory: expect.stringMatching(/sorbet$/) })
+    );
+    expect(first.credentials.list).toHaveBeenCalledWith({ signal: undefined });
+    expect(second.credentials.logout).toHaveBeenCalledWith('x', { signal: undefined });
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(second.close).toHaveBeenCalledOnce();
   });
 
-  it('allows custom endpoint creation for an unpublished setup resolved by the daemon', async () => {
+  it('uses Sorbet control for custom Provider operations', async () => {
     const config = { id, machineId: machine, cliType: 'builtin', agentType: 'sorbet' };
-    const document = {
-      getAgentConfigById: async () => null,
-      getAgentConfigForMachineLaunch: async () => config as never,
-    };
-    const handler = createSorbetCredentialsHandler(document, machine, logger);
+    const document = { getAgentConfigForMachineLaunch: async () => config as never };
     const provider = {
       name: 'Example',
       protocol: 'openai-completions' as const,
       baseUrl: 'https://example.com/v1',
       models: [],
     };
-    run.mockResolvedValueOnce({ kind: 'provider', provider: { ...provider, id: 'custom' } });
+    const create = control();
+    const list = control({
+      providers: {
+        listCustom: vi.fn(async () => [{ ...provider, id: 'custom' }]),
+        createCustom: vi.fn(),
+        deleteCustom: vi.fn(),
+        refresh: vi.fn(),
+        availableModels: vi.fn(),
+      },
+    });
+    openSorbetControl.mockResolvedValueOnce(create).mockResolvedValueOnce(list);
+    const handler = createSorbetCredentialsHandler(document, machine);
+
     expect(await handler.createProvider(id, provider)).toEqual({ ...provider, id: 'custom' });
-    run.mockResolvedValueOnce({ kind: 'providers', providers: [{ ...provider, id: 'custom' }] });
     expect(await handler.listProviders(id)).toEqual([{ ...provider, id: 'custom' }]);
+    expect(create.providers.createCustom).toHaveBeenCalledWith(provider, { signal: undefined });
+    expect(list.providers.listCustom).toHaveBeenCalledWith({ signal: undefined });
   });
 
-  it('holds the shared mutation owner after disconnect until the logout runner finishes cleanup', async () => {
+  it('refreshes Providers and reads the control model catalog', async () => {
     const config = { id, machineId: machine, cliType: 'builtin', agentType: 'sorbet' };
     const document = { getAgentConfigForMachineLaunch: async () => config as never };
-    const handler = createSorbetCredentialsHandler(document, machine, logger);
-    const otherWorkspace = createSorbetCredentialsHandler(document, machine, logger);
-    const signal = new AbortController();
-    let onStart: (() => void) | undefined;
-    let finish: (() => void) | undefined;
-    const started = new Promise<void>((resolve) => {
-      onStart = resolve;
+    const refresh = control();
+    const models = control({
+      providers: {
+        listCustom: vi.fn(),
+        createCustom: vi.fn(),
+        deleteCustom: vi.fn(),
+        refresh: vi.fn(),
+        availableModels: vi.fn(async () => [
+          {
+            selector: 'example/model',
+            providerId: 'example',
+            modelId: 'model',
+            displayName: 'Model',
+          },
+        ]),
+      },
     });
-    const cleanup = new Promise<void>((resolve) => {
-      finish = resolve;
+    openSorbetControl.mockResolvedValueOnce(refresh).mockResolvedValueOnce(models);
+    const handler = createSorbetCredentialsHandler(document, machine);
+
+    await handler.refreshProviders(id, 'example');
+    expect(await handler.listModels(id)).toEqual([
+      {
+        selector: 'example/model',
+        providerId: 'example',
+        modelId: 'model',
+        displayName: 'Model',
+      },
+    ]);
+    expect(refresh.providers.refresh).toHaveBeenCalledWith({
+      providers: ['example'],
+      signal: undefined,
     });
-    run.mockImplementationOnce(async (_logger, _operation, requestSignal) => {
-      onStart?.();
-      await new Promise<void>((resolve) =>
-        requestSignal.addEventListener('abort', resolve, { once: true })
-      );
-      await cleanup;
-      return { kind: 'credentials', credentials: [] };
+    expect(models.providers.availableModels).toHaveBeenCalledWith({
+      providerId: undefined,
+      signal: undefined,
     });
-    const logout = handler.logout(id, 'example', signal.signal);
-    await started;
-    signal.abort();
-    await expect(otherWorkspace.logout(id, 'example')).rejects.toThrow('busy');
-    await expect(acquireSorbetCredentialMutation()).rejects.toThrow('busy');
-    finish?.();
-    await logout;
-    (await acquireSorbetCredentialMutation()).release();
+  });
+
+  it('closes control after an operation failure', async () => {
+    const config = { id, machineId: machine, cliType: 'builtin', agentType: 'sorbet' };
+    const document = { getAgentConfigForMachineLaunch: async () => config as never };
+    const failure = new Error('failed');
+    const instance = control({
+      credentials: {
+        list: vi.fn(async () => {
+          throw failure;
+        }),
+        logout: vi.fn(),
+      },
+    });
+    openSorbetControl.mockResolvedValueOnce(instance);
+
+    await expect(createSorbetCredentialsHandler(document, machine).list(id)).rejects.toBe(failure);
+    expect(instance.close).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -97,14 +159,15 @@ describe('daemon Sorbet credentials', () => {
     { id, machineId: machine, cliType: 'custom', agentType: 'sorbet' },
     { id, machineId: machine, cliType: 'builtin', agentType: 'other' },
     { id: 'other', machineId: machine, cliType: 'builtin', agentType: 'sorbet' },
-  ])('rejects an unavailable or untrusted provider before launching', async (config) => {
-    run.mockClear();
+  ])('rejects an unavailable or untrusted provider before opening control', async (config) => {
     const document = { getAgentConfigForMachineLaunch: async () => config as never };
-    const handler = createSorbetCredentialsHandler(document, machine, logger);
+    const handler = createSorbetCredentialsHandler(document, machine);
     await expect(handler.list(id)).rejects.toThrow('configuration unavailable');
     await expect(handler.logout(id, 'x')).rejects.toThrow('configuration unavailable');
     await expect(handler.listProviders(id)).rejects.toThrow('configuration unavailable');
     await expect(handler.deleteProvider(id, 'x')).rejects.toThrow('configuration unavailable');
-    expect(run).not.toHaveBeenCalled();
+    await expect(handler.refreshProviders(id)).rejects.toThrow('configuration unavailable');
+    await expect(handler.listModels(id)).rejects.toThrow('configuration unavailable');
+    expect(openSorbetControl).not.toHaveBeenCalled();
   });
 });
