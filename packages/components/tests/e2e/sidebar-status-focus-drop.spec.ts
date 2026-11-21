@@ -64,12 +64,10 @@ test('a pinned row dragged into Focus is unpinned at the dropped slot', async ({
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(start.x, start.y + 10, { steps: 5 });
-  // Once the pointer leaves Pinned, its slot closes and Focus moves up: measure after.
   const entry = (await focusRows.nth(0).boundingBox())!;
   await page.mouse.move(start.x, entry.y + entry.height / 2, { steps: 20 });
   const first = (await focusRows.nth(0).boundingBox())!;
   const second = (await focusRows.nth(1).boundingBox())!;
-  // Below the first Focus row's middle, above the second's: the second slot.
   const dropY = (first.y + first.height / 2 + second.y + second.height / 2) / 2;
   await page.mouse.move(start.x, dropY, { steps: 10 });
   await page.mouse.up();

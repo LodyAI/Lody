@@ -383,7 +383,6 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         fromBackground: liftedBackground(),
         fromShadow: PINNED_ROW_LIFT_SHADOW,
       };
-      // Released over Focus: the row leaves the pinned area and lands in Focus.
       if (target.sectionId === FOCUS_SECTION_DND_KEY) {
         beginPinnedDropSettle(settle);
         setPendingOrder(

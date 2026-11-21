@@ -4069,7 +4069,6 @@ export function LoroAppSidebar({
         orderKey,
       }));
       const wasInFocus = focusRoots.some((item) => item.id === sessionId);
-      // A pinned row dropped into Focus leaves the pinned area first.
       const unpin = sessionById.get(sessionId)?.isPinned
         ? setSessionPinned(sessionId as SessionId, false)
         : Promise.resolve();
