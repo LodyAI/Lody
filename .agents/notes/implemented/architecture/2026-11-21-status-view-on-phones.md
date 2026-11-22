@@ -115,8 +115,8 @@ move, keys for unkeyed rows above the drop, real keys for expired snoozes when
 Focus is reordered, opened sub-conversations restored with a row dropped into
 Focus, `settledAt = max(now, lastMessageAt)`, and unpinning keeps `orderKey`.
 
-**Golden vectors** — `vectors/layout.json` (11 cases) and `vectors/commands.json`
-(33 cases, fixed `nowMs` and random bytes) run in `packages/shared`, against the
+**Golden vectors** — `vectors/layout.json` (13 cases) and `vectors/commands.json`
+(38 cases, fixed `nowMs` and random bytes) run in `packages/shared`, against the
 desktop and phone-WebView adapters in `packages/components`, in the iOS runtime
 tests and in the Android runtime tests.
 
@@ -226,7 +226,7 @@ folds past 20 rows.
 
 Verified:
 
-- Golden vectors (11 layout cases, 33 command cases) run in `packages/shared`,
+- Golden vectors (13 layout cases, 38 command cases) run in `packages/shared`,
   against the desktop and phone adapters in `packages/components`, in the iOS
   runtime tests and in the Android runtime tests.
 - Desktop: the Storybook end-to-end suite for Focus drops

@@ -203,6 +203,26 @@ export const LAYOUT_CASES: LayoutCase[] = [
     ),
   },
   {
+    name: 'pinned-root-carries-opened-rows-at-any-depth',
+    description:
+      'A row opened by a row the pinned root opened follows the root into its section and nests under it, like the direct child.',
+    input: layoutInput(
+      [
+        session('root', { isPinned: true, pinSectionId: 'work', orderKey: K1 }),
+        session('child', { openedById: 'root' }),
+        session('grandchild', { openedById: 'child' }),
+        session('other-pin', { isPinned: true, orderKey: K2 }),
+      ],
+      { sections: [section('work', K2, 'Work')] }
+    ),
+  },
+  {
+    name: 'all-zero-order-key-reads-as-no-key',
+    description:
+      'An all-zero order key has no key before it, so Focus orders that row as unkeyed rather than failing later.',
+    input: layoutInput([session('zero', { orderKey: '00' }), session('keyed', { orderKey: K2 })]),
+  },
+  {
     name: 'placed-woken-row-keeps-unread-at-its-place',
     description:
       'A woken row placed by a Focus reorder (focusRestoredAt at its wake-up, expired snoozedUntil kept) orders by its key and stays unread; an unplaced woken row still floats.',
@@ -453,6 +473,60 @@ export const COMMAND_CASES: CommandCase[] = [
       session('later-child', { openedById: 'settled-parent', snoozedUntil: NOW + HOUR }),
     ]),
     command: { type: 'moveToFocus', sessionId: 'settled-parent', includeOpened: true },
+  },
+  {
+    name: 'new-session-order-ignores-an-all-zero-key',
+    description:
+      'An all-zero key cannot have a key above it; the new top key is planned from the real keys.',
+    state: state([session('zero', { orderKey: '0000' }), session('keyed', { orderKey: K2 })]),
+    command: { type: 'newSessionOrder', sessionId: 'brand-new' },
+  },
+  {
+    name: 'move-to-focus-top-over-an-all-zero-key',
+    description:
+      'Moving above a row with an all-zero key gives that row a real key instead of failing.',
+    state: state([session('zero', { orderKey: '00' }), session('f1', { orderKey: K2 })]),
+    command: { type: 'move', sessionId: 'f1', to: { area: 'focus' }, beforeId: 'zero' },
+  },
+  {
+    name: 'pin-lands-above-a-pin-whose-section-was-deleted',
+    description:
+      'A pin naming a deleted section shows in the default section, so a new pin is keyed above it too.',
+    state: state(
+      [
+        session('orphan', { isPinned: true, pinSectionId: 'deleted', orderKey: K1 }),
+        session('default-pin', { isPinned: true, orderKey: K2 }),
+        session('focus-row', { orderKey: K3 }),
+      ],
+      { sections: [section('work', K3, 'Work')] }
+    ),
+    command: { type: 'setPinned', sessionId: 'focus-row', pinned: true },
+  },
+  {
+    name: 'pin-move-before-sections-load-ignores-held-back-rows',
+    description:
+      'Before the section rows are read, a pin naming a section is held back from the default section, so it is not a neighbor there.',
+    state: state(
+      [
+        session('held', { isPinned: true, pinSectionId: 'work', orderKey: K1 }),
+        session('default-pin', { isPinned: true, orderKey: K2 }),
+        session('focus-row', { orderKey: K3 }),
+      ],
+      { sectionsLoaded: false }
+    ),
+    command: {
+      type: 'move',
+      sessionId: 'focus-row',
+      to: { area: 'pinned', sectionId: null },
+      beforeId: 'default-pin',
+    },
+  },
+  {
+    name: 'settle-covers-activity-newer-than-the-clock',
+    description:
+      'settledAt is never before the row activity (contained Tabs included), so a Tab clock running ahead cannot keep the row out of Settled.',
+    state: state([session('ahead', { lastMessageAt: NOW - HOUR, activityAt: NOW + 2 * MINUTE })]),
+    command: { type: 'settle', sessionId: 'ahead', includeOpened: false },
   },
   {
     name: 'move-in-focus-over-read-only-unkeyed-row-is-refused',

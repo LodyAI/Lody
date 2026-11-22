@@ -2755,6 +2755,386 @@
       ]
     },
     {
+      "name": "new-session-order-ignores-an-all-zero-key",
+      "description": "An all-zero key cannot have a key above it; the new top key is planned from the real keys.",
+      "state": {
+        "sessions": [
+          {
+            "id": "zero",
+            "title": "zero",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "0000",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "keyed",
+            "title": "keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "newSessionOrder",
+        "sessionId": "brand-new"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "brand-new",
+          "access": "manage",
+          "patch": {
+            "orderKey": "7F80112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "move-to-focus-top-over-an-all-zero-key",
+      "description": "Moving above a row with an all-zero key gives that row a real key instead of failing.",
+      "state": {
+        "sessions": [
+          {
+            "id": "zero",
+            "title": "zero",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "00",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "f1",
+            "title": "f1",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "f1",
+        "to": {
+          "area": "focus"
+        },
+        "beforeId": "zero"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "f1",
+          "access": "manage",
+          "patch": {
+            "orderKey": "80112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "pin-lands-above-a-pin-whose-section-was-deleted",
+      "description": "A pin naming a deleted section shows in the default section, so a new pin is keyed above it too.",
+      "state": {
+        "sessions": [
+          {
+            "id": "orphan",
+            "title": "orphan",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "deleted",
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "default-pin",
+            "title": "default-pin",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "8180"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "setPinned",
+        "sessionId": "focus-row",
+        "pinned": true
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "focus-row",
+          "access": "prefer",
+          "patch": {
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "7E80112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "pin-move-before-sections-load-ignores-held-back-rows",
+      "description": "Before the section rows are read, a pin naming a section is held back from the default section, so it is not a neighbor there.",
+      "state": {
+        "sessions": [
+          {
+            "id": "held",
+            "title": "held",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "default-pin",
+            "title": "default-pin",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "focus-row",
+            "title": "focus-row",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "8180",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": false,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "move",
+        "sessionId": "focus-row",
+        "to": {
+          "area": "pinned",
+          "sectionId": null
+        },
+        "beforeId": "default-pin"
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "focus-row",
+          "access": "prefer",
+          "patch": {
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "7F80112233"
+          }
+        }
+      ]
+    },
+    {
+      "name": "settle-covers-activity-newer-than-the-clock",
+      "description": "settledAt is never before the row activity (contained Tabs included), so a Tab clock running ahead cannot keep the row out of Settled.",
+      "state": {
+        "sessions": [
+          {
+            "id": "ahead",
+            "title": "ahead",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true,
+            "activityAt": 1795219320000
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "command": {
+        "type": "settle",
+        "sessionId": "ahead",
+        "includeOpened": false
+      },
+      "env": {
+        "nowMs": 1795219200000,
+        "randomBytes": [
+          17,
+          34,
+          51
+        ]
+      },
+      "expected": [
+        {
+          "type": "session",
+          "sessionId": "ahead",
+          "access": "manage",
+          "patch": {
+            "settledAt": 1795219320000,
+            "snoozedUntil": null
+          }
+        }
+      ]
+    },
+    {
       "name": "move-in-focus-over-read-only-unkeyed-row-is-refused",
       "description": "A drop below a row without a key that the member cannot manage would have to write that row, so the move plans nothing.",
       "state": {
