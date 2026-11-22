@@ -11,10 +11,17 @@ import {
   getSessionRoomId,
   getWorkspaceFlockDocId,
   type MachineId,
+  type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
 import { createHistoryWriter } from '@lody/shared/history-writer';
-import { connectNativeRepo, nativeRepoDataDir } from '@lody/shared/node/native-repo';
+import {
+  connectNativeRepo,
+  importLegacyRoom,
+  isLegacyRoomPublished,
+  nativeRepoDataDir,
+} from '@lody/shared/node/native-repo';
+import { META_ROOM } from '@loro-dev/loro-repo-client';
 import { createNativeRemoteHistoryPort } from '@lody/shared/node/native-docs';
 import { createRemoteHistoryCommands } from '@lody/shared/session-data';
 import { connectEngine } from '@loro-dev/loro-repo-client/node';
@@ -192,12 +199,27 @@ describe('native Workspace Meta in the CLI daemon', () => {
       await daemon.close();
     }
     const restarted = await open(workspace, identity.userId);
+    const patchedDoc = getSessionRoomId('patched-only' as SessionId);
     let nativeOnly: string;
     try {
       expect((await restarted.manager.repo.getDocMeta(getSessionRoomId(kept)))?.meta.title).toBe(
         'renamed'
       );
       nativeOnly = await restarted.manager.createSession('local-machine', 'builtin', 'claude');
+      await restarted.manager.repo.upsertDocMeta(patchedDoc, { title: 'patched' });
+      await createRemoteHistoryCommands(
+        createNativeRemoteHistoryPort(connection.client, wsId, patchedDoc)
+      ).appendTurn({
+        id: 'patched-turn',
+        role: 'user',
+        timestamp: '2026-01-01T00:00:00Z',
+        items: [{ type: 'text', text: 'patched' }],
+        fileDiff: [],
+      } as SessionHistory);
+      await importLegacyRoom(connection.client, wsId, META_ROOM, 'renderer:window', async () => ({
+        version: 0,
+        entries: {},
+      }));
     } finally {
       await restarted.close();
     }
@@ -221,6 +243,22 @@ describe('native Workspace Meta in the CLI daemon', () => {
       await legacyAgain.manager.repo.upsertDocMeta(getSessionRoomId(kept), { title: 'offline' });
       await putRow(legacyAgain.manager, ['mcpServer', 'offline'], { name: 'offline' });
       expect(await turns(legacyAgain.manager)).toEqual(['legacy-turn', 'native-turn']);
+      expect(
+        (await legacyAgain.manager.repo.openPersistedDoc(patchedDoc)).doc
+          .getList('history')
+          .toJSON()
+          .map((turn: { id: string }) => turn.id)
+      ).toEqual(['patched-turn']);
+      const checked = await connectNativeRepo({
+        launcher: () => ({ command: process.execPath, args: [hostScript] }),
+      });
+      try {
+        expect(
+          await isLegacyRoomPublished(checked.client, wsId, META_ROOM, 'renderer:window')
+        ).toBe(false);
+      } finally {
+        await checked.close();
+      }
       await appendTurn(legacyAgain.manager, 'offline-turn');
     } finally {
       await legacyAgain.close();

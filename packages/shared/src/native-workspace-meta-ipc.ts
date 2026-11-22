@@ -145,6 +145,9 @@ export const NativeDocLegacySchema = DocTarget.extend({
 }).strict();
 
 /** One-time import of this renderer's frozen legacy replica (Flock JSON export). */
+/** Whether this window's legacy replica still needs importing (Meta marks the whole import). */
+export const NativeMetaLegacyCheckSchema = Workspace.extend({ source: RendererSource }).strict();
+
 export const NativeMetaImportSchema = Workspace.extend({
   /** An owned named Flock document; Workspace Meta when absent. */
   flockDocId: Id.optional(),

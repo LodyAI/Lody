@@ -376,7 +376,7 @@ import type { NativeWorkspaceMeta } from '@lody/shared/node/native-workspace-met
 import {
   openNativeSessionReader,
   openNativeWorkspaceMeta,
-  usesNativeWorkspaceMeta,
+  usesNativeWorkspaceMetaFor,
   writeBackNativeWorkspaceMeta,
 } from './native-workspace-meta';
 import { mentionsSqliteBusy, sqliteLockReporterLegacy } from './sqlite-lock-diagnostics';
@@ -679,7 +679,11 @@ export class LoroDocumentManager {
     let nativeMeta: NativeWorkspaceMeta | null = null;
     try {
       const createRepoStartMs = Date.now();
-      const native = usesNativeWorkspaceMeta(!!options.encryptedWorkspace)
+      const native = (await usesNativeWorkspaceMetaFor(
+        workspaceId,
+        !!options.encryptedWorkspace,
+        logger
+      ))
         ? await openNativeWorkspaceMeta(
             workspaceId,
             cliSqliteRepoStore.storageAdapter,

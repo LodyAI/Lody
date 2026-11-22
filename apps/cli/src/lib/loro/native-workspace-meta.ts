@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { META_ROOM, type RepoClient } from '@loro-dev/loro-repo-client';
+import { META_ROOM, RepoRpcError, type RepoClient } from '@loro-dev/loro-repo-client';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
   ExternalMetadataNotCommittedError,
@@ -23,13 +23,14 @@ import {
   isNativeEncryptedWorkspaceEnabled,
   isNativeWorkspaceMetaEnabled,
   nativeRepoDataDir,
-  unpublishLegacyRoom,
+  clearMigrationMarkers,
   type LegacyFlockBundle,
   type NativeRepoHostLauncher,
 } from '@lody/shared/node/native-repo';
 import { createNativeFlockDocs } from '@lody/shared/node/native-flock-docs';
 import {
   finishNativeWipe,
+  nativeEncryptedPendingUpload,
   nativePendingWipeMarker,
 } from '@lody/shared/node/native-encrypted-workspace';
 import {
@@ -37,7 +38,6 @@ import {
   createNativeRemoteHistoryPort,
   importLegacyDoc,
   listNativeDocIds,
-  unpublishLegacyDoc,
 } from '@lody/shared/node/native-docs';
 import {
   createRemoteLoroHistoryReader,
@@ -82,6 +82,31 @@ export const usesNativeWorkspaceMeta = (encrypted: boolean) =>
   (encrypted
     ? getCliPlatformKind() === 'cloud' && isNativeEncryptedWorkspaceEnabled()
     : getCliPlatformKind() === 'local');
+
+/**
+ * Whether one workspace runs on the native engine: the switches, except that an
+ * encrypted workspace whose namespace still holds rows not yet uploaded stays
+ * native until they are (`nativeEncryptedPendingUpload`).
+ */
+export async function usesNativeWorkspaceMetaFor(
+  workspaceId: string,
+  encrypted: boolean,
+  logger: Logger
+): Promise<boolean> {
+  if (usesNativeWorkspaceMeta(encrypted)) return true;
+  if (!encrypted || getCliPlatformKind() !== 'cloud') return false;
+  const pending = await nativeEncryptedPendingUpload(
+    nativeRepoDataDir('cloud'),
+    workspaceId,
+    connectCliNativeRepo
+  ).catch(() => 0);
+  if (pending > 0)
+    logger.warn(
+      `[${workspaceId}] Native engine switch is off, but ${pending} rows are not uploaded yet; ` +
+        'the workspace stays native until they are'
+    );
+  return pending > 0;
+}
 
 /** This installation's engine: one per platform, shared with the desktop. */
 const connectCliNativeRepo = () =>
@@ -222,16 +247,20 @@ export async function writeBackNativeWorkspaceMeta(
       await client.createRoom(workspaceId, flockRoom(id), 'plaintext');
       handle.flock.importFile((await client.exportFlockRaw(workspaceId, flockRoom(id))).bytes);
       await legacyRepo.persistFlockDocNow(id, handle.flock);
-      await unpublishLegacyRoom(client, workspaceId, flockRoom(id), CLI_SOURCE);
     }
-    for (const docId of await listNativeDocIds(client, workspaceId)) {
+    const docIds = new Set(await listNativeDocIds(client, workspaceId));
+    for (const row of await legacyRepo.listDoc()) docIds.add(row.docId);
+    for (const docId of docIds) {
       if (!isNativeDocId(docId)) continue;
       const room = { kind: 'loro_doc' as const, id: docId };
-      const { bytes } = await client.exportLoroRaw(workspaceId, room);
-      await legacyStorage.save({ type: 'doc-update', docId, update: bytes });
-      await unpublishLegacyDoc(client, workspaceId, docId, CLI_SOURCE);
+      const exported = await client.exportLoroRaw(workspaceId, room).catch((error: unknown) => {
+        if (error instanceof RepoRpcError && error.code === 'room_not_found') return undefined;
+        throw error;
+      });
+      if (!exported) continue;
+      await legacyStorage.save({ type: 'doc-update', docId, update: exported.bytes });
     }
-    await unpublishLegacyRoom(client, workspaceId, META_ROOM, CLI_SOURCE);
+    await clearMigrationMarkers(client, workspaceId);
     await rm(marker, { force: true });
     logger.info(`[${workspaceId}] Native Workspace Meta written back to the legacy replica`);
   } finally {

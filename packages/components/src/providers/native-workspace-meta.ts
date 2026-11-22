@@ -47,11 +47,8 @@ export async function openRendererNativeWorkspaceMeta(
   if (!api || !(await api.available({ workspaceId }))) return null;
 
   const source = `renderer:${replicaName.replace(/[^\w.-]/g, '_').slice(0, 128)}`;
-  const importedKey = `lody.nativeWorkspaceMeta.imported.v3.${workspaceId}.${source}`;
-  if (!encrypted && localStorage.getItem(importedKey) !== '1') {
+  if (!encrypted && (await api.needsLegacy({ workspaceId, source }))) {
     const empty = { version: 0, entries: {} };
-    const legacy = await legacyStorage.loadMeta();
-    await api.importLegacy({ workspaceId, source, bundle: legacy ? legacy.exportJson() : empty });
     const stored = (await legacyStorage.inventory?.())?.flockDocIds ?? [];
     for (const flockDocId of ownedLegacyFlockDocIds(workspaceId, stored)) {
       const body = await legacyStorage.loadFlockDoc?.(flockDocId);
@@ -62,7 +59,8 @@ export async function openRendererNativeWorkspaceMeta(
         bundle: body ? body.exportJson() : empty,
       });
     }
-    localStorage.setItem(importedKey, '1');
+    const legacy = await legacyStorage.loadMeta();
+    await api.importLegacy({ workspaceId, source, bundle: legacy ? legacy.exportJson() : empty });
   }
 
   let delivered = -1;

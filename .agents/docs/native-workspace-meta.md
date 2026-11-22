@@ -360,10 +360,23 @@ into an existing workspace), so the general export/import feature can call
 Turning the flag off writes native state back. Native mode leaves a
 `native-meta-published` file beside the CLI SQLite store. A legacy-mode daemon that
 finds it merges the native room's complete export (`exportFlockRaw`, with clocks
-and tombstones) into its legacy Meta Flock, persists it, and removes the
-`cli-sqlite` marker and the file. Renderers then receive the merged catalogue over
-the existing local data plane. Because the marker is gone, enabling the flag again
-re-imports the replica, including edits made while the flag was off. Native mode
+and tombstones) into its legacy Meta Flock and named Flock documents, and every
+owned document's body into the legacy store. The documents are those with a
+migration marker plus every owned id in the merged directory, because a Session
+written only through renderer patches has no marker. It then clears every
+migration marker, of every source, and removes the file. Renderers receive the
+merged catalogue over the existing local data plane. Because the markers are gone,
+enabling the flag again re-imports every replica, the CLI's and each renderer's,
+including edits made while the flag was off: a renderer asks main
+(`needsLegacy`) instead of remembering its import locally.
+
+An encrypted workspace is not written back: its legacy store re-syncs from the
+cloud. What the cloud lacks is the engine's outbox. Neither the daemon nor main
+can upload another process's rows, because only the connection that installed a
+writer's seed may seal for it, so switching off does not take effect while the
+namespace still holds rows not yet uploaded (`nativeEncryptedPendingUpload`). That
+process keeps the workspace native, logs why, and uploads; a later start honors
+the switch. Nothing is started where the engine was never used. Native mode
 has no released data, so this is a development switch-back with no compatibility
 handling; a failed write-back is logged and retried on the next start.
 
