@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentProps, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { Bot, Check, ListChecks, LockKeyhole, Monitor, Plus, ShieldAlert, Zap } from 'lucide-react';
@@ -47,6 +47,14 @@ import {
 } from '@/lib/composer-agent-roles';
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
+import {
+  commands,
+  composerScopedKeybindings,
+  formatKeyBinding,
+  getCommandKeybindings,
+  useCommand,
+  useCommands,
+} from '@/lib/commands';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
@@ -167,16 +175,19 @@ function ValueSubTrigger({
   label,
   value,
   icon,
+  shortcut,
   disabled = false,
 }: {
   label: string;
   value: string | null;
   /** Rides beside the value, for a row whose value has a mark of its own. */
   icon?: ReactNode;
+  /** Trailing hint text (e.g. a formatted shortcut), in the row's shortcut slot. */
+  shortcut?: ReactNode;
   disabled?: boolean;
 }) {
   return (
-    <Menu.SubmenuTrigger disabled={disabled}>
+    <Menu.SubmenuTrigger disabled={disabled} shortcut={shortcut}>
       {label}
       <span {...stylex.props(styles.rowValue)}>
         {icon}
@@ -427,6 +438,9 @@ export type DesktopRunConfigMenuProps = {
    * Omitted, it opens below and flips when there is no room.
    */
   menuSide?: 'top';
+  /** Register the `session.openRunConfig` command only while this surface owns
+   *  the composer's shortcuts (hidden retained panes pass `false`). */
+  commandsEnabled?: boolean;
 };
 
 export function DesktopRunConfigMenu({
@@ -451,9 +465,12 @@ export function DesktopRunConfigMenu({
   onRecentRunConfigSelect,
   agentRoles,
   menuSide,
+  commandsEnabled = true,
 }: DesktopRunConfigMenuProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [modelSubmenuOpen, setModelSubmenuOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   if (disabledReason && open) setOpen(false);
   // Each submenu remains anchored to its own trigger, including during filtering.
   const submenuPlacement = {
@@ -692,9 +709,37 @@ export function DesktopRunConfigMenu({
     speedTierSelector != null ||
     planSelector != null ||
     fastSelector != null;
+
+  useCommands(); // Rebinds re-render via the registry subscription so hints follow.
+  const openRunConfigKey = commands.getKeybindingsFor('session.openRunConfig')[0];
+  const cycleThinkEffortKey = commands.getKeybindingsFor('session.cycleThinkEffort')[0];
+
+  useCommand(
+    {
+      id: 'session.openRunConfig',
+      titleKey: 'commands.session.openRunConfig',
+      title: t('commands.session.openRunConfig', 'Open Run Configuration'),
+      category: 'Session',
+      keybindings: composerScopedKeybindings(
+        getCommandKeybindings('session.openRunConfig'),
+        () => triggerRef.current
+      ),
+      when: () => hasAnyRow && !disabledReason,
+      // ⌘/ lands in the model list; its search field grabs focus on mount.
+      run: () => {
+        if (modelPickerOptions.length > 0) setModelSubmenuOpen(true);
+        setOpen(true);
+      },
+    },
+    commandsEnabled
+  );
+
   if (!hasAnyRow) return null;
 
   const runConfigButtonAriaLabel = t('chat.runConfig.buttonAriaLabel', 'Run configuration');
+  const runConfigTriggerTitle = openRunConfigKey
+    ? `${runConfigButtonAriaLabel} (${formatKeyBinding(openRunConfigKey)})`
+    : runConfigButtonAriaLabel;
   /* The face, shared by the menu trigger and the inert (tooltip-only) button. */
   const triggerFace = (
     <>
@@ -738,7 +783,13 @@ export function DesktopRunConfigMenu({
   );
 
   const menu = (
-    <Menu.Root open={open} onOpenChange={setOpen}>
+    <Menu.Root
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setModelSubmenuOpen(false);
+      }}
+    >
       {disabledReason ? (
         <Tooltip.Root>
           {/* A native disabled button cannot reliably trigger hover/focus events.
@@ -763,7 +814,9 @@ export function DesktopRunConfigMenu({
         </Tooltip.Root>
       ) : (
         <Menu.Trigger
+          ref={triggerRef}
           aria-label={runConfigButtonAriaLabel}
+          title={runConfigTriggerTitle}
           data-run-config-trigger=""
           data-agent-config-id={selectedAgentConfig?.id}
           data-machine-id={selectedAgentConfig?.machineId}
@@ -931,7 +984,7 @@ export function DesktopRunConfigMenu({
           })}
 
           {modelPickerOptions.length > 0 ? (
-            <Menu.Submenu>
+            <Menu.Submenu open={modelSubmenuOpen} onOpenChange={setModelSubmenuOpen}>
               <ValueSubTrigger label={modelRowLabel} value={modelLabel} />
               <Menu.Content
                 {...submenuPlacement}
@@ -990,7 +1043,15 @@ export function DesktopRunConfigMenu({
 
           {thinkingSelector ? (
             <Menu.Submenu>
-              <ValueSubTrigger label={reasoningLabel} value={thinkingLabel} />
+              <ValueSubTrigger
+                label={reasoningLabel}
+                value={thinkingLabel}
+                shortcut={
+                  cycleThinkEffortKey && thinkingSelector.options.length > 1
+                    ? formatKeyBinding(cycleThinkEffortKey)
+                    : null
+                }
+              />
               <Menu.Content {...submenuPlacement} className={COMPACT_OPTION_SUBMENU_CLASS}>
                 {thinkingSelector.options.map((opt) => (
                   <OptionItem

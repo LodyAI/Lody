@@ -7,6 +7,14 @@ import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } 
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
+import {
+  commands,
+  composerScopedKeybindings,
+  formatKeyBinding,
+  getCommandKeybindings,
+  useCommand,
+  useCommands,
+} from '@/lib/commands';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 
@@ -46,6 +54,9 @@ export interface AttachmentAddMenuProps {
   scheduleDisabledReason?: string;
   /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
+  /** Register the `session.openAddMenu` command only while this surface owns
+   *  the composer's shortcuts (hidden retained panes pass `false`). */
+  commandsEnabled?: boolean;
 }
 
 /**
@@ -72,6 +83,7 @@ export function AttachmentAddMenu({
   onScheduleSend,
   scheduleDisabledReason,
   mcp,
+  commandsEnabled = true,
 }: AttachmentAddMenuProps) {
   const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
   const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
@@ -83,11 +95,33 @@ export function AttachmentAddMenu({
   // keyboard returns instead), so choosing the picker skips the composer
   // focus restore every other selection gets.
   const filePickerOpenedRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const triggerLabel = t('sessions.addAttachmentMenu', 'Add attachment');
 
   const mcpServers = mcp?.servers ?? [];
   const hasMcp = mcpServers.length > 0;
-  if (!onAddAttachment && !hasMcp && !onScheduleSend) {
+  const hasMenuContent = Boolean(onAddAttachment || hasMcp || onScheduleSend);
+
+  useCommands(); // Rebinds re-render via the registry subscription so the hint follows.
+  const openAddMenuKey = commands.getKeybindingsFor('session.openAddMenu')[0];
+
+  useCommand(
+    {
+      id: 'session.openAddMenu',
+      titleKey: 'commands.session.openAddMenu',
+      title: t('commands.session.openAddMenu', 'Open Composer + Menu'),
+      category: 'Session',
+      keybindings: composerScopedKeybindings(
+        getCommandKeybindings('session.openAddMenu'),
+        () => triggerRef.current
+      ),
+      when: () => hasMenuContent && !disabled,
+      run: () => setOpen(true),
+    },
+    commandsEnabled
+  );
+
+  if (!hasMenuContent) {
     return null;
   }
 
@@ -145,6 +179,7 @@ export function AttachmentAddMenu({
       }}
     >
       <Menu.Trigger
+        ref={triggerRef}
         render={
           <Button
             type="button"
@@ -152,6 +187,9 @@ export function AttachmentAddMenu({
             icon
             disabled={disabled}
             aria-label={triggerLabel}
+            title={
+              openAddMenuKey ? `${triggerLabel} (${formatKeyBinding(openAddMenuKey)})` : undefined
+            }
             className={cn(
               triggerSize,
               isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
