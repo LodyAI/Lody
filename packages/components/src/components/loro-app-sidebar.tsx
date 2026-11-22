@@ -1881,7 +1881,6 @@ export function LoroAppSidebar({
   const {
     archiveSession,
     markSessionUnread,
-    setSessionPinned,
     runStatusViewCommand,
     snoozeSession,
     settleSession,
@@ -1931,11 +1930,14 @@ export function LoroAppSidebar({
 
   const handleTogglePinSession = useCallback(
     (sessionId: string, nextPinned: boolean) => {
-      void setSessionPinned(sessionId as SessionId, nextPinned).catch((error: unknown) =>
+      void runStatusViewCommand(
+        { type: 'setPinned', sessionId, pinned: nextPinned },
+        statusViewInputRef.current
+      ).catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : String(error))
       );
     },
-    [setSessionPinned]
+    [runStatusViewCommand]
   );
 
   const handleMarkSessionUnread = useCallback(
@@ -2891,8 +2893,11 @@ export function LoroAppSidebar({
     resolveOpenerRowId,
     pinnedSessionIds,
   ]);
+  // Re-laid out at the layout's own next change, not only on the relative-time tick.
+  const [statusWake, setStatusWake] = useState(0);
   const statusViewInput = useMemo<StatusViewLayoutInput>(() => {
     void statusTick;
+    void statusWake;
     return {
       sessions: statusViewSessions,
       sections: pinSections,
@@ -2908,8 +2913,17 @@ export function LoroAppSidebar({
     statusViewWritable,
     scopeHiddenCounts,
     statusTick,
+    statusWake,
   ]);
   const statusLayout = useMemo(() => buildStatusViewLayout(statusViewInput), [statusViewInput]);
+  const statusNextChangeAt = statusLayout.nextChangeAt;
+  useEffect(() => {
+    if (statusNextChangeAt === null) return undefined;
+    const wait = Math.min(2_147_483_647, Math.max(0, statusNextChangeAt - getServerNow()));
+    const timer = setTimeout(() => setStatusWake((count) => count + 1), wait);
+    return () => clearTimeout(timer);
+  }, [statusNextChangeAt]);
+  const statusNow = useMemo(() => new Date(statusViewInput.nowMs), [statusViewInput.nowMs]);
   const sidebarItemById = useMemo(
     () => new Map(allSidebarItems.map((item) => [item.id, item])),
     [allSidebarItems]
@@ -4389,6 +4403,7 @@ export function LoroAppSidebar({
         onSettleUpdatedItem={statusViewWritable ? handleSettleSession : undefined}
         onMoveUpdatedItemToFocus={statusViewWritable ? handleMoveSessionToFocus : undefined}
         onDropFocusItem={statusViewWritable ? handleDropFocusItem : undefined}
+        statusNow={organizeMode === 'status' ? statusNow : undefined}
         onCopyUpdatedItemUrl={handleCopySessionUrl}
         onShareUpdatedItemWithTeam={handleRequestShareSession}
         onOpenUpdatedItemPullRequest={handleOpenUpdatedItemPullRequest}

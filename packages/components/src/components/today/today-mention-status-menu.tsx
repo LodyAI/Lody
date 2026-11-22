@@ -1,7 +1,18 @@
 import { AlarmClock, ArrowUpCircle, CheckCircle2, Mail, MailOpen, Timer } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { SessionId } from '@lody/shared';
+import { useAtomValue } from 'jotai';
+import { usePlatform } from '@lody/platform/react';
+import { getServerNow, getSessionRoomId, type SessionId } from '@lody/shared';
+import { userAtom } from '@/atoms';
+import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
+import { useOrganization } from '@/hooks/useOrganization';
+import {
+  useVisibleLocalProjectKeySet,
+  useVisibleMachineIdSet,
+} from '@/hooks/use-visible-session-metas';
+import { isSessionEditableToUser } from '@/lib/session-visibility';
 import { Menu } from '@lody/ui/menu';
 import {
   CustomSnoozeDialog,
@@ -69,7 +80,7 @@ export function TodayMentionStatusMenu(props: { actions: TodayMentionStatusActio
       ) : null}
       <CustomSnoozeDialog
         target={custom}
-        now={new Date()}
+        now={new Date(getServerNow())}
         onClose={() => setCustom(null)}
         onConfirm={(sessionId, until) => run(props.actions.snooze(sessionId as SessionId, until))}
       />
@@ -93,7 +104,8 @@ function TodayMentionStatusMenuContent(props: {
   const { t } = useTranslation();
   const { sessionId, actions } = props;
   const display = useTodaySessionDisplay(sessionId);
-  const now = new Date();
+  const canManage = useCanManageSessionStatus(sessionId);
+  const now = new Date(getServerNow());
   if (display.state !== 'ok') return null;
   const laterLabel = t('sessions.contextMenu.snooze', 'Later');
   const presetLabel: Record<SnoozePresetId, string> = {
@@ -124,42 +136,67 @@ function TodayMentionStatusMenuContent(props: {
             {t('sessions.contextMenu.markUnread', 'Mark as unread')}
           </Menu.Item>
         )}
-        <Menu.Submenu>
-          <Menu.SubmenuTrigger icon={AlarmClock}>
-            {display.snoozeCountdown
-              ? t('today.laterWithCountdown', '{{label}} · {{countdown}}', {
-                  label: laterLabel,
-                  countdown: display.snoozeCountdown,
-                })
-              : laterLabel}
-          </Menu.SubmenuTrigger>
-          <Menu.Content>
-            {buildSnoozePresets(now).map((preset) => (
-              <Menu.Item
-                key={preset.id}
-                shortcut={preset.countdown}
-                onClick={() => run(actions.snooze(sessionId, preset.timestamp))}
-              >
-                {presetLabel[preset.id]}
+        {canManage ? (
+          <Menu.Submenu>
+            <Menu.SubmenuTrigger icon={AlarmClock}>
+              {display.snoozeCountdown
+                ? t('today.laterWithCountdown', '{{label}} · {{countdown}}', {
+                    label: laterLabel,
+                    countdown: display.snoozeCountdown,
+                  })
+                : laterLabel}
+            </Menu.SubmenuTrigger>
+            <Menu.Content>
+              {buildSnoozePresets(now).map((preset) => (
+                <Menu.Item
+                  key={preset.id}
+                  shortcut={preset.countdown}
+                  onClick={() => run(actions.snooze(sessionId, preset.timestamp))}
+                >
+                  {presetLabel[preset.id]}
+                </Menu.Item>
+              ))}
+              <Menu.Separator />
+              <Menu.Item icon={Timer} onClick={() => props.onCustom(display.title)}>
+                {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
               </Menu.Item>
-            ))}
-            <Menu.Separator />
-            <Menu.Item icon={Timer} onClick={() => props.onCustom(display.title)}>
-              {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
-            </Menu.Item>
-          </Menu.Content>
-        </Menu.Submenu>
-        {display.group !== 'settled' ? (
+            </Menu.Content>
+          </Menu.Submenu>
+        ) : null}
+        {canManage && display.group !== 'settled' ? (
           <Menu.Item icon={CheckCircle2} onClick={() => run(actions.settle(sessionId))}>
             {t('today.markDone', 'Done')}
           </Menu.Item>
         ) : null}
-        {display.group !== 'focus' ? (
+        {canManage && display.group !== 'focus' ? (
           <Menu.Item icon={ArrowUpCircle} onClick={() => run(actions.moveToFocus(sessionId))}>
             {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
           </Menu.Item>
         ) : null}
       </Menu.Content>
     </Menu.Root>
+  );
+}
+
+/**
+ * Status actions write shared session metadata, so they are offered only where
+ * the management guard would accept them: a writable member, a conversation
+ * that is not archived, on a machine and project this member can edit.
+ */
+function useCanManageSessionStatus(sessionId: SessionId): boolean {
+  const platform = usePlatform();
+  const writable = useStatusViewWritable(useOrganization().role);
+  const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
+  const userId = useAtomValue(userAtom)?.id ?? null;
+  const { visibleMachineIds, ownedMachineIds } = useVisibleMachineIdSet();
+  const { visibleLocalProjectKeys } = useVisibleLocalProjectKeySet();
+  if (!writable || !meta || meta.isArchived === true) return false;
+  if (platform.kind === 'local') return true;
+  return isSessionEditableToUser(
+    meta,
+    visibleMachineIds,
+    visibleLocalProjectKeys,
+    userId,
+    ownedMachineIds
   );
 }

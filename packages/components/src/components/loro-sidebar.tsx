@@ -301,6 +301,11 @@ export interface LoroSidebarProps {
   onMoveUpdatedItemToFocus?: (id: string) => void;
   /** Reorder, restore or unpin (via drag) a session into Status Focus at `toIndex`. */
   onDropFocusItem?: (id: string, toIndex: number) => void;
+  /**
+   * The synced server clock the Status view was laid out at; rows, tiers and
+   * countdowns use it so they agree with the planned drops. Defaults to a local tick.
+   */
+  statusNow?: Date;
   /** Copy session URL for an Updated row. Mirrors `sessionListProps.onCopySessionUrl`. */
   onCopyUpdatedItemUrl?: (id: string) => void;
   /** Share an Updated row with the team. Mirrors `sessionListProps.onShareSessionWithTeam`. */
@@ -868,6 +873,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onSettleUpdatedItem,
   onMoveUpdatedItemToFocus,
   onDropFocusItem,
+  statusNow,
   onCopyUpdatedItemUrl,
   onShareUpdatedItemWithTeam,
   onOpenUpdatedItemPullRequest,
@@ -925,7 +931,8 @@ export const LoroSidebar = memo(function LoroSidebar({
     filter: { ...defaultLabels.filter, ...(labels?.filter ?? {}) },
     updated: { ...defaultLabels.updated, ...(labels?.updated ?? {}) },
   };
-  const now = useStableNow();
+  const localNow = useStableNow();
+  const now = statusNow ?? localNow;
   const mobileResize = minWidth === undefined && isMobileSidebarDevice();
   const resolvedMinWidth = Math.max(
     160,

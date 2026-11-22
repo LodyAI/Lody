@@ -95,8 +95,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { buildSnoozePresets, statusViewTier } from '@lody/shared';
+import { buildSnoozePresets, expiredSnoozeTimestamp, statusViewTier } from '@lody/shared';
 import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
+import { useOrganization } from '@/hooks/useOrganization';
 import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
@@ -787,6 +788,10 @@ const styles = stylex.create({
   composerHidden: { display: 'none' },
 });
 
+function reportStatusActionError(error: unknown): void {
+  toast.error(error instanceof Error ? error.message : String(error));
+}
+
 function getErrorMessage(err: unknown): string {
   const syncError = loroSyncErrorTools?.formatLoroSyncError(err);
   if (syncError) return syncError;
@@ -1430,7 +1435,7 @@ export function SessionHeaderMenu({
   const [customSnoozeTarget, setCustomSnoozeTarget] = useState<CustomSnoozeDialogTarget | null>(
     null
   );
-  const statusNow = new Date();
+  const statusNow = new Date(getServerNow());
   const statusGroup = statusViewTier(
     {
       activityAt: session.lastMessageAt ?? (Date.parse(session.createdAt ?? '') || 0),
@@ -3101,7 +3106,7 @@ export const SessionChatInterface = memo(
       settleSession,
       moveSessionToFocus,
     } = useSessionActions();
-    const statusViewWritable = useStatusViewWritable();
+    const statusViewWritable = useStatusViewWritable(useOrganization().role);
     // Linked pull requests: the user unlinks through their own records (the reconciler
     // alone publishes `pullRequests`). Rows open the primary PR's tab, others on GitHub.
     const prOwnerMeta = workspaceSession ?? session;
@@ -4364,15 +4369,26 @@ export const SessionChatInterface = memo(
       }
 
       const liveEngagement = getLatestWindowReadEngagement();
+      const readGate = {
+        rendersConversation: !hideMessageArea,
+        isVisible: surfaceVisible,
+        isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
+        hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
+      };
+      const rootWokeAt =
+        session.parentSessionId && workspaceSession
+          ? expiredSnoozeTimestamp(parseTimestamp(workspaceSession.snoozedUntil), getServerNow())
+          : null;
       if (
-        !shouldMarkSessionRead({
-          rendersConversation: !hideMessageArea,
-          isVisible: surfaceVisible,
-          isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
-          hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
-          lastMessageAt,
-          lastReadAt,
-        })
+        !shouldMarkSessionRead({ ...readGate, lastMessageAt, lastReadAt }) &&
+        !(
+          rootWokeAt !== null &&
+          shouldMarkSessionRead({
+            ...readGate,
+            lastMessageAt: rootWokeAt,
+            lastReadAt: parseTimestamp(workspaceSession?.lastReadAt),
+          })
+        )
       ) {
         return;
       }
@@ -4390,8 +4406,10 @@ export const SessionChatInterface = memo(
       session.id,
       session.lastMessageAt,
       session.lastReadAt,
+      session.parentSessionId,
       session.snoozedUntil,
       windowReadEngagementRevision,
+      workspaceSession,
     ]);
 
     const isDispatching = inputActionState === 'dispatching';
@@ -7299,17 +7317,28 @@ export const SessionChatInterface = memo(
         onSnooze={
           statusViewWritable && headerSharing?.access !== 'read'
             ? (snoozedUntil) =>
-                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(() => undefined)
+                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
             : undefined
         }
         onSettle={
           statusViewWritable && headerSharing?.access !== 'read'
-            ? () => settleSessionWithConfirmation(session.id).then(() => undefined)
+            ? () =>
+                settleSessionWithConfirmation(session.id).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
             : undefined
         }
         onMoveToFocus={
           statusViewWritable && headerSharing?.access !== 'read'
-            ? () => moveToFocusWithConfirmation(session.id).then(() => undefined)
+            ? () =>
+                moveToFocusWithConfirmation(session.id).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
             : undefined
         }
         owner={ownerMenuState}

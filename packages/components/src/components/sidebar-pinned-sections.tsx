@@ -239,12 +239,20 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
   const rowsById = useMemo(() => {
     const items = new Map<string, SidebarUpdatedItem>();
     const carried = new Map<string, SidebarUpdatedItem[]>();
-    for (const section of sections) {
-      for (const item of section.items) {
-        items.set(item.id, item);
-        const opener = item.isPinned ? null : item.openedByRowSessionId;
-        if (opener) carried.set(opener, [...(carried.get(opener) ?? []), item]);
+    for (const section of sections) for (const item of section.items) items.set(item.id, item);
+    const pinnedOwnerOf = (item: SidebarUpdatedItem): string | null => {
+      const seen = new Set<string>();
+      let cursor: SidebarUpdatedItem | undefined = item;
+      while (cursor && !cursor.isPinned && !seen.has(cursor.id)) {
+        seen.add(cursor.id);
+        cursor = cursor.openedByRowSessionId ? items.get(cursor.openedByRowSessionId) : undefined;
       }
+      return cursor?.isPinned ? cursor.id : null;
+    };
+    for (const item of items.values()) {
+      if (item.isPinned) continue;
+      const owner = pinnedOwnerOf(item);
+      if (owner) carried.set(owner, [...(carried.get(owner) ?? []), item]);
     }
     return { items, carried };
   }, [sections]);
