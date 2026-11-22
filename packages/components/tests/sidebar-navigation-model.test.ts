@@ -43,7 +43,7 @@ function sessionIds(items: SidebarNavItem[]): string[] {
 
 const baseOptions = {
   organizeMode: 'workspace' as const,
-  showFullSessionGroups: {},
+  revealedRowsByGroup: {},
   pinnedItems: [] as SidebarUpdatedItem[],
   pinnedSectionCollapsed: false,
   workspace: {
@@ -57,7 +57,7 @@ const baseOptions = {
   updated: {
     items: [] as SidebarUpdatedItem[],
     collapsedBuckets: {},
-    showFullBuckets: {},
+    revealedRowsByBucket: {},
   },
 };
 
@@ -75,7 +75,7 @@ describe('sidebar navigation model', () => {
                 machineId: 'machine',
                 localProjectId: 'project',
                 collapsed: false,
-                showFull: false,
+                revealedRows: 0,
                 sessions: [{ id: 'local-new' }, { id: 'local-old' }],
               },
             ],
@@ -126,7 +126,7 @@ describe('sidebar navigation model', () => {
           updatedItem('updated-new', '2026-07-16T11:00:00Z'),
         ],
         collapsedBuckets: {},
-        showFullBuckets: {},
+        revealedRowsByBucket: {},
       },
     });
 
@@ -151,7 +151,7 @@ describe('sidebar navigation model', () => {
     const defaultItems = buildSidebarNavigationItems({
       ...baseOptions,
       organizeMode: 'status',
-      updated: { items: statusItems, collapsedBuckets: {}, showFullBuckets: {} },
+      updated: { items: statusItems, collapsedBuckets: {}, revealedRowsByBucket: {} },
     });
     // Later and Settled are collapsed by default; Focus preserves manual orderKey then unkeyed recency.
     expect(sessionIds(defaultItems)).toEqual(['focus-first', 'focus-second', 'focus-unkeyed']);
@@ -167,7 +167,7 @@ describe('sidebar navigation model', () => {
       updated: {
         items: statusItems,
         collapsedBuckets: { later: false, settled: false },
-        showFullBuckets: {},
+        revealedRowsByBucket: {},
       },
     });
     const expandedIds = sessionIds(expanded);
@@ -202,7 +202,7 @@ describe('sidebar navigation model', () => {
                 machineId: 'machine',
                 localProjectId: 'hidden-project',
                 collapsed: false,
-                showFull: false,
+                revealedRows: 0,
                 sessions: [{ id: 'hidden-local' }],
               },
             ],
@@ -220,7 +220,7 @@ describe('sidebar navigation model', () => {
     const updatedPreview = buildSidebarNavigationItems({
       ...baseOptions,
       organizeMode: 'updated',
-      updated: { items: updatedItems, collapsedBuckets: {}, showFullBuckets: {} },
+      updated: { items: updatedItems, collapsedBuckets: {}, revealedRowsByBucket: {} },
     });
     expect(sessionIds(updatedPreview)).toHaveLength(20);
 
@@ -231,7 +231,7 @@ describe('sidebar navigation model', () => {
       updated: {
         items: updatedItems,
         collapsedBuckets: { all: true },
-        showFullBuckets: { all: true },
+        revealedRowsByBucket: { all: 20 },
       },
     });
     expect(sessionIds(updatedCollapsed)).toEqual(['pinned']);
@@ -275,7 +275,7 @@ describe('sidebar navigation model opened-by tree', () => {
           { ...updatedItem('opened', '2026-04-22T08:00:00.000Z'), openedBySessionId: 'opener' },
         ],
         collapsedBuckets: {},
-        showFullBuckets: {},
+        revealedRowsByBucket: {},
       },
     });
 
@@ -294,7 +294,7 @@ describe('sidebar navigation model opened-by tree', () => {
           updatedItem('other', '2026-04-22T07:00:00.000Z'),
         ],
         collapsedBuckets: {},
-        showFullBuckets: {},
+        revealedRowsByBucket: {},
       },
     });
 
@@ -314,7 +314,7 @@ describe('sidebar navigation model opened-by tree', () => {
           updatedItem('other', '2026-04-22T07:00:00.000Z'),
         ],
         collapsedBuckets: {},
-        showFullBuckets: {},
+        revealedRowsByBucket: {},
       },
     });
 
@@ -361,7 +361,7 @@ describe('sidebar navigation model opened-by tree', () => {
                 machineId: 'machine-1',
                 localProjectId: 'notes',
                 collapsed: true,
-                showFull: false,
+                revealedRows: 0,
                 sessions: [],
               },
             ],

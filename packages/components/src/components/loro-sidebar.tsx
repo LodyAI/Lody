@@ -259,11 +259,11 @@ export interface LoroSidebarProps {
   /** Per-bucket collapse state for the 'updated' organize mode. */
   updatedBucketsCollapsed?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
   /**
-   * Per-bucket "show all" state for the 'updated' organize mode. Buckets above
-   * the threshold default to a compact preview; this map records which buckets
-   * the user has expanded.
+   * Per-bucket incremental reveal for the 'updated' organize mode. Buckets
+   * above the threshold default to a compact preview; each entry counts extra
+   * top-level rows "Show more" has uncovered beyond it.
    */
-  updatedShowFullBuckets?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
+  updatedRevealedRows?: Partial<Record<SidebarUpdatedBucketKey, number>>;
   /**
    * Loading state for the 'updated' organize mode. When true and there are no
    * items yet, the list renders a skeleton instead of the empty state — keeps
@@ -284,7 +284,8 @@ export interface LoroSidebarProps {
   onSelectUpdatedItem?: (id: string, tabSessionId?: string) => void;
   onTogglePinnedSection?: () => void;
   onToggleUpdatedBucket?: (key: SidebarUpdatedBucketKey) => void;
-  onToggleUpdatedShowFullBucket?: (key: SidebarUpdatedBucketKey) => void;
+  onShowMoreUpdatedRows?: (key: SidebarUpdatedBucketKey) => void;
+  onShowLessUpdatedRows?: (key: SidebarUpdatedBucketKey) => void;
   /**
    * Archive a session from the 'updated' organize mode. Mirrors `sessionListProps.onArchiveSession`
    * so both organize modes share the same destination handler.
@@ -856,7 +857,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   pinSectionActions,
   updatedSelectedItemId,
   updatedBucketsCollapsed,
-  updatedShowFullBuckets,
+  updatedRevealedRows,
   updatedIsLoading = false,
   showUpdatedProjectNames = true,
   onShowUpdatedProjectNamesChange,
@@ -869,7 +870,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   onSelectUpdatedItem,
   onTogglePinnedSection,
   onToggleUpdatedBucket,
-  onToggleUpdatedShowFullBucket,
+  onShowMoreUpdatedRows,
+  onShowLessUpdatedRows,
   onArchiveUpdatedItem,
   onMarkUpdatedItemUnread,
   onRenameUpdatedItem,
@@ -1666,10 +1668,11 @@ export const LoroSidebar = memo(function LoroSidebar({
                     selectedItemId={updatedSelectedItemId ?? null}
                     labels={mergedLabels.updated}
                     collapsedBuckets={updatedBucketsCollapsed}
-                    showFullBuckets={updatedShowFullBuckets}
+                    revealedRowsByBucket={updatedRevealedRows}
                     onSelectItem={onSelectUpdatedItem}
                     onToggleBucket={onToggleUpdatedBucket}
-                    onToggleFullBucket={onToggleUpdatedShowFullBucket}
+                    onShowMore={onShowMoreUpdatedRows}
+                    onShowLess={onShowLessUpdatedRows}
                     onArchiveItem={onArchiveUpdatedItem}
                     onMarkItemUnread={onMarkUpdatedItemUnread}
                     onRenameItem={onRenameUpdatedItem}
