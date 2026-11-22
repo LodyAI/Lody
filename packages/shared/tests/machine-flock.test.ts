@@ -517,6 +517,41 @@ describe('machine Flock helpers', () => {
     ).toBeUndefined();
   });
 
+  it('keeps a Provider session defaults and drops only malformed values', () => {
+    const flock = new FakeMachineFlock();
+    flock.set(machineFlockKeys.agentConfig('sorbet' as AgentConfigId), {
+      id: 'sorbet',
+      machineId: 'machine-1',
+      name: 'Lody Agent',
+      cliType: 'builtin',
+      agentType: 'sorbet',
+      env: {},
+      sessionDefaults: {
+        modelId: 'anthropic/claude-fable-5',
+        configOptionValues: { permission_mode: 'auto', fast: true, broken: { nested: 1 } },
+      },
+    });
+    flock.set(machineFlockKeys.agentConfig('other' as AgentConfigId), {
+      id: 'other',
+      machineId: 'machine-1',
+      name: 'Other',
+      cliType: 'builtin',
+      agentType: 'sorbet',
+      env: {},
+      sessionDefaults: 'not an object',
+    });
+
+    const configs = getMachineFlockAgentConfigs(
+      readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })
+    );
+    expect(configs['sorbet' as AgentConfigId]?.sessionDefaults).toEqual({
+      modelId: 'anthropic/claude-fable-5',
+      configOptionValues: { permission_mode: 'auto', fast: true },
+    });
+    expect(configs['other' as AgentConfigId]?.name).toBe('Other');
+    expect(configs['other' as AgentConfigId]?.sessionDefaults).toBeUndefined();
+  });
+
   it('round-trips arbitrary ACP provider names through scoped quota rows', () => {
     const flock = new FakeMachineFlock();
     const configId = 'example-provider' as AgentConfigId;

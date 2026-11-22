@@ -914,6 +914,7 @@ type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefres
     | 'magpieGatewayUrl'
     | 'env'
     | 'codexAuth'
+    | 'sessionDefaults'
   >;
 
 const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary => {
@@ -9507,6 +9508,7 @@ export class SessionExecutionService {
         magpieGatewayUrl: config.magpieGatewayUrl,
         env: config.env,
         codexAuth: config.codexAuth,
+        sessionDefaults: config.sessionDefaults,
       },
       options
     );
@@ -9737,6 +9739,7 @@ export class SessionExecutionService {
         {
           agentConfigId: message.configId,
           magpieGatewayUrl: message.magpieGatewayUrl,
+          sessionDefaults: message.sessionDefaults,
           signal: options.signal,
           codexProfile: codexProfile ? { profile: codexProfile } : undefined,
           onManagedRuntimeProgress: (event) => {
@@ -10259,6 +10262,7 @@ const fingerprintAcpLaunchInputs = (inputs: {
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
   magpieGatewayUrl?: string;
+  sessionDefaults?: AgentConfigMeta['sessionDefaults'];
 }): string =>
   createHash('sha256')
     .update(
@@ -10272,6 +10276,8 @@ const fingerprintAcpLaunchInputs = (inputs: {
         inputs.magpieGatewayUrl
       )
     )
+    // The probe applies these, so a cached probe taken under other defaults is stale.
+    .update(`\x00${JSON.stringify(inputs.sessionDefaults ?? null)}`)
     .digest('hex');
 
 const computeAcpRefreshDedupeKey = (

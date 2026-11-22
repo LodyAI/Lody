@@ -40,6 +40,12 @@ import {
 import type { SettingsTabId } from '@/components/settings/settings-tabs';
 import { DesktopSettingsModal } from '@/components/settings/desktop-settings-modal';
 import { RoutedStory, SettingsStoryProviders } from './settings-story-shell';
+import { PromptShortcutRuntimeProvider } from '@/providers/prompt-shortcut-provider';
+import type {
+  PromptShortcut,
+  PromptShortcutIndexEntry,
+  PromptShortcutRuntime,
+} from '@lody/shared/prompt-shortcuts';
 
 /**
  * Desktop settings modal — the overlay that replaces the full-page settings route on
@@ -102,6 +108,84 @@ function RolesCatalogFixture({
     [userAtom, { id: storyRole.ownerUserId, name: 'Example user', email: 'user@example.com' }],
   ]);
   return <>{children}</>;
+}
+
+const storyPrompt = (patch: Partial<PromptShortcut>): PromptShortcut => ({
+  v: 1,
+  id: `story-prompt-${patch.slug ?? 'review-pr'}`,
+  workspaceId: 'settings-story-workspace',
+  ownerUserId: storyRole.ownerUserId,
+  name: 'Review PR',
+  slug: 'review-pr',
+  description: 'Review the current diff as a pull request.',
+  prompt: 'Review the current diff. Report correctness issues first, then style.',
+  mentions: [],
+  scope: {},
+  revision: 'rev-1',
+  createdAt: 0,
+  updatedAt: 0,
+  ...patch,
+});
+
+const storyPrompts: PromptShortcut[] = [
+  storyPrompt({}),
+  storyPrompt({
+    name: 'Release notes',
+    slug: 'release-notes',
+    description: 'Draft release notes from merged PRs since the last tag.',
+    scope: { project: { kind: 'github', repository: 'lodyai/lody' } },
+  }),
+  storyPrompt({ name: 'Fix lint', slug: 'fix-lint', description: undefined }),
+  storyPrompt({
+    name: 'Team standup summary',
+    slug: 'standup',
+    ownerUserId: 'settings-story-teammate',
+    description: 'Summarize yesterday’s merged work for the standup.',
+  }),
+  storyPrompt({
+    name: 'Translate copy to Chinese',
+    slug: 'translate-zh',
+    description: 'Translate the selected UI strings, keeping product names in English.',
+  }),
+];
+
+/**
+ * The catalog boundary only: the real Prompts page, its list, the editor
+ * dialog and the read-only view render on top of these entries.
+ */
+function PromptsCatalogFixture({
+  prompts,
+  children,
+}: {
+  prompts: readonly PromptShortcut[];
+  children: ReactNode;
+}) {
+  useHydrateAtoms([
+    [userAtom, { id: storyRole.ownerUserId, name: 'Example user', email: 'user@example.com' }],
+  ]);
+  const runtime = useMemo(() => {
+    const entries: PromptShortcutIndexEntry[] = prompts.map(
+      ({ prompt: _prompt, mentions: _mentions, ...entry }) => ({
+        ...entry,
+        bodyDocId: entry.id,
+        dependencySummary: [],
+      })
+    );
+    const snapshot = { entries, pendingIds: [], errors: {}, loading: false };
+    return {
+      workspaceId: 'settings-story-workspace',
+      userId: storyRole.ownerUserId,
+      subscribe: () => () => {},
+      getSnapshot: () => snapshot,
+      read: async (entry: PromptShortcutIndexEntry) =>
+        prompts.find((prompt) => prompt.id === entry.id)!,
+      save: async () => {},
+      remove: async () => {},
+      retry: async () => {},
+      prefetch: async () => {},
+    } as unknown as PromptShortcutRuntime;
+  }, [prompts]);
+  return <PromptShortcutRuntimeProvider runtime={runtime}>{children}</PromptShortcutRuntimeProvider>;
 }
 
 // Only data/transport boundaries are synthetic. The modal, navigation, machines
@@ -350,11 +434,13 @@ function LodyAgentEnabled({ children }: { children: ReactNode }) {
 function SettingsModalStory({
   tab,
   roles = [storyRole],
+  prompts = storyPrompts,
   solo = false,
   noneShared = false,
 }: {
   tab: SettingsTabId;
   roles?: readonly AgentRole[];
+  prompts?: readonly PromptShortcut[];
   /** The workspace has no other members. */
   solo?: boolean;
   /** No machine is shared with the workspace. */
@@ -377,6 +463,10 @@ function SettingsModalStory({
                 <RolesCatalogFixture roles={roles}>
                   <DesktopSettingsModal />
                 </RolesCatalogFixture>
+              ) : tab === 'prompt-shortcuts' ? (
+                <PromptsCatalogFixture prompts={prompts}>
+                  <DesktopSettingsModal />
+                </PromptsCatalogFixture>
               ) : tab === 'lody-agent' ? (
                 <LodyAgentEnabled>
                   <DesktopSettingsModal />
@@ -458,4 +548,12 @@ export const MachinesSoloWorkspace: Story = {
  * than claiming no machine is connected. */
 export const MachinesNoneShared: Story = {
   render: () => <SettingsModalStory tab="machines" noneShared />,
+};
+
+export const PromptsTab: Story = {
+  render: () => <SettingsModalStory tab="prompt-shortcuts" />,
+};
+
+export const PromptsEmptyTab: Story = {
+  render: () => <SettingsModalStory tab="prompt-shortcuts" prompts={[]} />,
 };

@@ -181,7 +181,7 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
                   project={project}
                   canRemoveProject
                   collapsed={collapsedProjects[project.id] ?? false}
-                  whetherShowFullList={false}
+                  revealedRows={0}
                   isSelected={false}
                   sessionsForProject={sessions}
                   childSessionsByParent={emptyChildren}
@@ -206,7 +206,8 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
                   onToggleCollapsed={(_machine, projectId) =>
                     setCollapsedProjects((prev) => ({ ...prev, [projectId]: !prev[projectId] }))
                   }
-                  onToggleFullList={() => undefined}
+                  onShowMore={() => {}}
+                  onShowLess={() => {}}
                   onRequestRemoval={() => undefined}
                 />
               ))}

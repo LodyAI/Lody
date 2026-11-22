@@ -137,7 +137,20 @@ describe('MachineRuntime remote bridge transitions', () => {
   });
 });
 
-it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
+const sorbetRemoteRequests = {
+  'sorbet/credentials-list': { configId: 'config' },
+  'sorbet/credentials-logout': { configId: 'config', providerId: '提供商 / 账户' },
+  'sorbet/providers-list': { configId: 'config' },
+  'sorbet/providers-update': {
+    configId: 'config',
+    providerId: 'gateway',
+    provider: { name: 'Gateway', protocol: 'openai-responses', baseUrl: 'https://e.test' },
+  },
+  'sorbet/providers-delete': { configId: 'config', providerId: 'gateway' },
+  'sorbet/models-list': { configId: 'config' },
+} as const;
+
+it.each(Object.keys(sorbetRemoteRequests) as Array<keyof typeof sorbetRemoteRequests>)(
   'rejects %s at encrypted remote ingress before dispatch',
   async (method) => {
     const { runtime, handler } = createHarness(true);
@@ -148,15 +161,12 @@ it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
         return { ok: true };
       },
     });
-    const request =
-      method === 'sorbet/credentials-list'
-        ? { method, workspaceId: 'workspace', machineId: 'machine', params: { configId: 'config' } }
-        : {
-            method,
-            workspaceId: 'workspace',
-            machineId: 'machine',
-            params: { configId: 'config', providerId: '提供商 / 账户' },
-          };
+    const request = {
+      method,
+      workspaceId: 'workspace',
+      machineId: 'machine',
+      params: sorbetRemoteRequests[method],
+    } as import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest;
     await expect(runtime.handleEncryptedFeatureRpc(request)).rejects.toThrow(
       'e2ee_feature_unavailable'
     );

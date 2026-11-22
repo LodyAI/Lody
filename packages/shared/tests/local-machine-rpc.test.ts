@@ -4,6 +4,7 @@ import {
   LocalMachineRpcRequestSchema,
   safeParseLocalMachineRpcRequest,
 } from '../src/local-machine-rpc';
+import { isE2eeFeatureMethod } from '../src/e2ee-rpc';
 
 describe('local Machine RPC', () => {
   it('bounds Sorbet credential identifiers and excludes unexpected fields', () => {
@@ -65,6 +66,27 @@ describe('local Machine RPC', () => {
       result: { type: 'sorbet/providers-create', provider: { ...provider, id: 'endpoint' } },
     };
     expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
+  });
+
+  it('edits a stored endpoint without letting the client rewrite its models', () => {
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'sorbet/providers-update',
+      params: {
+        configId: 'config',
+        providerId: 'endpoint',
+        provider: { name: 'Gateway', protocol: 'openai-responses', baseUrl: 'https://e.test' },
+      },
+    };
+    expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+    expect(
+      LocalMachineRpcRequestSchema.safeParse({
+        ...request,
+        params: { ...request.params, provider: { ...request.params.provider, models: [] } },
+      }).success
+    ).toBe(false);
+    expect(isE2eeFeatureMethod('sorbet/providers-update')).toBe(true);
   });
 
   it('retains selected roots across file RPC parsing and defaults legacy requests to main at dispatch', () => {

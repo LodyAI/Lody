@@ -11,6 +11,7 @@ vi.mock('convex/browser', () => ({
 vi.mock('@lody/cloud-api', () => ({
   api: {
     github: {
+      getCredentialPolicyForCli: 'github.getCredentialPolicyForCli',
       getAccessTokenByRepoNameForCli: 'github.getAccessTokenByRepoNameForCli',
       getOperationAccessTokenByRepoNameForCli: 'github.getOperationAccessTokenByRepoNameForCli',
     },
@@ -27,6 +28,79 @@ describe('GitHubTokenManager', () => {
   beforeEach(() => {
     actionMock.mockReset();
     vi.useRealTimers();
+  });
+
+  it('reuses a confirmed disabled commit identity briefly and rechecks an approval on each turn', async () => {
+    let now = 0;
+    const manager = new GitHubTokenManager({
+      serverUrl: 'http://example.test',
+      cliToken: 'cli',
+      workspaceId: 'ws',
+      now: () => now,
+    });
+    const context = { requesterUserId: 'owner', machineId: 'machine' };
+    const disabled = { personalEnabled: false };
+    const approved = { personalEnabled: true };
+    actionMock.mockResolvedValueOnce(disabled).mockResolvedValue(approved);
+
+    expect(await manager.getCredentialPolicy(context)).toEqual(disabled);
+    expect(await manager.getCredentialPolicy(context)).toEqual(disabled);
+    now += 30_000;
+    expect(await manager.getCredentialPolicy(context)).toEqual(approved);
+    actionMock.mockResolvedValue(disabled);
+    expect(await manager.getCredentialPolicy(context)).toEqual(disabled);
+    actionMock.mockResolvedValue(approved);
+    expect(await manager.getCredentialPolicy({ ...context, requesterUserId: 'member' })).toEqual(
+      approved
+    );
+    actionMock.mockResolvedValueOnce(disabled);
+    expect(await manager.getCredentialPolicy(context)).toEqual(disabled);
+    expect(await manager.getCredentialPolicy({ ...context, machineId: 'another-machine' })).toEqual(
+      approved
+    );
+  });
+
+  it.each(['invalidation', 'failed retry'])(
+    'discards an outdated commit policy after %s',
+    async (reason) => {
+      const manager = new GitHubTokenManager({
+        serverUrl: 'http://example.test',
+        cliToken: 'cli',
+        workspaceId: 'ws',
+      });
+      const context = { requesterUserId: 'owner', machineId: 'machine' };
+      const stale = Promise.withResolvers<{ personalEnabled: boolean }>();
+      actionMock.mockReturnValueOnce(stale.promise);
+      const first = manager.getCredentialPolicy(context);
+      if (reason === 'invalidation') {
+        manager.invalidateAll();
+      } else {
+        actionMock.mockRejectedValueOnce(new Error('unavailable'));
+        await expect(manager.getCredentialPolicy(context)).rejects.toThrow('unavailable');
+      }
+      stale.resolve({ personalEnabled: false });
+      await first;
+      actionMock.mockResolvedValue({ personalEnabled: true });
+      expect(await manager.getCredentialPolicy(context)).toEqual({ personalEnabled: true });
+    }
+  );
+
+  it('does not reuse a disabled reply that arrived after its turn stopped waiting', async () => {
+    const manager = new GitHubTokenManager({
+      serverUrl: 'http://example.test',
+      cliToken: 'cli',
+      workspaceId: 'ws',
+    });
+    const context = { requesterUserId: 'owner', machineId: 'machine' };
+    const attempt = new AbortController();
+    const delayed = Promise.withResolvers<{ personalEnabled: boolean }>();
+    actionMock.mockReturnValueOnce(delayed.promise);
+    const waiting = manager.getCredentialPolicy(context, attempt.signal);
+    attempt.abort();
+    delayed.resolve({ personalEnabled: false });
+    await expect(waiting).rejects.toMatchObject({ name: 'AbortError' });
+    actionMock.mockResolvedValue({ personalEnabled: true });
+    expect(await manager.getCredentialPolicy(context)).toEqual({ personalEnabled: true });
   });
 
   it('isolates short-lived candidates by owner and source and honors invalidation', async () => {

@@ -667,6 +667,13 @@ export type WorkspaceRuntime = {
       | Pick<
           Extract<
             import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/providers-update' }
+          >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
             { method: 'sorbet/providers-delete' }
           >,
           'method' | 'params'

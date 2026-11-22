@@ -451,6 +451,48 @@ describe('eager-sync cloud auth bridge', () => {
     streamUrl: 'https://streams.example.com/ds/bucket/stream',
   });
 
+  it('ends a worker on denied credentials and admits a fresh worker after login recovers', async () => {
+    let login: string | null = null;
+    const provider = createLoroStreamsTokenProviderLegacy({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace',
+      authToken: () => login,
+      fetchImpl: async () => Response.json({ token: 'valid-jwt', expiresIn: 900 }),
+    });
+    let now = 0;
+    const h = clientHarness(cloudTransport, undefined, provider.createAuthCallback(), {
+      now: () => now,
+    });
+    try {
+      const failed = h.client.prefetch('room', 1, new AbortController().signal);
+      const deniedWorker = await h.starts[0].promise;
+      deniedWorker.emit({ type: 'auth', id: 1, context: { reason: 'request' } });
+      expect(await failed).toBe('failed');
+      expect(deniedWorker.terminated).toBe(true);
+      expect(deniedWorker.inputs.some((input) => input.type === 'auth-result')).toBe(false);
+      login = 'valid';
+      now = 1_000_000;
+      const recovered = h.client.prefetch('room', 1, new AbortController().signal);
+      const worker = await h.starts[1].promise;
+      const authorized = deferred<void>();
+      const post = worker.postMessage.bind(worker);
+      worker.postMessage = (input) => {
+        post(input);
+        if (input.type === 'auth-result') {
+          expect(input.token).toBe('valid-jwt');
+          authorized.resolve();
+        }
+      };
+      worker.emit({ type: 'auth', id: 2, context: { reason: 'request' } });
+      await authorized.promise;
+      worker.emit({ type: 'complete', outcome: 'synced' });
+      expect(await recovered).toBe('synced');
+    } finally {
+      h.client.dispose();
+      await provider.close();
+    }
+  });
+
   it('refreshes a rejected JWT through the held provider callback instead of returning it', async () => {
     const bodies: Array<{ workspaceId: string; rejectedToken?: string }> = [];
     let issued = 0;

@@ -37,6 +37,8 @@ import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
+import { duration, ease } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
 import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
@@ -334,7 +336,7 @@ export function AgentRoleRow({
   const runConfig = uniform ? (summaries[0]?.text ?? '') : '';
 
   return (
-    <div {...stylex.props(catalog.row, surface.pressableLine)}>
+    <div {...withClassName(stylex.props(catalog.row, surface.pressableLine), ROW_MARKER)}>
       <button
         type="button"
         onClick={onEdit}
@@ -376,7 +378,7 @@ export function AgentRoleRow({
         </span>
       </button>
       <AgentRoleMachines targets={targets} allMachines={allMachines} />
-      <div {...stylex.props(catalog.actions)}>
+      <div {...stylex.props(catalog.actions, styles.reveal)}>
         {canManage ? (
           <Button
             type="button"
@@ -384,7 +386,6 @@ export function AgentRoleRow({
             aria-label={t('common.remove')}
             size="small"
             icon
-            tone="destructive"
             onClick={onRemove}
           >
             <Trash2 {...stylex.props(catalog.icon)} />
@@ -513,7 +514,25 @@ function MachineMark({
   );
 }
 
+/** The row the remove action waits on: its hover and focus reveal it. */
+const ROW_MARKER = stylex.props(stylex.defaultMarker()).className;
+
 const styles = stylex.create({
+  /**
+   * Removing is the row's second action, so it waits for the pointer or the
+   * keyboard; a touch screen has no hover and always shows it.
+   */
+  reveal: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      [stylex.when.ancestor(':focus-within')]: 1,
+      '@media (hover: none)': 1,
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
   /** A badge's height whether or not the Role has one, so every row is one height. */
   titleLine: { flexWrap: 'nowrap', height: '20px' },
   machines: {

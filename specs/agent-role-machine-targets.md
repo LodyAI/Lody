@@ -22,13 +22,16 @@ the Role has more than one target. A machine has at most one target per Role.
 Target order is authoring order, not preference; there is no fallback between
 targets.
 
-The Role editor shows machine tabs below the prompt: the Role's machines first,
-then every other machine the user can reach. A tab the Role does not run on offers
-"Add to this machine". Adding preselects an Agent Config on that machine with the
+The Role editor shows a "Runs on" list right below the name: one row per machine
+the Role runs on, in authoring order. Each row names the machine, its agent and
+the exact `@` token that runs the Role there, so the list itself answers where a
+mention runs; opening a row shows that machine's own settings. Every other machine
+the user can reach is one step away in an "Add machine" menu. Adding preselects an
+Agent Config on that machine with the
 same agent type as the first configured target, preferring the same name (a custom
 agent matches by name). The run config is copied as authored; whatever that agent
 does not support is listed as an issue in the editor before saving, never dropped
-silently. Memory lives inside the machine tab because memory associations and
+silently. Memory lives inside the machine row because memory associations and
 provider data belong to a machine: adding preselects an association with the same
 provider and memory ID on that machine and otherwise leaves memory unlinked.
 Memories on different machines are stored separately and Lody does not merge them.

@@ -140,7 +140,7 @@ describe('Workspace group nesting for a child-tab opener', () => {
         openedByRowSessionId: 'root-in-another-repo',
       }),
     ]);
-    expect(getVisibleSessionGroupTree(group, true).map((node) => node.depth)).toEqual([0, 0]);
+    expect(getVisibleSessionGroupTree(group, 1000).map((node) => node.depth)).toEqual([0, 0]);
   });
 });
 
@@ -150,7 +150,7 @@ function sessionIds(items: SidebarNavItem[]): string[] {
 
 const navBase = {
   organizeMode: 'workspace' as const,
-  showFullSessionGroups: {},
+  revealedRowsByGroup: {},
   pinnedItems: [] as SidebarUpdatedItem[],
   pinnedSectionCollapsed: false,
   workspace: {
@@ -161,7 +161,7 @@ const navBase = {
     chatSessions: [] as SessionListRow[],
     chatsCollapsed: false,
   },
-  updated: { items: [] as SidebarUpdatedItem[], collapsedBuckets: {}, showFullBuckets: {} },
+  updated: { items: [] as SidebarUpdatedItem[], collapsedBuckets: {}, revealedRowsByBucket: {} },
 };
 
 describe('keyboard navigation for a child-tab opener', () => {
@@ -203,7 +203,7 @@ describe('keyboard navigation for a child-tab opener', () => {
                 machineId: 'machine-1',
                 localProjectId: 'proj-1',
                 collapsed: false,
-                showFull: false,
+                revealedRows: 0,
                 sessions: [
                   { id: 'root', rootRankMs: 3_000 },
                   { id: 'unrelated', rootRankMs: 2_500 },

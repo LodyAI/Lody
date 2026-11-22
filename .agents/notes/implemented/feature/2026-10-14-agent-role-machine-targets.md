@@ -11,7 +11,7 @@ Users with several machines kept one Role per machine because a Role bound exact
 one machine and Agent Config and names had to be unique, so every edit was repeated
 by hand. A Role now keeps its shared fields (name, prompt, description, emoji,
 visibility) once and carries one target per machine with its own agent, run config,
-memory and optional alias. The editor shows machine tabs, the Settings list names
+memory and optional alias. The editor lists the Role's machines, the Settings list names
 each Role's machines, and `@` offers one row per target. Single-target Roles stay
 in the v1 row shape; only multi-target Roles use a v2 row that older clients skip.
 The [draft Spec](../../../../specs/agent-role-machine-targets.md) awaits review.
@@ -44,11 +44,14 @@ associations are stored per machine
 - **Agents and CLI.** MCP create tools take `agentRoleMachineId`; the CLI uses
   `--machine` or a target alias. A multi-target Role without a machine fails with
   the list of its machines. Discovery lists one row per target.
-- **Editor.** The machine selector became tabs; the Memory tab moved into each
-  machine tab. "Add to this machine" suggests the same agent type (same name
-  first) and copies the run config; unsupported values surface as the existing
-  compatibility issues. Explicit-save option cleanup applies only to the tab being
-  edited, because only that agent's capabilities are loaded.
+- **Editor.** The machine selector became tabs, and memory moved into each
+  machine. Since 2026-11-22 the tabs are a "Runs on" list: one expandable row per
+  target showing its machine, agent and exact `@` token, with other machines in an
+  "Add machine" menu, because tabs mixed membership, selection and an extra add
+  step. Adding suggests the same agent type (same name first) and copies the run
+  config; unsupported values surface as the existing compatibility issues.
+  Explicit-save option cleanup applies only to the open row, because only that
+  agent's capabilities are loaded.
 - **List.** Settings is one list instead of machine groups. Every row is the same
   two lines (a fixed-height title line absorbs badges); machines sit in a trailing
   column with state dots, folding past two into "+N" or reading "All N machines".

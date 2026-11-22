@@ -438,20 +438,20 @@ export const GroupByDate: Story = {
 /* Group preview cap — the state this exists for. Three worktrees on the same
    project plus a long-running one: without the cap the first bucket's twelve
    rows push every other worktree off the screen. Each bucket previews five
-   top-level rows and ends in "Show all (N)". */
+   top-level rows and ends in "Show more". */
 export const GroupPreviewOverflow: Story = {
   args: { groupBy: 'project', chats: overflowingChats, capGroupPreviews: true },
 };
 
-/* One bucket expanded past the cap: the toggle reads "Show less" and stays
-   pinned to the tail of the bucket it belongs to. Collapsing it scrolls the
-   toggle back into view rather than dropping the user somewhere else in the
-   list. */
+/* One bucket expanded past the cap: "Show more" uncovers another page and
+   "Show less" appears beside it, pinned to the tail of the bucket it belongs
+   to. Collapsing scrolls the toggle back into view rather than dropping the
+   user somewhere else in the list. */
 export const GroupPreviewExpanded: Story = {
   args: { groupBy: 'project', chats: overflowingChats, capGroupPreviews: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const [toggle] = await canvas.findAllByRole('button', { name: /Show all/i });
+    const [toggle] = await canvas.findAllByRole('button', { name: /Show more/i });
     await userEvent.click(toggle!);
   },
 };

@@ -1345,6 +1345,7 @@ export function MachineAgentSettings({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
+            sessionDefaults: dialogMode.config.sessionDefaults,
           });
         }
       } catch (error) {

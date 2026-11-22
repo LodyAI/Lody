@@ -192,6 +192,9 @@ export const parts = stylex.create({
 
   /** One answer out of a few: a sunken track with a thumb that travels. */
   seg: {
+    // The thumb is measured against this track, so the track is its containing
+    // block; without it the thumb lands on whatever ancestor is positioned.
+    position: 'relative',
     display: 'inline-flex',
     padding: '2px',
     gap: '1px',

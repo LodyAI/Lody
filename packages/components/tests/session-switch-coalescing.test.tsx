@@ -269,7 +269,7 @@ describe('sidebar visible session 1-9 shortcuts and pills', () => {
         { kind: 'local-project', machineId: 'm1', localProjectId: 'p1', collapsed: false },
         { kind: 'session', sessionId: 's2', groupKey: 'local-project:m1:p1' },
         { kind: 'session', sessionId: 's3', groupKey: 'local-project:m1:p1' },
-        { kind: 'show-more', groupKey: 'local-project:m1:p1', expanded: false },
+        { kind: 'show-more', groupKey: 'local-project:m1:p1' },
         ...SESSION_IDS.slice(3).map((sessionId) => ({
           kind: 'session' as const,
           sessionId,

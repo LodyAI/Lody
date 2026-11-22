@@ -185,13 +185,28 @@ export class GitHubTokenManager {
   private readonly candidateFlights = new Map<string, CandidateFlight>();
   /** Bumped by invalidation; a candidate fetch publishes only within its generation. */
   private candidateGeneration = 0;
+  private lastCommitPolicy?: GitHubWriteTokenContext & { disabledUntil: number };
   private refreshTimer: NodeJS.Timeout | null = null;
   private refreshAllInFlight: Promise<void> | null = null;
 
   async getCredentialPolicy(
-    context: GitHubWriteTokenContext
+    context: GitHubWriteTokenContext,
+    signal?: AbortSignal
   ): Promise<{ personalEnabled: boolean }> {
-    return z.object({ personalEnabled: z.boolean() }).parse(
+    signal?.throwIfAborted();
+    const now = this.now();
+    const cached = this.lastCommitPolicy;
+    if (
+      cached &&
+      cached.requesterUserId === context.requesterUserId &&
+      cached.machineId === context.machineId &&
+      now < cached.disabledUntil
+    )
+      return { personalEnabled: false };
+
+    const entry = { ...context, disabledUntil: 0 };
+    this.lastCommitPolicy = entry;
+    const policy = z.object({ personalEnabled: z.boolean() }).parse(
       await this.client.action(api.github.getCredentialPolicyForCli, {
         cliToken: this.cliToken,
         workspaceId: this.workspaceId,
@@ -199,6 +214,9 @@ export class GitHubTokenManager {
         machineId: context.machineId,
       })
     );
+    signal?.throwIfAborted();
+    if (!policy.personalEnabled) entry.disabledUntil = now + 30_000;
+    return policy;
   }
 
   // Selection is per command. In particular, do not reuse an App candidate after
@@ -479,6 +497,7 @@ export class GitHubTokenManager {
     this.stopAutoRefresh();
     this.states.clear();
     this.candidates.clear();
+    this.lastCommitPolicy = undefined;
     this.candidateFlights.clear();
     this.candidateGeneration++;
   }
@@ -568,6 +587,7 @@ export class GitHubTokenManager {
    */
   invalidateAll(): void {
     this.candidates.clear();
+    this.lastCommitPolicy = undefined;
     this.candidateFlights.clear();
     this.candidateGeneration++;
     this.logger.debug('[github-token] Invalidating all cached tokens');
@@ -800,7 +820,7 @@ export function createSharedGitHubTokenManagers(
       const owner = entry;
       let released = false;
       return {
-        getCredentialPolicy: (context) => manager.getCredentialPolicy(context),
+        getCredentialPolicy: (context, signal) => manager.getCredentialPolicy(context, signal),
         getCredentialCandidate: (repoFullName, context, source, invalidatedPersonalToken) =>
           manager.getCredentialCandidate(repoFullName, context, source, invalidatedPersonalToken),
         startAutoRefresh: () => manager.startAutoRefresh(),

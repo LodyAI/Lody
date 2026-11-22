@@ -987,6 +987,47 @@ describe('LoroSidebar pinned section', () => {
     expect(updated?.getAttribute('draggable')).toBe('true');
   });
 
+  it('starts a new chat from a user section menu, not from the default one', async () => {
+    const onNewChat = vi.fn();
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      pinSectionActions: {
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+        onNewChat,
+      },
+    });
+    const openMenu = async (section: string) => {
+      const trigger = container?.querySelector<HTMLElement>(
+        `[data-pin-section="${section}"] button[aria-label="Section actions"]`
+      );
+      expect(trigger).not.toBeNull();
+      flushSync(() => {
+        trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        trigger?.click();
+      });
+      await flushFrame();
+      return Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+        (entry) => entry.textContent === 'New Chat in This Section'
+      );
+    };
+    expect(await openMenu('default')).toBeUndefined();
+    flushSync(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await flushFrame();
+    const item = await openMenu('maintenance');
+    expect(item).toBeDefined();
+    flushSync(() => item?.click());
+    expect(onNewChat).toHaveBeenCalledWith('maintenance');
+  });
+
   it('creates an empty section from the Pinned header menu', async () => {
     const onCreateSection = vi.fn();
     renderSidebar({

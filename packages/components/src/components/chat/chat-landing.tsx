@@ -156,7 +156,7 @@ import {
   recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
-import { agentDefaultsCache, persistAgentSessionDefaults } from '@/lib/local-storage-cache';
+import { readAgentStartDefaults, persistAgentSessionDefaults } from '@/lib/local-storage-cache';
 import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 import {
   buildRecentRunConfigItems,
@@ -243,6 +243,7 @@ import {
 } from './submission/use-composer-navigation-focus';
 import { BranchSelector } from './chat-landing-selectors';
 import { composerSurface } from '@/components/shared/composer-surface';
+import { PinSectionTarget } from '@/components/chat/pin-section-target-pill';
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -477,6 +478,8 @@ interface ChatLandingProps {
   preSelectedRepo?: string;
   /** Project group id, with `preSelectedContext: 'group'`. */
   preSelectedGroup?: string;
+  pinSectionId?: string;
+  onClearPinSection?: () => void;
   /**
    * Mirrors the composer's effective selection back into the chat-route URL
    * (with `replace`) once the URL names a selection. Passed by the desktop
@@ -676,11 +679,14 @@ function WorkspaceChatLanding({
   preSelectedProject,
   preSelectedRepo,
   preSelectedGroup,
+  pinSectionId: pinSectionIdProp,
+  onClearPinSection,
   onSelectionUrlSync,
   embedding,
 }: ChatLandingProps) {
   const embeddedSurface = embedding ? CHAT_LANDING_EMBEDDED_SURFACES[embedding.surface] : null;
   const isEmbedded = embeddedSurface != null;
+  const pinSectionId = isEmbedded ? undefined : pinSectionIdProp;
   const sessionEntrypoint = embeddedSurface?.entrypoint ?? 'chat_landing';
   const embeddingRef = useLatestRef(embedding);
   // A Project group runs on top of the plain chat context: every existing
@@ -1937,8 +1943,8 @@ function WorkspaceChatLanding({
         configOptionValues: roleRunConfig.configOptionValues,
       };
     }
-    return selectedAgent ? (agentDefaultsCache.get(selectedAgent.agentId) ?? {}) : {};
-  }, [activeAgentRolePreference, selectedAgent]);
+    return selectedAgent ? (readAgentStartDefaults(selectedConfig) ?? {}) : {};
+  }, [activeAgentRolePreference, selectedAgent, selectedConfig]);
   /* No effects: user edits are the only stored selection state; the effective
      values derive per render. Candidates feed the capability lookup so the
      catalog can depend on the selection without feeding back into it. */
@@ -3609,6 +3615,7 @@ function WorkspaceChatLanding({
           ...(activeAgentRole
             ? { agentRoleId: activeAgentRole.id, agentRoleRevision: activeAgentRole.revision }
             : {}),
+          ...(pinSectionId ? { isPinned: true, pinSectionId } : {}),
         },
         pendingHistoryEntry,
         attachments
@@ -4449,6 +4456,9 @@ function WorkspaceChatLanding({
         </div>
         {localGitStateRetryNode}
         {branchWorktreePill}
+        {pinSectionId ? (
+          <PinSectionTarget sectionId={pinSectionId} onClear={onClearPinSection} />
+        ) : null}
       </div>
     </ErrorBoundary>
   );
