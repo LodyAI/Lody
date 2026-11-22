@@ -362,14 +362,15 @@ function getDocsLinkOrigin(): string {
 }
 
 function getStableRepoFullNames(tasks: { repoFullName?: string | null }[]): string[] {
-  const seen = new Set<string>();
+  const seenLower = new Set<string>();
   const ordered: string[] = [];
 
   for (const task of tasks) {
     const repoFullName = typeof task.repoFullName === 'string' ? task.repoFullName.trim() : '';
     if (!repoFullName) continue;
-    if (seen.has(repoFullName)) continue;
-    seen.add(repoFullName);
+    const lower = repoFullName.toLowerCase();
+    if (seenLower.has(lower)) continue;
+    seenLower.add(lower);
     ordered.push(repoFullName);
   }
 
@@ -3381,17 +3382,35 @@ export function LoroAppSidebar({
       }
     }
     const sessionsByProject = new Map<string, SessionMeta[]>();
+    const githubDisplayRankById = new Map<string, number>();
     for (const session of sessions) {
       if (session.parentSessionId) continue;
       if (!isSessionInMyScope(session, myAccountId)) continue;
       const key = getSessionCoordinatorProjectKey(session);
       if (!key) continue;
       const id = coordinatorProjectKeyId(key);
-      if (key.kind === 'github' && !projects.has(id)) {
-        projects.set(id, {
-          key,
-          item: { id, kind: 'github', name: key.repoFullName, detail: null, activity: null },
-        });
+      if (key.kind === 'github') {
+        const rank = Math.max(
+          Date.parse(session.createdAt) || 0,
+          typeof session.lastMessageAt === 'number'
+            ? session.lastMessageAt
+            : Date.parse(String(session.lastMessageAt ?? '')) || 0
+        );
+        const existing = projects.get(id);
+        const prevRank = githubDisplayRankById.get(id) ?? -1;
+        if (!existing) {
+          githubDisplayRankById.set(id, rank);
+          projects.set(id, {
+            key,
+            item: { id, kind: 'github', name: key.repoFullName, detail: null, activity: null },
+          });
+        } else if (existing.key.kind === 'github' && rank > prevRank) {
+          githubDisplayRankById.set(id, rank);
+          projects.set(id, {
+            key,
+            item: { ...existing.item, name: key.repoFullName },
+          });
+        }
       }
       const list = sessionsByProject.get(id);
       if (list) list.push(session);
@@ -3436,10 +3455,16 @@ export function LoroAppSidebar({
     }
     const search = location.search as Record<string, unknown>;
     if (search.coordinator === true || search.coordinator === 'true') {
-      if (search.context === 'local' && typeof search.machine === 'string')
-        return `local:${search.machine}:${String(search.project)}`;
-      if (search.context === 'github' && typeof search.repo === 'string')
-        return `github:${search.repo}`;
+      if (search.context === 'local' && typeof search.machine === 'string') {
+        return coordinatorProjectKeyId({
+          kind: 'local',
+          machineId: search.machine as MachineId,
+          localProjectId: String(search.project),
+        });
+      }
+      if (search.context === 'github' && typeof search.repo === 'string') {
+        return coordinatorProjectKeyId({ kind: 'github', repoFullName: search.repo });
+      }
     }
     return null;
   }, [allActiveSessions, location.search, selectedSessionId, showProjectList]);
@@ -3826,30 +3851,43 @@ export function LoroAppSidebar({
       </div>
     );
 
-  // Compute repos array from persisted state
   const repos = useMemo<SessionListRepoState[]>(() => {
-    const repoSet = new Set(repoFullNames);
+    const canonicalByLower = new Map<string, string>();
+    for (const repoFullName of repoFullNames) {
+      canonicalByLower.set(repoFullName.toLowerCase(), repoFullName);
+    }
+    const collapsedByLower = new Map<string, boolean>();
+    for (const [key, collapsed] of Object.entries(repoCollapseState)) {
+      if (collapsed) {
+        collapsedByLower.set(key.toLowerCase(), true);
+      }
+    }
     const result: SessionListRepoState[] = [];
-    const seen = new Set<string>();
+    const seenLower = new Set<string>();
 
-    // First, add repos in persisted order (if they still exist)
-    for (const repoFullName of repoOrder) {
-      if (repoSet.has(repoFullName) && !seen.has(repoFullName)) {
-        seen.add(repoFullName);
+    for (const orderedName of repoOrder) {
+      const lower = orderedName.trim().toLowerCase();
+      const canonical = canonicalByLower.get(lower);
+      if (canonical && !seenLower.has(lower)) {
+        seenLower.add(lower);
         result.push({
-          repoFullName,
-          collapsed: repoCollapseState[repoFullName] ?? false,
+          repoFullName: canonical,
+          collapsed:
+            repoCollapseState[canonical] ??
+            repoCollapseState[orderedName] ??
+            collapsedByLower.get(lower) ??
+            false,
         });
       }
     }
 
-    // Then, add any new repos not in the persisted order
     for (const repoFullName of repoFullNames) {
-      if (!seen.has(repoFullName)) {
-        seen.add(repoFullName);
+      const lower = repoFullName.toLowerCase();
+      if (!seenLower.has(lower)) {
+        seenLower.add(lower);
         result.push({
           repoFullName,
-          collapsed: repoCollapseState[repoFullName] ?? false,
+          collapsed: repoCollapseState[repoFullName] ?? collapsedByLower.get(lower) ?? false,
         });
       }
     }
@@ -3857,21 +3895,18 @@ export function LoroAppSidebar({
     return result;
   }, [repoFullNames, repoOrder, repoCollapseState]);
 
-  // Append-only sync: register newly discovered repos into `repoOrder`, but
-  // never remove. Removing on transient disappearance (scope/visibility/sync
-  // races) would corrupt persisted positions and could ping-pong adjacent
-  // repos every time they flicker in and out.
   const repoOrderRef = useRef(repoOrder);
   repoOrderRef.current = repoOrder;
   useEffect(() => {
     if (sessionsListLoading) return;
     if (repoFullNames.length === 0) return;
     const prevOrder = repoOrderRef.current;
-    const known = new Set(prevOrder);
+    const knownLower = new Set(prevOrder.map((entry) => entry.trim().toLowerCase()));
     const newRepos: string[] = [];
     for (const repoFullName of repoFullNames) {
-      if (!known.has(repoFullName)) {
-        known.add(repoFullName);
+      const lower = repoFullName.toLowerCase();
+      if (!knownLower.has(lower)) {
+        knownLower.add(lower);
         newRepos.push(repoFullName);
       }
     }

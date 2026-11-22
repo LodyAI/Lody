@@ -116,14 +116,31 @@ export const repoOrderAtom = atom<readonly string[], [readonly string[]], void>(
 );
 
 /**
- * Update repo collapse state for a specific repo
+ * Update repo collapse state for a specific repo, consolidating legacy case aliases.
  */
 export const toggleRepoCollapsedAtom = atom(null, (get, set, repoFullName: string) => {
   const current = get(repoCollapseStateAtom);
-  set(repoCollapseStateAtom, {
-    ...current,
-    [repoFullName]: !current[repoFullName],
-  });
+  if (repoFullName.startsWith('__')) {
+    set(repoCollapseStateAtom, {
+      ...current,
+      [repoFullName]: !current[repoFullName],
+    });
+    return;
+  }
+  const lower = repoFullName.trim().toLowerCase();
+  const next: RepoCollapseState = {};
+  let wasCollapsed = current[repoFullName];
+  for (const [key, value] of Object.entries(current)) {
+    if (!key.startsWith('__') && key.trim().toLowerCase() === lower) {
+      if (wasCollapsed === undefined) {
+        wasCollapsed = value;
+      }
+      continue;
+    }
+    next[key] = value;
+  }
+  next[repoFullName] = !Boolean(wasCollapsed);
+  set(repoCollapseStateAtom, next);
 });
 
 /**

@@ -21,7 +21,7 @@ export type CoordinatorProjectKey =
 export const coordinatorProjectKeyId = (key: CoordinatorProjectKey): string =>
   key.kind === 'local'
     ? `local:${key.machineId}:${key.localProjectId}`
-    : `github:${key.repoFullName}`;
+    : `github:${key.repoFullName.trim().toLowerCase()}`;
 
 /** The project a conversation belongs to, or `null` for a plain chat. */
 export function getSessionCoordinatorProjectKey(
@@ -35,8 +35,9 @@ export function getSessionCoordinatorProjectKey(
       localProjectId: project.localProjectId,
     };
   }
-  const repoFullName =
+  const rawRepo =
     project?.kind === 'github' ? project.repoFullName : (session.repoFullName ?? undefined);
+  const repoFullName = rawRepo?.trim();
   return repoFullName ? { kind: 'github', repoFullName } : null;
 }
 

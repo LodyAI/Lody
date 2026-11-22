@@ -346,7 +346,9 @@ export function getChatLandingProjectRecency(
   const byProject = new Map<string, number>();
   const byGroup = new Map<string, number>();
   for (const session of sessions) {
-    recordLatestTimestamp(byRepo, getSessionGitHubRepoFullName(session), session.lastMessageAt);
+    const repoFullName = getSessionGitHubRepoFullName(session);
+    recordLatestTimestamp(byRepo, repoFullName, session.lastMessageAt);
+    recordLatestTimestamp(byRepo, repoFullName?.toLowerCase() ?? null, session.lastMessageAt);
     recordLatestTimestamp(byProject, getSessionLocalProjectKey(session), session.lastMessageAt);
     recordLatestTimestamp(byGroup, session.projectRun?.id ?? null, session.lastMessageAt);
   }
@@ -359,8 +361,10 @@ export function compareChatLandingRepositoryByRecency(
   latestMessageAtByRepo: ReadonlyMap<string, number>
 ): number {
   const timestampComparison = compareNullableTimestampDesc(
-    latestMessageAtByRepo.get(left.fullName),
-    latestMessageAtByRepo.get(right.fullName)
+    latestMessageAtByRepo.get(left.fullName) ??
+      latestMessageAtByRepo.get(left.fullName.toLowerCase()),
+    latestMessageAtByRepo.get(right.fullName) ??
+      latestMessageAtByRepo.get(right.fullName.toLowerCase())
   );
   if (timestampComparison !== 0) return timestampComparison;
   return left.fullName.localeCompare(right.fullName);

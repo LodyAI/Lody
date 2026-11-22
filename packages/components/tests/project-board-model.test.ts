@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { MachineId, SessionMeta, SessionStatus } from '@lody/shared';
 import {
   buildProjectBoard,
+  coordinatorProjectKeyId,
   findProjectCoordinatorSession,
+  isSessionInCoordinatorProject,
   type CoordinatorProjectKey,
 } from '../src/components/project-mode/project-board-model';
 import { buildChildSessionsByParent } from '../src/components/sessions/session-list-rows';
@@ -227,5 +229,35 @@ describe('project board', () => {
       )
     ).toBeNull();
     expect(findProjectCoordinatorSession([original], project, null)).toBeNull();
+  });
+
+  it('treats GitHub repository casing variants as one coordinator project', () => {
+    const upperKey: CoordinatorProjectKey = { kind: 'github', repoFullName: 'LodyAI/Lody' };
+    const lowerKey: CoordinatorProjectKey = { kind: 'github', repoFullName: 'LodyAI/lody' };
+    expect(coordinatorProjectKeyId(upperKey)).toBe('github:lodyai/lody');
+    expect(coordinatorProjectKeyId(lowerKey)).toBe('github:lodyai/lody');
+
+    const olderLowerCoordinator = session('coord-lower', {
+      coordinator: { version: 1 },
+      createdAt: '2026-11-10T00:00:00.000Z',
+      project: { kind: 'github', repoFullName: 'LodyAI/lody', branch: 'main' },
+      repoFullName: 'LodyAI/lody',
+    });
+    const newerUpperCoordinator = session('coord-upper', {
+      coordinator: { version: 1 },
+      createdAt: '2026-11-22T00:00:00.000Z',
+      project: { kind: 'github', repoFullName: 'LodyAI/Lody', branch: 'main' },
+      repoFullName: 'LodyAI/Lody',
+    });
+
+    expect(isSessionInCoordinatorProject(olderLowerCoordinator, upperKey)).toBe(true);
+    expect(isSessionInCoordinatorProject(newerUpperCoordinator, lowerKey)).toBe(true);
+    expect(
+      findProjectCoordinatorSession(
+        [olderLowerCoordinator, newerUpperCoordinator],
+        lowerKey,
+        'user-1'
+      )?.id
+    ).toBe('coord-upper');
   });
 });
