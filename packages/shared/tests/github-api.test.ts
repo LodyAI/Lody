@@ -546,7 +546,6 @@ describe('GitHub branch listing', () => {
     vi.unstubAllGlobals();
   });
 
-  // A synthetic repository whose default branch sorts after the first page.
   const branchNames = [
     ...Array.from({ length: 250 }, (_, i) => `feature/${String(i).padStart(3, '0')}`),
     'trunk',
@@ -560,7 +559,6 @@ describe('GitHub branch listing', () => {
       if (url.pathname === '/repos/owner/repo') {
         return new Response(JSON.stringify({ default_branch: 'trunk' }));
       }
-      // GitHub's `next` links use the repository id path after the first page.
       if (
         url.pathname === '/repos/owner/repo/branches' ||
         url.pathname === '/repositories/42/branches'
@@ -638,6 +636,23 @@ describe('GitHub branch listing', () => {
       Array.from({ length: 10 }, (_, i) => `feature/24${i}`)
     );
     await expect(githubSearchBranches('token', 'owner/repo', '  ')).resolves.toEqual([]);
+  });
+
+  it('never lets a search query leave the branch refs namespace', async () => {
+    const requested = installFakeGitHub();
+
+    for (const query of [
+      '..',
+      '.',
+      'feature/../../../pulls',
+      'feature/./x',
+      'a//b',
+      '/main',
+      'main/',
+    ]) {
+      await expect(githubSearchBranches('token', 'owner/repo', query)).resolves.toEqual([]);
+    }
+    expect(requested).toEqual([]);
   });
 
   it('still lists every branch for callers that need the complete set', async () => {

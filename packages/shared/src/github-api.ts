@@ -1442,7 +1442,6 @@ export const GITHUB_BRANCH_PAGE_SIZE = 100;
 
 export type GitHubBranchPage = {
   branches: string[];
-  /** GitHub's `rel="next"` URL for the following page, or null on the last page. */
   nextPageUrl: string | null;
 };
 
@@ -1457,6 +1456,7 @@ function branchesPageUrl(repoFullName: string): string {
 /**
  * The token is attached to every page request, so a cursor must point back at
  * this repository's branch listing on the GitHub API host and nowhere else.
+ * GitHub's `next` links may use the `/repositories/<id>/branches` form.
  */
 function assertBranchesPageUrl(repoFullName: string, pageUrl: string): void {
   let url: URL;
@@ -1466,7 +1466,6 @@ function assertBranchesPageUrl(repoFullName: string, pageUrl: string): void {
     throw new Error(`Invalid GitHub branches page URL: ${pageUrl}`);
   }
   const expectedPath = `/repos/${repoFullName}/branches`.toLowerCase();
-  // GitHub answers with `/repositories/<id>/branches` once a repository is renamed.
   const isRepoPath = url.pathname.toLowerCase() === expectedPath;
   const isRepoIdPath = /^\/repositories\/\d+\/branches$/.test(url.pathname);
   if (url.origin !== 'https://api.github.com' || (!isRepoPath && !isRepoIdPath)) {
@@ -1508,11 +1507,6 @@ function withDefaultBranch(
   };
 }
 
-/**
- * The default branch and the first page of branches, requested together. The
- * default branch is always part of `branches` when the repository has any.
- * Continue with {@link githubFetchBranchesPage} while `nextPageUrl` is set.
- */
 export async function githubFetchBranchesFirstPage(
   token: string,
   repoFullName: string
@@ -1531,7 +1525,6 @@ export async function githubFetchBranchesFirstPage(
   };
 }
 
-/** One further page of branches, from a `nextPageUrl` this module returned. */
 export async function githubFetchBranchesPage(
   token: string,
   repoFullName: string,
@@ -1542,20 +1535,18 @@ export async function githubFetchBranchesPage(
 }
 
 /**
- * Branches whose name starts with `prefix`, resolved by GitHub's
- * matching-refs endpoint, so a lookup does not need every branch page.
+ * Branches whose name starts with `prefix` (GitHub matching-refs). Empty, `.`
+ * and `..` segments return no result: they survive `encodeURIComponent` and
+ * would normalize the request out of `refs/heads/`.
  */
 export async function githubSearchBranches(
   token: string,
   repoFullName: string,
   prefix: string
 ): Promise<string[]> {
-  const trimmed = prefix.trim();
-  if (!trimmed) return [];
-  const encodedPrefix = trimmed
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/');
+  const segments = prefix.trim().split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return [];
+  const encodedPrefix = segments.map((segment) => encodeURIComponent(segment)).join('/');
   const refs = await fetchGithubJson(
     `https://api.github.com/repos/${repoFullName}/git/matching-refs/heads/${encodedPrefix}?per_page=${GITHUB_BRANCH_PAGE_SIZE}`,
     token,
