@@ -22,7 +22,9 @@ import type {
 import {
   useCoordinatorActionExecutor,
   type CoordinatorBubbleActionExecutionRequest,
+  type CoordinatorCardFeedbackRequest,
 } from './use-coordinator-action-executor';
+import type { CoordinatorPreviewChildAttentionItem } from './coordinator-child-attention-cards';
 
 /**
  * Project mode: the coordinator's conversation shows people what changed, not
@@ -36,6 +38,7 @@ import {
 type CoordinatorConversationValue = {
   tasks: ReadonlyMap<string, ProjectBoardRow>;
   openTask: (sessionId: string) => void;
+  openPr?: (sessionId: string, pr: SessionPullRequestView) => void;
   openExternalLink?: (href: string, label?: string) => boolean;
   replyCountByRootId?: ReadonlyMap<string, number>;
   activeThreadRootId?: string | null;
@@ -44,6 +47,8 @@ type CoordinatorConversationValue = {
   preferredMergeMethod?: GitHubMergeMethod;
   supportedActionCommands?: ReadonlySet<string>;
   onExecuteBubbleAction?: (req: CoordinatorBubbleActionExecutionRequest) => Promise<void> | void;
+  onSubmitCardFeedback?: (req: CoordinatorCardFeedbackRequest) => Promise<boolean> | boolean;
+  previewChildAttention?: readonly CoordinatorPreviewChildAttentionItem[];
 };
 
 const CoordinatorConversationContext = createContext<CoordinatorConversationValue | null>(null);
@@ -89,7 +94,7 @@ export function CoordinatorConversationProvider({
   children: ReactNode;
 }) {
   const tasks = useCoordinatorTasksData(coordinatorSessionId, project);
-  const { executeBubbleAction, supportedCommands, preferredMergeMethod } =
+  const { executeBubbleAction, submitCardFeedback, supportedCommands, preferredMergeMethod } =
     useCoordinatorActionExecutor({
       coordinatorSessionId: coordinatorSessionId as SessionId,
       tasks,
@@ -104,6 +109,7 @@ export function CoordinatorConversationProvider({
     () => ({
       tasks,
       openTask: onOpenTask,
+      openPr: onOpenPr,
       openExternalLink: onOpenExternalLink,
       replyCountByRootId,
       activeThreadRootId,
@@ -112,16 +118,19 @@ export function CoordinatorConversationProvider({
       preferredMergeMethod,
       supportedActionCommands: supportedCommands,
       onExecuteBubbleAction: executeBubbleAction,
+      onSubmitCardFeedback: submitCardFeedback,
     }),
     [
       activeThreadRootId,
       executeBubbleAction,
       onOpenExternalLink,
+      onOpenPr,
       onOpenTask,
       onOpenThread,
       onReplyToBubble,
       preferredMergeMethod,
       replyCountByRootId,
+      submitCardFeedback,
       supportedCommands,
       tasks,
     ]

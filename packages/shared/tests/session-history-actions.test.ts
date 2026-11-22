@@ -17,6 +17,7 @@ import { formatCoordinatorAnchorId, parseCoordinatorAnchorId } from '../src/coor
 import {
   computeCoordinatorActionDedupKey,
   normalizeCoordinatorActionSpecs,
+  normalizeCoordinatorProactiveCard,
 } from '../src/coordinator-actions';
 const sid = 'actions' as SessionId;
 const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry => ({
@@ -908,4 +909,92 @@ it('syncs coordinator bubble replies, originThreadId progress, and shallow direc
       intent: { kind: 'coordinator_prompt', prompt: 'Keep 7 days' },
     },
   ]);
+
+  const cardWrite = await data.commands.applyHistoryAction({
+    kind: 'coordinator-output',
+    turnId: 'assistant:user-reply-1',
+    output: {
+      kind: 'message',
+      id: 'b-card-only',
+      body: '',
+      card: {
+        kind: 'next_step',
+        title: 'iOS 输入框配置同步问题已定位',
+        summary: '冷启动读取后未订阅机器能力更新，建议直接安排修复并提 PR。',
+        actions: [
+          {
+            id: 'card-act-1',
+            label: '让天才程序员修复并创建 PR',
+            description: '在现有排查会话上实现修复、补测试并提 PR。',
+            tone: 'primary',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'child-task-1' as SessionId,
+              prompt: '请修复该问题并创建 PR',
+              mode: 'send',
+            },
+          },
+        ],
+      },
+      createdAt: 2200,
+    },
+  });
+  expect(cardWrite.matched).toBe(true);
+
+  const peer3 = new LoroDoc();
+  peer3.import(doc.export({ mode: 'snapshot' }));
+  const copy3 = createLoroSessionData({ sessionId: sid, doc: peer3 });
+  const assistantWithCard = await copy3.history.readTurn('assistant:user-reply-1');
+  expect(assistantWithCard).toMatchObject({
+    state: 'ready',
+    turn: {
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'coordinator_message',
+          id: 'b-card-only',
+          body: '',
+          card: {
+            kind: 'next_step',
+            title: 'iOS 输入框配置同步问题已定位',
+            summary: '冷启动读取后未订阅机器能力更新，建议直接安排修复并提 PR。',
+            actions: [
+              expect.objectContaining({
+                id: 'card-act-1',
+                label: '让天才程序员修复并创建 PR',
+              }),
+            ],
+          },
+        }),
+      ]),
+    },
+  });
+
+  expect(
+    normalizeCoordinatorProactiveCard({
+      kind: 'review_ready',
+      title: 'PR ready',
+      actions: [
+        {
+          id: 'ok-1',
+          label: 'Merge',
+          intent: { kind: 'client_command', command: 'github.pr_merge', params: {} },
+        },
+        {
+          id: 'future-2',
+          label: 'Future',
+          intent: { kind: 'unknown_future_intent' },
+        },
+      ],
+    })
+  ).toEqual({
+    kind: 'review_ready',
+    title: 'PR ready',
+    actions: [
+      {
+        id: 'ok-1',
+        label: 'Merge',
+        intent: { kind: 'client_command', command: 'github.pr_merge', params: {} },
+      },
+    ],
+  });
 });

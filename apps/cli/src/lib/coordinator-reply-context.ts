@@ -6,6 +6,7 @@ import {
   formatCoordinatorAnchorId,
   formatCoordinatorReplyContextBlock,
   normalizeCoordinatorActionSpecs,
+  normalizeCoordinatorProactiveCard,
   normalizeSessionTurnInputConfig,
   parseCoordinatorAnchorId,
   parseThreadRootsScalar,
@@ -72,6 +73,15 @@ function collectTurnLinkedSessionIds(
       }
       if (typeof item.body === 'string') {
         for (const id of extractLinkedSessionIdsFromText(item.body)) push(id);
+      }
+      if (isRecord(item.card)) {
+        const normalizedCard = normalizeCoordinatorProactiveCard(item.card);
+        if (normalizedCard) {
+          if (normalizedCard.summary) {
+            for (const id of extractLinkedSessionIdsFromText(normalizedCard.summary)) push(id);
+          }
+          for (const id of extractActionLinkedSessionIds(normalizedCard.actions)) push(id);
+        }
       }
       if (Array.isArray(item.actions)) {
         for (const id of extractActionLinkedSessionIds(
@@ -171,9 +181,11 @@ export async function readAnchorSnapshotFromHistory(
   );
   if (!bubble) return null;
   const body = typeof bubble.body === 'string' ? bubble.body.trim() : '';
+  const cardTitle =
+    isRecord(bubble.card) && typeof bubble.card.title === 'string' ? bubble.card.title.trim() : '';
   return {
     author: 'coordinator',
-    text: body,
+    text: body || cardTitle,
     linkedSessionIds: collectTurnLinkedSessionIds(read.turn, resolvedAnchor.bubbleId),
   };
 }

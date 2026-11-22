@@ -6,6 +6,7 @@ import type { CoordinatorReplyRef } from './coordinator-threads';
 import type {
   CoordinatorActionResolution,
   CoordinatorActionSpec,
+  CoordinatorProactiveCardSpec,
 } from './coordinator-actions';
 import type { AcpModelControls } from './acp-model-capabilities';
 import {
@@ -2032,6 +2033,7 @@ export type MessageContent =
       files?: SessionFilePayload[];
       replyTo?: CoordinatorReplyRef;
       linkedSessionIds?: SessionId[];
+      card?: CoordinatorProactiveCardSpec;
       actions?: CoordinatorActionSpec[];
       actionResolutions?: Record<string, CoordinatorActionResolution>;
       createdAt?: number;

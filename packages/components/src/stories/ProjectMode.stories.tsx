@@ -292,43 +292,39 @@ const streamItems: ChatStreamItem[] = [
       id: 'msg-results-2',
       body: turns[2]!.text,
       linkedSessionIds: ['asks' as SessionId, 'unread-pr' as SessionId],
-      actions: [
-        {
-          id: 'act-keep-7d',
-          label: '旧链接保留 7 天',
-          tone: 'primary',
-          icon: 'sparkles',
-          source: 'agent',
-          intent: {
-            kind: 'coordinator_prompt',
-            prompt: '旧的分享链接保留 7 天有效期，然后再自动失效。',
-            mode: 'send',
+      card: {
+        kind: 'decision',
+        title: '确认旧分享链接过渡期策略',
+        summary:
+          '迁移 E2EE 会话分享已完成核心加密链路改造，仅剩旧明文短链的失效窗口需要你拍板。选定后我会直接转发给 T1 完成收尾。',
+        actions: [
+          {
+            id: 'act-keep-7d',
+            label: '旧链接保留 7 天过渡期',
+            description: '让 T1 按 7 天自动过期实现平滑迁移，期间访问提示升级链接。',
+            tone: 'primary',
+            icon: 'sparkles',
+            source: 'agent',
+            intent: {
+              kind: 'coordinator_prompt',
+              prompt: '旧的分享链接保留 7 天有效期，然后再自动失效。',
+              mode: 'send',
+            },
           },
-        },
-        {
-          id: 'act-expire-now',
-          label: '迁移后立即失效',
-          tone: 'default',
-          source: 'agent',
-          intent: {
-            kind: 'coordinator_prompt',
-            prompt: '迁移完成后旧的分享链接立即失效。',
-            mode: 'send',
+          {
+            id: 'act-expire-now',
+            label: '迁移后立即失效',
+            description: '不保留旧链接兼容层，所有分享一律要求重新生成端到端加密链接。',
+            tone: 'default',
+            source: 'agent',
+            intent: {
+              kind: 'coordinator_prompt',
+              prompt: '迁移完成后旧的分享链接立即失效。',
+              mode: 'send',
+            },
           },
-        },
-        {
-          id: 'act-custom-note',
-          label: '补充其他要求…',
-          tone: 'default',
-          icon: 'message-square',
-          source: 'agent',
-          intent: {
-            kind: 'coordinator_prompt',
-            prompt: '关于旧分享链接的迁移策略，我希望：',
-            mode: 'prefill',
-          },
-        },
-      ],
+        ],
+      },
       actionResolutions: {
         'act-keep-7d': {
           status: 'executed',
@@ -364,24 +360,44 @@ const streamItems: ChatStreamItem[] = [
       {
         type: 'coordinator_message',
         id: 'msg-reply-2',
-        body: '好，已经把「旧链接保留 7 天过渡期」转发给 **迁移 E2EE 会话分享** 继续实现了；**PR #2631** 单测全绿无冲突，你可以在下方一键合并。',
+        body: '好，已经把「旧链接保留 7 天过渡期」转发给 **迁移 E2EE 会话分享** 继续实现了；**PR #2631** 单测全绿无冲突。',
         replyTo: STORY_REPLY_TO_USER,
         linkedSessionIds: ['asks' as SessionId, 'unread-pr' as SessionId],
-        actions: [
-          {
-            id: 'act-squash-merge',
-            label: 'Squash 合并 #2631',
-            tone: 'primary',
-            icon: 'git-merge',
-            dedupKey: 'pr.merge:unread-pr',
-            source: 'agent',
-            intent: {
-              kind: 'client_command',
-              command: 'github.pr_merge',
-              params: { sessionId: 'unread-pr', method: 'squash' },
+        card: {
+          kind: 'review_ready',
+          title: 'PR #2631 侧边栏折叠动画修复已就绪',
+          summary:
+            '改动集中在 sidebar-group-transition.tsx（避免布局回流），CI 检查全部通过且与 main 无冲突，可直接合并或安排独立审查。',
+          actions: [
+            {
+              id: 'act-squash-merge',
+              label: 'Squash 合并 PR #2631',
+              description: '直接将 #2631 Squash 合并进 main 并归档对应任务。',
+              tone: 'primary',
+              icon: 'git-merge',
+              dedupKey: 'pr.merge:unread-pr',
+              source: 'agent',
+              intent: {
+                kind: 'client_command',
+                command: 'github.pr_merge',
+                params: { sessionId: 'unread-pr', method: 'squash' },
+              },
             },
-          },
-        ],
+            {
+              id: 'act-dispatch-review',
+              label: '派审核员再独立审阅一遍',
+              description: '新建审核员子对话核对动画帧率与无障碍焦点行为后再合并。',
+              tone: 'default',
+              icon: 'sparkles',
+              source: 'agent',
+              intent: {
+                kind: 'coordinator_prompt',
+                prompt: '请安排审核员独立审阅 PR #2631，确认没问题后再告诉我合并。',
+                mode: 'send',
+              },
+            },
+          ],
+        },
       },
     ],
     true,
@@ -605,6 +621,57 @@ function CoordinatorPage({
             onReplyToBubble: setReplyDraft,
             onOpenThread: openThread,
             onExecuteBubbleAction: () => {},
+            onSubmitCardFeedback: () => true,
+            previewChildAttention: [
+              {
+                sessionId: 'permission' as SessionId,
+                taskNumber: 2,
+                taskTitle: '修复 Android 提及列表排序',
+                turnId: 'child-turn-perm-1',
+                toolCall: {
+                  type: 'tool_call',
+                  toolCallId: 'tc-gradle-test',
+                  title: './gradlew :app:testDebugUnitTest --tests "*MentionSortTest*"',
+                  kind: 'execute',
+                  status: 'in_progress',
+                  content: [
+                    {
+                      type: 'terminal_command',
+                      command: './gradlew',
+                      args: [':app:testDebugUnitTest', '--tests', '*MentionSortTest*'],
+                      cwd: 'apps/mobile/android',
+                    },
+                  ],
+                },
+                permission: {
+                  requestId: 'perm-gradle-1',
+                  options: [
+                    {
+                      optionId: 'allow_once',
+                      name: '允许执行一次',
+                      kind: 'allow_once',
+                    },
+                    {
+                      optionId: 'allow_always',
+                      name: '本会话始终允许',
+                      kind: 'allow_always',
+                    },
+                    {
+                      optionId: 'reject_once',
+                      name: '拒绝',
+                      kind: 'reject_once',
+                    },
+                  ],
+                  _meta: {
+                    permission: {
+                      title: '请求运行 Android 单元测试验证提及列表排序修复',
+                      description:
+                        '修改了 MentionCandidateSorter.kt，需执行 MentionSortTest 验证中文拼音与最近活跃度权重顺序。',
+                    },
+                  },
+                },
+              },
+            ],
           }}
         >
           <ConversationPage

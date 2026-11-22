@@ -1,9 +1,18 @@
 import * as stylex from '@stylexjs/stylex';
 import type { CoordinatorReplyRef } from '@lody/shared';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
-import { Check, ChevronRight, Copy, CornerDownRight, MessageSquareText, Reply, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import {
+  Check,
+  ChevronRight,
+  Copy,
+  CornerDownRight,
+  MessageSquareText,
+  PencilLine,
+  Reply,
+  X,
+} from 'lucide-react';
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { Tooltip } from '@/ui/armed-overlays';
@@ -120,20 +129,20 @@ const styles = stylex.create({
     color: colors.tertiaryLabel,
   },
 
-  footerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[1.5],
-    minHeight: 22,
-    paddingInline: 2,
-  },
-  footerRowEnd: {
-    justifyContent: 'flex-end',
-  },
-  hoverGroup: {
+  sidePill: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 2,
+    flexShrink: 0,
+    height: 28,
+    marginTop: 4,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.raised,
+    overflow: 'hidden',
     opacity: {
       default: 0,
       ':focus-within': 1,
@@ -142,29 +151,39 @@ const styles = stylex.create({
       default: 'none',
       ':focus-within': 'auto',
     },
-    transitionProperty: 'opacity',
+    transitionProperty: 'opacity, transform',
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
   },
-  hoverGroupVisible: {
+  sidePillVisible: {
     opacity: 1,
     pointerEvents: 'auto',
   },
-  actionBtn: {
+  sideCellBtn: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 4,
-    height: 22,
-    paddingBlock: 0,
-    paddingInline: space[1.5],
+    justifyContent: 'center',
+    width: 30,
+    height: '100%',
+    padding: 0,
     borderWidth: 0,
-    borderRadius: radius.small,
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
-    color: colors.secondaryLabel,
-    fontSize: text.footnoteSize,
-    lineHeight: text.footnoteLeading,
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
     cursor: 'pointer',
+    transitionProperty: 'background-color, color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
+  sideCellCopied: {
+    color: colors.success,
+  },
+  sideDivider: {
+    width: 1,
+    height: 14,
+    flexShrink: 0,
+    backgroundColor: colors.separator,
+  },
+
   threadCountPill: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -258,9 +277,7 @@ export function CoordinatorInlineQuoteChip({
     >
       <CornerDownRight size={12} {...stylex.props(styles.composerBannerIcon)} aria-hidden="true" />
       <span {...stylex.props(styles.inlineQuoteAuthor)}>{authorName}:</span>
-      <span {...stylex.props(styles.inlineQuoteText)}>
-        {replyTo.previewText || '…'}
-      </span>
+      <span {...stylex.props(styles.inlineQuoteText)}>{replyTo.previewText || '…'}</span>
       {interactive ? (
         <ChevronRight size={12} {...stylex.props(styles.inlineQuoteChevron)} aria-hidden="true" />
       ) : null}
@@ -298,22 +315,22 @@ export function CoordinatorThreadReplyCountPill({
   );
 }
 
-export function CoordinatorBubbleFooterActions({
+/**
+ * Feishu-style compact segmented action toolbar floating beside a chat bubble on
+ * hover, occupying zero vertical height underneath the message.
+ */
+export function CoordinatorBubbleSideActions({
   copyText,
-  replyCount = 0,
   isHovered = false,
   alwaysRevealActions = false,
-  align = 'start',
+  onEdit,
   onReply,
-  onOpenThread,
 }: {
   copyText: string;
-  replyCount?: number;
   isHovered?: boolean;
   alwaysRevealActions?: boolean;
-  align?: 'start' | 'end';
+  onEdit?: () => void;
   onReply?: () => void;
-  onOpenThread?: () => void;
 }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -336,87 +353,94 @@ export function CoordinatorBubbleFooterActions({
   }, [copyText]);
 
   const hasCopy = copyText.trim().length > 0;
-  if (!hasCopy && !onReply && (replyCount <= 0 || !onOpenThread)) {
-    return null;
+  const items: Array<{
+    key: string;
+    label: string;
+    dataAttr: Record<string, string>;
+    isCopied?: boolean;
+    icon: ReactNode;
+    onClick: () => void;
+  }> = [];
+
+  if (onEdit) {
+    items.push({
+      key: 'edit',
+      label: t('sessions.editMessage', 'Edit message'),
+      dataAttr: { 'data-coordinator-bubble-edit': '' },
+      icon: <PencilLine size={13.5} aria-hidden="true" />,
+      onClick: onEdit,
+    });
   }
+  if (hasCopy) {
+    const copyLabel = copied
+      ? t('projectMode.reply.copied', 'Copied')
+      : t('projectMode.reply.copy', 'Copy');
+    items.push({
+      key: 'copy',
+      label: copyLabel,
+      dataAttr: { 'data-coordinator-bubble-copy': '' },
+      isCopied: copied,
+      icon: copied ? (
+        <Check size={13.5} aria-hidden="true" />
+      ) : (
+        <Copy size={13.5} aria-hidden="true" />
+      ),
+      onClick: () => {
+        void handleCopy();
+      },
+    });
+  }
+  if (onReply) {
+    const replyLabel = t('projectMode.reply.action', 'Reply');
+    items.push({
+      key: 'reply',
+      label: replyLabel,
+      dataAttr: {
+        'data-coordinator-bubble-reply': '',
+        'data-user-message-reply': '',
+      },
+      icon: <Reply size={13.5} aria-hidden="true" />,
+      onClick: onReply,
+    });
+  }
+
+  if (items.length === 0) return null;
 
   return (
     <div
-      {...stylex.props(styles.footerRow, align === 'end' && styles.footerRowEnd)}
+      {...stylex.props(
+        styles.sidePill,
+        (isHovered || alwaysRevealActions || copied) && styles.sidePillVisible
+      )}
       data-coordinator-bubble-actions=""
     >
-      {replyCount > 0 && onOpenThread ? (
-        <CoordinatorThreadReplyCountPill count={replyCount} onClick={onOpenThread} />
-      ) : null}
-      <div
-        {...stylex.props(
-          styles.hoverGroup,
-          (isHovered || alwaysRevealActions || copied) && styles.hoverGroupVisible
-        )}
-      >
-        {hasCopy ? (
+      {items.map((item, idx) => (
+        <Fragment key={item.key}>
+          {idx > 0 ? <span {...stylex.props(styles.sideDivider)} aria-hidden="true" /> : null}
           <Tooltip.Provider>
             <Tooltip.Root>
               <Tooltip.Trigger
-                delay={400}
+                delay={300}
                 render={
                   <button
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation();
-                      void handleCopy();
+                      item.onClick();
                     }}
-                    aria-label={
-                      copied
-                        ? t('projectMode.reply.copied', 'Copied')
-                        : t('projectMode.reply.copy', 'Copy')
-                    }
-                    data-coordinator-bubble-copy=""
-                    {...stylex.props(styles.actionBtn)}
+                    aria-label={item.label}
+                    {...item.dataAttr}
+                    {...stylex.props(styles.sideCellBtn, item.isCopied && styles.sideCellCopied)}
                   >
-                    {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
-                    <span>
-                      {copied
-                        ? t('projectMode.reply.copied', 'Copied')
-                        : t('projectMode.reply.copy', 'Copy')}
-                    </span>
+                    {item.icon}
                   </button>
                 }
               />
-              <Tooltip.Content>
-                {copied
-                  ? t('projectMode.reply.copied', 'Copied')
-                  : t('projectMode.reply.copy', 'Copy')}
-              </Tooltip.Content>
+              <Tooltip.Content>{item.label}</Tooltip.Content>
             </Tooltip.Root>
           </Tooltip.Provider>
-        ) : null}
-        {onReply ? (
-          <Tooltip.Provider>
-            <Tooltip.Root>
-              <Tooltip.Trigger
-                delay={400}
-                render={
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onReply();
-                    }}
-                    aria-label={t('projectMode.reply.action', 'Reply')}
-                    data-coordinator-bubble-reply=""
-                    {...stylex.props(styles.actionBtn)}
-                  >
-                    <Reply size={12} aria-hidden="true" />
-                    <span>{t('projectMode.reply.action', 'Reply')}</span>
-                  </button>
-                }
-              />
-              <Tooltip.Content>{t('projectMode.reply.action', 'Reply')}</Tooltip.Content>
-            </Tooltip.Root>
-          </Tooltip.Provider>
-        ) : null}
-      </div>
+        </Fragment>
+      ))}
     </div>
   );
 }

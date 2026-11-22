@@ -10,6 +10,11 @@ export const COORDINATOR_ACTION_DEDUP_KEY_MAX_CHARS = 200;
 export const COORDINATOR_ACTION_COMMAND_MAX_CHARS = 128;
 export const COORDINATOR_ACTION_PROMPT_MAX_CHARS = 8192;
 export const COORDINATOR_ACTION_SUMMARY_MAX_CHARS = 160;
+export const COORDINATOR_CARD_TITLE_MAX_CHARS = 140;
+export const COORDINATOR_CARD_SUMMARY_MAX_CHARS = 600;
+
+export const CoordinatorCardKindSchema = z.enum(['next_step', 'decision', 'review_ready']);
+export type CoordinatorCardKind = z.infer<typeof CoordinatorCardKindSchema>;
 
 export const COORDINATOR_CLIENT_COMMANDS = {
   taskAccept: 'task.accept',
@@ -83,6 +88,17 @@ export const CoordinatorActionSpecSchema = z
 
 export type CoordinatorActionSpec = z.infer<typeof CoordinatorActionSpecSchema>;
 
+export const CoordinatorProactiveCardSpecSchema = z
+  .object({
+    kind: CoordinatorCardKindSchema.optional(),
+    title: z.string().trim().min(1).max(COORDINATOR_CARD_TITLE_MAX_CHARS),
+    summary: z.string().trim().max(COORDINATOR_CARD_SUMMARY_MAX_CHARS).optional(),
+    actions: z.array(CoordinatorActionSpecSchema).min(1).max(COORDINATOR_ACTIONS_MAX_COUNT),
+  })
+  .strict();
+
+export type CoordinatorProactiveCardSpec = z.infer<typeof CoordinatorProactiveCardSpecSchema>;
+
 export const CoordinatorActionResolutionStatusSchema = z.enum(['executed', 'dismissed']);
 export type CoordinatorActionResolutionStatus = z.infer<
   typeof CoordinatorActionResolutionStatusSchema
@@ -120,6 +136,28 @@ export function normalizeCoordinatorActionSpecs(raw: unknown): CoordinatorAction
     out.push(parsed.data);
   }
   return out;
+}
+
+export function normalizeCoordinatorProactiveCard(
+  raw: unknown
+): CoordinatorProactiveCardSpec | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const title = typeof record.title === 'string' ? record.title.trim() : '';
+  if (!title || title.length > COORDINATOR_CARD_TITLE_MAX_CHARS) return undefined;
+  const actions = normalizeCoordinatorActionSpecs(record.actions);
+  if (actions.length === 0) return undefined;
+  const kindParsed = CoordinatorCardKindSchema.safeParse(record.kind);
+  const summary =
+    typeof record.summary === 'string' && record.summary.trim().length > 0
+      ? record.summary.trim().slice(0, COORDINATOR_CARD_SUMMARY_MAX_CHARS)
+      : undefined;
+  return {
+    ...(kindParsed.success ? { kind: kindParsed.data } : {}),
+    title,
+    ...(summary ? { summary } : {}),
+    actions,
+  };
 }
 
 export function normalizeCoordinatorActionResolutions(

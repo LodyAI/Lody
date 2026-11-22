@@ -16,6 +16,7 @@ import {
 import {
   normalizeCoordinatorActionResolutions,
   normalizeCoordinatorActionSpecs,
+  normalizeCoordinatorProactiveCard,
 } from './coordinator-actions';
 import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
@@ -3884,6 +3885,10 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
       files: z.array(SessionFileBlockSchema).min(1).max(SESSION_FILE_MAX_COUNT).optional(),
       replyTo: CoordinatorReplyRefSchema.optional(),
       linkedSessionIds: CoordinatorLinkedSessionIdsSchema.optional(),
+      card: z
+        .unknown()
+        .transform((raw) => normalizeCoordinatorProactiveCard(raw))
+        .optional(),
       actions: z
         .array(z.unknown())
         .max(32)

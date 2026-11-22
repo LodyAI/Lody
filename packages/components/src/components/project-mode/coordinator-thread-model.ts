@@ -331,6 +331,10 @@ export function collectThreadLinkedSessionIds(
       if (item.type === 'coordinator_message') {
         for (const id of item.linkedSessionIds ?? []) push(id);
         for (const id of extractLinkedSessionIdsFromText(item.body)) push(id);
+        if (item.card?.summary) {
+          for (const id of extractLinkedSessionIdsFromText(item.card.summary)) push(id);
+        }
+        for (const id of extractActionLinkedSessionIds(item.card?.actions)) push(id);
         for (const id of extractActionLinkedSessionIds(item.actions)) push(id);
       } else if (item.type === 'operation_progress') {
         for (const entry of item.items) {

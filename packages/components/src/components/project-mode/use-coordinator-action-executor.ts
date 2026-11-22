@@ -39,6 +39,7 @@ import {
 import { openExternalUrl } from '@/lib/native-browser';
 import { toast } from '@/lib/toast';
 import {
+  COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID,
   createCoordinatorActionCommandRegistry,
   type CoordinatorActionCommandContext,
   type CoordinatorActionCommandHandler,
@@ -54,6 +55,15 @@ export type CoordinatorBubbleActionExecutionRequest = {
   readonly bubbleReplyTo?: CoordinatorReplyRef;
   readonly activeThreadRootId?: string | null;
   readonly action: CoordinatorActionSpec;
+};
+
+export type CoordinatorCardFeedbackRequest = {
+  readonly turnId: string;
+  readonly bubbleId: string;
+  readonly cardTitle: string;
+  readonly bubbleReplyTo?: CoordinatorReplyRef;
+  readonly activeThreadRootId?: string | null;
+  readonly feedback: string;
 };
 
 function readParamString(
@@ -95,6 +105,7 @@ export function useCoordinatorActionExecutor(options: {
   extraCommands?: Record<string, CoordinatorActionCommandHandler>;
 }): {
   executeBubbleAction: (req: CoordinatorBubbleActionExecutionRequest) => Promise<void>;
+  submitCardFeedback: (req: CoordinatorCardFeedbackRequest) => Promise<boolean>;
   supportedCommands: ReadonlySet<string>;
   preferredMergeMethod: GitHubMergeMethod;
 } {
@@ -465,8 +476,41 @@ export function useCoordinatorActionExecutor(options: {
     ]
   );
 
+  const submitCardFeedback = useCallback(
+    async (req: CoordinatorCardFeedbackRequest): Promise<boolean> => {
+      const trimmed = req.feedback.trim();
+      if (!trimmed) return false;
+      const replyRef = createCoordinatorReplyRef({
+        target: {
+          kind: 'coordinator_bubble',
+          turnId: req.turnId,
+          bubbleId: req.bubbleId,
+        },
+        existingThreadRootId: req.activeThreadRootId ?? req.bubbleReplyTo?.threadRootId,
+        author: 'coordinator',
+        text: req.cardTitle,
+      });
+      const sent = await onSendCoordinatorPrompt(trimmed, replyRef);
+      if (sent) {
+        await persistActionResolution(
+          req.turnId,
+          req.bubbleId,
+          COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID,
+          {
+            status: 'executed',
+            resolvedAt: getServerNow(),
+            summary: trimmed.slice(0, 140),
+          }
+        );
+      }
+      return sent;
+    },
+    [onSendCoordinatorPrompt, persistActionResolution]
+  );
+
   return {
     executeBubbleAction,
+    submitCardFeedback,
     supportedCommands,
     preferredMergeMethod,
   };

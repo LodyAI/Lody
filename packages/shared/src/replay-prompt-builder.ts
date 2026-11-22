@@ -181,8 +181,19 @@ function extractTextFromItem(item: MessageContent, pass: GenerationPass): string
     case 'text':
       return item.text;
 
-    case 'coordinator_message':
-      return item.body;
+    case 'coordinator_message': {
+      const parts: string[] = [];
+      if (item.body.trim()) parts.push(item.body);
+      if (item.card) {
+        const lines = [`[Card] ${item.card.title}`];
+        if (item.card.summary) lines.push(item.card.summary);
+        for (const act of item.card.actions) {
+          lines.push(`- ${act.label}${act.description ? `: ${act.description}` : ''}`);
+        }
+        parts.push(lines.join('\n'));
+      }
+      return parts.length > 0 ? parts.join('\n\n') : null;
+    }
 
     case 'thought':
       if (!pass.includeThinking) {

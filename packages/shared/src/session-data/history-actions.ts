@@ -99,6 +99,7 @@ export type HistoryAction =
             files?: import('../ai').SessionFilePayload[];
             replyTo?: import('../coordinator-threads').CoordinatorReplyRef;
             linkedSessionIds?: import('../ids').SessionId[];
+            card?: import('../coordinator-actions').CoordinatorProactiveCardSpec;
             actions?: import('../coordinator-actions').CoordinatorActionSpec[];
             createdAt: number;
           }
@@ -420,6 +421,7 @@ export function applyHistoryAction(
             ...(action.output.linkedSessionIds?.length
               ? { linkedSessionIds: action.output.linkedSessionIds }
               : {}),
+            ...(action.output.card ? { card: action.output.card } : {}),
             ...(action.output.actions?.length ? { actions: action.output.actions } : {}),
             createdAt: action.output.createdAt,
           },

@@ -145,6 +145,11 @@ function estimateStoredMessageTokens(items: readonly MessageContent[]): number {
         break;
       case 'coordinator_message':
         count(item.body);
+        if (item.card) {
+          count(item.card.title);
+          count(item.card.summary);
+          for (const act of item.card.actions) count(act.label);
+        }
         break;
       case 'tool_call': {
         count(item.toolName ?? item.title);
@@ -624,11 +629,21 @@ function renderItem(item: MessageContent, level: LevelConfig, tally: RenderTally
       }
       return demoteMarkdownHeadings(item.markdown);
 
-    case 'coordinator_message':
-      if (!item.body?.trim()) {
-        return null;
+    case 'coordinator_message': {
+      const parts: string[] = [];
+      if (item.body?.trim()) {
+        parts.push(demoteMarkdownHeadings(item.body));
       }
-      return demoteMarkdownHeadings(item.body);
+      if (item.card) {
+        const cardLines = [`**[${item.card.title}]**`];
+        if (item.card.summary) cardLines.push(item.card.summary);
+        for (const act of item.card.actions) {
+          cardLines.push(`- ${act.label}${act.description ? ` — ${act.description}` : ''}`);
+        }
+        parts.push(cardLines.join('\n'));
+      }
+      return parts.length > 0 ? parts.join('\n\n') : null;
+    }
 
     case 'coordinator_status':
       return null;

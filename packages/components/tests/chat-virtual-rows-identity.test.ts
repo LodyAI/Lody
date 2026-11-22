@@ -6,8 +6,10 @@ import {
   getMessageItemPrefix,
 } from '../src/lib/session-chat-search';
 import {
+  areAssistantChatVirtualRowsEqual,
   buildChatVirtualRows,
   resolveActiveCoordinatorStatus,
+  type AssistantChatVirtualRow,
   type ChatStreamItem,
 } from '../src/components/ai-gui/view';
 import {
@@ -16,9 +18,11 @@ import {
   filterThreadStreamItems,
 } from '../src/components/project-mode/coordinator-thread-model';
 import {
+  COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID,
   buildLatestCoordinatorBubbleByTaskId,
   createCoordinatorActionCommandRegistry,
   resolveCoordinatorBubbleActions,
+  resolveCoordinatorProactiveCard,
 } from '../src/components/project-mode/coordinator-action-engine';
 import type { ProjectBoardRow } from '../src/components/project-mode/project-board-model';
 import type { TurnIndexRow } from '../src/lib/conversation-view';
@@ -904,5 +908,152 @@ describe('coordinator conversation bubbles and search', () => {
     );
     expect(calls).toEqual(['pixel-9']);
     expect(execRes).toEqual({ persistResolution: true, summary: 'Opened simulator' });
+
+    const bubblePlusCardEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-with-card',
+      body: '两边都定位到了同一个 iOS 配置缓存缺陷。',
+      linkedSessionIds: ['task-pr' as SessionId, 'task-nopr' as SessionId],
+      card: {
+        kind: 'next_step',
+        title: '下一步建议：修复 iOS 配置重新加载逻辑',
+        summary: '机器同步完成后重新触发配置刷新即可彻底解决。',
+        actions: [
+          {
+            id: 'card-fix-pr',
+            label: '让天才程序员修复并开 PR',
+            description: '复用排查上下文修改代码并提交 PR。',
+            tone: 'primary',
+            source: 'agent',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'task-nopr' as SessionId,
+              prompt: '修复并创建 PR',
+              mode: 'send',
+            },
+          },
+          {
+            id: 'card-merge-42',
+            label: '合并 #42',
+            source: 'agent',
+            intent: {
+              kind: 'client_command',
+              command: 'github.pr_merge',
+              params: { sessionId: 'task-pr' },
+            },
+          },
+        ],
+      },
+    };
+
+    const cardOnlyEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-card-only',
+      body: '',
+      card: {
+        kind: 'decision',
+        title: '确认兼容窗口',
+        actions: [
+          {
+            id: 'opt-7d',
+            label: '保留 7 天',
+            intent: { kind: 'coordinator_prompt', prompt: '保留 7 天', mode: 'send' },
+          },
+        ],
+      },
+    };
+
+    const plainBubbleEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-plain',
+      body: '收到，马上安排。',
+    };
+
+    const turnA = wrap(
+      makeMessage(
+        'assistant:card-turn',
+        'assistant',
+        [plainBubbleEntry, bubblePlusCardEntry, cardOnlyEntry],
+        true
+      )
+    );
+    const rowsA = buildChatVirtualRows({
+      items: [turnA],
+      lastAssistantMessageId: 'assistant:card-turn',
+      expansionVersion: 0,
+      coordinatorBubbles: true,
+    });
+    expect(rowsA.map((r) => r.key)).toEqual([
+      'assistant:assistant:card-turn:bubble:b-plain',
+      'assistant:assistant:card-turn:bubble:b-with-card',
+      'assistant:assistant:card-turn:card:b-with-card',
+      'assistant:assistant:card-turn:card:b-card-only',
+    ]);
+
+    expect(
+      resolveCoordinatorProactiveCard({
+        entry: plainBubbleEntry,
+        tasksById: tasksMap,
+        translate,
+      })
+    ).toBeNull();
+
+    const resolvedCardInitial = resolveCoordinatorProactiveCard({
+      entry: bubblePlusCardEntry,
+      tasksById: tasksMap,
+      translate,
+    });
+    expect(resolvedCardInitial).toMatchObject({
+      kind: 'next_step',
+      title: '下一步建议：修复 iOS 配置重新加载逻辑',
+      linkedTasks: [taskPrReady, taskNoPrDirty],
+      actions: [
+        expect.objectContaining({ liveState: 'ready', displayLabel: '让天才程序员修复并开 PR' }),
+        expect.objectContaining({ liveState: 'ready', displayLabel: '合并 #42' }),
+      ],
+    });
+
+    const updatedCardEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      ...bubblePlusCardEntry,
+      actionResolutions: {
+        [COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID]: {
+          status: 'executed',
+          resolvedAt: 5000,
+          summary: '让天才程序员修复并直接合并',
+        },
+      },
+    };
+    const resolvedCardAfterFeedback = resolveCoordinatorProactiveCard({
+      entry: updatedCardEntry,
+      tasksById: tasksAfterLiveWorldChanges,
+      translate,
+    });
+    expect(resolvedCardAfterFeedback).toMatchObject({
+      customFeedbackSummary: '让天才程序员修复并直接合并',
+      actions: [
+        expect.objectContaining({ liveState: 'completed', displayLabel: '#43 created' }),
+        expect.objectContaining({ liveState: 'completed', displayLabel: '#42 merged' }),
+      ],
+    });
+
+    const turnB = wrap(
+      makeMessage(
+        'assistant:card-turn',
+        'assistant',
+        [plainBubbleEntry, updatedCardEntry, cardOnlyEntry],
+        true
+      )
+    );
+    const rowsB = buildChatVirtualRows({
+      items: [turnB],
+      lastAssistantMessageId: 'assistant:card-turn',
+      expansionVersion: 0,
+      coordinatorBubbles: true,
+    });
+    const cardRowA = rowsA[2] as AssistantChatVirtualRow;
+    const cardRowB = rowsB[2] as AssistantChatVirtualRow;
+    expect(areAssistantChatVirtualRowsEqual({ ...cardRowB, item: cardRowA.item }, cardRowA)).toBe(
+      false
+    );
   });
 });

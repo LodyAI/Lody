@@ -6,8 +6,10 @@ import {
   hasWorkspaceChanges,
   normalizeCoordinatorActionResolutions,
   normalizeCoordinatorActionSpecs,
+  normalizeCoordinatorProactiveCard,
   type CoordinatorActionResolution,
   type CoordinatorActionSpec,
+  type CoordinatorCardKind,
   type CoordinatorReplyRef,
   type GitHubMergeMethod,
   type MessageContent,
@@ -48,6 +50,17 @@ export type ResolvedCoordinatorAction = {
   readonly dedupKey: string;
   readonly liveState: CoordinatorActionLiveState;
   readonly displayLabel: string;
+};
+
+export const COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID = '__custom_feedback__';
+
+export type ResolvedCoordinatorProactiveCard = {
+  readonly kind: CoordinatorCardKind;
+  readonly title: string;
+  readonly summary?: string;
+  readonly linkedTasks: readonly ProjectBoardRow[];
+  readonly actions: readonly ResolvedCoordinatorAction[];
+  readonly customFeedbackSummary?: string;
 };
 
 export type CoordinatorActionCommandContext = {
@@ -128,6 +141,10 @@ export function extractBubbleLinkedSessionIds(
   };
   for (const id of entry.linkedSessionIds ?? []) push(id);
   for (const id of extractLinkedSessionIdsFromText(entry.body)) push(id);
+  if (entry.card?.summary) {
+    for (const id of extractLinkedSessionIdsFromText(entry.card.summary)) push(id);
+  }
+  for (const id of extractActionLinkedSessionIds(entry.card?.actions)) push(id);
   for (const id of extractActionLinkedSessionIds(entry.actions)) push(id);
   return out;
 }
@@ -616,4 +633,83 @@ export function resolveCoordinatorBubbleActions(args: {
   }
 
   return resolved;
+}
+
+/**
+ * Resolves a standalone proactive next-step or decision card authored by the
+ * coordinator (`entry.card` or legacy `entry.actions`), reconciling linked task
+ * badges, live PR/diff state, and option execution status without attaching
+ * fallback buttons onto plain chat bubbles.
+ */
+export function resolveCoordinatorProactiveCard(args: {
+  entry: Extract<MessageContent, { type: 'coordinator_message' }>;
+  tasksById: ReadonlyMap<string, ProjectBoardRow>;
+  supportedCommands?: ReadonlySet<string>;
+  translate: CoordinatorTranslateFn;
+}): ResolvedCoordinatorProactiveCard | null {
+  const {
+    entry,
+    tasksById,
+    supportedCommands = BUILTIN_SUPPORTED_CLIENT_COMMANDS,
+    translate,
+  } = args;
+
+  const normalizedCard = normalizeCoordinatorProactiveCard(entry.card);
+  const legacyActions = normalizedCard ? [] : normalizeCoordinatorActionSpecs(entry.actions);
+  if (!normalizedCard && legacyActions.length === 0) return null;
+
+  const rawActions = normalizedCard ? normalizedCard.actions : legacyActions;
+  const resolutions = normalizeCoordinatorActionResolutions(entry.actionResolutions);
+  const seenDedupKeys = new Set<string>();
+  const resolvedActions: ResolvedCoordinatorAction[] = [];
+
+  for (const spec of rawActions) {
+    if (
+      spec.intent.kind === 'client_command' &&
+      !supportedCommands.has(spec.intent.command.trim())
+    ) {
+      continue;
+    }
+    const dedupKey = computeCoordinatorActionDedupKey(spec);
+    if (seenDedupKeys.has(dedupKey)) continue;
+    seenDedupKeys.add(dedupKey);
+
+    const { liveState, displayLabel } = resolveSingleActionLiveStatus({
+      spec,
+      dedupKey,
+      resolution: resolutions[spec.id],
+      tasksById,
+      translate,
+    });
+    if (liveState === 'dismissed') continue;
+
+    resolvedActions.push({
+      spec,
+      dedupKey,
+      liveState,
+      displayLabel,
+    });
+  }
+
+  const customFeedback = resolutions[COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID];
+  if (resolvedActions.length === 0 && !customFeedback) return null;
+
+  const linkedIds = extractBubbleLinkedSessionIds(entry);
+  const linkedTasks: ProjectBoardRow[] = [];
+  for (const sid of linkedIds) {
+    const task = tasksById.get(sid);
+    if (task) linkedTasks.push(task);
+  }
+
+  return {
+    kind: normalizedCard?.kind ?? 'next_step',
+    title:
+      normalizedCard?.title ??
+      translate('projectMode.card.defaultTitle', 'Suggested next steps'),
+    summary: normalizedCard?.summary,
+    linkedTasks,
+    actions: resolvedActions,
+    customFeedbackSummary:
+      customFeedback?.status === 'executed' ? customFeedback.summary : undefined,
+  };
 }

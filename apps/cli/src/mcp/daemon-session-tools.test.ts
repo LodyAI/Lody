@@ -3031,5 +3031,71 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         createdAt: expect.any(Number),
       },
     ]);
+    const standaloneCardResult = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        card: {
+          kind: 'next_step',
+          title: '排查已完成，下一步如何推进？',
+          summary: '根因已由 [审核员](lody://session/child-audit?workspace=ws) 独立复现确认。',
+          actions: [
+            {
+              label: '让天才程序员修复并创建 PR',
+              description: '继续复用排查会话完成修复、回归测试与 PR 创建。',
+              tone: 'primary',
+              intent: {
+                kind: 'session_dispatch',
+                sessionId: 'lody://session/child-ios-fix?workspace=ws',
+                prompt: '请修复该配置同步缺陷并创建 PR',
+                mode: 'send',
+              },
+            },
+          ],
+        },
+      })
+    );
+    expect(standaloneCardResult.isError).not.toBe(true);
+    const firstBlock = standaloneCardResult.content[0] as { type: string; text: string };
+    expect(JSON.parse(firstBlock.text)).toMatchObject({
+      ok: true,
+      hasCard: true,
+      actionCount: 1,
+    });
+
+    const storedAfterCard = await backend.readTurn('assistant:user-reply-turn');
+    expect(storedAfterCard.state).toBe('ready');
+    if (storedAfterCard.state !== 'ready') throw new Error('Expected ready reply turn');
+    expect(storedAfterCard.turn.items[2]).toEqual({
+      type: 'coordinator_message',
+      id: expect.any(String),
+      body: '',
+      replyTo: {
+        target: { kind: 'user_turn', turnId: 'user-reply-turn' },
+        threadRootId: 'bubble:assistant:user-open-turn:bubble-ask',
+        author: 'user',
+        previewText: '保留 7 天即可',
+      },
+      linkedSessionIds: ['child-audit', 'child-ios-fix'],
+      card: {
+        kind: 'next_step',
+        title: '排查已完成，下一步如何推进？',
+        summary: '根因已由 [审核员](lody://session/child-audit?workspace=ws) 独立复现确认。',
+        actions: [
+          {
+            id: 'card-act-1',
+            label: '让天才程序员修复并创建 PR',
+            description: '继续复用排查会话完成修复、回归测试与 PR 创建。',
+            tone: 'primary',
+            source: 'agent',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'child-ios-fix',
+              prompt: '请修复该配置同步缺陷并创建 PR',
+              mode: 'send',
+            },
+          },
+        ],
+      },
+      createdAt: expect.any(Number),
+    });
   });
 });

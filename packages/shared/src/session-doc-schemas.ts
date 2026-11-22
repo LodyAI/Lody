@@ -249,6 +249,7 @@ const historyMessageItemSchema = schema
               (v.files === undefined || Array.isArray(v.files)) &&
               (v.replyTo === undefined || isRecord(v.replyTo)) &&
               (v.linkedSessionIds === undefined || Array.isArray(v.linkedSessionIds)) &&
+              (v.card === undefined || isRecord(v.card)) &&
               (v.actions === undefined || Array.isArray(v.actions)) &&
               (v.actionResolutions === undefined || isRecord(v.actionResolutions)) &&
               (v.createdAt === undefined || typeof v.createdAt === 'number')

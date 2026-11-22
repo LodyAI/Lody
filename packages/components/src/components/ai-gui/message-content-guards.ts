@@ -219,6 +219,9 @@ export const isMessageContent = (value: unknown): value is MessageContent => {
         (value.files === undefined || Array.isArray(value.files)) &&
         (value.replyTo === undefined || isRecord(value.replyTo)) &&
         (value.linkedSessionIds === undefined || Array.isArray(value.linkedSessionIds)) &&
+        (value.card === undefined || isRecord(value.card)) &&
+        (value.actions === undefined || Array.isArray(value.actions)) &&
+        (value.actionResolutions === undefined || isRecord(value.actionResolutions)) &&
         (value.createdAt === undefined || typeof value.createdAt === 'number')
       );
     case 'coordinator_status':

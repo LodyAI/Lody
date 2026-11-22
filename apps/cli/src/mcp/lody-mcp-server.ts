@@ -7,15 +7,20 @@ import {
   COORDINATOR_ACTION_LABEL_MAX_CHARS,
   COORDINATOR_ACTIONS_MAX_COUNT,
   COORDINATOR_ANCHOR_ID_MAX_CHARS,
+  COORDINATOR_CARD_SUMMARY_MAX_CHARS,
+  COORDINATOR_CARD_TITLE_MAX_CHARS,
   COORDINATOR_LINKED_SESSIONS_MAX_COUNT,
   CoordinatorActionIntentSchema,
   CoordinatorActionToneSchema,
+  CoordinatorCardKindSchema,
   extractActionLinkedSessionIds,
   extractLinkedSessionIdsFromText,
   isContainedSession,
   isCoordinatorSession,
   normalizeCoordinatorActionSpecs,
+  normalizeCoordinatorProactiveCard,
   type CoordinatorActionSpec,
+  type CoordinatorProactiveCardSpec,
   type ScheduleCommand,
 } from '@lody/shared';
 import {
@@ -303,6 +308,35 @@ const CoordinatorSendMessageActionInputSchema = z
   })
   .strict();
 
+const CoordinatorSendMessageCardInputSchema = z
+  .object({
+    kind: CoordinatorCardKindSchema.optional().describe(
+      'Card category: "next_step" (predicted follow-up options after child results), "decision" (answering a child question or choosing between approaches), or "review_ready" (code changes or PR ready for review/merge).'
+    ),
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(COORDINATOR_CARD_TITLE_MAX_CHARS)
+      .describe('Clear, self-contained card headline in the user language.'),
+    summary: z
+      .string()
+      .trim()
+      .max(COORDINATOR_CARD_SUMMARY_MAX_CHARS)
+      .optional()
+      .describe(
+        'Concise context summary (findings, affected files, verification status, or trade-offs) so the user can decide directly on the card without opening child conversations.'
+      ),
+    actions: z
+      .array(CoordinatorSendMessageActionInputSchema)
+      .min(1)
+      .max(COORDINATOR_ACTIONS_MAX_COUNT)
+      .describe(
+        '1-4 predicted next-step or decision options in the user language. Put the recommended choice first with tone: "primary" and include a 1-sentence description on each option; the card already provides a built-in custom-feedback input.'
+      ),
+  })
+  .strict();
+
 const CoordinatorSendMessageInputSchema = z
   .object({
     markdown: z
@@ -327,18 +361,25 @@ const CoordinatorSendMessageInputSchema = z
       .describe(
         "Optional thread root identifier (e.g. from a delegated completion item's originThreadId) when routing bubbles to distinct threads. Omitted calls automatically inherit the active turn's thread."
       ),
+    card: CoordinatorSendMessageCardInputSchema.optional().describe(
+      'Optional standalone interactive card rendered below the bubble when delegated results arrive or a user decision is needed, letting the user pick predicted next steps or send custom feedback without opening child conversations.'
+    ),
     actions: z
       .array(CoordinatorSendMessageActionInputSchema)
       .max(COORDINATOR_ACTIONS_MAX_COUNT)
       .optional()
       .describe(
-        'Optional interactive action buttons rendered on this bubble for one-click decisions, direct child-session prompts, or native client commands.'
+        'Optional legacy action list; prefer `card` for standalone next-step or decision cards.'
       ),
   })
   .strict()
-  .refine((value) => Boolean(value.markdown?.trim()) || Boolean(value.attachments?.length), {
-    message: 'Provide markdown text or at least one attachment',
-  });
+  .refine(
+    (value) =>
+      Boolean(value.markdown?.trim()) || Boolean(value.attachments?.length) || Boolean(value.card),
+    {
+      message: 'Provide markdown text, at least one attachment, or a card',
+    }
+  );
 
 const CoordinatorSetStatusInputSchema = z
   .object({
@@ -5398,6 +5439,7 @@ export function buildSessionToolServer(
             markdown?: string;
             attachments?: string[];
             threadId?: string;
+            card?: z.infer<typeof CoordinatorSendMessageCardInputSchema>;
             actions?: z.infer<typeof CoordinatorSendMessageActionInputSchema>[];
           }
         | { kind: 'status'; status: string }
@@ -5471,6 +5513,17 @@ export function buildSessionToolServer(
               explicitThreadId: output.threadId,
             })
           : undefined;
+      const normalizedCard: CoordinatorProactiveCardSpec | undefined =
+        output.kind === 'message' && output.card
+          ? normalizeCoordinatorProactiveCard({
+              ...output.card,
+              actions: output.card.actions.map((item, idx) => ({
+                ...item,
+                id: item.id?.trim() || `card-act-${idx + 1}`,
+                source: 'agent' as const,
+              })),
+            })
+          : undefined;
       const normalizedActions: CoordinatorActionSpec[] | undefined =
         output.kind === 'message' && output.actions?.length
           ? normalizeCoordinatorActionSpecs(
@@ -5488,6 +5541,10 @@ export function buildSessionToolServer(
               const seen = new Set<string>();
               for (const id of [
                 ...(output.markdown ? extractLinkedSessionIdsFromText(output.markdown) : []),
+                ...(normalizedCard?.summary
+                  ? extractLinkedSessionIdsFromText(normalizedCard.summary)
+                  : []),
+                ...extractActionLinkedSessionIds(normalizedCard?.actions),
                 ...extractActionLinkedSessionIds(normalizedActions),
               ]) {
                 if (!seen.has(id) && merged.length < COORDINATOR_LINKED_SESSIONS_MAX_COUNT) {
@@ -5512,6 +5569,7 @@ export function buildSessionToolServer(
                 ...(files ? { files } : {}),
                 ...(replyTo ? { replyTo } : {}),
                 ...(linkedSessionIds?.length ? { linkedSessionIds } : {}),
+                ...(normalizedCard ? { card: normalizedCard } : {}),
                 ...(normalizedActions?.length ? { actions: normalizedActions } : {}),
                 createdAt: now,
               }
@@ -5522,13 +5580,16 @@ export function buildSessionToolServer(
       }
       if (output.kind === 'message') {
         await sessionDoc.setLastMessageAt(now);
+        const totalActionCount =
+          (normalizedCard?.actions.length ?? 0) + (normalizedActions?.length ?? 0);
         return jsonTextResult({
           ok: true,
           messageId,
           ...(replyTo ? { threadId: replyTo.threadRootId } : {}),
           ...(images ? { imageCount: images.length } : {}),
           ...(files ? { fileCount: files.length } : {}),
-          ...(normalizedActions?.length ? { actionCount: normalizedActions.length } : {}),
+          ...(normalizedCard ? { hasCard: true } : {}),
+          ...(totalActionCount > 0 ? { actionCount: totalActionCount } : {}),
         });
       }
       return jsonTextResult({ ok: true, status: normalizedStatus });
@@ -5538,10 +5599,10 @@ export function buildSessionToolServer(
       COORDINATOR_SEND_MESSAGE_TOOL_NAME,
       {
         summary:
-          'Send one Markdown chat bubble (optionally with attachments and action buttons) to the user.',
+          'Send one Markdown chat bubble (and optional standalone next-step/decision card or attachments) to the user.',
         title: 'Send message to user',
         description:
-          'Send one Markdown chat bubble to the user in this coordinator conversation, optionally attaching images, videos, or documents via zero-copy references ("image:<id>", "file:<id>") or workspace file paths, and optionally attaching interactive action buttons (`actions`). Plain assistant text and thoughts are hidden from the user; every message you want the user to read must be sent with this tool. Ready to call directly without lody_help.',
+          'Send one Markdown chat bubble to the user in this coordinator conversation, optionally attaching images, videos, or documents via zero-copy references ("image:<id>", "file:<id>") or workspace file paths, and optionally attaching a standalone interactive `card` (`title`, `summary`, `actions`) for predicted next steps or decisions. Plain assistant text and thoughts are hidden from the user; every message you want the user to read must be sent with this tool. Ready to call directly without lody_help.',
         inputSchema: CoordinatorSendMessageInputSchema,
         exemptFromHelp: true,
       },
@@ -5552,6 +5613,7 @@ export function buildSessionToolServer(
             markdown: args.markdown,
             attachments: args.attachments,
             threadId: args.threadId,
+            card: args.card,
             actions: args.actions,
           });
         } catch (error) {

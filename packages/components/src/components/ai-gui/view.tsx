@@ -308,13 +308,14 @@ import {
   CoordinatorTaskChangeStrip,
   useCoordinatorConversation,
 } from '@/components/project-mode/coordinator-conversation';
-import { CoordinatorBubbleActionBar } from '@/components/project-mode/coordinator-action-bar';
+import { CoordinatorProactiveCard } from '@/components/project-mode/coordinator-action-bar';
+import { CoordinatorChildAttentionCards } from '@/components/project-mode/coordinator-child-attention-cards';
 import {
   buildLatestCoordinatorBubbleByTaskId,
-  resolveCoordinatorBubbleActions,
+  resolveCoordinatorProactiveCard,
 } from '@/components/project-mode/coordinator-action-engine';
 import {
-  CoordinatorBubbleFooterActions,
+  CoordinatorBubbleSideActions,
   CoordinatorInlineQuoteChip,
   CoordinatorThreadReplyCountPill,
 } from '@/components/project-mode/coordinator-reply-ui';
@@ -463,6 +464,12 @@ type AssistantVirtualContent =
   /** Coordinator conversation: one chat bubble per `lody_coordinator_send_message` call. */
   | {
       kind: 'coordinator_bubble';
+      entry: Extract<MessageContent, { type: 'coordinator_message' }>;
+      itemIndex: number;
+    }
+  /** Coordinator conversation: standalone proactive next-step or decision card. */
+  | {
+      kind: 'coordinator_card';
       entry: Extract<MessageContent, { type: 'coordinator_message' }>;
       itemIndex: number;
     }
@@ -1054,8 +1061,8 @@ const ChatItem = memo(function ChatItem({
   noMessagesLabel: string;
   emptyState?: React.ReactNode;
 }) {
+  const coordinator = useCoordinatorConversation();
   if (item.type === 'message') {
-    // Skip empty agent messages entirely so the padding wrapper doesn't cause visual jitter
     const msg = item.message;
     if (msg.role === 'assistant' && !msg.items.length && !(msg.plan && msg.plan.length > 0)) {
       return null;
@@ -1064,10 +1071,13 @@ const ChatItem = memo(function ChatItem({
       <ConversationColumn
         {...stylex.props(
           conversationSurface.message,
-          msg.role === 'user' && conversationSurface.userMessage,
+          msg.role === 'user' &&
+            (coordinator ? coordinatorBubbleStyles.userMessage : conversationSurface.userMessage),
           msg.role === 'system' &&
             msg.items.some(isOperationSurfaceItem) &&
-            conversationSurface.operationSurface
+            (coordinator
+              ? coordinatorBubbleStyles.systemStrip
+              : conversationSurface.operationSurface)
         )}
       >
         {renderMessageRow({
@@ -1316,22 +1326,31 @@ export const buildChatVirtualRows = ({
         itemIndex: number;
         content: Extract<
           AssistantVirtualContent,
-          { kind: 'coordinator_bubble' | 'coordinator_notice' }
+          { kind: 'coordinator_bubble' | 'coordinator_card' | 'coordinator_notice' }
         >;
       }> = [];
       message.items.forEach((entry, itemIndex) => {
-        if (
-          entry.type === 'coordinator_message' &&
-          (entry.body.trim().length > 0 ||
+        if (entry.type === 'coordinator_message') {
+          const hasBubbleBody =
+            entry.body.trim().length > 0 ||
             (entry.images?.length ?? 0) > 0 ||
-            (entry.files?.length ?? 0) > 0 ||
-            (entry.actions?.length ?? 0) > 0)
-        ) {
-          coordinatorEntries.push({
-            key: `assistant:${message.id}:bubble:${entry.id}`,
-            itemIndex,
-            content: { kind: 'coordinator_bubble', entry, itemIndex },
-          });
+            (entry.files?.length ?? 0) > 0;
+          const hasCardPayload =
+            Boolean(entry.card) || (entry.actions?.length ?? 0) > 0;
+          if (hasBubbleBody) {
+            coordinatorEntries.push({
+              key: `assistant:${message.id}:bubble:${entry.id}`,
+              itemIndex,
+              content: { kind: 'coordinator_bubble', entry, itemIndex },
+            });
+          }
+          if (hasCardPayload) {
+            coordinatorEntries.push({
+              key: `assistant:${message.id}:card:${entry.id}`,
+              itemIndex,
+              content: { kind: 'coordinator_card', entry, itemIndex },
+            });
+          }
         } else if (entry.type === 'system_notice') {
           coordinatorEntries.push({
             key: `assistant:${message.id}:notice:${itemIndex}`,
@@ -1996,7 +2015,28 @@ export const SessionChatStreamView = forwardRef<
 
     const copyContextAvailable = onCopyContext !== undefined;
     const selectionLayouts = selectionLayoutsRef.current;
-    const coordinatorBubbles = isMetaCoordinator || useCoordinatorConversation() !== null;
+    const coordinatorContext = useCoordinatorConversation();
+    const coordinatorBubbles = isMetaCoordinator || coordinatorContext !== null;
+    const hasChildAttentionCards = useMemo(() => {
+      if (!coordinatorContext || coordinatorContext.activeThreadRootId) return false;
+      if ((coordinatorContext.previewChildAttention?.length ?? 0) > 0) return true;
+      for (const row of coordinatorContext.tasks.values()) {
+        if (row.bucket === 'needsYou') return true;
+      }
+      return false;
+    }, [coordinatorContext]);
+    const effectiveTrailingContent = useMemo(
+      () =>
+        hasChildAttentionCards ? (
+          <>
+            {trailingContent}
+            <CoordinatorChildAttentionCards />
+          </>
+        ) : (
+          trailingContent
+        ),
+      [hasChildAttentionCards, trailingContent]
+    );
     const latestCoordinatorBubbleByTaskId = useMemo(
       () => (coordinatorBubbles ? buildLatestCoordinatorBubbleByTaskId(items) : undefined),
       [coordinatorBubbles, items]
@@ -2208,9 +2248,9 @@ export const SessionChatStreamView = forwardRef<
       const meta = virtualRows.map(engineRowOf);
       if (leadingContent != null) meta.unshift(LEADING_ENGINE_ROW);
       if (hasActivityRow) meta.push(AGENT_ACTIVITY_ENGINE_ROW);
-      if (trailingContent != null) meta.push(TRAILING_ENGINE_ROW);
+      if (effectiveTrailingContent != null) meta.push(TRAILING_ENGINE_ROW);
       return meta;
-    }, [hasActivityRow, leadingContent, trailingContent, virtualRows]);
+    }, [effectiveTrailingContent, hasActivityRow, leadingContent, virtualRows]);
 
     /**
      * A sent message waiting for its row. The send path learns the turn id
@@ -2658,9 +2698,9 @@ export const SessionChatStreamView = forwardRef<
                     </div>
                   )}
                 </div>
-                {trailingContent == null ? null : (
+                {effectiveTrailingContent == null ? null : (
                   <div className="shrink-0" data-conversation-trailing-content="">
-                    {trailingContent}
+                    {effectiveTrailingContent}
                   </div>
                 )}
               </div>
@@ -2777,9 +2817,9 @@ export const SessionChatStreamView = forwardRef<
           )}
         </div>
       ) : null,
-      trailingContent == null ? null : (
+      effectiveTrailingContent == null ? null : (
         <div key={TRAILING_ROW_KEY} data-conversation-trailing-content="">
-          {trailingContent}
+          {effectiveTrailingContent}
         </div>
       ),
     ].filter((row): row is ReactElement => row != null);
@@ -4222,6 +4262,7 @@ const UserMessageRowView = ({
   const [didCopy, setDidCopy] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isUserHovered, setIsUserHovered] = useState(false);
   const [resendDialogOpen, setResendDialogOpen] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(() => getTextContentFromMessageItems(message.items));
@@ -4337,6 +4378,12 @@ const UserMessageRowView = ({
           ),
           'group/usermsg'
         )}
+        onPointerEnter={(event) => {
+          if (event.pointerType !== 'touch') setIsUserHovered(true);
+        }}
+        onPointerLeave={(event) => {
+          if (event.pointerType !== 'touch') setIsUserHovered(false);
+        }}
         onClick={
           isMobile
             ? (event) => {
@@ -4465,7 +4512,7 @@ const UserMessageRowView = ({
                     />
                   </div>
                 ) : (
-                  <div className="flex min-w-0 max-w-full flex-col items-end gap-1.5">
+                  <div className="flex min-w-0 max-w-full flex-col items-end gap-1">
                     {showUserInlineQuote && userReplyTo ? (
                       <CoordinatorInlineQuoteChip
                         replyTo={userReplyTo}
@@ -4476,24 +4523,73 @@ const UserMessageRowView = ({
                         }
                       />
                     ) : null}
-                    <UserChatBubble
-                      sessionId={sessionId}
-                      message={message}
-                      conversationFontSize={conversationFontSize}
-                    />
+                    <div className="flex min-w-0 max-w-full items-start justify-end gap-2">
+                      {coordinator ? (
+                        <CoordinatorBubbleSideActions
+                          copyText={getCopyTextFromMessageItems(message.items, copyWorkspaceId)}
+                          isHovered={isUserHovered}
+                          alwaysRevealActions={isMobile && mobileActionsRevealed}
+                          onEdit={
+                            onEdit
+                              ? () => {
+                                  const draft = getMessageQuoteEditDraft(message.items);
+                                  setEditText(draft.text);
+                                  setEditQuoteDrafts(draft.drafts);
+                                  setIsEditing(true);
+                                }
+                              : undefined
+                          }
+                          onReply={
+                            coordinator.onReplyToBubble
+                              ? () =>
+                                  coordinator.onReplyToBubble!(
+                                    createCoordinatorReplyRef({
+                                      target: { kind: 'user_turn', turnId: message.id },
+                                      existingThreadRootId:
+                                        coordinator.activeThreadRootId ??
+                                        userReplyTo?.threadRootId,
+                                      author: 'user',
+                                      text: getCopyTextFromMessageItems(
+                                        message.items,
+                                        copyWorkspaceId
+                                      ),
+                                    })
+                                  )
+                              : undefined
+                          }
+                        />
+                      ) : null}
+                      <UserChatBubble
+                        sessionId={sessionId}
+                        message={message}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           </div>
         </div>
-        {/* While editing, the row's own actions (edit/pin/copy) would compete with
-            the editor's Cancel / Save & resend — hide them until it closes. */}
-        {(hasTextContent ||
-          copyContext ||
-          Boolean(coordinator?.onReplyToBubble) ||
-          userReplyCount > 0) &&
-        !isEditing ? (
+        {coordinator && !isEditing ? (
+          userReplyCount > 0 && coordinator.onOpenThread ? (
+            <div {...stylex.props(coordinatorBubbleStyles.userReplyPillRow)}>
+              <CoordinatorThreadReplyCountPill
+                count={userReplyCount}
+                onClick={() =>
+                  coordinator.onOpenThread!(
+                    userAnchorId,
+                    getCopyTextFromMessageItems(message.items, copyWorkspaceId)
+                  )
+                }
+              />
+            </div>
+          ) : null
+        ) : (hasTextContent ||
+            copyContext ||
+            Boolean(coordinator?.onReplyToBubble) ||
+            userReplyCount > 0) &&
+          !isEditing ? (
           <div
             {...withClassName(
               stylex.props(conversationSurface.userActions),
@@ -6253,7 +6349,19 @@ const areAssistantVirtualContentsEqual = (
         b.kind === 'coordinator_bubble' &&
         a.itemIndex === b.itemIndex &&
         a.entry.id === b.entry.id &&
-        a.entry.body === b.entry.body
+        a.entry.body === b.entry.body &&
+        a.entry.images === b.entry.images &&
+        a.entry.files === b.entry.files
+      );
+    case 'coordinator_card':
+      return (
+        b.kind === 'coordinator_card' &&
+        a.itemIndex === b.itemIndex &&
+        a.entry.id === b.entry.id &&
+        a.entry.card === b.entry.card &&
+        a.entry.actions === b.entry.actions &&
+        a.entry.actionResolutions === b.entry.actionResolutions &&
+        a.entry.linkedSessionIds === b.entry.linkedSessionIds
       );
     case 'coordinator_notice':
       return (
@@ -6388,6 +6496,13 @@ const AssistantChatItem = memo(function AssistantChatItem({
             sessionId={row.item.sessionId}
             onFilePathClick={onFilePathClick}
             conversationFontSize={conversationFontSize}
+          />
+        );
+      case 'coordinator_card':
+        return (
+          <CoordinatorProactiveCardRow
+            messageId={message.id}
+            entry={content.entry}
           />
         );
       case 'coordinator_notice':
@@ -6543,8 +6658,10 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return isCardContentBlock(content.block) ? cardSiblingGap : turnSiblingGap;
       case 'coordinator_bubble':
         return coordinatorBubbleStyles.siblingGap;
+      case 'coordinator_card':
+        return coordinatorBubbleStyles.cardGap;
       case 'coordinator_notice':
-        return cardSiblingGap;
+        return coordinatorBubbleStyles.cardGap;
       case 'plan':
         return cardSiblingGap;
       case 'worked_group_header':
@@ -6574,16 +6691,29 @@ const AssistantChatItem = memo(function AssistantChatItem({
     content.kind === 'activity_group_header' ||
     content.kind === 'activity_detail';
 
+  const isCoordinatorRow =
+    content.kind === 'coordinator_bubble' ||
+    content.kind === 'coordinator_card' ||
+    content.kind === 'coordinator_notice';
+
   return (
     <ConversationColumn
       {...stylex.props(
         verticalClass,
-        row.isFirstRowForMessage && conversationSurface.firstRow,
-        row.isLastRowForMessage && conversationSurface.lastRow,
+        row.isFirstRowForMessage &&
+          (isCoordinatorRow
+            ? coordinatorBubbleStyles.firstRow
+            : conversationSurface.firstRow),
+        row.isLastRowForMessage &&
+          (isCoordinatorRow
+            ? coordinatorBubbleStyles.lastRow
+            : conversationSurface.lastRow),
         row.endsRound &&
-          (content.kind === 'footer' && !isMobile
-            ? conversationSurface.roundFooterRow
-            : conversationSurface.roundLastRow)
+          (isCoordinatorRow
+            ? coordinatorBubbleStyles.roundLastRow
+            : content.kind === 'footer' && !isMobile
+              ? conversationSurface.roundFooterRow
+              : conversationSurface.roundLastRow)
       )}
       data-assistant-turn-id={message.id}
       onMouseEnter={() => onTurnHoverChange(message.id, true)}
@@ -6820,9 +6950,7 @@ function CoordinatorReplyBubble({
   onFilePathClick?: (filePath: string) => void;
   conversationFontSize: ConversationFontSize;
 }) {
-  const { t } = useTranslation();
   const coordinator = useCoordinatorConversation();
-  const latestBubbleByTaskId = useContext(CoordinatorStreamLatestBubbleContext);
   const isMobile = useIsMobile();
   const [isBubbleHovered, setIsBubbleHovered] = useState(false);
   const hasBody = entry.body.trim().length > 0;
@@ -6836,22 +6964,6 @@ function CoordinatorReplyBubble({
         bubbleId: entry.id,
       }),
     [entry.id, messageId]
-  );
-  const resolvedActions = useMemo(
-    () =>
-      coordinator
-        ? resolveCoordinatorBubbleActions({
-            turnId: messageId,
-            entry,
-            tasksById: coordinator.tasks,
-            latestBubbleByTaskId,
-            preferredMergeMethod: coordinator.preferredMergeMethod,
-            supportedCommands: coordinator.supportedActionCommands,
-            translate: (key, fallback, options) =>
-              String(t(key as never, { defaultValue: fallback, ...options } as never)),
-          })
-        : [],
-    [coordinator, entry, latestBubbleByTaskId, messageId, t]
   );
   const mobileActionsRevealed = useMobileMessageActionsRevealed(anchorId);
   const replyCount = coordinator?.activeThreadRootId
@@ -6883,7 +6995,7 @@ function CoordinatorReplyBubble({
     >
       <div {...stylex.props(coordinatorBubbleStyles.row)}>
         <div {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}>
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-2">
             {showInlineQuote && entry.replyTo ? (
               <CoordinatorInlineQuoteChip
                 replyTo={entry.replyTo}
@@ -6915,57 +7027,99 @@ function CoordinatorReplyBubble({
             {hasFiles ? (
               <SessionFileGroup files={entry.files!} sessionId={sessionId} align="start" />
             ) : null}
-            {resolvedActions.length > 0 ? (
-              <CoordinatorBubbleActionBar
-                actions={resolvedActions}
-                onExecuteAction={
-                  coordinator?.onExecuteBubbleAction
-                    ? (action) =>
-                        coordinator.onExecuteBubbleAction!({
-                          turnId: messageId,
-                          bubbleId: entry.id,
-                          bubbleBody: entry.body,
-                          bubbleReplyTo: entry.replyTo,
-                          activeThreadRootId: coordinator.activeThreadRootId,
-                          action,
-                        })
-                    : undefined
-                }
-              />
-            ) : null}
           </div>
         </div>
+        <CoordinatorBubbleSideActions
+          copyText={entry.body}
+          isHovered={isBubbleHovered}
+          alwaysRevealActions={isMobile && mobileActionsRevealed}
+          onReply={
+            coordinator?.onReplyToBubble
+              ? () =>
+                  coordinator.onReplyToBubble!(
+                    createCoordinatorReplyRef({
+                      target: {
+                        kind: 'coordinator_bubble',
+                        turnId: messageId,
+                        bubbleId: entry.id,
+                      },
+                      existingThreadRootId:
+                        coordinator.activeThreadRootId ?? entry.replyTo?.threadRootId,
+                      author: 'coordinator',
+                      text: entry.body,
+                    })
+                  )
+              : undefined
+          }
+        />
       </div>
-      <CoordinatorBubbleFooterActions
-        copyText={entry.body}
-        replyCount={replyCount}
-        isHovered={isBubbleHovered}
-        alwaysRevealActions={isMobile && mobileActionsRevealed}
-        onOpenThread={
-          coordinator?.onOpenThread
-            ? () => coordinator.onOpenThread!(anchorId, entry.body)
-            : undefined
-        }
-        onReply={
-          coordinator?.onReplyToBubble
-            ? () =>
-                coordinator.onReplyToBubble!(
-                  createCoordinatorReplyRef({
-                    target: {
-                      kind: 'coordinator_bubble',
-                      turnId: messageId,
-                      bubbleId: entry.id,
-                    },
-                    existingThreadRootId:
-                      coordinator.activeThreadRootId ?? entry.replyTo?.threadRootId,
-                    author: 'coordinator',
-                    text: entry.body,
-                  })
-                )
-            : undefined
-        }
-      />
+      {replyCount > 0 && coordinator?.onOpenThread ? (
+        <div {...stylex.props(coordinatorBubbleStyles.replyPillRow)}>
+          <CoordinatorThreadReplyCountPill
+            count={replyCount}
+            onClick={() => coordinator.onOpenThread!(anchorId, entry.body)}
+          />
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function CoordinatorProactiveCardRow({
+  messageId,
+  entry,
+}: {
+  messageId: string;
+  entry: Extract<MessageContent, { type: 'coordinator_message' }>;
+}) {
+  const { t } = useTranslation();
+  const coordinator = useCoordinatorConversation();
+  const resolvedCard = useMemo(
+    () =>
+      resolveCoordinatorProactiveCard({
+        entry,
+        tasksById: coordinator?.tasks ?? new Map(),
+        supportedCommands: coordinator?.supportedActionCommands,
+        translate: (key, fallback, options) =>
+          String(t(key as never, { defaultValue: fallback, ...options } as never)),
+      }),
+    [coordinator?.supportedActionCommands, coordinator?.tasks, entry, t]
+  );
+
+  if (!resolvedCard) return null;
+
+  return (
+    <CoordinatorProactiveCard
+      card={resolvedCard}
+      onOpenTask={coordinator?.openTask}
+      onOpenPr={coordinator?.openPr}
+      onExecuteAction={
+        coordinator?.onExecuteBubbleAction
+          ? (action) =>
+              coordinator.onExecuteBubbleAction!({
+                turnId: messageId,
+                bubbleId: entry.id,
+                bubbleBody: entry.body || resolvedCard.title,
+                bubbleReplyTo: entry.replyTo,
+                activeThreadRootId: coordinator.activeThreadRootId,
+                action,
+              })
+          : undefined
+      }
+      onSubmitFeedback={
+        coordinator?.onSubmitCardFeedback
+          ? (feedback) =>
+              coordinator.onSubmitCardFeedback!({
+                turnId: messageId,
+                bubbleId: entry.id,
+                cardTitle: resolvedCard.title,
+                bubbleReplyTo: entry.replyTo,
+                activeThreadRootId: coordinator.activeThreadRootId,
+                feedback,
+              })
+          : undefined
+      }
+    />
   );
 }
 
@@ -7062,7 +7216,9 @@ export function resolveActiveCoordinatorStatus({
       entry.type === 'coordinator_message' &&
       (entry.body.trim().length > 0 ||
         (entry.images?.length ?? 0) > 0 ||
-        (entry.files?.length ?? 0) > 0)
+        (entry.files?.length ?? 0) > 0 ||
+        Boolean(entry.card) ||
+        (entry.actions?.length ?? 0) > 0)
     ) {
       hasVisibleCoordinatorMessage = true;
     }
@@ -7137,22 +7293,60 @@ function CoordinatorWorkingRow({
 
 const coordinatorBubbleStyles = stylex.create({
   siblingGap: {
-    paddingBlock: 0,
+    paddingTop: 6,
+    paddingBottom: 0,
+  },
+  cardGap: {
+    paddingTop: space[2],
+    paddingBottom: 2,
+  },
+  firstRow: {
+    paddingTop: 4,
+  },
+  lastRow: {
+    paddingBottom: 4,
+  },
+  roundLastRow: {
+    paddingBottom: 10,
+  },
+  userMessage: {
+    paddingTop: space[2],
+    paddingBottom: space[2],
+  },
+  userReplyPillRow: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    paddingTop: 4,
+  },
+  systemStrip: {
+    paddingBlock: 6,
   },
   column: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-start',
-    gap: 2,
+    gap: 4,
     width: 'fit-content',
-    maxWidth: '88%',
+    maxWidth: '100%',
   },
   row: {
     display: 'flex',
+    alignItems: 'flex-start',
     justifyContent: 'flex-start',
+    gap: space[2],
     maxWidth: '100%',
   },
-  bubble: { display: 'flex', flexDirection: 'column', gap: 8, maxWidth: '100%' },
+  bubble: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    maxWidth: 'calc(100% - 76px)',
+  },
+  replyPillRow: {
+    display: 'flex',
+    alignItems: 'center',
+    paddingInline: 2,
+  },
   statusPill: {
     display: 'inline-flex',
     alignItems: 'center',
