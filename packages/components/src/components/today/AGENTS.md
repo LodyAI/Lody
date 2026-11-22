@@ -12,6 +12,9 @@ Behavior: [Today Spec](../../../../../specs/today-outline.md). Files: [README.md
 - Outline keys are guarded against IME composition (`isComposing`, keyCode 229, `Process`).
   Nothing is written while a composition is open, so disposing a binding writes what it still held:
   leaving a node mid-composition must never drop the preedit.
+- A day of 200+ visible rows is virtualized; the row being edited always stays mounted. Rows take only their
+  own node and state as props, never the visible array, and the page model's snapshot stays incremental
+  (`Today/Stress` is the benchmark): a change that walks every node per keystroke is a regression.
 - Node actions live in the selection bar, which never takes focus (the surface keeps the selection's keys);
   a to-do state changes only through `TodayOutline.cycleTodo`/`setTodo` inside `undo.structural`.
 - Viewing a day never creates it remotely: a page joins its room only once registered.

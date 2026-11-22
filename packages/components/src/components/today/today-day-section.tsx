@@ -2,8 +2,12 @@ import * as stylex from '@stylexjs/stylex';
 import { Check, ChevronRight } from 'lucide-react';
 import {
   Fragment,
+  memo,
   useCallback,
+  useContext,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -14,9 +18,10 @@ import { getTodayDocId, type TodayDate, type TodayNodeView } from '@lody/shared'
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
-import { useTodayEditor } from './editor/today-editor-context';
+import { TodayEditorContext, useTodayEditor } from './editor/today-editor-context';
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import { TodayMentionDecorators } from './editor/today-mention-decorators';
-import { TODAY_INDENT_PX } from './editor/today-editor-controller';
+import { TODAY_INDENT_PX, type TodayEditorController } from './editor/today-editor-controller';
 import { TodayMention } from './today-session-mention';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
@@ -253,42 +258,162 @@ function TodayStaticOutline(props: {
   if (snapshot.visible.length === 0) {
     return (
       <div {...stylex.props(styles.outline)}>
-        <TodayRow node={null} store={store} />
+        <TodayRow node={null} store={store} active={false} selected={false} />
       </div>
     );
+  }
+  if (snapshot.visible.length >= TODAY_VIRTUALIZE_FROM) {
+    return <TodayVirtualOutline store={store} />;
   }
   return (
     <div {...stylex.props(styles.outline)} role="tree">
       {snapshot.visible.map((node, index) => (
         <TodayRow
           key={node.id}
-          node={node}
           store={store}
-          // A run of selected rows reads as one block: only its ends are rounded.
-          joinsPrevious={
-            index > 0 && !!controller?.isBlockSelected(store, snapshot.visible[index - 1]!.id)
-          }
-          joinsNext={
-            index < snapshot.visible.length - 1 &&
-            !!controller?.isBlockSelected(store, snapshot.visible[index + 1]!.id)
-          }
+          {...rowState(controller, store, snapshot.visible, index)}
         />
       ))}
     </div>
   );
 }
 
-function TodayRow(props: {
+/** Pages with at least this many visible rows render only the rows near the viewport. */
+export const TODAY_VIRTUALIZE_FROM = 200;
+
+/** What a memoized row compares: its node and its editing and selection state. */
+function rowState(
+  controller: TodayEditorController | null,
+  store: TodayPageStore,
+  visible: readonly TodayNodeView[],
+  index: number
+) {
+  const node = visible[index]!;
+  const isSelected = (at: number) => {
+    const other = visible[at];
+    return !!other && !!controller?.isBlockSelected(store, other.id);
+  };
+  const selected = isSelected(index);
+  return {
+    node,
+    active: !!controller?.isActive(store, node.id),
+    selected,
+    // A run of selected rows reads as one block: only its ends are rounded.
+    joinsPrevious: selected && isSelected(index - 1),
+    joinsNext: selected && isSelected(index + 1),
+  };
+}
+
+/**
+ * A large page: only the rows near the viewport (and the one being edited,
+ * wherever it is) are mounted, positioned inside a box as tall as the whole
+ * page. Rows are measured as they mount, so wrapped lines keep their height.
+ */
+function TodayVirtualOutline(props: { store: TodayPageStore }) {
+  const { store } = props;
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const { visible, layout } = snapshot;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  /** Keys follow the rows' order, which changes only with the layout: typing keeps every measurement. */
+  const getItemKey = useCallback((index: number) => visibleRef.current[index]!.id, [layout]);
+  const controller = useTodayEditor();
+  const outlineRef = useRef<HTMLDivElement | null>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const scroller = useCallback(
+    () => outlineRef.current?.closest<HTMLElement>('[data-today-scroller]') ?? null,
+    []
+  );
+  useLayoutEffect(() => {
+    const outline = outlineRef.current;
+    const element = scroller();
+    if (!outline || !element) return undefined;
+    const update = () => {
+      const margin =
+        outline.getBoundingClientRect().top -
+        element.getBoundingClientRect().top +
+        element.scrollTop;
+      setScrollMargin((previous) => (Math.abs(previous - margin) < 1 ? previous : margin));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element.firstElementChild ?? element);
+    return () => observer.disconnect();
+  }, [scroller]);
+  const activeIndex = useMemo(() => {
+    if (!controller) return -1;
+    return visible.findIndex((node) => controller.isActive(store, node.id));
+  }, [controller, store, visible, controller?.getVersion()]);
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const indexes = defaultRangeExtractor(range);
+      // The node being edited stays mounted: unmounting would end its editor and IME.
+      if (activeIndex >= 0 && !indexes.includes(activeIndex)) {
+        indexes.push(activeIndex);
+        indexes.sort((a, b) => a - b);
+      }
+      return indexes;
+    },
+    [activeIndex]
+  );
+  const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
+    count: visible.length,
+    getScrollElement: scroller,
+    estimateSize,
+    overscan: 12,
+    scrollMargin,
+    getItemKey,
+    rangeExtractor,
+  });
+  useEffect(
+    () =>
+      controller?.registerReveal(store, (nodeId) => {
+        const index = visible.findIndex((node) => node.id === nodeId);
+        if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto' });
+      }),
+    [controller, store, virtualizer, visible]
+  );
+  return (
+    <div
+      ref={outlineRef}
+      role="tree"
+      style={{ position: 'relative', height: virtualizer.getTotalSize() }}
+    >
+      {virtualizer.getVirtualItems().map((item) => (
+        <div
+          key={item.key}
+          data-index={item.index}
+          ref={virtualizer.measureElement}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            transform: `translateY(${item.start - scrollMargin}px)`,
+          }}
+        >
+          <TodayRow store={store} {...rowState(controller, store, visible, item.index)} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A single-line row's height (the row's minimum). */
+const TODAY_ROW_HEIGHT = 28;
+const estimateSize = () => TODAY_ROW_HEIGHT;
+
+const TodayRow = memo(function TodayRow(props: {
   node: TodayNodeView | null;
   store: TodayPageStore;
+  active: boolean;
+  selected: boolean;
   joinsPrevious?: boolean;
   joinsNext?: boolean;
 }) {
   const { t } = useTranslation();
-  const { node, store } = props;
-  const controller = useTodayEditor();
-  const active = !!node && !!controller?.isActive(store, node.id);
-  const selected = !!node && !!controller?.isBlockSelected(store, node.id);
+  const { node, store, active, selected } = props;
+  const controller = useContext(TodayEditorContext);
   const done = node?.todo === 'done';
   const blank = !!node && !node.text.trim() && !node.hasChildren && !node.todo;
   return (
@@ -405,7 +530,7 @@ function TodayRow(props: {
       )}
     </div>
   );
-}
+});
 
 /** A node's text as the editor would show it: text runs and mentions. */
 function TodayStaticText(props: { node: TodayNodeView }) {
