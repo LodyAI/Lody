@@ -36,6 +36,7 @@ export {
   lodyQueries,
   type BusinessKeyScope,
   type CreateSessionRequest,
+  type HostQueryDescriptor,
   type LodyQueryDescriptor,
   type MachinePluginScope,
   type MachineRef,
@@ -48,6 +49,10 @@ export {
 };
 
 export interface MachineHostPort {
+  read<S extends PluginScope, TInput, TOutput>(
+    target: ScopeTarget<S>,
+    query: [void] extends [TInput] ? LodyQueryDescriptor<S, TInput, TOutput> : never
+  ): Promise<TOutput>;
   read<S extends PluginScope, TInput, TOutput>(
     target: ScopeTarget<S>,
     query: LodyQueryDescriptor<S, TInput, TOutput>,
@@ -83,6 +88,9 @@ export interface MachineContext<S extends MachinePluginScope = MachinePluginScop
   readonly sessionDataDir: S extends 'session' ? string : undefined;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly signal: AbortSignal;
+  /** Unified programmatic Lody SDK handle on the daemon (matches `useLody()` on the client). */
+  readonly lody: MachineHostPort;
+  /** Alias of `lody` retained for backwards compatibility. */
   readonly host: MachineHostPort;
   invalidate<QS extends MachinePluginScope>(
     descriptor: InvalidatableDescriptor<QS>,
@@ -101,6 +109,9 @@ export interface ToolExecutionContext {
   readonly sessionDataDir: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly signal: AbortSignal;
+  /** Unified programmatic Lody SDK handle on the daemon (matches `useLody()` on the client). */
+  readonly lody: MachineHostPort;
+  /** Alias of `lody` retained for backwards compatibility. */
   readonly host: MachineHostPort;
   invalidate<QS extends MachinePluginScope>(
     descriptor: InvalidatableDescriptor<QS>,
@@ -133,6 +144,21 @@ export interface SessionLifecycleEvent {
   readonly turnId?: string;
   readonly openedByRootSessionId?: string;
   readonly agentRoleId?: string;
+}
+
+export interface BeforeSessionTurnEvent {
+  readonly session: SessionRef;
+  readonly project?: ProjectRef;
+  readonly turnId: string;
+  readonly agentRoleId?: string;
+}
+
+export interface BeforeSessionTurnResult {
+  /**
+   * Optional bounded context appendix attached on the owning machine after `e2eeIntent` verification
+   * (never mutating stored user message content or bypassing Session Inbox / Stop admission).
+   */
+  readonly appendContextMarkdown?: string;
 }
 
 export interface MachinePluginRegistry {
@@ -176,6 +202,16 @@ export interface MachinePluginRegistry {
       ctx: MachineContext<S>,
       input: z.output<TInput>
     ) => Promise<ObservationReadResult<z.input<TOutput>>> | ObservationReadResult<z.input<TOutput>>
+  ): void;
+  /**
+   * Pre-Turn hook inspired by Paseo's `server.before` for pre-flight worktree/branch validation
+   * or dynamic environment context injection on this machine before an admitted Turn starts.
+   */
+  beforeSessionTurn(
+    handler: (
+      ctx: MachineContext<'session'>,
+      event: BeforeSessionTurnEvent
+    ) => BeforeSessionTurnResult | void | Promise<BeforeSessionTurnResult | void>
   ): void;
   /**
    * Event-driven lifecycle hook for low-latency multi-Agent pipelines on this machine.

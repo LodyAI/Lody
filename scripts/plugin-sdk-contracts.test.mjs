@@ -90,6 +90,8 @@ function loadIssueMachine(io = fs) {
     query() {},
     observation() {},
     attachmentSource() {},
+    beforeSessionTurn() {},
+    onSessionEvent() {},
     mutation(descriptor, handler) {
       mutations.set(descriptor.id, handler);
     },

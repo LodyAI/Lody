@@ -67,15 +67,33 @@ export type PluginSettingField = {
 );
 
 /**
- * VS Code color theme JSON shipped in `assets/` and applied through Lody's built-in theme engine
- * across app chrome tokens, Monaco editors, Shiki code blocks, and integrated terminals.
+ * Minimal seed palette from which Lody's theme engine automatically derives the complete app
+ * chrome, panel, diff, Monaco, Shiki, and integrated terminal tokens.
  */
-export interface PluginThemeContribution {
+export interface PluginThemeSeedColors {
+  readonly bg: string;
+  readonly fg: string;
+  readonly accent: string;
+  readonly surface?: string;
+  readonly border?: string;
+  readonly muted?: string;
+  readonly success?: string;
+  readonly warning?: string;
+  readonly danger?: string;
+}
+
+/**
+ * Theme contribution declared in `lody.plugin.json`: accepts either a full VS Code color theme
+ * JSON in `assets/` (`path`) or a compact Paseo/T3-style seed palette (`seed`).
+ */
+export type PluginThemeContribution = {
   readonly id: string;
   readonly label: string;
   readonly appearance: 'dark' | 'light';
-  readonly path: string;
-}
+} & (
+  | { readonly path: string; readonly seed?: undefined }
+  | { readonly seed: PluginThemeSeedColors; readonly path?: undefined }
+);
 
 export interface PluginManifest {
   readonly id: string;

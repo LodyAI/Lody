@@ -212,6 +212,52 @@ export interface SendSessionMessageReceipt {
   readonly disposition: 'started' | 'queued' | 'steered';
 }
 
+/**
+ * Lightweight pending-interaction indicator on `SessionSummary` (mirrors `PermissionRequestKind`
+ * in `packages/shared/src/schema.ts`) so sidebar rows and HUD badges can immediately display
+ * `? Input` or `Approval needed` states without N+1 detail queries.
+ */
+export interface PendingInteractionSummary {
+  readonly kind: 'permission' | 'ask_user_question';
+  readonly requestId: string;
+}
+
+export interface ElicitationOption {
+  readonly label: string;
+  readonly description?: string;
+  readonly preview?: string;
+}
+
+export interface ElicitationQuestion {
+  /** Canonical answer key resolved via `getAskUserQuestionAnswerKey` (`packages/shared/src/acp/ask-user-question.ts`). */
+  readonly answerKey: string;
+  readonly id?: string;
+  readonly header: string;
+  readonly question: string;
+  readonly options: readonly ElicitationOption[];
+  readonly multiSelect: boolean;
+  readonly allowCustomAnswer?: boolean;
+  readonly isSecret?: boolean;
+}
+
+/**
+ * Structured `ask_user_question` prompt parsed from Lody, Claude Code, or Codex ACP elicitation
+ * (`packages/shared/src/acp/ask-user-question.ts`). Note: tool `permission` approvals remain
+ * exclusively owned by Lody's trusted kernel UI so plugins can never spoof or auto-approve tools.
+ */
+export interface PendingQuestionPrompt {
+  readonly requestId: string;
+  readonly source: 'lody' | 'claude' | 'codex';
+  readonly allowCustomAnswer: boolean;
+  readonly questions: readonly ElicitationQuestion[];
+  readonly autoResolveAt?: number;
+}
+
+export interface AnswerQuestionRequest {
+  readonly requestId: string;
+  readonly answers: Readonly<Record<string, string | readonly string[]>>;
+}
+
 export interface LodyQueryDescriptor<S extends PluginScope, TInput, TOutput> {
   readonly kind: 'lody-query';
   readonly scope: S;
@@ -273,9 +319,9 @@ export interface ScheduleSummary {
 
 /**
  * Raw visible `SessionMeta` + ephemeral presence record exposed directly through `lodyQueries.sessions`
- * so custom sidebars, multi-Agent dashboards, and panels can reconstruct parent/child lineages
- * (`openedBySessionId` / `openedByRootSessionId`), Role lanes (`agentRoleId`), and pin/status buckets
- * without bespoke host grouping concepts or bloated component props.
+ * so custom sidebars, row hover popovers, multi-Agent dashboards, and external peripherals can
+ * reconstruct parent/child lineages (`openedBySessionId` / `openedByRootSessionId`), Role lanes
+ * (`agentRoleId`), and waiting-input indicators (`pendingInteraction`) without bespoke host groups.
  */
 export interface SessionSummary {
   readonly session: SessionRef;
@@ -304,6 +350,8 @@ export interface SessionSummary {
   readonly settledAt?: number;
   readonly scheduleId?: string;
   readonly contextWindowUsage?: { readonly usedTokens: number; readonly maxTokens?: number };
+  /** Present when the Session is currently awaiting an elicitation answer or tool permission. */
+  readonly pendingInteraction?: PendingInteractionSummary;
   /** Present when the Session was created by a plugin (`pluginId`). */
   readonly createdByPluginId?: string;
   /** Present only when the Session was created by the calling plugin (`pluginId`). */
@@ -331,6 +379,8 @@ export interface SessionDetail extends SessionSummary {
   };
   readonly queuedCount: number;
   readonly pendingPermission: boolean;
+  /** Present when `pendingInteraction?.kind === 'ask_user_question'`. */
+  readonly pendingQuestion?: PendingQuestionPrompt;
   readonly recentTurns: readonly SessionTurnSummary[];
 }
 

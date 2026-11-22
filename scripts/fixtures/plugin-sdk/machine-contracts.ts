@@ -45,7 +45,7 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
   machine.query(sessionMonitorQuery, async (ctx) => {
     const sessionDir: string = ctx.sessionDataDir;
     void sessionDir;
-    const detail = await ctx.host.read(ctx.target, lodyQueries.sessionDetail, {
+    const detail = await ctx.lody.read(ctx.target, lodyQueries.sessionDetail, {
       recentTurnLimit: 3,
     });
     return { activeStep: detail.recentTurns[0]?.previewText ?? null };
@@ -57,7 +57,19 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
     revision: 'depth-v1',
   }));
 
+  machine.beforeSessionTurn(async (ctx, event) => {
+    if (!event.project) return;
+    const gitState = await ctx.lody.read(event.project, lodyQueries.gitState);
+    if (gitState.dirty) {
+      return {
+        appendContextMarkdown: `Note: worktree branch \`${gitState.branch}\` has uncommitted changes.`,
+      };
+    }
+  });
+
   machine.onSessionEvent((ctx, event) => {
+    // @ts-expect-error Machine daemon port never exposes client-only `answerQuestion` or permission bypasses.
+    void ctx.lody.sessions.answerQuestion;
     if (event.kind === 'turn.completed') {
       const rootId: string | undefined = event.openedByRootSessionId;
       void rootId;
@@ -71,7 +83,7 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
     ctx.invalidate(queueDepthObservation, ctx.target);
     // Replaying the original request also recovers an archived Session; an active-only
     // catalog lookup must not decide whether this operation has already been accepted.
-    const created = await ctx.host.sessions.create(ctx.target, {
+    const created = await ctx.lody.sessions.create(ctx.target, {
       requestId: input.requestId,
       businessKey: key,
       businessKeyScope: 'project',

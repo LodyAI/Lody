@@ -14,8 +14,9 @@ import {
   type WorkspaceRef,
 } from '@lody/plugin-sdk';
 import {
+  createLodyClient,
   defineClientPlugin,
-  useHost,
+  useLody,
   useLodyQuery,
   useMutation,
   usePluginSettings,
@@ -98,6 +99,17 @@ export const validManifest: PluginManifest = {
       appearance: 'dark',
       path: './assets/cyber-war-room.json',
     },
+    {
+      id: 'amber-ember',
+      label: 'Amber Ember',
+      appearance: 'dark',
+      seed: {
+        bg: '#11100e',
+        fg: '#f5efe6',
+        accent: '#f59e0b',
+        surface: '#1b1916',
+      },
+    },
   ],
   styles: ['./assets/war-room.css'],
   env: {
@@ -138,6 +150,15 @@ export const unknownOutcomeCode: PluginCallErrorCode = 'outcome_unknown';
 export const quarantinedPluginCode: PluginCallErrorCode = 'plugin_faulted';
 
 export const customizableShellPlugin = defineClientPlugin((lody) => {
+  // @ts-expect-error Singleton `sidebar.replace` was unified into selectable `sidebar.views.add` + `sessionRow.decorate`.
+  void lody.sidebar.replace;
+
+  lody.themes.add({
+    id: 'live-ocean',
+    label: 'Live Ocean',
+    appearance: 'dark',
+    seed: { bg: '#0b1220', fg: '#e2e8f0', accent: '#38bdf8' },
+  });
   lody.styles.add({
     id: 'compact-rows',
     css: '[data-lody-slot="sidebar"] { --lody-row-gap: 2px; }',
@@ -155,7 +176,7 @@ export const customizableShellPlugin = defineClientPlugin((lody) => {
     id: 'activate-war-room-theme',
     title: 'Switch to War Room Theme',
     defaultShortcut: 'Mod+Shift+W',
-    run: ({ host }) => host.themes.activate('cyber-war-room'),
+    run: ({ lody: client }) => client.themes.activate('cyber-war-room'),
   });
 });
 
@@ -179,7 +200,21 @@ export async function verifyClientTypeSafety(
   session: SessionRef,
   pageProps: ProjectPageProps
 ) {
-  const host = useHost();
+  const lody = useLody();
+  const externalPeripheral = createLodyClient({
+    endpoint: 'ws://127.0.0.1:4120',
+    token: 'lody_local_peripheral_token',
+  });
+  const peripheralSessions = await externalPeripheral.read(workspace, lodyQueries.sessions, {
+    archived: false,
+  });
+  const peripheralGit = await externalPeripheral.read(project, lodyQueries.gitState);
+  void peripheralSessions.items;
+  void peripheralGit.branch;
+
+  // @ts-expect-error Queries with required input parameters cannot omit input.
+  void externalPeripheral.read(project, lodyQueries.filePreview);
+
   const settings = usePluginSettings<{ readonly maxParallelAgents: number }>(project);
   const maxParallel: number = settings.values.maxParallelAgents;
   void maxParallel;
@@ -231,7 +266,12 @@ export async function verifyClientTypeSafety(
   const detailRead = useLodyQuery(session, lodyQueries.sessionDetail, { recentTurnLimit: 5 });
   if (detailRead.status === 'ready') {
     const turnCount: number = detailRead.data.recentTurns.length;
+    const questionSource: 'lody' | 'claude' | 'codex' | undefined =
+      detailRead.data.pendingQuestion?.source;
+    const answerKey: string | undefined = detailRead.data.pendingQuestion?.questions[0]?.answerKey;
     void turnCount;
+    void questionSource;
+    void answerKey;
   }
 
   const byKeyRead = useLodyQuery(project, hostQueries.sessions, {
@@ -244,9 +284,12 @@ export async function verifyClientTypeSafety(
     const key: string | undefined = first?.businessKey;
     const rootOpener: string | undefined = first?.openedByRootSessionId;
     const roleId: string | undefined = first?.agentRoleId;
+    const pendingKind: 'permission' | 'ask_user_question' | undefined =
+      first?.pendingInteraction?.kind;
     void key;
     void rootOpener;
     void roleId;
+    void pendingKind;
   }
 
   // @ts-expect-error Project-scoped query cannot be called with a WorkspaceRef.
@@ -262,15 +305,20 @@ export async function verifyClientTypeSafety(
   // @ts-expect-error Mutation input is validated against the Zod input schema.
   void pin.mutate({ itemId: 42 });
 
-  const sendReceipt = await host.sessions.send(session, {
+  const sendReceipt = await lody.sessions.send(session, {
     idempotencyKey: 'followup-1',
     prompt: 'Summarize the latest test failures.',
     delivery: 'queue',
   });
   void sendReceipt.disposition;
-  await host.sessions.requestStop(session);
-  host.panels.openSession(session, 'issues', { identifier: 'LODY-101' });
-  host.themes.activate('cyber-war-room');
+  await lody.sessions.answerQuestion(session, {
+    requestId: 'req-1',
+    answers: { rolloutTarget: 'Canary shard (5%)' },
+  });
+  await lody.sessions.requestStop(session);
+  lody.panels.openSession(session, 'issues', { identifier: 'LODY-101' });
+  lody.screens.open(workspace, 'swarm-hub');
+  lody.themes.activate('cyber-war-room');
 
   const createRequest: CreateSessionRequest = {
     requestId: 'create-review-attempt-1',
@@ -284,21 +332,21 @@ export async function verifyClientTypeSafety(
       params: { prNumber: 42 },
     },
   };
-  await host.sessions.create(project, createRequest);
+  await lody.sessions.create(project, createRequest);
   // Unbound Sessions and drafts can target a MachineRef without a ProjectRef.
-  await host.sessions.create(machine, {
+  await lody.sessions.create(machine, {
     requestId: 'create-unbound-triage-1',
     prompt: 'Inspect recent daemon alerts.',
   });
-  host.drafts.open(machine, {
+  lody.drafts.open(machine, {
     prompt: 'Quick machine-scoped investigation.',
     pluginRoleId: 'reviewer',
   });
 
   // The same immutable request is used after an uncertain result, even if the
   // original Session has since been archived. A new generation gets a new ID.
-  await host.sessions.create(project, createRequest);
-  await host.sessions.create(project, { ...createRequest, requestId: 'create-review-attempt-2' });
+  await lody.sessions.create(project, createRequest);
+  await lody.sessions.create(project, { ...createRequest, requestId: 'create-review-attempt-2' });
 
   // @ts-expect-error A business key alone cannot identify a retryable creation request.
   const missingRequestId: CreateSessionRequest = { businessKey: 'review/42', prompt: 'Review.' };
@@ -312,8 +360,8 @@ export async function verifyClientTypeSafety(
   void legacyCreateRequest;
 
   // @ts-expect-error Raw ID objects cannot forge a branded SessionRef capability.
-  host.sessions.open({ workspaceId: 'lw_1', machineId: 'm_1', sessionId: 's_1' });
+  lody.sessions.open({ workspaceId: 'lw_1', machineId: 'm_1', sessionId: 's_1' });
 
-  // @ts-expect-error Route params are immutable; navigation goes through host.pages.openProject.
+  // @ts-expect-error Route params are immutable; navigation goes through lody.pages.openProject.
   pageProps.params.pr = '99';
 }

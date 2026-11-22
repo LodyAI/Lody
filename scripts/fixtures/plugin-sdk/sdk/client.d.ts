@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { z } from 'zod';
+import type { PluginThemeSeedColors } from './manifest';
 import {
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
@@ -7,11 +8,14 @@ import {
   hostQueries,
   lodyQueries,
   type AgentRoleSummary,
+  type AnswerQuestionRequest,
   type AttachmentItem,
   type AttachmentSnapshot,
   type AttachmentSourceDescriptor,
   type BusinessKeyScope,
   type CreateSessionRequest,
+  type ElicitationOption,
+  type ElicitationQuestion,
   type FilePreviewEntry,
   type HostQueryDescriptor,
   type LodyQueryDescriptor,
@@ -19,6 +23,8 @@ import {
   type MachineRef,
   type MachineSummary,
   type MutationDescriptor,
+  type PendingInteractionSummary,
+  type PendingQuestionPrompt,
   type PluginCallError,
   type PluginCallErrorCode,
   type PluginScope,
@@ -50,17 +56,23 @@ export {
   hostQueries,
   lodyQueries,
   type AgentRoleSummary,
+  type AnswerQuestionRequest,
   type BusinessKeyScope,
   type CreateSessionRequest,
+  type ElicitationOption,
+  type ElicitationQuestion,
   type FilePreviewEntry,
   type HostQueryDescriptor,
   type LodyQueryDescriptor,
   type MachinePluginScope,
   type MachineRef,
   type MachineSummary,
+  type PendingInteractionSummary,
+  type PendingQuestionPrompt,
   type PluginCallError,
   type PluginCallErrorCode,
   type PluginScope,
+  type PluginThemeSeedColors,
   type ProjectRef,
   type ProjectSummary,
   type PullRequestSummary,
@@ -136,6 +148,12 @@ export interface SessionPanelProps {
   readonly params: Readonly<Record<string, string>>;
 }
 
+export interface ScreenProps {
+  readonly workspace: WorkspaceRef;
+  readonly activeSession?: SessionRef;
+  readonly params: Readonly<Record<string, string>>;
+}
+
 export interface WorkspacePageProps {
   readonly workspace: WorkspaceRef;
   readonly params: Readonly<Record<string, string>>;
@@ -158,20 +176,23 @@ export interface InstallationSettingsProps {
   readonly version: string;
 }
 
-export interface SidebarFilterSpec {
-  readonly id: string;
-  readonly label: string;
-  readonly defaultValue: boolean;
-}
-
-export interface SidebarViewProps {
+export interface SidebarItemProps {
   readonly workspace: WorkspaceRef;
   readonly activeSession?: SessionRef;
-  readonly taskScope?: 'mine' | 'all';
-  readonly filters: Readonly<Record<string, boolean>>;
 }
 
-export interface SidebarReplaceProps {
+export interface SessionRowSlotProps {
+  readonly workspace: WorkspaceRef;
+  readonly session: SessionSummary;
+  readonly active: boolean;
+}
+
+/**
+ * Paseo-style pure custom sidebar view body rendered between the sidebar header and footer.
+ * Multiple plugins may contribute selectable sidebar views (`"Default"`, `"Agent Tree"`, `"T3 Cards"`)
+ * without overwriting one another via a singleton `replace` or relying on toy host filter schemas.
+ */
+export interface SidebarViewProps {
   readonly workspace: WorkspaceRef;
   readonly activeSession?: SessionRef;
 }
@@ -185,6 +206,35 @@ export interface StatusBarItemProps {
   readonly workspace: WorkspaceRef;
   readonly activeSession?: SessionRef;
 }
+
+/**
+ * Native sidebar navigation row primitive backed by `sidebarSurface` (`packages/components`),
+ * ensuring `sidebar.headerItems` / `footerItems` and custom views match built-in row metrics.
+ */
+export interface SidebarRowProps {
+  readonly icon?: ReactNode;
+  readonly label: ReactNode;
+  readonly trailing?: ReactNode;
+  readonly selected?: boolean;
+  readonly onClick?: () => void;
+}
+
+export declare const SidebarRow: ComponentType<SidebarRowProps>;
+
+/**
+ * Native session row primitive backed by `sidebarSurface` that automatically composes every
+ * enabled `sidebar.sessionRow` decorator (`trailing` badges and `hoverCard` popovers), even
+ * when rendered inside a plugin's custom `sidebar.views` tree!
+ */
+export interface SessionRowProps {
+  readonly session: SessionSummary;
+  readonly selected?: boolean;
+  readonly indent?: number;
+  readonly leading?: ReactNode;
+  readonly onClick?: () => void;
+}
+
+export declare const SessionRow: ComponentType<SessionRowProps>;
 
 export interface ClientPluginRegistry {
   readonly tools: {
@@ -226,6 +276,14 @@ export interface ClientPluginRegistry {
       }): void;
     };
   };
+  readonly screens: {
+    /** Registers a full main-area canvas/workspace screen (e.g. Swarm Hub or PR Review Center). */
+    add(spec: {
+      readonly id: string;
+      readonly title: string;
+      readonly Component: ComponentType<ScreenProps>;
+    }): void;
+  };
   readonly project: {
     readonly pages: {
       add(spec: {
@@ -244,26 +302,34 @@ export interface ClientPluginRegistry {
       }): void;
     };
   };
+  /**
+   * Three orthogonal sidebar extension layers:
+   * 1. `sessionRow.decorate`: Composable row-level badges & interactive hover popovers (e.g.
+   *    answering `ask_user_question` on hover without switching threads) across native and `<SessionRow />` views.
+   * 2. `headerItems` / `footerItems`: Native `<SidebarRow />` navigation entries opening `screens` or popovers.
+   * 3. `views.add`: Selectable full custom sidebar body between header and footer (e.g. Swarm tree or card layout).
+   */
   readonly sidebar: {
+    readonly sessionRow: {
+      decorate(spec: {
+        readonly id: string;
+        readonly trailing?: ComponentType<SessionRowSlotProps>;
+        readonly hoverCard?: ComponentType<SessionRowSlotProps>;
+      }): void;
+    };
+    readonly headerItems: {
+      add(spec: { readonly id: string; readonly Component: ComponentType<SidebarItemProps> }): void;
+    };
+    readonly footerItems: {
+      add(spec: { readonly id: string; readonly Component: ComponentType<SidebarItemProps> }): void;
+    };
     readonly views: {
       add(spec: {
         readonly id: string;
         readonly title: string;
-        readonly taskScope?: boolean;
-        readonly filters?: readonly SidebarFilterSpec[];
         readonly Component: ComponentType<SidebarViewProps>;
       }): void;
     };
-    /**
-     * Replaces the default sidebar body with a custom plugin-rendered sidebar (e.g. a multi-Agent
-     * Swarm hierarchy or Role-lane board built on `useLodyQuery(workspace, lodyQueries.sessions)`),
-     * while the host retains a minimal switcher + `--safe-mode` escape hatch.
-     */
-    replace(spec: {
-      readonly id: string;
-      readonly title: string;
-      readonly Component: ComponentType<SidebarReplaceProps>;
-    }): void;
   };
   readonly settings: {
     readonly pages: {
@@ -283,6 +349,14 @@ export interface ClientPluginRegistry {
             }
       ): void;
     };
+  };
+  readonly themes: {
+    add(spec: {
+      readonly id: string;
+      readonly label: string;
+      readonly appearance: 'dark' | 'light';
+      readonly seed: PluginThemeSeedColors;
+    }): void;
   };
   /**
    * Local client appearance & shell extensions (`styles`, `shell.overlays`, `shell.statusBar`, `commands`).
@@ -315,13 +389,26 @@ export interface ClientPluginRegistry {
       readonly run: (ctx: {
         readonly workspace: WorkspaceRef;
         readonly activeSession?: SessionRef;
-        readonly host: HostActions;
+        readonly lody: LodyClient;
       }) => void | Promise<void>;
     }): void;
   };
 }
 
-export interface HostActions {
+/**
+ * Unified programmatic Lody Client SDK handle shared across in-app client plugins (`useLody()`)
+ * and external local peripherals (`createLodyClient()` for Raycast, Chrome PR badges, IDE wrappers, scripts).
+ */
+export interface LodyClient {
+  read<S extends PluginScope, TInput, TOutput>(
+    target: ScopeTarget<S>,
+    query: [void] extends [TInput] ? LodyQueryDescriptor<S, TInput, TOutput> : never
+  ): Promise<TOutput>;
+  read<S extends PluginScope, TInput, TOutput>(
+    target: ScopeTarget<S>,
+    query: LodyQueryDescriptor<S, TInput, TOutput>,
+    input: TInput
+  ): Promise<TOutput>;
   readonly sessions: {
     open(session: SessionRef): void;
     create(target: MachineRef | ProjectRef, request: CreateSessionRequest): Promise<SessionRef>;
@@ -329,6 +416,13 @@ export interface HostActions {
       session: SessionRef,
       request: SendSessionMessageRequest
     ): Promise<SendSessionMessageReceipt>;
+    /**
+     * Submits user answers to a pending `ask_user_question` elicitation without switching the
+     * active Session, authoring the response through `WorkspaceWriter.respondSessionPermission`
+     * (non-Guest authorized in E2EE workspaces). Tool `permission` prompts remain strictly owned
+     * by Lody's trusted kernel UI and are rejected here.
+     */
+    answerQuestion(session: SessionRef, request: AnswerQuestionRequest): Promise<void>;
     requestStop(session: SessionRef): Promise<void>;
     requestArchive(session: SessionRef): Promise<void>;
   };
@@ -353,6 +447,13 @@ export interface HostActions {
       params?: Readonly<Record<string, string>>
     ): void;
   };
+  readonly screens: {
+    open(
+      workspace: WorkspaceRef,
+      screenId: string,
+      params?: Readonly<Record<string, string>>
+    ): void;
+  };
   readonly pages: {
     openProject(
       project: ProjectRef,
@@ -371,19 +472,30 @@ export interface HostActions {
   };
 }
 
+/** Backwards-compatible alias for `LodyClient`. */
+export type HostActions = LodyClient;
+
+export interface LodyClientConnectionOptions {
+  /** Local loopback endpoint (`127.0.0.1` / `[::1]`; defaults to local Lody runtime discovery). */
+  readonly endpoint?: string;
+  /** Explicit per-client bearer token minted by the local user (`lody client token`). */
+  readonly token?: string;
+}
+
+/**
+ * Connects external local tools (Raycast extensions, browser PR-badge extensions, IDE splits, CLI scripts)
+ * to the exact same typed `LodyClient` SDK used inside `useLody()`, bound strictly to local loopback
+ * with explicit per-client token authorization.
+ */
+export declare function createLodyClient(options?: LodyClientConnectionOptions): LodyClient;
+
 /**
  * Subscribes to Lody's built-in raw reactive stores (shared Loro/Flock rooms & presence) or
  * authenticated host network / `MachineRpc` adapters (`lodyQueries.*`).
  */
-export declare function useLodyQuery<S extends PluginScope, TOutput>(
-  target: ScopeTarget<S>,
-  query: LodyQueryDescriptor<S, void, TOutput>
-): QueryResult<TOutput>;
-
 export declare function useLodyQuery<S extends PluginScope, TInput, TOutput>(
   target: ScopeTarget<S>,
-  query: LodyQueryDescriptor<S, TInput | void, TOutput>,
-  input?: TInput
+  query: [void] extends [TInput] ? LodyQueryDescriptor<S, TInput, TOutput> : never
 ): QueryResult<TOutput>;
 
 export declare function useLodyQuery<S extends PluginScope, TInput, TOutput>(
@@ -426,7 +538,10 @@ export declare function usePluginSettings<
   readonly update: (patch: Partial<TValues>) => Promise<void>;
 };
 
-export declare function useHost(): HostActions;
+export declare function useLody(): LodyClient;
+
+/** Alias of `useLody()` retained for convenience. */
+export declare function useHost(): LodyClient;
 
 export type ClientPluginCleanup = () => void;
 
