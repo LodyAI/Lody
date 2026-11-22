@@ -79,13 +79,16 @@ const DRAG_UNFOLD_DELAY_MS = 500;
 /** How long the released card glides before it disappears. */
 const DRAG_SETTLE_MS = 120;
 
-/** The structural moves the node editor and block selection share. */
+/** The structural moves the node editor and block selection share; `within` is the zoomed root. */
 const OUTLINE_MOVES = {
   indent: (outline, ids) => outline.indent(ids),
-  outdent: (outline, ids) => outline.outdent(ids),
+  outdent: (outline, ids, within) => outline.outdent(ids, { within }),
   'move-up': (outline, ids) => outline.moveUp(ids),
   'move-down': (outline, ids) => outline.moveDown(ids),
-} satisfies Record<string, (outline: TodayPageStore['outline'], ids: TodayNodeId[]) => unknown>;
+} satisfies Record<
+  string,
+  (outline: TodayPageStore['outline'], ids: TodayNodeId[], within?: TodayNodeId) => unknown
+>;
 
 export type TodaySessionPickerState = {
   store: TodayPageStore;
@@ -854,11 +857,10 @@ export class TodayEditorController {
       case 'outdent':
       case 'move-up':
       case 'move-down': {
-        const leavesZoom =
-          intent.type === 'outdent' &&
-          roots.some((id) => outline.getNode(id)?.parentId === zoomRoot);
-        if (roots.length > 0 && !(zoomRoot && leavesZoom)) {
-          store.undo.structural(() => OUTLINE_MOVES[intent.type](outline, roots));
+        if (roots.length > 0) {
+          store.undo.structural(() =>
+            OUTLINE_MOVES[intent.type](outline, roots, zoomRoot ?? undefined)
+          );
         }
         keep();
         return true;
@@ -915,7 +917,9 @@ export class TodayEditorController {
     this.clearBlockSelection();
     this.apply(
       store,
-      store.undo.structural(() => store.outline.deleteNodes(roots))
+      store.undo.structural(() =>
+        store.outline.deleteNodes(roots, { within: this.zoomRoot(store) ?? undefined })
+      )
     );
   }
 
@@ -1312,9 +1316,6 @@ export class TodayEditorController {
         return keepCaret();
       }
     }
-    if (root && intent.type === 'outdent' && outline.getNode(nodeId)?.parentId === root) {
-      return keepCaret();
-    }
     switch (intent.type) {
       case 'zoom-in':
         return this.onZoom?.(store, nodeId);
@@ -1332,23 +1333,27 @@ export class TodayEditorController {
       case 'enter-empty':
         return this.apply(
           store,
-          store.undo.structural(() => outline.enterOnEmpty(nodeId))
+          store.undo.structural(() => outline.enterOnEmpty(nodeId, { within: root ?? undefined }))
         );
       case 'merge-previous':
         return this.apply(
           store,
-          store.undo.structural(() => outline.mergeWithPrevious(nodeId))
+          store.undo.structural(() =>
+            outline.mergeWithPrevious(nodeId, { within: root ?? undefined })
+          )
         );
       case 'merge-next':
         return this.apply(
           store,
-          store.undo.structural(() => outline.mergeWithNext(nodeId))
+          store.undo.structural(() => outline.mergeWithNext(nodeId, { within: root ?? undefined }))
         );
       case 'indent':
       case 'outdent':
       case 'move-up':
       case 'move-down':
-        store.undo.structural(() => OUTLINE_MOVES[intent.type](outline, [nodeId]));
+        store.undo.structural(() =>
+          OUTLINE_MOVES[intent.type](outline, [nodeId], root ?? undefined)
+        );
         return keepCaret();
       case 'collapse':
       case 'expand':

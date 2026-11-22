@@ -132,9 +132,11 @@ any time; when off it changes none of the app's existing behavior.
   position it had (anchored to the top visible row, so peers' edits above do not shift it). Middle ancestors fold
   into "…" past five parts.
 - Zoomed in, the node's text is the view's editable title (no bullet) and its children list below from depth 0,
-  even if the node is folded. Enter in the title starts a first child; the caret, Mod+A, drags and drops stay inside
-  the subtree; the node itself is not indented, outdented, moved, merged or deleted from its own view, and its
-  direct children do not outdent out of it. A node deleted meanwhile shows "This node was deleted." with a way back.
+  even if the node is folded. Enter in the title starts a first child; the caret, Mod+A, drags and drops,
+  Backspace/Delete merges and the caret after a deletion stay inside the subtree; the node itself is not indented,
+  outdented, moved, merged or deleted from its own view, and its direct children do not outdent out of it: Enter on
+  its empty last child adds another child instead (as in Logseq), so repeated Enter and Shift+Tab keep every line
+  inside the subtree. A node deleted meanwhile shows "This node was deleted." with a way back.
 - Keys: `⌥→` zooms into the edited or selected node and `⌥←` goes up one level (node, parent, day, stream). On
   Windows and Linux they always apply; on the Mac, where `⌥←/→` move by word, they apply in block selection and
   while editing only from the node's end (`⌥→`) or start (`⌥←`). `⌘.`, `⌘,` and `⌘[` keep their app bindings;

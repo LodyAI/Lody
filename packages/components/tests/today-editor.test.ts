@@ -1382,6 +1382,101 @@ describe('Today focus view', () => {
     ctx.done();
   });
 
+  it('shows what was typed in a folded node’s subtree once the caret leaves the line', async () => {
+    const folded = await zoomed('a\n  b\n  c', 'a');
+    await act(async () => void folded.store.outline.setCollapsed(folded.id('a'), true));
+    const type = (value: string) =>
+      act(async () =>
+        folded.controller.editor.update(
+          () => {
+            $setSelectionOffsets($readComposerValue().text.length);
+            const selection = $getSelection();
+            if ($isRangeSelection(selection)) selection.insertText(value);
+          },
+          { discrete: true }
+        )
+      );
+    const blank = await act(async () => folded.store.outline.split(folded.id('c'), 1)!.nodeId);
+    expect(folded.surface.querySelector('[data-today-dot="quiet"]')).not.toBeNull();
+    await act(async () => folded.controller.activate(folded.store, blank, 'end'));
+    await type('new');
+    await act(async () => folded.controller.activate(folded.store, folded.id('b'), 'end'));
+    await type('!');
+    await act(async () => folded.controller.activate(folded.store, folded.id('a'), 'end'));
+    expect(folded.rows()).toEqual(['a', 'b!', 'c', 'new']);
+    expect(folded.surface.querySelector('[data-today-dot="quiet"]')).toBeNull();
+    folded.done();
+  });
+
+  it('repeated Enter on empty lines and Shift+Tab keep every line inside the zoomed node', async () => {
+    const ctx = await zoomed('a\n  b\n    c\n      d\ne', 'b');
+    const inside = () =>
+      ctx.store.outline.getAllNodes().every((node) => {
+        if (['a', 'b', 'e'].includes(node.text)) return true;
+        for (let id = node.parentId; id; id = ctx.store.outline.getNode(id)?.parentId ?? null) {
+          if (id === ctx.id('b')) return true;
+        }
+        return false;
+      });
+    const blank = await act(async () => ctx.store.outline.split(ctx.id('d'), 1)!.nodeId);
+    await act(async () => ctx.controller.activate(ctx.store, blank, 0));
+    for (let press = 0; press < 3; press += 1) {
+      await ctx.pressIn('Enter');
+      expect(inside()).toBe(true);
+    }
+    expect(ctx.rows()).toEqual(['b', 'c', 'd', '', '', '']);
+    for (const id of [ctx.id('d'), ctx.store.outline.childIds(ctx.id('b')).at(-1)!]) {
+      await act(async () => ctx.controller.activate(ctx.store, id, 0));
+      for (let press = 0; press < 3; press += 1) {
+        await ctx.pressIn('Tab', { shiftKey: true });
+        expect(inside()).toBe(true);
+      }
+      expect(ctx.store.outline.getNode(id)?.parentId).toBe(ctx.id('b'));
+    }
+    await act(async () => ctx.controller.selectBlocks(ctx.store, [ctx.id('c'), ctx.id('d')]));
+    await act(
+      async () =>
+        void ctx.controller.onBlockKey(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true }))
+    );
+    expect(inside()).toBe(true);
+    ctx.done();
+  });
+
+  it('inside a zoomed node, folded or not, merges and deletion take neighbours from its subtree', async () => {
+    const ctx = await zoomed('a\n  b\n  c\n  d\ne', 'a');
+    const press = async (key: string, atEnd: boolean) =>
+      act(async () => {
+        const editable = ctx.surface.querySelector<HTMLElement>('[contenteditable="true"]')!;
+        const text = editable.querySelector('span')!.firstChild!;
+        window.getSelection()!.collapse(text, atEnd ? text.textContent!.length : 0);
+        editable.dispatchEvent(
+          new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    await act(async () => ctx.controller.activate(ctx.store, ctx.id('d'), 'end'));
+    await press('Delete', true);
+    expect(ctx.store.outline.getAllNodes().map((node) => node.text)).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+      'e',
+    ]);
+    await act(async () => void ctx.store.outline.setCollapsed(ctx.id('a'), true));
+    await act(async () => ctx.controller.activate(ctx.store, ctx.id('c'), 0));
+    await press('Backspace', false);
+    expect(ctx.rows()).toEqual(['a', 'bc', 'd']);
+    await act(async () => ctx.controller.selectBlocks(ctx.store, [ctx.id('d')]));
+    await act(
+      async () => void ctx.controller.onBlockKey(new KeyboardEvent('keydown', { key: 'Backspace' }))
+    );
+    expect(ctx.rows()).toEqual(['a', 'bc']);
+    expect(ctx.controller.isActive(ctx.store, ctx.id('bc'))).toBe(true);
+    ctx.done();
+  });
+
   it('says the zoomed node is gone when a peer deletes it, and offers the way back', async () => {
     const ctx = await zoomed('a\n  b', 'b');
     await act(async () => void ctx.store.outline.deleteNodes([ctx.id('b')]));

@@ -114,11 +114,14 @@ export type TodayOutline = {
   insertFirst(text?: string): FocusIntent;
   /** `intoChildren`: the new line becomes the first child (a zoomed root's title). */
   split(id: TodayNodeId, offset: number, options?: { intoChildren?: boolean }): FocusIntent;
-  enterOnEmpty(id: TodayNodeId): FocusIntent;
-  mergeWithPrevious(id: TodayNodeId): FocusIntent;
-  mergeWithNext(id: TodayNodeId): FocusIntent;
+  /** `within`: a zoomed root; its empty last child gets a sibling instead of leaving it. */
+  enterOnEmpty(id: TodayNodeId, options?: { within?: TodayNodeId }): FocusIntent;
+  /** `within`: a zoomed root. The neighbour merged with is taken from its subtree's rows. */
+  mergeWithPrevious(id: TodayNodeId, options?: { within?: TodayNodeId }): FocusIntent;
+  mergeWithNext(id: TodayNodeId, options?: { within?: TodayNodeId }): FocusIntent;
   indent(ids: readonly TodayNodeId[]): boolean;
-  outdent(ids: readonly TodayNodeId[]): boolean;
+  /** `within`: a zoomed root. Nothing moves when a node would leave its subtree. */
+  outdent(ids: readonly TodayNodeId[], options?: { within?: TodayNodeId }): boolean;
   moveUp(ids: readonly TodayNodeId[]): boolean;
   moveDown(ids: readonly TodayNodeId[]): boolean;
   moveTo(ids: readonly TodayNodeId[], target: TodayMoveTarget): boolean;
@@ -135,7 +138,8 @@ export type TodayOutline = {
    */
   onViewChange(listener: () => void): () => void;
   dispose(): void;
-  deleteNodes(ids: readonly TodayNodeId[]): FocusIntent;
+  /** Focus moves to the previous surviving row (of a zoomed root's subtree with `within`). */
+  deleteNodes(ids: readonly TodayNodeId[], options?: { within?: TodayNodeId }): FocusIntent;
   /** Replace `deleteCount` characters at `offset` with one mention; the caret lands after it. */
   insertMention(
     id: TodayNodeId,
@@ -278,7 +282,15 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   let cachedSnapshot: TodayPageSnapshot | null = null;
   /** Row of each visible node in `cachedSnapshot`, and every node's last view. */
   let indexById = new Map<string, number>();
-  const subtreeCache = new Map<string, { from: TodayPageSnapshot; subtree: TodayPageSnapshot }>();
+  /**
+   * Bumped when text changes on a node the snapshot hides under a fold: the
+   * snapshot stays the same object then, but a zoomed subtree may show the node.
+   */
+  let hiddenTextRevision = 0;
+  const subtreeCache = new Map<
+    string,
+    { from: TodayPageSnapshot; revision: number; subtree: TodayPageSnapshot }
+  >();
   const viewById = new Map<string, TodayNodeView>();
   let structureDirty = true;
   const dirtyText = new Set<string>();
@@ -508,10 +520,17 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     for (const child of childrenOf(from)) child.move(to);
   };
 
-  const visibleNeighbour = (id: TodayNodeId, step: -1 | 1): TodayNodeView | undefined => {
-    const visible = outline.getSnapshot().visible;
-    const index = visible.findIndex((node) => node.id === id);
-    return index < 0 ? undefined : visible[index + step];
+  /** The rows the caret walks: the page's visible rows, or a zoomed root followed by its subtree. */
+  const visibleRows = (within?: TodayNodeId): TodayNodeId[] => {
+    if (!within) return outline.getSnapshot().visible.map((node) => node.id);
+    const subtree = outline.getSubtree(within);
+    return subtree ? [within, ...subtree.visible.map((node) => node.id)] : [];
+  };
+
+  const visibleNeighbour = (id: TodayNodeId, step: -1 | 1, within?: TodayNodeId) => {
+    const rows = visibleRows(within);
+    const index = rows.indexOf(id);
+    return index < 0 ? undefined : rows[index + step];
   };
 
   /** True when `candidate` is `ancestorId` or lies inside its subtree. */
@@ -642,7 +661,10 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
           }
           const rich = cachedRich(node);
           const index = indexById.get(id);
-          if (index === undefined) continue;
+          if (index === undefined) {
+            hiddenTextRevision += 1;
+            continue;
+          }
           if (!changed) visible = [...previous.visible];
           changed = true;
           const nodeView = {
@@ -727,7 +749,9 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       const snapshot = outline.getSnapshot();
       if (!live(rootId)) return null;
       const cached = subtreeCache.get(rootId);
-      if (cached && cached.from === snapshot) return cached.subtree;
+      if (cached && cached.from === snapshot && cached.revision === hiddenTextRevision) {
+        return cached.subtree;
+      }
       const previous = new Map(cached?.subtree.visible.map((row) => [row.id as string, row]));
       const visible: TodayNodeView[] = [];
       let isEmpty = true;
@@ -770,7 +794,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       visit(rootId, 0, rootId);
       const layout = cached && cached.from.layout === snapshot.layout ? cached.subtree.layout : {};
       const subtree = { visible, isEmpty, layout };
-      subtreeCache.set(rootId, { from: snapshot, subtree });
+      subtreeCache.set(rootId, { from: snapshot, revision: hiddenTextRevision, subtree });
       return subtree;
     },
     getNode: (id) => {
@@ -815,7 +839,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return { nodeId: created.id, offset: 0 };
     },
 
-    enterOnEmpty: (id) => {
+    enterOnEmpty: (id, options) => {
       const node = live(id);
       if (!node) return null;
       if (writeTodo(node, undefined)) {
@@ -824,7 +848,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       }
       const parent = node.parent();
       const siblings = siblingsOf(node);
-      if (parent && siblings.at(-1)?.id === node.id) {
+      if (parent && parent.id !== options?.within && siblings.at(-1)?.id === node.id) {
         node.moveAfter(parent);
         commit();
         return { nodeId: id, offset: 0 };
@@ -834,10 +858,10 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return { nodeId: created.id, offset: 0 };
     },
 
-    mergeWithPrevious: (id) => {
+    mergeWithPrevious: (id, options) => {
       const node = live(id);
-      const previousView = visibleNeighbour(id, -1);
-      const previous = previousView && live(previousView.id);
+      const previousId = visibleNeighbour(id, -1, options?.within);
+      const previous = previousId && live(previousId);
       if (!node || !previous) return null;
       const previousText = textOf(previous);
       if (!previousText) return null;
@@ -850,7 +874,13 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       insertTodayRich(previousText, offset, readRich(node));
       // Merging into a folded node would hide the merged line's children under
       // it: unfold it, as indenting under it does.
-      if (isCollapsed(previous) && childrenOf(previous).length > 0) writeFold(previous, false);
+      if (
+        previous.id !== options?.within &&
+        isCollapsed(previous) &&
+        childrenOf(previous).length > 0
+      ) {
+        writeFold(previous, false);
+      }
       if (isWithin(node, previous.id)) {
         // Merging a first child into its parent: its children take its place.
         for (const child of childrenOf(node)) child.moveBefore(node);
@@ -862,13 +892,13 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return { nodeId: previous.id, offset };
     },
 
-    mergeWithNext: (id) => {
+    mergeWithNext: (id, options) => {
       const node = live(id);
       const text = node && textOf(node);
       if (!node || !text) return null;
-      if (isCollapsed(node) && childrenOf(node).length > 0) return null;
-      const nextView = visibleNeighbour(id, 1);
-      const next = nextView && live(nextView.id);
+      if (id !== options?.within && isCollapsed(node) && childrenOf(node).length > 0) return null;
+      const nextId = visibleNeighbour(id, 1, options?.within);
+      const next = nextId && live(nextId);
       if (!next) return null;
       const offset = text.length;
       insertTodayRich(text, offset, readRich(next));
@@ -894,9 +924,12 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
 
     // Each run as if outdented on its own, last first, so an earlier run's
     // followers (its later siblings) are taken as they stand.
-    outdent: (ids) => {
+    outdent: (ids, options) => {
       const runs = siblingRuns(ids);
       if (!runs) return false;
+      if (options?.within && runs.some((run) => run[0]!.parent()?.id === options.within)) {
+        return false;
+      }
       let changed = false;
       for (const run of [...runs].reverse()) changed = outdentRun(run) || changed;
       if (changed) commit();
@@ -976,14 +1009,14 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       viewListeners.clear();
     },
 
-    deleteNodes: (ids) => {
+    deleteNodes: (ids, options) => {
       const nodes = liveAll(ids);
       if (!nodes) return null;
       const removed = new Set(ids);
-      const visible = outline.getSnapshot().visible;
-      const firstIndex = visible.findIndex((node) => removed.has(node.id));
-      const isRemoved = (candidate: TodayNodeView) =>
-        nodes.some((node) => isWithin(live(candidate.id), node.id));
+      const visible = visibleRows(options?.within);
+      const firstIndex = visible.findIndex((id) => removed.has(id));
+      const isRemoved = (candidate: TodayNodeId) =>
+        nodes.some((node) => isWithin(live(candidate), node.id));
       const survivor =
         visible
           .slice(0, Math.max(firstIndex, 0))
@@ -996,7 +1029,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
         }
       }
       commit();
-      return survivor ? { nodeId: survivor.id, offset: 'end' } : null;
+      return survivor ? { nodeId: survivor, offset: 'end' } : null;
     },
 
     insertMention: (id, offset, deleteCount, mention) => {
