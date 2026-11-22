@@ -76,6 +76,8 @@ function appendAttachment(
 
   attachments.set(image.imageId, {
     imageId: image.imageId,
+    encryption: image.encryption,
+    storageSessionId: image.storageSessionId,
     mimeType: image.mimeType,
     fileName: buildAttachmentFileName(image),
     originalFileName: normalizeString(image.fileName),

@@ -1,4 +1,5 @@
 import type {
+  EncryptedAttachment,
   MessageContent,
   SessionHistoryInput,
   SessionMeta,
@@ -67,6 +68,8 @@ export type ExportSystemNoticeRecord = {
 
 export type ExportAttachmentRecord = {
   imageId: string;
+  encryption?: EncryptedAttachment;
+  storageSessionId?: string;
   mimeType: string;
   fileName: string | null;
   originalFileName: string | null;

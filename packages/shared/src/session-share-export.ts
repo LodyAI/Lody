@@ -237,6 +237,7 @@ export async function prepareSharePackage(options: {
         reference[copy.source.kind === 'image' ? 'imageId' : 'fileId'] = copy.id;
         reference.sizeBytes = descriptor.sizeBytes;
         reference.mimeType = loaded.mediaType;
+        delete reference.encryption;
         delete reference.storageSessionId;
         delete reference.machineId;
         delete reference.sourcePath;

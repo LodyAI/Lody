@@ -1,4 +1,6 @@
 import { it, expect, vi } from 'vitest';
+import { uploadEncryptedAttachment } from '@lody/shared';
+import { SHARE_LIMITS } from '@lody/shared/session-sharing';
 import { decodeShareHistoryBytes } from '@lody/shared/session-sharing';
 import { captureSessionShare } from '../src/lib/session-share-publisher';
 vi.mock('@/lib', () => ({ API_BASE_URL: 'https://api.example.test' }));
@@ -151,3 +153,86 @@ it('reports image download failures and still releases the source', async () => 
     vi.unstubAllGlobals();
   }
 });
+
+it.each(['success', 'oversized', 'missing-manifest', 'tampered'])(
+  'reads protected share image bytes: %s',
+  async (scenario) => {
+    const plain = new Uint8Array([1, 2, 3]);
+    let sealed: Uint8Array = new Uint8Array();
+    const { encryption } = await uploadEncryptedAttachment({
+      workspaceId: 'workspace',
+      sessionId: 'original',
+      kind: 'image',
+      fileName: 'private.png',
+      mimeType: 'image/png',
+      sizeBytes: plain.length,
+      read: async () => plain.slice(),
+      upload: async (bytes) => {
+        sealed = bytes;
+        return 'ciphertext';
+      },
+    });
+    if (scenario === 'tampered') sealed[0] ^= 1;
+    if (scenario === 'oversized') encryption.sizeBytes = SHARE_LIMITS.imageBytes + 1;
+    const image = {
+      type: 'image',
+      imageId: 'ciphertext',
+      storageSessionId: 'original',
+      fileName: 'private.png',
+      mimeType: 'image/png',
+      sizeBytes: plain.length,
+      ...(scenario === 'missing-manifest' ? {} : { encryption }),
+    };
+    const runtime = {
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+      attachmentToken: async () => 'attachment-grant',
+      prepareSessionTarget: async () => {},
+      acquireSessionStore: async () => ({
+        sessionId: 'root',
+        firstSynced: Promise.resolve(),
+        acquireSync: () => () => {},
+        sessionData: {
+          history: { readAll: async () => [{ id: 'turn', role: 'user', items: [image] }] },
+        },
+      }),
+      releaseSessionStoreRef: () => {},
+    };
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', async (url: URL, init: RequestInit) => {
+      requests.push(String(url));
+      if (scenario === 'oversized' || scenario === 'missing-manifest')
+        throw new Error('Unexpected attachment request');
+      expect(String(url)).toContain('/session-encrypted-images/original/ciphertext');
+      expect(new Headers(init.headers).get('Authorization')).toBe('Bearer attachment-grant');
+      return new Response(sealed as Uint8Array<ArrayBuffer>);
+    });
+    try {
+      const capturing = captureSessionShare({
+        runtime,
+        sessions: [{ id: 'root' }],
+        rootSessionId: 'root',
+        token: 'ordinary-token',
+        signal: new AbortController().signal,
+      } as unknown as Parameters<typeof captureSessionShare>[0]);
+      if (scenario !== 'success') {
+        await expect(capturing).rejects.toThrow('Share attachment unavailable');
+        if (scenario !== 'tampered') expect(requests).toEqual([]);
+        return;
+      }
+      const result = await capturing;
+      const attachment = result.manifest.objects.find((object) => object.id === 'a1')!;
+      expect(attachment.mediaType).toBe('image/png');
+      expect(result.objects.get('a1')).toEqual(plain);
+      const history = result.manifest.objects.find((object) => object.id === 'h1')!;
+      const captured = JSON.parse(
+        new TextDecoder().decode(decodeShareHistoryBytes(result.objects.get('h1')!, history))
+      );
+      expect(captured[0].items[0]).toMatchObject({ imageId: 'a1', mimeType: 'image/png' });
+      expect(captured[0].items[0]).not.toHaveProperty('encryption');
+      expect(image.encryption).toBe(encryption);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+);

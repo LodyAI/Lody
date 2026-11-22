@@ -1,5 +1,7 @@
 import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { LoroRepo } from 'loro-repo';
+import { uploadEncryptedAttachment } from '@lody/shared';
+import { downloadSessionAttachment } from './image-downloader';
 import { type SessionMeta, type WorkspaceId } from '@lody/shared';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,6 +13,8 @@ import { toExportSessionSummary } from './formatters';
 import { buildTranscriptMarkdown } from './markdown';
 import { prepareExportOutputDir } from './output-dir';
 
+vi.mock('@/utils/const', () => ({ LODY_SERVER_URL: 'https://api.example.test' }));
+
 vi.mock('./workspace-usage', () => ({
   fetchWorkspaceUsageBundle: async () => ({ summary: {}, timelines: [] }),
 }));
@@ -19,12 +23,42 @@ it('writes decrypted sessions and encrypted Schedule definitions to the local ex
   const root = await mkdtemp(path.join(tmpdir(), 'lody-encrypted-export-'));
   const outputDir = path.join(root, 'export');
   const session = { id: 'synthetic', title: 'Private export', createdAt: '2026-01-01T00:00:00Z' };
+  let sealed: Uint8Array = new Uint8Array();
+  const { encryption } = await uploadEncryptedAttachment({
+    workspaceId: 'protected',
+    sessionId: 'original',
+    kind: 'image',
+    fileName: 'private.png',
+    mimeType: 'image/png',
+    sizeBytes: 3,
+    read: async () => new Uint8Array([1, 2, 3]),
+    upload: async (bytes) => {
+      sealed = bytes;
+      return 'ciphertext';
+    },
+  });
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    expect(String(url)).toContain('/session-encrypted-images/original/ciphertext');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer attachment-grant');
+    return new Response(sealed as Uint8Array<ArrayBuffer>);
+  });
   const history = [
     {
       id: 'turn',
       role: 'user',
       timestamp: session.createdAt,
-      items: [{ type: 'text', text: 'SYNTHETIC_DECRYPTED_EXPORT' }],
+      items: [
+        { type: 'text', text: 'SYNTHETIC_DECRYPTED_EXPORT' },
+        {
+          type: 'image',
+          imageId: 'ciphertext',
+          storageSessionId: 'original',
+          encryption,
+          mimeType: 'image/png',
+          fileName: 'private.png',
+          sizeBytes: 3,
+        },
+      ],
     },
   ];
   const repo = await LoroRepo.create({});
@@ -55,6 +89,7 @@ it('writes decrypted sessions and encrypted Schedule definitions to the local ex
   const manager = {
     repo,
     getSessionHistorySnapshot: async () => history,
+    getEncryptedAttachmentToken: async () => 'attachment-grant',
   } as unknown as LoroDocumentManager;
   try {
     const result = await exportWorkspaceData({
@@ -67,8 +102,19 @@ it('writes decrypted sessions and encrypted Schedule definitions to the local ex
       },
       cliToken: 'synthetic',
       outputDir,
-      downloadImages: false,
+      downloadImages: true,
     });
+    expect(result.warnings).toEqual([]);
+    const attachments = JSON.parse(
+      await readFile(
+        path.join(outputDir, 'sessions/synthetic/artifacts/attachments/index.json'),
+        'utf8'
+      )
+    );
+    expect(attachments[0]).toMatchObject({ mimeType: 'image/png', sizeBytes: 3 });
+    expect(
+      await readFile(path.join(outputDir, 'sessions/synthetic', attachments[0].relativePath))
+    ).toEqual(Buffer.from([1, 2, 3]));
     expect(result.manifest).toMatchObject({ sessionCount: 1, scheduleCount: 1 });
     expect(
       await readFile(path.join(outputDir, 'sessions/synthetic/transcript.md'), 'utf8')
@@ -80,6 +126,7 @@ it('writes decrypted sessions and encrypted Schedule definitions to the local ex
       await readFile(path.join(outputDir, 'schedules/synthetic-schedule/schedule.md'), 'utf8')
     ).toContain('SYNTHETIC_SCHEDULE_EXPORT');
   } finally {
+    vi.unstubAllGlobals();
     await repo.destroy();
     await rm(root, { recursive: true, force: true });
   }
@@ -165,3 +212,63 @@ describe('prepareExportOutputDir', () => {
     await expect(prepareExportOutputDir(target)).rejects.toThrow(/Output directory is not empty/);
   });
 });
+
+it.each(['missing-manifest', 'missing-credentials', 'unavailable-key'])(
+  'skips encrypted export images with a warning: %s',
+  async (scenario) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'lody-export-missing-'));
+    const { encryption } = await uploadEncryptedAttachment({
+      workspaceId: 'protected',
+      sessionId: 'session',
+      kind: 'image',
+      fileName: 'private.png',
+      mimeType: 'image/png',
+      sizeBytes: 1,
+      read: async () => new Uint8Array([1]),
+      upload: async () => 'ciphertext',
+    });
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      requests.push(String(url));
+      throw new Error('Unexpected request');
+    });
+    try {
+      const result = await downloadSessionAttachment({
+        workspaceId: 'protected',
+        sessionId: 'session',
+        authToken: 'ordinary-token',
+        sessionDir: root,
+        contentMode: 'e2ee',
+        attachmentToken:
+          scenario === 'missing-credentials'
+            ? undefined
+            : async () => {
+                throw new Error('E2EE key unavailable');
+              },
+        attachment: {
+          imageId: 'ciphertext',
+          mimeType: 'image/png',
+          fileName: 'private.png',
+          originalFileName: 'private.png',
+          sizeBytes: 1,
+          width: null,
+          height: null,
+          sourceTurnIds: ['turn'],
+          relativePath: 'image.png',
+          ...(scenario === 'missing-manifest' ? {} : { encryption }),
+        },
+      });
+      expect(result.attachment.relativePath).toBeNull();
+      expect(result.warning).toContain(
+        scenario === 'unavailable-key' ? 'E2EE key unavailable' : 'missing E2EE'
+      );
+      expect(requests).toEqual([]);
+      await expect(readFile(path.join(root, 'image.png'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+);

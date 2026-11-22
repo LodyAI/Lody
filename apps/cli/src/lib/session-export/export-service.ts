@@ -110,6 +110,7 @@ async function exportSession(args: {
   cliToken: string;
   outputDir: string;
   downloadImages: boolean;
+  contentMode?: string;
   warnings: string[];
 }): Promise<SessionIndexEntry> {
   const sessionDirName = encodeExportPathSegment(args.session.id, 'session');
@@ -130,6 +131,8 @@ async function exportSession(args: {
           authToken: args.cliToken,
           sessionDir,
           attachment,
+          contentMode: args.contentMode,
+          attachmentToken: () => args.manager.getEncryptedAttachmentToken(),
         });
         if (downloaded.warning) {
           args.warnings.push(
@@ -187,6 +190,7 @@ export async function exportWorkspaceData(
         cliToken: options.cliToken,
         outputDir: options.outputDir,
         downloadImages,
+        contentMode: options.workspace.contentMode,
         warnings,
       })
   );

@@ -142,6 +142,8 @@ fixed Session/Turn IDs; daemon recovery consumes these instead of source paths.
 
 The transfer selects the encrypted-file route only for an admitted encrypted workspace and obtains a short-lived attachment grant from its host-owned device credential. Paired machine ports receive the relay URL explicitly from cloud startup, without restoring an account CLI token. Files and images upload bounded opaque parts; the protected conversation stores the secret manifest. Downloads authenticate parts before materialization, and local backfill retains that manifest with its crash-recovery receipt. The [file-key decision](../notes/implemented/architecture/2026-10-28-encrypted-attachments.md) explains rotation, retention and failure trade-offs. Ordinary transfer paths remain unchanged.
 
+Session exports retain each image manifest and source Session ID through the download step, then use the existing authenticated image reader to write decrypted bytes. Missing protected manifests or attachment credentials produce a warning and no local attachment link; they never select ordinary image routes. Public shares likewise use the protected attachment reader and remove the original secret manifest after copying the plaintext into the share package.
+
 ### Local reference integration boundaries
 
 Initial session prompts and subsequent turns use the attachment path directly.
