@@ -44,6 +44,10 @@ See [build requirements](BUILDING.md#iphone-duo) and the
 
 ### iPhone Home Screen widgets
 
+Encrypted workspaces disable Live Activity summaries and Home Screen widgets.
+Switching into one ends the activity and clears the widget snapshots; decrypted
+session titles, permission commands and agent names stay inside the app.
+
 The **Conversation progress** widget supports small and medium sizes. The small
 widget features one conversation; the medium widget shows up to three, with task
 title, agent, status and recent activity. Conversations waiting for your response

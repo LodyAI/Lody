@@ -10,9 +10,11 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import uniffi.lody_iroh_uniffi.IrohException
 import uniffi.lody_iroh_uniffi.MobileIrohCall
@@ -27,6 +29,7 @@ import uniffi.lody_iroh_uniffi.openMobileEndpoint
 @CapacitorPlugin(name = "LodyIroh")
 class LodyIrohPlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var destroyed = false
     private val endpoints = ConcurrentHashMap<String, MobileIrohEndpoint>()
     private val calls = ConcurrentHashMap<String, MobileIrohCall>()
 
@@ -69,7 +72,13 @@ class LodyIrohPlugin : Plugin() {
             // test build's VITE_IROH_PROXY_URL; release builds never set it.
             val opened = openMobileEndpoint(seed, relays, call.getString("relayToken"), call.getString("proxyUrl"))
             val id = UUID.randomUUID().toString()
-            endpoints[id] = opened
+            val retained = synchronized(endpoints) {
+                if (destroyed) false else { endpoints[id] = opened; true }
+            }
+            if (!retained) {
+                withContext(NonCancellable) { opened.shutdown() }
+                throw IrohException.Failed("iroh_closed")
+            }
             result("handle" to id)
         } finally {
             seed.fill(0)
@@ -100,7 +109,13 @@ class LodyIrohPlugin : Plugin() {
             millis(call, "connectTimeoutMs"),
         )
         val id = UUID.randomUUID().toString()
-        calls[id] = started
+        synchronized(endpoints) {
+            if (destroyed) {
+                started.cancel()
+                throw IrohException.Failed("iroh_closed")
+            }
+            calls[id] = started
+        }
         result("call" to id)
     }
 
@@ -124,15 +139,24 @@ class LodyIrohPlugin : Plugin() {
 
     @PluginMethod
     fun close(call: PluginCall) = run(call) {
-        endpoints.remove(string(call, "handle"))?.shutdown()
+        withContext(NonCancellable) { endpoints.remove(string(call, "handle"))?.shutdown() }
         JSObject()
     }
 
     override fun handleOnDestroy() {
-        calls.values.forEach { it.cancel() }
-        calls.clear()
-        endpoints.clear()
+        val closing = synchronized(endpoints) {
+            destroyed = true
+            calls.values.forEach { it.cancel() }
+            calls.clear()
+            endpoints.values.toList().also { endpoints.clear() }
+        }
         scope.cancel()
+        CoroutineScope(Dispatchers.IO).launch {
+            closing.forEach { endpoint ->
+                runCatching { endpoint.shutdown() }
+            }
+        }
+        super.handleOnDestroy()
     }
 
     private companion object {

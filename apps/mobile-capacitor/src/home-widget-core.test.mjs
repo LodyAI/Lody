@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   createHomeWidgetSync,
   resolveHomeWidgetScope,
+  resolveHomeWidgetIdentity,
   toHomeWidgetConversations,
 } from './home-widget-core.ts';
 import {
@@ -950,4 +951,35 @@ void test('quota logout clear survives a pending native write, disposal and late
   await f.flush();
   assert.equal(f.cache.get('quota'), null);
   await f.finishSignOut();
+});
+
+void test('encrypted workspace identity clears conversation and provider quota snapshots', async (t) => {
+  const f = await publishedWidgetFixture(t);
+  await f.setQuotaSources(quotaFixtureSource());
+  await f.startQuota();
+  await f.flush();
+  assert.ok(f.cache.get('conversation').items.length > 0);
+  assert.ok(f.cache.get('quota').providers.length > 0);
+  await f.change(() => {
+    const runtime = { ...f.store.get(f.runtime.runtimeAtom), contentMode: 'e2ee' };
+    f.store.set(f.runtime.runtimeAtom, runtime);
+    assert.equal(
+      resolveHomeWidgetIdentity({
+        userId: runtime.accountId,
+        hasAuthToken: true,
+        slug: runtime.workspaceSlug,
+        runtime,
+      }),
+      null
+    );
+  });
+  await f.flush();
+  assert.equal(f.store.get(f.scopeAtom), null);
+  assert.equal(f.cache.get('conversation'), null);
+  assert.equal(f.cache.get('quota'), null);
+  await f.setTask('Decrypted title must stay private');
+  await f.setQuotaSources(quotaFixtureSource(80));
+  await f.flush();
+  assert.equal(f.cache.get('conversation'), null);
+  assert.equal(f.cache.get('quota'), null);
 });

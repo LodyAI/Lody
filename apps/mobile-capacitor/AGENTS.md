@@ -116,6 +116,10 @@ Read those invariants before editing their Swift or image assets.
 
 ## Home Screen widgets
 
+Encrypted workspaces disable Live Activity summaries and widget publication and
+clear existing native snapshots; decrypted workspace content never enters ActivityKit
+or App Group storage.
+
 Require matched auth/runtime/workspace; latch logout per page. Token queries use
 identity; metadata reads require readiness. Pending may retain only decoded
 same-owner snapshots without renewing age. Join raw writes; drain clears/retries

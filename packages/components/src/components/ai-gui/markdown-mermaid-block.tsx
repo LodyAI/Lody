@@ -1,6 +1,9 @@
 import { memo, useEffect, useRef, useState, type RefObject } from 'react';
 import { Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { isNativeAppShell } from '@/lib/native-platform';
+import { shareFileBytesNatively } from '@/lib/session-file-native-save';
+import { toast } from '@/lib/toast';
 import { downloadBytesAsFile } from '@/lib/download-file';
 import { Menu } from '@/ui/armed-overlays';
 import { CodeBlockCopyButton } from './markdown-code-block';
@@ -83,6 +86,12 @@ function MermaidDownloadMenu({
   hostRef: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
+  const save = async (fileName: string, bytes: Uint8Array) => {
+    if (isNativeAppShell()) await shareFileBytesNatively(fileName, bytes);
+    else downloadBytesAsFile(fileName, bytes);
+  };
+  const reportExportFailure = () =>
+    toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
   const label = t('sessions.diagram.download', 'Download diagram');
   // A file leaves the themed block, so it carries the colors in effect now.
   const exportSvg = () =>
@@ -98,7 +107,7 @@ function MermaidDownloadMenu({
           disabled={!svg}
           onClick={() => {
             const file = exportSvg();
-            if (file) downloadBytesAsFile('diagram.svg', encodeText(file));
+            if (file) void save('diagram.svg', encodeText(file)).catch(reportExportFailure);
           }}
         >
           {t('sessions.diagram.downloadSvg', 'SVG')}
@@ -109,13 +118,17 @@ function MermaidDownloadMenu({
             const file = exportSvg();
             if (!file) return;
             void svgToPngBytes(file)
-              .then((bytes) => downloadBytesAsFile('diagram.png', bytes))
-              .catch((error: unknown) => console.warn('[Lody] Diagram PNG export failed.', error));
+              .then((bytes) => save('diagram.png', bytes))
+              .catch(reportExportFailure);
           }}
         >
           {t('sessions.diagram.downloadPng', 'PNG')}
         </Menu.Item>
-        <Menu.Item onClick={() => downloadBytesAsFile('diagram.mmd', encodeText(code))}>
+        <Menu.Item
+          onClick={() => {
+            void save('diagram.mmd', encodeText(code)).catch(reportExportFailure);
+          }}
+        >
           {t('sessions.diagram.downloadSource', 'Mermaid source')}
         </Menu.Item>
       </Menu.Content>
