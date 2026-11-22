@@ -55,12 +55,14 @@ see [observe scopes](../../commands/session-observe-runtime.ts).
 
 ## Streams cursors are replica-bound
 
-Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `createRepoStreamsPersistence`, LoroDoc cursors from
-`createDocumentRemoteCursorStore` (shared rows: daemon only). No shared
-`remoteCursorStore` or schedule-only `onPersist*`. Test:
+Per identity, share `repo.sqlite3`, not replicas. Meta/Flock cursors use
+`createRepoStreamsPersistence`. Only the daemon writes shared LoroDoc cursors.
+Process seeds require nonempty peer clocks covered by the synchronized document;
+process saves and deletions stay in memory. The [decision](../../../../../.agents/notes/implemented/architecture/2026-09-27-loro-repo-flock-persistence-migration.md)
+explains why unchecked shared reads lose data. Never use a shared `remoteCursorStore`
+or schedule-only `onPersist*`. The incomplete-recovery scope survives reattachment.
+One-shot managers disable cloud ephemeral sinks. Test:
 `tests/cli-streams-replica-checkpoints.test.ts`.
-
-The manager's incomplete-recovery scope survives cloud reattachment; cursors remain replica-bound.
 
 ## Shared ACP runtime config contains no secrets
 
@@ -69,6 +71,8 @@ workspace-shared runtime baseline. It must remove every option id matched by
 `isSensitiveAcpConfigOptionId`, even when an upstream caller already filtered the
 ACP response; otherwise a future agent can persist and broadcast credential-like
 selector values to collaborators.
+
+One-shot command managers disable cloud ephemeral sinks while keeping durable Streams sync.
 
 ## Presence is ephemeral and partitioned by origin
 

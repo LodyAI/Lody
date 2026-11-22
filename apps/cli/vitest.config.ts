@@ -12,6 +12,7 @@ const isolatedFiles = new Set([
   // Factory registration and live Flock timers outlive their importing module.
   'src/session/session-backend.test.ts',
   'tests/streams-relay-authorship.repro.test.ts',
+  'tests/cli-streams-replica-checkpoints.test.ts',
   'src/lib/loro/presence.test.ts',
   // These suites replace process.env itself; Vitest retains the original object
   // for vi.stubEnv, so subsequent files must start with fresh worker state.

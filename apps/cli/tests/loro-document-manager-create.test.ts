@@ -189,7 +189,10 @@ vi.mock('@/utils/http-transport', () => ({
 
 import { LoroDocumentManager } from '../src/lib/loro/doc';
 import { withWorkspaceManager } from '../src/lib/command-runtime';
-import { createCliSqliteRepoStore } from '../src/lib/loro/sqlite-repo-store';
+import {
+  ProcessDocumentRemoteCursorStore,
+  createCliSqliteRepoStore,
+} from '../src/lib/loro/sqlite-repo-store';
 import * as timeoutUtils from '../src/lib/loro/timeout-utils';
 
 const testStreamsTokens = {
@@ -736,7 +739,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     // One-shot commands do not pass a cursor scope: their LoroDoc progress must
     // stay in this process's memory, never the daemon's shared SQLite cursors.
     expect(mocks.transportOptions[0]).toMatchObject({
-      persistence: { documentRemoteCursorStore: expect.any(InMemoryRemoteCursorStore) },
+      persistence: { documentRemoteCursorStore: expect.any(ProcessDocumentRemoteCursorStore) },
     });
 
     await manager.cleanUp({ fast: true });
