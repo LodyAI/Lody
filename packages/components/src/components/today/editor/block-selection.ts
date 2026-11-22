@@ -7,6 +7,7 @@ import {
   type TodayMentionTarget,
   type TodayNodeId,
   type TodayNodeView,
+  type TodayRichText,
 } from '@lody/shared';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { isImeKey, type OutlineKeyEvent } from './outline-keys';
@@ -63,6 +64,8 @@ export type BlockIntent =
   | { type: 'move-down' }
   | { type: 'select-all' }
   | { type: 'cycle-todo' }
+  | { type: 'zoom-in' }
+  | { type: 'zoom-out' }
   | { type: 'undo' }
   | { type: 'redo' };
 
@@ -93,6 +96,10 @@ export function resolveBlockKey(
       if (mod || event.altKey) return null;
       return { type: 'step', step };
     }
+    case 'ArrowLeft':
+    case 'ArrowRight':
+      if (!event.altKey || event.shiftKey || event.metaKey || event.ctrlKey) return null;
+      return { type: event.key === 'ArrowRight' ? 'zoom-in' : 'zoom-out' };
     case 'a':
     case 'A':
       return mod ? { type: 'select-all' } : null;
@@ -278,8 +285,23 @@ export function parseTodayClipboard(data: {
   return fragments.length > 0 ? fragments : null;
 }
 
-/** "Convert to task" prompt: the node's text, then its subtree as an indented list. */
-export function buildConvertPrompt(fragment: TodayFragment, mentionText: TodayMentionText): string {
+/**
+ * "Convert to task" prompt: the node's text, then its subtree as an indented
+ * list. With `ancestors` (outermost first) the whole path is one indented
+ * list, the node nested under its parents with its subtree below it.
+ */
+export function buildConvertPrompt(
+  fragment: TodayFragment,
+  mentionText: TodayMentionText,
+  ancestors: readonly TodayRichText[] = []
+): string {
+  if (ancestors.length > 0) {
+    const chain = ancestors.reduceRight<TodayFragment>(
+      (child, ancestor) => ({ ...ancestor, children: [child] }),
+      fragment
+    );
+    return serializeTodayFragments([chain], mentionText);
+  }
   // Mentions reach the agent as conversation links.
   const head = todayRichToPlain(fragment, mentionText);
   const children = serializeTodayFragments(fragment.children, mentionText);
@@ -310,6 +332,39 @@ export function selectionCovers(
     }
   }
   return covered;
+}
+
+/**
+ * The next `Mod+A` step of a block selection: the parent of a single selected
+ * node, the lowest common ancestor of several, and the day's top-level nodes
+ * once there is no ancestor left. Null when the day is already selected.
+ * Behavior: specs/today-outline.md (Outline editing).
+ */
+export function escalateSelection(
+  visible: readonly TodayNodeView[],
+  ids: readonly TodayNodeId[]
+): TodayNodeId[] | null {
+  const byId = new Map(visible.map((node) => [node.id, node] as const));
+  const roots = topLevelSelection(visible, ids);
+  const dayRoots = visible.filter((node) => node.depth === 0).map((node) => node.id);
+  const chain = (id: TodayNodeId) => {
+    const out: TodayNodeId[] = [];
+    for (let parent = byId.get(id)?.parentId ?? null; parent;) {
+      out.push(parent);
+      parent = byId.get(parent)?.parentId ?? null;
+    }
+    return out;
+  };
+  let common: TodayNodeId[] | null = null;
+  for (const root of roots) {
+    const ancestors = chain(root);
+    common = common === null ? ancestors : common.filter((id) => ancestors.includes(id));
+  }
+  const ancestor = common?.[0];
+  if (ancestor) return [ancestor];
+  const all = new Set(roots);
+  if (dayRoots.length === 0 || dayRoots.every((id) => all.has(id))) return null;
+  return dayRoots;
 }
 
 /**
