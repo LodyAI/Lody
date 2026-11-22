@@ -407,7 +407,16 @@ follows a pull attempt rather than an empty local room. An offline cold read
 still sees only local state.
 
 The keyring and snapshot policy live in engine memory, so they are reinstalled on
-every reconnect (host restart or build handoff). `refresh()` reruns the install
+every reconnect (host restart or build handoff). Until that reinstall, the engine refuses
+a local write to an encrypted room that names this process's writer
+(`WRITER_NOT_BOUND`), because only the connection that installed a seed may write
+as it. The attachment therefore tracks whether its writer is bound
+(`setNativeWriterState`). Every write that names the writer goes through
+`withNativeWriter`: it waits, bounded at 30 s, until the writer is bound, and on a
+`WRITER_NOT_BOUND` refusal it waits for the next install and writes again. A
+streamed turn or a renderer patch in a host-restart window therefore lands once
+the seed is back, instead of failing. A read-only or retired writer has no seed to
+wait for and fails at once. `refresh()` reruns the install
 for the Spec's notification table. Daemon and main share the namespace, and each
 installs its own writer. The engine seals a writer's rows only for the connection
 that installed its seed (K1), so every local write names this process's writer

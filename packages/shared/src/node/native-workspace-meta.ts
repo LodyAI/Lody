@@ -20,6 +20,7 @@ import {
   nativeWriteOptions,
   observeFlock,
   syncNativeColdRooms,
+  withNativeWriter,
   type FlockObservation,
 } from './native-repo';
 
@@ -289,12 +290,14 @@ export function createNativeWorkspaceMeta(
       let txId: number;
       try {
         txId = (
-          await client.flockBatchConditional(
-            namespace,
-            META_ROOM,
-            ops,
-            read.readSet,
-            nativeWriteOptions(client, namespace)
+          await withNativeWriter(client, namespace, () =>
+            client.flockBatchConditional(
+              namespace,
+              META_ROOM,
+              ops,
+              read.readSet,
+              nativeWriteOptions(client, namespace)
+            )
           )
         ).txId;
       } catch (error) {
