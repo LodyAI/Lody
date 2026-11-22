@@ -60,11 +60,16 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
   useAgentRoleMentionItems: () => [],
 }));
 
+import { Provider, createStore } from 'jotai';
+import { currentWorkspaceIdAtom } from '../src/atoms';
 import { UserMessageEditor } from '../src/components/ai-gui/user-message-editor';
 import { CombinedMentionTextarea } from '../src/components/mentions/combined-mention-textarea';
+import { __resetIssuePrFetchFreshnessForTests } from '../src/components/mentions/issue-pr-hash-mention';
 import { composerIn } from './composer-test-utils';
 import { initI18n } from '../src/i18n';
 import { commands } from '../src/lib/commands';
+import { invalidateGitHubTokensForWorkspace } from '../src/lib/github-token';
+import { installGitHubTokenPort } from '../src/lib/github-token-port';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -90,6 +95,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    __resetIssuePrFetchFreshnessForTests();
     vi.useRealTimers();
     container.remove();
     if (originalScrollIntoView) {
@@ -103,14 +109,19 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
 
   async function render(props: {
     value: string;
+    workspaceId?: string;
     skillAgent?: { machineId?: string; cliType?: string };
     mentionSource?: unknown;
     commandsEnabled?: boolean;
     availableCommands?: Array<{ name: string; description: string }>;
   }) {
+    const store = props.workspaceId ? createStore() : null;
+    if (store && props.workspaceId) {
+      store.set(currentWorkspaceIdAtom, props.workspaceId as never);
+    }
     function ControlledComposer() {
       const [value, setValue] = React.useState(props.value);
-      return (
+      const content = (
         <CombinedMentionTextarea
           value={value}
           onValueChange={setValue}
@@ -121,6 +132,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
           resetOnEmpty={false}
         />
       );
+      return store ? <Provider store={store}>{content}</Provider> : content;
     }
 
     await act(async () => {
@@ -568,5 +580,110 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     });
     expect(textarea()!.value).toBe(`${trigger}unknown`);
     expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
+  });
+
+  it('hides Issues and Pull Requests for unlinked repositories and recovers once linked', async () => {
+    let repoLinked = false;
+    let tokenRequests = 0;
+    const uninstallPort = installGitHubTokenPort({
+      getRepoToken: async () => {
+        tokenRequests += 1;
+        if (!repoLinked) {
+          return {
+            success: false,
+            errorCode: 'repo_not_linked',
+            errorMessage:
+              'Repository acme/unlinked is not linked to your workspace. Add it in Settings → Integrations → GitHub.',
+          };
+        }
+        return {
+          success: true,
+          token: 'ghs_linked',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        };
+      },
+      getOperationToken: async () => ({
+        success: false,
+        errorCode: 'repo_not_linked',
+        errorMessage: 'not linked',
+      }),
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify([
+          {
+            number: 42,
+            title: 'Linked repo issue',
+            state: 'open',
+            updated_at: '2026-01-01T00:00:00Z',
+            html_url: 'https://github.com/acme/unlinked/issues/42',
+          },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    try {
+      await render({
+        value: '',
+        workspaceId: 'ws-1',
+        mentionSource: {
+          kind: 'github',
+          repoFullName: 'acme/unlinked',
+          issuePrEnabled: false,
+        },
+      });
+      await typeInto('@');
+      expect(document.body.textContent).toContain('Files');
+      expect(document.body.textContent).not.toContain('Issues');
+      expect(document.body.textContent).not.toContain('Pull Requests');
+      expect(tokenRequests).toBe(0);
+
+      await render({
+        value: '',
+        workspaceId: 'ws-1',
+        mentionSource: {
+          kind: 'local',
+          machineId: 'machine-1',
+          workspaceId: 'ws-1',
+          localProjectId: 'project-1',
+          githubRepoFullName: 'acme/unlinked',
+        },
+      });
+      await typeInto('@linked');
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(tokenRequests).toBe(1);
+      expect(document.body.textContent).not.toContain('is not linked to your workspace');
+      expect(document.querySelector('[role="alert"]')).toBeNull();
+      expect(document.body.textContent).not.toContain('Issues');
+      expect(document.body.textContent).not.toContain('Pull Requests');
+
+      await typeInto('');
+      await typeInto('@again');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(tokenRequests).toBe(1);
+      expect(document.body.textContent).not.toContain('Issues');
+
+      repoLinked = true;
+      await act(async () => {
+        invalidateGitHubTokensForWorkspace('ws-1');
+      });
+      await typeInto('');
+      await typeInto('@Linked');
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(document.body.textContent).toContain('Linked repo issue');
+    } finally {
+      fetchSpy.mockRestore();
+      uninstallPort();
+    }
   });
 });

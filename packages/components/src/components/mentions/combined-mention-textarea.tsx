@@ -57,6 +57,7 @@ import {
   SKILL_MENTION_TRIGGER_ALIASES,
   SkillMentionHydrator,
   getAllowedSkillMentionDirs,
+  hasProjectSkillSource,
   type SkillMentionAgent,
   type SkillMentionItem,
   useMentionProjectSkills,
@@ -846,9 +847,19 @@ export const CombinedMentionTextarea = React.forwardRef<
             ? mentionSource.githubRepoFullName
             : undefined;
     const githubRepoIsPublic =
-      mentionSource?.kind === 'github' || mentionSource?.kind === 'provider'
+      mentionSource?.kind === 'github' ||
+      mentionSource?.kind === 'local' ||
+      mentionSource?.kind === 'provider'
         ? mentionSource.isPublic
         : undefined;
+    const issuePrAllowedBySource =
+      mentionSource?.kind === 'github' || mentionSource?.kind === 'provider'
+        ? mentionSource.issuePrEnabled !== false
+        : true;
+    const { knownItems: knownIssuePrItems, issuePrData } = useKnownIssuePrItems(
+      issuePrAllowedBySource ? githubRepoFullName : undefined,
+      githubRepoIsPublic
+    );
     // Resolve the analytics source_kind: worktree (live session FS) wins over the
     // project/github source, mirroring useMentionProjectFiles' source resolution.
     const usesWorktreeSource =
@@ -865,25 +876,18 @@ export const CombinedMentionTextarea = React.forwardRef<
         : mentionSource?.kind === 'local'
           ? Boolean(mentionSource.localProjectId)
           : Boolean(githubRepoFullName);
-    const enableIssueMentions = Boolean(githubRepoFullName);
+    const enableIssueMentions =
+      Boolean(githubRepoFullName) &&
+      issuePrAllowedBySource &&
+      issuePrData.status !== 'unavailable';
     // The machine the chat runs on (selected agent's machine). Lets the `$` menu
     // list that machine's global skills even when the chat has no local project
     // (GitHub / plain-agent chats) — see useMentionProjectSkills.
     const skillGlobalMachineId = skillAgent?.machineId;
-    const hasProjectSkillSource =
-      mentionSource?.kind === 'local'
-        ? Boolean(
-            mentionSource.localProjectId && mentionSource.workspaceId && mentionSource.machineId
-          )
-        : mentionSource?.kind === 'github'
-          ? Boolean(mentionSource.repoFullName)
-          : mentionSource?.kind === 'provider'
-            ? Boolean(mentionSource.githubRepoFullName)
-            : false;
     // Enable `$` when there are project skills OR a known machine whose global
     // skills we can list (so GitHub / plain-agent chats still offer skills).
     const enableSkillMentions =
-      (hasProjectSkillSource || Boolean(skillGlobalMachineId)) &&
+      (hasProjectSkillSource(mentionSource) || Boolean(skillGlobalMachineId)) &&
       (!templateScope || (!!templateScope.providerKey && !!skillAgent));
     // Only scan/fetch skills once they are actually asked for, so the composer
     // doesn't kick a skills RPC on every mount. Two things ask: the menu, when a
@@ -950,10 +954,6 @@ export const CombinedMentionTextarea = React.forwardRef<
       () =>
         getAllowedSkillMentionDirs({ cliType: skillAgentCliType, agentType: skillAgentAgentType }),
       [skillAgentAgentType, skillAgentCliType]
-    );
-    const { knownItems: knownIssuePrItems, issuePrData } = useKnownIssuePrItems(
-      githubRepoFullName,
-      githubRepoIsPublic
     );
 
     const [uncontrolledMentionValues, setUncontrolledMentionValues] = React.useState<string[]>([]);

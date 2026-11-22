@@ -30,6 +30,7 @@ export type MentionProjectSource =
       kind: 'github';
       repoFullName?: string;
       isPublic?: boolean;
+      issuePrEnabled?: boolean;
       localWorktree?: { machineId: MachineId; repoKey: string; sessionId: SessionId };
     }
   | {
@@ -38,6 +39,7 @@ export type MentionProjectSource =
       workspaceId: WorkspaceId;
       localProjectId: LocalProjectId;
       githubRepoFullName?: string;
+      isPublic?: boolean;
       localWorktree?: { machineId: MachineId; repoKey: string; sessionId: SessionId };
     }
   | {
@@ -46,9 +48,14 @@ export type MentionProjectSource =
       providerPending?: boolean;
       providerMessage?: string;
       /** Project identity retained when a live provider serves a local Session workspace. */
-      localProject?: { machineId: MachineId; localProjectId: LocalProjectId };
+      localProject?: {
+        workspaceId?: WorkspaceId;
+        machineId: MachineId;
+        localProjectId: LocalProjectId;
+      };
       githubRepoFullName?: string;
       isPublic?: boolean;
+      issuePrEnabled?: boolean;
     };
 
 export type MentionLazyDirectoryEntry = {

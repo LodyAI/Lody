@@ -25,7 +25,12 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   in a Worker, cancel stale work, and publish current-source results only; no
   UI-thread fallback. Aggregate results are capped; Roles list all readable entries.
 - Issues and PRs rank over their own slice of the shared cache, partitioned once
-  by `useMentionCategories`.
+  by `useMentionCategories`. Only workspace-linked GitHub repositories enable
+  Issue/PR mentions; unlinked local remotes and `repo_not_linked` /
+  `installation_not_found` / `repo_not_authorized` token responses hide both
+  categories. Non-row list blocks (`groupLabel`, `message`, `notice`,
+  `emptyState`) keep `flexShrink: 0` so wrapped copy scrolls instead of
+  overlapping neighbouring rows.
 - Files, Sessions, Roles, Issues, and PRs use vendored VS Code `scoreFuzzy`
   with source ordering. Skills rank alone; typed slash queries merge Commands
   and Prompt Shortcuts after source gates.
@@ -40,16 +45,15 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   and aggregate views. Both share the menu's once-per-menu-open latch, the menu
   owns no source-specific rule, and categories on one source share its
   `sourceKey`.
-- Activation means "make sure this is loaded", not "revalidate": Issues/PRs gate
-  on `ISSUE_PR_FRESH_FOR_MS`, and only explicit gestures pass `refresh({ force:
-true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
-  An unasked source reports `loading`, never `ready` with zero rows.
-
-- The file index loads only once asked for: the menu reaching Files or a draft
-  carrying an `@`. A project on another machine is searched there with
-  `local-project/search-files`; only a daemon without `localProjectFileSearch`
-  gets the full-list fallback. Send that request only after the capability check: an
-  older daemon drops it unanswered.
+- Activation ensures data is loaded without revalidating fresh entries: Issues
+  and PRs gate on `ISSUE_PR_FRESH_FOR_MS`, `fetchedAtMs` persists in the cached
+  entry, and only explicit gestures pass `refresh({ force: true })`. An unasked
+  source reports `loading`, never `ready` with zero rows. See
+  [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md#activation-is-not-revalidation).
+- The file index loads only on Files activation or an `@` in the draft. Remote
+  projects use `local-project/search-files` after checking the
+  `localProjectFileSearch` capability, falling back to the full list only for
+  older daemons.
 - File fetch accounting follows [its contract](../../../../../specs/mention-file-fetch.md).
 
 ## Hydration and drafts
@@ -57,13 +61,10 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 - Hydrators only add ranges for known tokens/items, preserve existing external
   `pasted_text` ranges, and must record a `kind`. Hydration latches the first
   NON-EMPTY text, not the first render's.
-- A composer stores its ranges with its draft and restores them through
-  `PersistedMentionHydrator`; rebuilding from text is the fallback. Store the
-  narrow `PersistedMentionRange`, never the live range. `mergeHydratedMentions`
-  drops a hydrated range that OVERLAPS one already present, not merely a
-  duplicate.
-- A composer that swaps drafts in place (the session one does) must pass
-  `draftKey`; the reset runs during render.
+- Composers persist narrow `PersistedMentionRange` entries with drafts and
+  restore them via `PersistedMentionHydrator` before text fallback;
+  `mergeHydratedMentions` rejects any range that overlaps an existing one.
+- Composers that swap drafts in place must pass `draftKey`; the reset runs during render.
 - Locale files are flat dotted-key maps: i18next runs `keySeparator: false`.
 - `vscode-fuzzy-score.ts` is vendored: keep Microsoft's copyright header, the
   adjacent MIT license, and the generated third-party attribution when updating
