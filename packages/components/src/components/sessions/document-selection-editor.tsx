@@ -269,7 +269,7 @@ export function DocumentSelectionEditor({
         setError(
           t(
             'sessions.fileViewer.selection.addFailed',
-            'Could not add the selection. Check the open chat and attachment limits, then retry.'
+            'Could not add the selection. Check the open session and attachment limits, then retry.'
           )
         );
     } finally {
@@ -531,7 +531,7 @@ export function DocumentSelectionEditor({
         <Button size="mini" onClick={() => void add()} disabled={busy}>
           {allowMarkup
             ? t('common.done', 'Done')
-            : t('sessions.fileViewer.selection.add', 'Add to chat')}
+            : t('sessions.fileViewer.selection.add', 'Add to session')}
         </Button>
       </div>
       {error ? (

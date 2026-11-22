@@ -328,7 +328,7 @@ describe('schedule list rows', () => {
     act(() => clear.click());
     expect(handlers.onClearEnded).toHaveBeenCalledWith([sent]);
     const chat = rowOf('Remind me to ship').querySelector<HTMLButtonElement>(
-      'button[title="Open chat “CI triage”"]'
+      'button[title="Open session “CI triage”"]'
     )!;
     act(() => chat.click());
     expect(handlers.onOpenSession).toHaveBeenCalledWith('chat-1');

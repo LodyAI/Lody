@@ -1664,7 +1664,7 @@ export function SessionHeaderMenu({
                 void onRename();
               }}
             >
-              {t('sidebar.renameChat.title', 'Rename Chat')}
+              {t('sidebar.renameChat.title', 'Rename Session')}
             </Menu.Item>
           )}
 

@@ -1526,7 +1526,7 @@ describe('useSessionActions', () => {
       const { result: plain } = await startConfirmation(archive, tree.archivedOpened.id, {
         confirm: true,
       });
-      expect(confirmationDialog()?.textContent).toContain('Archive chat?');
+      expect(confirmationDialog()?.textContent).toContain('Archive session?');
       expect(confirmationDialog()?.textContent).not.toContain('sub-conversation');
       await answerConfirmation('Archive');
       await expect(plain).resolves.toBe(true);

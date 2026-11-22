@@ -23,7 +23,7 @@ const commands = [
   {
     name: 'app',
     description:
-      'Open the Lody desktop app on a new chat with a local directory selected (registers it if needed)',
+      'Open the Lody desktop app on a new session with a local directory selected (registers it if needed)',
     usage: '[options] [command] [path]',
     load: async () => (await import('./app')).appCommand,
   },

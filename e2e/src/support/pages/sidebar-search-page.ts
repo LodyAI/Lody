@@ -237,7 +237,7 @@ export class SidebarSearchPage {
   private async renameSession(sessionId: string, title: string): Promise<void> {
     await this.openRowMenu(this.activeRow(sessionId));
     await this.page.getByRole('menuitem', { name: /^(Rename|重命名)$/u }).click();
-    const dialog = this.page.getByRole('dialog', { name: /^(Rename Chat|重命名聊天)$/u });
+    const dialog = this.page.getByRole('dialog', { name: /^(Rename Session|重命名聊天)$/u });
     await dialog.locator('textarea').fill(title);
     await dialog.getByRole('button', { name: /^(Save|保存)$/u }).click();
     await expect(dialog).toBeHidden();
@@ -283,7 +283,9 @@ export class SidebarSearchPage {
   }
 
   private paletteInput(): Locator {
-    return this.page.getByPlaceholder(/^(Search commands and chats\.\.\.|搜索命令和聊天\.\.\.)$/u);
+    return this.page.getByPlaceholder(
+      /^(Search commands and sessions\.\.\.|搜索命令和聊天\.\.\.)$/u
+    );
   }
 
   private paletteSessionResult(title: string): Locator {
@@ -311,7 +313,7 @@ export class SidebarSearchPage {
   }
 
   private async openHome(): Promise<void> {
-    const home = this.page.getByRole('button', { name: /^(Home|New chat|主页|新对话)$/u });
+    const home = this.page.getByRole('button', { name: /^(New|Home|主页|新对话)$/u });
     await expect(home).toBeEnabled();
     await home.focus();
     await home.press('Enter');

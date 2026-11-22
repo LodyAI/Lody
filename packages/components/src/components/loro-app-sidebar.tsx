@@ -1153,7 +1153,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   const projectMenuLabel = t('sessions.moreActions', 'More actions');
   const projectSettingsLabel = t('sidebar.localProjects.settings', 'Project settings');
   const revealProjectLabel = t('sidebar.localProjects.reveal', 'Reveal in file manager');
-  const archiveProjectChatsLabel = t('sidebar.localProjects.archiveChats', 'Archive chats');
+  const archiveProjectChatsLabel = t('sidebar.localProjects.archiveChats', 'Archive sessions');
   const archivableSessionIds = useMemo(
     () => sessionsForProject.map((session) => session.id),
     [sessionsForProject]
@@ -3112,7 +3112,7 @@ export function LoroAppSidebar({
     [t]
   );
   const newChatLabel = useMemo(
-    () => t('sidebar.localProjects.newChat', 'New chat in this project'),
+    () => t('sidebar.localProjects.newChat', 'New session in this project'),
     [t]
   );
   const toggleLabel = useMemo(() => t('common.toggle', 'Toggle'), [t]);
@@ -3827,7 +3827,7 @@ export function LoroAppSidebar({
   const labels: Partial<LoroSidebarLabels> = useMemo(() => {
     return {
       schedules: t('schedules.title', 'Schedules'),
-      home: t('sidebar.home', 'Home'),
+      home: t('sidebar.home', 'New'),
       docs: t('sidebar.docs', 'Docs'),
       joinCommunity: t('sidebar.joinCommunity', 'Join community'),
       feedback: t('sidebar.feedback', 'Feedback'),

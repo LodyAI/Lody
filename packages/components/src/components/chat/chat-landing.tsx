@@ -6610,7 +6610,7 @@ function WorkspaceChatLanding({
       title: t('chat.mobileNewChat.title', '新建对话'),
       backAriaLabel: t('common.back', 'Back'),
     },
-    targetNode: t('chat.mobileNewChat.title', 'New chat'),
+    targetNode: t('chat.mobileNewChat.title', 'New session'),
     coordinator: MobileInlinePickerCoordinator,
     summary: (
       <div className="flex flex-col gap-2 py-3">
@@ -7305,7 +7305,7 @@ function WorkspaceChatLanding({
           somethingWentWrong: t('common.somethingWentWrong', 'Something went wrong'),
           composerCrashed: t(
             'chat.composerCrashed',
-            'The chat composer failed to render. Your draft is preserved below.'
+            'The session composer failed to render. Your draft is preserved below.'
           ),
           tryAgain: t('common.tryAgain', 'Try again'),
           unavailable: t('common.unavailable', 'Unavailable'),

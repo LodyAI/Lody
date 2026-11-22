@@ -2343,7 +2343,7 @@ export function ArchiveView() {
                   )
                 : t(
                     'archive.deleteConfirm.description.chatSession',
-                    'This will permanently delete the chat session.'
+                    'This will permanently delete the session.'
                   )}
             </Dialog.Description>
           </Dialog.Header>

@@ -205,7 +205,7 @@ export function MobileSessionTabSheet({
                 <span className="flex h-4 w-4 shrink-0 items-center justify-center">
                   <Plus className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
                 </span>
-                <span>{t('sessions.tabs.newChat', 'New Chat')}</span>
+                <span>{t('sessions.tabs.newChat', 'New')}</span>
               </button>
             ) : null}
             {showArchived ? (

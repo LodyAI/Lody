@@ -289,12 +289,12 @@ export function SessionSubConversationConfirmationView({
           {count === 0 ? (
             <>
               <AlertDialog.Title>
-                {t('sessions.archiveConfirm.title', 'Archive chat?')}
+                {t('sessions.archiveConfirm.title', 'Archive session?')}
               </AlertDialog.Title>
               <AlertDialog.Description>
                 {t(
                   'sessions.archiveConfirm.description',
-                  'This chat will move to the archive. You can restore it later.'
+                  'This session will move to the archive. You can restore it later.'
                 )}
               </AlertDialog.Description>
             </>

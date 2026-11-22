@@ -343,7 +343,7 @@ export function ChatLandingView({
 
   const {
     somethingWentWrong = 'Something went wrong',
-    composerCrashed = 'The chat composer failed to render. Your draft is preserved below.',
+    composerCrashed = 'The session composer failed to render. Your draft is preserved below.',
     tryAgain = 'Try again',
   } = errorLabels;
 

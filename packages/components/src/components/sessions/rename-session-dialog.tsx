@@ -125,10 +125,10 @@ export function RenameSessionDialogView({
       <Dialog.Content className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
         <Dialog.Header className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
           <Dialog.Title className="text-base">
-            {t('sidebar.renameChat.title', 'Rename Chat')}
+            {t('sidebar.renameChat.title', 'Rename Session')}
           </Dialog.Title>
           <Dialog.Description className="leading-5">
-            {t('sidebar.renameChat.description', 'Enter a new name for this chat.')}
+            {t('sidebar.renameChat.description', 'Enter a new name for this session.')}
           </Dialog.Description>
         </Dialog.Header>
 

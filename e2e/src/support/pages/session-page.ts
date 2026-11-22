@@ -192,7 +192,7 @@ export class SessionPage {
     });
     await dialog.getByRole('button', { name: /^(Delete|删除)$/u }).click();
     await expect(archivedRow).toHaveCount(0);
-    await this.page.getByRole('button', { name: /^(Home|New chat|主页|新对话)$/u }).click();
+    await this.page.getByRole('button', { name: /^(New|Home|主页|新对话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
     await expect(this.page.locator('#chat-prompt')).toBeEditable({ timeout: 30_000 });
   }

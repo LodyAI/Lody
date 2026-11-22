@@ -124,7 +124,7 @@ test.describe('compact navigation modal', () => {
     for (let repeat = 0; repeat < 2; repeat += 1) {
       await opener.click();
       await expect(navigation).toBeVisible();
-      const first = navigation.getByRole('button', { name: 'New Chat' });
+      const first = navigation.getByRole('button', { name: 'New', exact: true });
       const last = navigation.getByRole('button', { name: 'Settings', exact: true });
       await expect(first).toBeFocused();
       await page.keyboard.press('Shift+Tab');
@@ -192,7 +192,7 @@ test.describe('compact navigation modal', () => {
     const opener = page.getByRole('button', { name: 'Show navigation sidebar' });
     await opener.click();
     const navigation = page.getByRole('dialog', { name: 'Navigation Menu', exact: true });
-    await expect(navigation.getByRole('button', { name: 'New Chat' })).toBeFocused();
+    await expect(navigation.getByRole('button', { name: 'New', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(navigation).toBeHidden();
     await expect(opener).toBeFocused();

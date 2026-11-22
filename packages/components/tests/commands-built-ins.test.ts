@@ -24,7 +24,7 @@ describe('commands-built-ins', () => {
     it('registers web-safe session shortcut definitions for keyboard settings', () => {
       registerBuiltInCommands();
 
-      expect(commands.get('session.archiveCurrent')?.title).toBe('Archive Current Chat');
+      expect(commands.get('session.archiveCurrent')?.title).toBe('Archive Current Session');
       expect(commands.getDefaultKeybindingsFor('session.archiveCurrent')).toEqual(['Mod+Alt+a']);
       expect(commands.getDefaultKeybindingsFor('session.searchCurrent')).toEqual(['Mod+Alt+f']);
       expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual([]);

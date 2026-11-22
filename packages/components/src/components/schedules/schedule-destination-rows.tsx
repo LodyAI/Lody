@@ -84,9 +84,9 @@ export function ScheduleDestinationRows({
   const chatIssues = value.kind === 'existing_session' ? issues : [];
   const sendToIssues = value.kind === 'existing_session' ? [] : issues;
   const labels: Record<ScheduleDestination['kind'], string> = {
-    new_session: t('schedules.destination.newSession', 'New chat each run'),
-    own_session: t('schedules.destination.ownSession', 'One chat for this task'),
-    existing_session: t('schedules.destination.existingSession', 'An existing chat'),
+    new_session: t('schedules.destination.newSession', 'New session each run'),
+    own_session: t('schedules.destination.ownSession', 'One session for this task'),
+    existing_session: t('schedules.destination.existingSession', 'An existing session'),
   };
   return (
     <>
@@ -145,7 +145,7 @@ export function ScheduleDestinationRows({
                 ownSession
                   ? t(
                       'schedules.destination.ownSessionLockedHint',
-                      'The Agent is now this chat’s Agent. Start a new chat to change it.'
+                      'The Agent is now this session’s Agent. Start a new session to change it.'
                     )
                   : t(
                       'schedules.destination.ownSessionPendingHint',
@@ -173,7 +173,7 @@ export function ScheduleDestinationRows({
                     disabled={disabled}
                     onClick={() => onChange({ kind: 'own_session', epoch: value.epoch + 1 })}
                   >
-                    {t('schedules.destination.startNewChat', 'Start a new chat')}
+                    {t('schedules.destination.startNewChat', 'Start a new session')}
                   </Button>
                 </div>
               ) : (
@@ -201,7 +201,7 @@ export function ScheduleDestinationRows({
                 pickedSession
                   ? t(
                       'schedules.destination.existingSessionHint',
-                      'Runs use this chat’s Agent and workspace.'
+                      'Runs use this session’s Agent and workspace.'
                     )
                   : undefined
               }
@@ -253,19 +253,19 @@ function SessionPicker({
     >
       <Combobox.Button
         size="small"
-        aria-label={t('schedules.destination.chooseChat', 'Choose a chat')}
-        placeholder={t('schedules.destination.chooseChat', 'Choose a chat')}
+        aria-label={t('schedules.destination.chooseChat', 'Choose a session')}
+        placeholder={t('schedules.destination.chooseChat', 'Choose a session')}
         {...stylex.props(styles.chatPickerButton)}
       />
       <Combobox.Content
         search={
           <Combobox.Search
-            aria-label={t('schedules.destination.searchChats', 'Search chats')}
-            placeholder={t('schedules.destination.searchChats', 'Search chats')}
+            aria-label={t('schedules.destination.searchChats', 'Search sessions')}
+            placeholder={t('schedules.destination.searchChats', 'Search sessions')}
           />
         }
         empty={
-          <Combobox.Empty>{t('schedules.destination.noChats', 'No chats found')}</Combobox.Empty>
+          <Combobox.Empty>{t('schedules.destination.noChats', 'No sessions found')}</Combobox.Empty>
         }
       >
         {(session: PickableSession) => (

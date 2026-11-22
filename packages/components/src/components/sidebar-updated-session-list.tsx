@@ -580,9 +580,9 @@ export type SidebarUpdatedSessionListProps = {
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
-  heading: 'Chats',
+  heading: 'Sessions',
   emptyTitle: 'Nothing yet',
-  emptyDescription: 'Start a chat or open a worktree to see it here.',
+  emptyDescription: 'Start a session or open a worktree to see it here.',
 };
 
 export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList({

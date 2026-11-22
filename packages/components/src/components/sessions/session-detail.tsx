@@ -2573,7 +2573,7 @@ const SessionDetail = ({
       ) {
         return chatRef.toggleVisualAnnotationReference(reference);
       }
-      toast.error(t('sessions.preview.annotation.chatUnavailable', 'Open the session chat first'));
+      toast.error(t('sessions.preview.annotation.chatUnavailable', 'Open the session first'));
       return false;
     },
     [closedConversationIds, t]
@@ -2606,7 +2606,7 @@ const SessionDetail = ({
       ) {
         return chatRef.addVisualAnnotationReference(reference);
       }
-      toast.error(t('sessions.preview.annotation.chatUnavailable', 'Open the session chat first'));
+      toast.error(t('sessions.preview.annotation.chatUnavailable', 'Open the session first'));
       return false;
     },
     [closedConversationIds, t]
@@ -4600,7 +4600,7 @@ const SessionDetail = ({
     if (launcherState === 'hidden') return null;
     return {
       id: 'side-session',
-      label: t('sessions.detailTabs.sideSession', 'Side Chat'),
+      label: t('sessions.detailTabs.sideSession', 'Side Session'),
       kind: 'session',
       pending: isCreatingSideSession,
       disabled: launcherState === 'disabled' || isCreatingSideSession,
@@ -4667,7 +4667,7 @@ const SessionDetail = ({
       ...fixedTabs,
       ...visibleSideSessions.map((sideSession): SessionSidePanelTabItem => ({
         id: getSideSessionPanelTabId(sideSession.id),
-        label: sideSession.title?.trim() || t('sessions.detailTabs.sideSession', 'Side Chat'),
+        label: sideSession.title?.trim() || t('sessions.detailTabs.sideSession', 'Side Session'),
         kind: 'session',
         closeable: true,
         pending: closingSideSessionIds.has(sideSession.id),
@@ -5003,7 +5003,7 @@ const SessionDetail = ({
 
   useCommand({
     id: 'session.archiveCurrent',
-    title: t('commands.session.archiveCurrent', 'Archive Current Chat'),
+    title: t('commands.session.archiveCurrent', 'Archive Current Session'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.archiveCurrent'),
     when: () =>
@@ -5015,7 +5015,7 @@ const SessionDetail = ({
 
   useCommand({
     id: 'session.toggleCurrentPinned',
-    title: t('commands.session.toggleCurrentPinned', 'Toggle Current Chat Pinned'),
+    title: t('commands.session.toggleCurrentPinned', 'Toggle Current Session Pinned'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.toggleCurrentPinned'),
     /* While the URL-named child is still pending, `activeTabSession` falls
@@ -5031,7 +5031,7 @@ const SessionDetail = ({
 
   useCommand({
     id: 'session.searchCurrent',
-    title: t('commands.session.searchCurrent', 'Find in Current Chat'),
+    title: t('commands.session.searchCurrent', 'Find in Current Session'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.searchCurrent'),
     when: () => Boolean(activeTabSession) && !activeDraftTab,
@@ -5128,7 +5128,7 @@ const SessionDetail = ({
 
   useCommand({
     id: 'session.renameCurrent',
-    title: t('commands.session.renameCurrent', 'Rename Current Chat'),
+    title: t('commands.session.renameCurrent', 'Rename Current Session'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.renameCurrent'),
     when: () => canRenameCurrentSession,
@@ -5252,7 +5252,7 @@ const SessionDetail = ({
         }
       } catch (error) {
         console.error('Failed to close side session', { sideSessionId, error });
-        toast.error(t('sessions.sideSession.closeFailed', 'Unable to close side chat'));
+        toast.error(t('sessions.sideSession.closeFailed', 'Unable to close side session'));
       } finally {
         setClosingSideSessionIds((current) => {
           const next = new Set(current);
@@ -5909,7 +5909,7 @@ const SessionDetail = ({
                 )
               : t(
                   'archive.deleteConfirm.description.chatSession',
-                  'This will permanently delete the chat session.'
+                  'This will permanently delete the session.'
                 )}
           </Dialog.Description>
         </Dialog.Header>
@@ -6272,7 +6272,7 @@ const SessionDetail = ({
         mobileMenuActions.push({
           id: 'rename',
           icon: <Pencil {...stylex.props(detailStyles.icon14)} />,
-          label: t('sidebar.renameChat.title', 'Rename Chat'),
+          label: t('sidebar.renameChat.title', 'Rename Session'),
           onClick: handleRenameCurrentSession,
         });
       }

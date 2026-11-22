@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { Plus } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Button, Popover } from '@lody/ui';
 import { space } from '@lody/ui/tokens/scales.stylex';
@@ -35,7 +36,10 @@ function Harness({ closeOnMount = false }: { closeOnMount?: boolean }) {
         returnFocus={returnFocus}
       >
         <FocusScope id="navigation" {...stylex.props(styles.sidebar)}>
-          <Button onClick={() => setOpen(false)}>New Chat</Button>
+          <Button onClick={() => setOpen(false)}>
+            <Plus className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+            New
+          </Button>
           <Popover.Root>
             <Popover.Trigger render={<Button />}>Navigation machine</Popover.Trigger>
             <Popover.Content aria-label="Navigation machine picker">

@@ -147,11 +147,11 @@ export function describeTrigger(
 export function describeDestination(destination: ScheduleDestination, t: TFunction): string {
   switch (destination.kind) {
     case 'new_session':
-      return t('schedules.destination.newSession', 'New chat each run');
+      return t('schedules.destination.newSession', 'New session each run');
     case 'own_session':
-      return t('schedules.destination.ownSession', 'One chat for this task');
+      return t('schedules.destination.ownSession', 'One session for this task');
     case 'existing_session':
-      return t('schedules.destination.existingSession', 'An existing chat');
+      return t('schedules.destination.existingSession', 'An existing session');
     default: {
       const unknown: never = destination;
       return unknown;
