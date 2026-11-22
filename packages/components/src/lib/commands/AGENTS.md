@@ -33,6 +33,8 @@ only tells global dispatch to yield for events originating in its subtree.
 - A composer command mounted once per composer box wraps its defaults in
   `composerScopedKeybindings` so each surface answers only its own field's chords;
   `commandsEnabled` still gates which visible surfaces register.
+- A hint renderer calls `useCommands()` for the registry subscription alone, so a
+  rebound binding re-renders the formatted hint.
 - `useKeyScope(id, ref)` registers a scope and automatically removes it. Dispatch finds
   scopes containing `event.target`, preferring the innermost. A matched scope yields all
   app shortcuts unless the command has `allowInTextInput: true`; `claims` narrows the

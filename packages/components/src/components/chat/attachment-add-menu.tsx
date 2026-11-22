@@ -103,7 +103,7 @@ export function AttachmentAddMenu({
   const hasMcp = mcpServers.length > 0;
   const hasMenuContent = Boolean(onAddAttachment || hasMcp || onScheduleSend);
 
-  useCommands(); // Rebinds re-render via the registry subscription so the hint follows.
+  useCommands();
   const openAddMenuKey = commands.getKeybindingsFor('session.openAddMenu')[0];
 
   useCommand(

@@ -163,13 +163,10 @@ export const COMMAND_SHORTCUTS = {
   'session.switchToVisible7': [electron('Mod+7')],
   'session.switchToVisible8': [electron('Mod+8')],
   'session.switchToVisible9': [electron('Mod+9')],
-  // ⇧Tab cycles the agent mode and ⌘' the thinking effort while the composer is
-  // focused. The other cyclers stay unbound; the settings page can rebind them.
   'session.cycleMode': [whileComposerFocused('Shift+Tab')],
   'session.cycleProvider': [],
   'session.cycleModel': [],
   'session.cycleThinkEffort': [whileComposerFocused("Mod+'")],
-  // ⌘/ opens the run-config menu into its model search; ⌘; opens the "+" menu.
   'session.openRunConfig': [whileComposerFocused('Mod+/')],
   'session.openAddMenu': [whileComposerFocused('Mod+;')],
   'mention.toggleSessionProjectScope': [],

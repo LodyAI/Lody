@@ -711,7 +711,7 @@ export function DesktopRunConfigMenu({
     planSelector != null ||
     fastSelector != null;
 
-  useCommands(); // Rebinds re-render via the registry subscription so hints follow.
+  useCommands();
   const openRunConfigKey = commands.getKeybindingsFor('session.openRunConfig')[0];
   const cycleThinkEffortKey = commands.getKeybindingsFor('session.cycleThinkEffort')[0];
 
@@ -726,7 +726,6 @@ export function DesktopRunConfigMenu({
         () => triggerRef.current
       ),
       when: () => hasAnyRow && !disabledReason,
-      // ⌘/ lands in the model list; its search field grabs focus on mount.
       run: () => {
         if (modelPickerOptions.length > 0) setModelSubmenuOpen(true);
         setOpen(true);
