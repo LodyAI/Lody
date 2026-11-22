@@ -3,7 +3,7 @@
  * own in-memory replicas. Streams progress must therefore belong to the replica
  * that loaded it: a process that hydrated before another process advanced data
  * and cursor has to bootstrap, not resume at that tail. Meta/Flock cursors are
- * replica-bound; LoroDoc cursors are durable for the daemon only.
+ * replica-bound; LoroDoc cursor writes are daemon-only; commands can seed covered progress.
  *
  * Drives the real CLI composition (`createCliSqliteRepoStore` +
  * `createCliStreamsTransport` + `LoroRepo`) against a scripted Streams server.
@@ -14,18 +14,43 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
-import { getLoroMetaStreamId, getWorkspaceFlockDocId, type WorkspaceId } from '@lody/shared';
+import {
+  getLoroMetaStreamId,
+  getLoroStreamIdForDocId,
+  getWorkspaceFlockDocId,
+  type WorkspaceId,
+} from '@lody/shared';
 import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { LoroRepo } from 'loro-repo';
 import {
   createCliSqliteRepoStore,
   hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
+  ProcessDocumentRemoteCursorStore,
   type CliSqliteRepoStore,
   type DocumentCursorScope,
 } from '../src/lib/loro/sqlite-repo-store';
 import { createCliStreamsTransport } from '../src/lib/loro/streams-transport';
 import type { Logger } from '../src/utils/logger';
+
+import { Effect, Layer } from 'effect';
+import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
+import {
+  makeLoroStreamsTokenProvider,
+  makeLoroStreamsTokenWebPorts,
+  LoroStreamsTokenPorts,
+} from '@lody/shared';
+import { LoroDocumentManager } from '../src/lib/loro/doc';
+import { WorkspacePresenceOwnersLive } from '../src/lib/loro/workspace-presence';
+import { presencePlatformLayer } from '../src/platform/presence';
+import {
+  bindWorkspacePresenceApplicationLegacy,
+  createCliPresenceRuntimeLegacy,
+  recoverCliPresenceApplicationShutdown,
+  WorkspacePresenceLegacyFailure,
+} from '../src/lib/loro/presence-legacy';
+import { CliMachineMonitorRuntime } from '../src/lib/loro/machine-monitor';
+import { CliPromptSuggestions } from '../src/lib/loro/prompt-suggestions';
 
 const workspaceId = 'ws-replica-checkpoints' as WorkspaceId;
 const gatewayBaseUrl = 'https://streams.checkpoint.invalid';
@@ -53,7 +78,7 @@ const metaSnapshotWithA = (): Uint8Array => {
 /** Streams serving `snapshot` at offset 100; catch-up from 100 has nothing new. */
 function createStreamsServer(
   snapshot: Uint8Array,
-  respond?: (url: URL, method: string) => Response | undefined
+  respond?: (url: URL, method: string, init?: RequestInit) => Response | undefined
 ) {
   const requests: URL[] = [];
   vi.stubGlobal(
@@ -61,7 +86,7 @@ function createStreamsServer(
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input);
       requests.push(url);
-      const intercepted = respond?.(url, init?.method ?? 'GET');
+      const intercepted = respond?.(url, init?.method ?? 'GET', init);
       if (intercepted) return intercepted;
       if (init?.method === 'POST') {
         const headers = new Headers(init.headers);
@@ -101,7 +126,7 @@ function createStreamsServer(
     })
   );
   const bootstraps = () => requests.filter((url) => url.pathname.endsWith('/bootstrap')).length;
-  return { bootstraps };
+  return { bootstraps, requests };
 }
 
 type CliProcess = {
@@ -175,6 +200,109 @@ afterEach(async () => {
 });
 
 describe('CLI Streams checkpoints are bound to the replica that loaded them', () => {
+  it.each([false, true])(
+    'attaches cloud ephemeral rooms only when enabled (%s)',
+    async (attachCloudEphemeralSinks) => {
+      const seen = new Set<string>();
+      let monitorRequested: () => void = () => {};
+      const monitorReady = new Promise<void>((resolve) => {
+        monitorRequested = resolve;
+      });
+      const server = createStreamsServer(metaSnapshotWithA(), (url, method, init) => {
+        const ephemeral = url.searchParams.get('ephemeral');
+        if (ephemeral) seen.add(ephemeral);
+        if (ephemeral === 'machine-monitor') monitorRequested();
+        if (ephemeral && method === 'GET') {
+          let stopped = false;
+          let stop = () => {};
+          const body = new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('event: bootstrap\ndata: \n\n'));
+              stop = () => {
+                if (!stopped) {
+                  stopped = true;
+                  controller.close();
+                }
+              };
+              init?.signal?.addEventListener('abort', stop, { once: true });
+            },
+            cancel() {
+              stopped = true;
+              init?.signal?.removeEventListener('abort', stop);
+            },
+          });
+          return new Response(body, {
+            headers: { 'Content-Type': 'text/event-stream', 'Stream-SSE-Data-Encoding': 'base64' },
+          });
+        }
+        return undefined;
+      });
+      const app = makeApplicationRuntime(
+        WorkspacePresenceOwnersLive.pipe(
+          Layer.provide(presencePlatformLayer(silentLogger, globalThis.fetch))
+        ),
+        {
+          recover: recoverCliPresenceApplicationShutdown,
+          project: (cause) => new WorkspacePresenceLegacyFailure(cause),
+        }
+      );
+      bindWorkspacePresenceApplicationLegacy(app);
+      const cli = await openCliProcess('process');
+      const manager = new LoroDocumentManager({
+        repo: cli.repo,
+        workspaceId,
+        userId: 'synthetic-user',
+        logger: silentLogger,
+        metaSub: null,
+        sqliteRepoStore: cli.store,
+        documentRemoteCursorStore: cli.documentRemoteCursorStore,
+        attachCloudEphemeralSinks,
+        presenceRuntime: await createCliPresenceRuntimeLegacy(workspaceId),
+        machineMonitorRuntime: new CliMachineMonitorRuntime({ workspaceId, logger: silentLogger }),
+        promptSuggestions: new CliPromptSuggestions(workspaceId, silentLogger),
+        streamsTokens: {
+          createTokenProvider: () =>
+            makeLoroStreamsTokenProvider({
+              endpoint: 'https://synthetic.invalid/token',
+              workspaceId,
+            }).pipe(
+              Effect.provideService(
+                LoroStreamsTokenPorts,
+                makeLoroStreamsTokenWebPorts({
+                  credential: Effect.succeed('synthetic'),
+                  fetchImpl: async () =>
+                    new Response(
+                      JSON.stringify({ token: 'synthetic', expiresIn: 900, gatewayBaseUrl })
+                    ),
+                })
+              )
+            ),
+        },
+      });
+      vi.useFakeTimers({
+        toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+      });
+      try {
+        const attaching = manager.attachRemoteStreamsTransport();
+        await attaching;
+        if (attachCloudEphemeralSinks) await monitorReady;
+        expect((await syncMeta(cli)).ok).toBe(true);
+        expect(cli.repo.getMeta().get(keyA)).toBe('A');
+        expect(server.bootstraps()).toBe(1);
+        expect(seen.has('presence')).toBe(attachCloudEphemeralSinks);
+        expect(seen.has('machine-monitor')).toBe(attachCloudEphemeralSinks);
+        if (!attachCloudEphemeralSinks) expect([...seen]).toEqual([]);
+        await manager.detachRemoteStreamsTransport();
+        await manager.detachRemoteStreamsTransport();
+      } finally {
+        openProcesses.delete(cli);
+        vi.useRealTimers();
+        await manager.cleanUp({ fast: true });
+        await app.closeLegacy();
+      }
+    }
+  );
+
   it.each(['import', 'importBatch'] as const)(
     'preserves pending-only %s updates across a SQLite restart',
     async (method) => {
@@ -289,6 +417,214 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
     expect((await syncDoc(oneShot, docId, oneShotDoc)).ok).toBe(true);
     expect(oneShotDoc.getText('t').toString()).toBe('A');
     expect(server.bootstraps()).toBe(2);
+  });
+
+  it('seeds a covered large session from SQLite without bootstrap or shared cursor writes', async () => {
+    const docId = 'session-covered';
+    const remote = new LoroDoc();
+    remote.setPeerId('1');
+    const body = 'synthetic history|'.repeat(100_000);
+    remote.getText('t').insert(0, body);
+    const server = createStreamsServer(remote.export({ mode: 'snapshot' }));
+    const daemon = await openCliProcess('shared-durable');
+    const daemonDoc = (await daemon.repo.openPersistedDoc(docId)).doc;
+    expect((await syncDoc(daemon, docId, daemonDoc)).ok).toBe(true);
+    const rows = () => daemon.store.sqliteStore.db.prepare('SELECT * FROM remote_cursors').all();
+    const before = rows();
+    expect(before).toHaveLength(1);
+
+    const oneShot = await openCliProcess('process');
+    const doc = (await oneShot.repo.openPersistedDoc(docId)).doc;
+    expect(doc.getText('t').toString()).toBe(body);
+    server.requests.length = 0;
+    expect((await syncDoc(oneShot, docId, doc)).ok).toBe(true);
+    expect(server.bootstraps()).toBe(0);
+    expect(server.requests.some((url) => url.searchParams.get('offset') === tail100)).toBe(true);
+    expect(doc.oplogVersion().toJSON()).toEqual(remote.oplogVersion().toJSON());
+    expect(rows()).toEqual(before);
+
+    const cursorRow = before[0] as { stream_url: string };
+    const cursor = await oneShot.documentRemoteCursorStore.load(cursorRow.stream_url);
+    expect(cursor).not.toBeNull();
+    if (!cursor) throw new Error('missing covered cursor');
+    await oneShot.documentRemoteCursorStore.save({ ...cursor, nextOffset: '200' });
+    expect((await oneShot.documentRemoteCursorStore.load(cursor.streamUrl))?.nextOffset).toBe(
+      '200'
+    );
+    await oneShot.documentRemoteCursorStore.delete?.(cursor.streamUrl);
+    expect(await oneShot.documentRemoteCursorStore.load(cursor.streamUrl)).toBeNull();
+    expect(rows()).toEqual(before);
+  });
+
+  it.each([{}, { '1': 'invalid' }, { '1': -1 }])(
+    'bootstraps instead of seeding an invalid cursor version %j',
+    async (serverLowerBoundVersion) => {
+      const docId = 'session-invalid-seed';
+      const remote = new LoroDoc();
+      remote.setPeerId('1');
+      remote.getText('t').insert(0, 'complete history');
+      const server = createStreamsServer(remote.export({ mode: 'snapshot' }));
+      const daemon = await openCliProcess();
+      const doc = (await daemon.repo.openPersistedDoc(docId)).doc;
+      expect((await syncDoc(daemon, docId, doc)).ok).toBe(true);
+      const rows = daemon.store.sqliteStore.db
+        .prepare('SELECT stream_url FROM remote_cursors')
+        .all() as Array<{ stream_url: string }>;
+      const streamUrl = rows[0]?.stream_url;
+      if (!streamUrl) throw new Error('missing daemon cursor');
+      const cursor = await daemon.documentRemoteCursorStore.load(streamUrl);
+      if (!cursor) throw new Error('missing daemon cursor');
+      const invalid = { ...cursor, serverLowerBoundVersion };
+      await daemon.documentRemoteCursorStore.save(invalid);
+      const oneShot = await openCliProcess('process');
+      const restored = (await oneShot.repo.openPersistedDoc(docId)).doc;
+      expect((await syncDoc(oneShot, docId, restored)).ok).toBe(true);
+      expect(server.bootstraps()).toBe(2);
+      expect(restored.getText('t').toString()).toBe('complete history');
+      expect(await daemon.documentRemoteCursorStore.load(streamUrl)).toEqual(invalid);
+    }
+  );
+
+  it('does not repair a corrupt daemon cursor row while bootstrapping a command', async () => {
+    const docId = 'session-corrupt-cursor';
+    const remote = new LoroDoc();
+    remote.getText('t').insert(0, 'complete history');
+    const server = createStreamsServer(remote.export({ mode: 'snapshot' }));
+    const daemon = await openCliProcess();
+    expect((await syncDoc(daemon, docId, (await daemon.repo.openPersistedDoc(docId)).doc)).ok).toBe(
+      true
+    );
+    daemon.store.sqliteStore.db
+      .prepare('UPDATE remote_cursors SET server_lower_bound_version = ?')
+      .run('invalid json');
+    const rows = () => daemon.store.sqliteStore.db.prepare('SELECT * FROM remote_cursors').all();
+    const before = rows();
+    const oneShot = await openCliProcess('process');
+    const doc = (await oneShot.repo.openPersistedDoc(docId)).doc;
+    expect((await syncDoc(oneShot, docId, doc)).ok).toBe(true);
+    expect(server.bootstraps()).toBe(2);
+    expect(doc.getText('t').toString()).toBe('complete history');
+    expect(rows()).toEqual(before);
+  });
+
+  it('bootstraps a pending-only replica and restores its missing causal prefix without writing shared cursors', async () => {
+    const docId = 'session-pending-seed';
+    const remote = new LoroDoc();
+    remote.setPeerId('1');
+    remote.getText('t').insert(0, 'A');
+    remote.commit();
+    const beforeU2 = remote.oplogVersion();
+    remote.getText('t').push('B');
+    remote.commit();
+    const u2 = remote.export({ mode: 'update', from: beforeU2 });
+    const oneShot = await openCliProcess('process');
+    const oldDoc = (await oneShot.repo.openPersistedDoc(docId)).doc;
+    expect(oldDoc.import(u2).pending?.size).toBeGreaterThan(0);
+    // Pinned Loro 1.17.0 retains pending separately from both version vectors.
+    expect([...oldDoc.oplogVersion().toJSON()]).toEqual([]);
+    expect([...oldDoc.version().toJSON()]).toEqual([]);
+    expect(oldDoc.exportPendingUpdates()?.byteLength).toBeGreaterThan(0);
+
+    createStreamsServer(remote.export({ mode: 'snapshot' }));
+    const daemon = await openCliProcess();
+    expect((await syncDoc(daemon, docId, (await daemon.repo.openPersistedDoc(docId)).doc)).ok).toBe(
+      true
+    );
+    const rows = () => daemon.store.sqliteStore.db.prepare('SELECT * FROM remote_cursors').all();
+    const before = rows();
+    const row = before[0] as { stream_url: string };
+    expect(
+      (await daemon.documentRemoteCursorStore.load(row.stream_url))?.serverLowerBoundVersion
+    ).toEqual({ '1': 2 });
+    const recovery = createStreamsServer(remote.export({ mode: 'snapshot' }));
+    expect((await syncDoc(oneShot, docId, oldDoc)).ok).toBe(true);
+    expect(recovery.bootstraps()).toBe(1);
+    expect(oldDoc.getText('t').toString()).toBe('AB');
+    expect(oldDoc.version().toJSON()).toEqual(remote.version().toJSON());
+    expect(oldDoc.exportPendingUpdates()).toBeUndefined();
+    expect(rows()).toEqual(before);
+  });
+
+  it.each(['pending', 'detached'] as const)(
+    'refuses a seed for a %s replica even when its oplog covers the cursor',
+    async (state) => {
+      const docId = 'session-applied-seed';
+      const remote = new LoroDoc();
+      remote.setPeerId('1');
+      remote.getText('t').insert(0, 'A');
+      remote.commit();
+      const prefix = remote.frontiers();
+      remote.getText('t').push('B');
+      remote.commit();
+      createStreamsServer(remote.export({ mode: 'snapshot' }));
+      const daemon = await openCliProcess();
+      expect(
+        (await syncDoc(daemon, docId, (await daemon.repo.openPersistedDoc(docId)).doc)).ok
+      ).toBe(true);
+      const rows = () => daemon.store.sqliteStore.db.prepare('SELECT * FROM remote_cursors').all();
+      const before = rows();
+      const row = before[0] as { stream_url: string };
+      const oneShot = await openCliProcess('process');
+      const doc = (await oneShot.repo.openPersistedDoc(docId)).doc;
+      if (state === 'pending') {
+        remote.getText('t').push('C');
+        remote.commit();
+        const beforeD = remote.oplogVersion();
+        remote.getText('t').push('D');
+        remote.commit();
+        expect(
+          doc.import(remote.export({ mode: 'update', from: beforeD })).pending?.size
+        ).toBeGreaterThan(0);
+        expect([...doc.version().toJSON()]).toEqual([['1', 2]]);
+        expect(doc.exportPendingUpdates()?.byteLength).toBeGreaterThan(0);
+      } else {
+        doc.checkout(prefix);
+        expect([...doc.version().toJSON()]).toEqual([['1', 1]]);
+      }
+      expect([...doc.oplogVersion().toJSON()]).toEqual([['1', 2]]);
+      const cursors = oneShot.documentRemoteCursorStore;
+      if (!(cursors instanceof ProcessDocumentRemoteCursorStore))
+        throw new Error('missing process cursor store');
+      cursors.bindDocument(getLoroStreamIdForDocId(workspaceId, docId), doc);
+      expect(await cursors.load(row.stream_url)).toBeNull();
+      expect(rows()).toEqual(before);
+      if (state === 'detached') doc.attach();
+    }
+  );
+
+  it('rejects a future peer even when every other peer clock is covered', async () => {
+    const docId = 'session-future-peer';
+    const remote = new LoroDoc();
+    remote.setPeerId('1');
+    remote.getText('t').insert(0, 'base|');
+    const server = createStreamsServer(remote.export({ mode: 'snapshot' }));
+    const daemon = await openCliProcess();
+    const daemonDoc = (await daemon.repo.openPersistedDoc(docId)).doc;
+    expect((await syncDoc(daemon, docId, daemonDoc)).ok).toBe(true);
+    const oneShot = await openCliProcess('process');
+    const oldDoc = (await oneShot.repo.openPersistedDoc(docId)).doc;
+    remote.setPeerId('2');
+    remote.getText('t').push('new peer');
+    createStreamsServer(remote.export({ mode: 'snapshot' }));
+    // A fresh daemon transport first checks the old checkpoint; invalidate it to
+    // model a full receive of the new snapshot and its matching durable cursor.
+    const rows = daemon.store.sqliteStore.db
+      .prepare('SELECT stream_url FROM remote_cursors')
+      .all() as Array<{ stream_url: string }>;
+    const streamUrl = rows[0]?.stream_url;
+    if (!streamUrl) throw new Error('missing daemon cursor');
+    await daemon.documentRemoteCursorStore.delete?.(streamUrl);
+    expect((await syncDoc(daemon, docId, daemonDoc)).ok).toBe(true);
+    const future = await daemon.documentRemoteCursorStore.load(streamUrl);
+    expect(Object.keys(future?.serverLowerBoundVersion ?? {})).toHaveLength(2);
+    expect(oldDoc.getText('t').toString()).toBe('base|');
+    const recovery = createStreamsServer(remote.export({ mode: 'snapshot' }));
+    expect((await syncDoc(oneShot, docId, oldDoc)).ok).toBe(true);
+    expect(recovery.bootstraps()).toBe(1);
+    expect(oldDoc.getText('t').toString()).toBe('base|new peer');
+    expect(oldDoc.oplogVersion().toJSON()).toEqual(remote.oplogVersion().toJSON());
+    expect(await daemon.documentRemoteCursorStore.load(streamUrl)).toEqual(future);
+    expect(server.bootstraps()).toBe(1);
   });
 
   it('does not advance the checkpoint past data that failed to persist before a crash', async () => {

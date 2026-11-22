@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-loro-repo 0.20.0 把 Flock 版本向量当作"其下所有内容都已保存"的证据。Lody 自己还另有三处游标与数据不一致：CLI 在对应的 SQLite 写入之前就保存了 Streams 游标；一次性 CLI 命令会从 daemon 的游标行继续；Web 标签页共用同一个 repo 库和同一个游标库。每一处都可能让某个副本永久跳过远端数据。现在，Lody 把每个 Meta/Flock Streams checkpoint 绑定到加载它的副本，并与该副本的数据原子地存在一起：渲染端存在 IndexedDB，CLI 存在 SQLite。每次保存游标前都会先等真实的逐资源持久化屏障；LoroDoc 游标只在 daemon 中共享并持久化。改动分三个 PR 上线：库升级（#1049）、渲染端（#1058），以及基于 loro-repo 0.21.0 的 CLI（#1066）。没有迁移任何游标；每个 Meta/Flock 房间在首次用 0.21.0 打开时 bootstrap 一次，这也顺带修复了已经损坏的缓存；旧版本持续写入期间，受影响的房间可能再次 bootstrap。剩余局限有两点：持久性是用 fake-indexeddb、真实 Chromium 的事务顺序和注入的 SQLite 故障证明的，没有验证断电；LoroDoc 游标没有绑定到副本，所以一次性命令打开的每个文档都会 bootstrap 一次。
+loro-repo 0.20.0 把 Flock 版本向量当作"其下所有内容都已保存"的证据。Lody 自己还另有三处游标与数据不一致：CLI 在对应的 SQLite 写入之前就保存了 Streams 游标；一次性 CLI 命令会从 daemon 的游标行继续；Web 标签页共用同一个 repo 库和同一个游标库。每一处都可能让某个副本永久跳过远端数据。现在，Lody 把每个 Meta/Flock Streams checkpoint 绑定到加载它的副本，并与该副本的数据原子地存在一起：渲染端存在 IndexedDB，CLI 存在 SQLite。每次保存游标前都会先等真实的逐资源持久化屏障；只有 daemon 写入共享的持久化 LoroDoc 游标。改动分三个 PR 上线：库升级（#1049）、渲染端（#1058），以及基于 loro-repo 0.21.0 的 CLI（#1066）。没有迁移任何游标；每个 Meta/Flock 房间在首次用 0.21.0 打开时 bootstrap 一次，这也顺带修复了已经损坏的缓存；旧版本持续写入期间，受影响的房间可能再次 bootstrap。剩余局限有两点：持久性是用 fake-indexeddb、真实 Chromium 的事务顺序和注入的 SQLite 故障证明的，没有验证断电；未覆盖或空版本的 LoroDoc 游标仍需 bootstrap，已覆盖游标的一次性副本可以增量续传。
 
 ## 上游变化（0.20.0 → 0.20.3，`main` 位于 `5862a2b`）
 
@@ -79,7 +79,7 @@ loro-repo 0.20.0 把 Flock 版本向量当作"其下所有内容都已保存"的
 
 **相关但不在本范围内。** 本地数据平面用 `exportJson(from: version())` 发送 Flock 增量（`packages/shared/src/local-loro-transport.ts:578-580`、`local-loro-data-plane-server.ts`）。它依赖同样的"版本向量相等就代表完整"的假设，因此无法修复渲染端与 CLI 副本之间"版本相同但缺数据"的空洞，需要单独决策。
 
-## 提案
+## 决策
 
 ### 阶段 0：只升级库
 
@@ -264,11 +264,13 @@ loro-repo 0.20.0 把 Flock 版本向量当作"其下所有内容都已保存"的
   - 用共享游标的两参数工厂时，过期副本最终缺少 A；
   - 用只安排、不等待的屏障时，写入失败了同步却报告成功；
   - 用内存游标时，每次重启都会 bootstrap。
-- **评审修复（P1）：共享的 LoroDoc 游标只给 daemon 用。** loro-repo 并没有把 LoroDoc 游标与文档字节绑定，所以一次性命令如果在 daemon 推进某个文档之前就打开了它，会从 daemon 共享的 `remote_cursors` 行继续，并一直缺少 daemon 收到的数据。
-  - `LoroDocumentManager.create` 新增 `documentCursorScope` 选项。只有 daemon（`lib/lody.ts`）传 `shared-durable`；默认的 `process` 把 LoroDoc 进度保存在本进程内存里，所以一次性命令打开的每个文档都会 bootstrap 一次，并且永远不会写共享游标。
-  - 这样共享游标只会描述 daemon 自己的副本。一次性命令写入的数据可能领先于它，这只会导致重放。
-  - 回归测试：新增双进程 `syncDoc` 测试（一次性命令先加载空文档，daemon bootstrap 到 A 并推进共享游标，然后一次性命令同步，必须通过第二次 bootstrap 拿到 A）。若 LoroDoc 游标共享，一次性命令最终仍是空的。manager-create 测试断言一次性调用方默认得到内存游标库。
-  - 上游如果提供 LoroDoc 的 replica-bound checkpoint，可以省掉每条命令的 bootstrap，但这不是正确性所必需的。
+- **LoroDoc 游标保留 daemon 独占写入，命令读取前检查因果版本。** [实现](https://github.com/LodyAI/Lody/pull/3103). 文档字节和 `remote_cursors` 分开存储。如果命令加载文档后 daemon 又收到了更新，命令不检查实际副本就使用共享游标，会永久跳过更新。
+  - 只有 daemon（`lib/lody.ts`）传 `documentCursorScope: 'shared-durable'`。默认 `process` 存储对每个流只读取一次固定版本的 SQLite 游标格式，并保留相同的 URL alias 查找。SDK 的 load 会删除坏行做修复，因此命令播种在 SDK 现有连接上缓存 SELECT。固定 SDK 把该连接声明为 private；这处兼容访问保留连接设置及生命周期，执行前必须由 SQLite 确认语句为 `readonly`，连接关闭则不播种。只有传给 `syncDoc` 或 `joinDocRoom` 的实际文档，其已应用的 `version()` 覆盖非空 `serverLowerBoundVersion` 的每个 peer 时钟，且没有 pending 更新，才采用播种游标。无效或超前时钟回退 bootstrap，保存游标前的 `persistDocNow` 屏障不变。
+  - 进程保存和带墓碑的删除只改内存，不改共享表。磁盘读取与本地保存或删除并发时，不覆盖较新的本地状态。更换副本时作废本地进度，不把它带到另一个文档实例。
+  - 拒绝直接共享 daemon 游标库，也拒绝用新打开的磁盘快照代替实际同步的内存文档做检查：两者都可能让旧副本从缺失数据之后继续。
+  - 一次性 `withWorkspaceManager` 关闭云端 presence、machine-monitor、prompt-suggestion 通道及 repo transport 的 ephemeral 能力。本地状态和持久化同步继续可用，daemon 保留这些通道。令牌归属、串行挂载与卸载、回滚和独立清理保持不变。这次配置与存储适配器修复不需要新增等待门槛、重试所有者或 Effect 迁移。
+  - Node CLI fetch 只添加 `lody-cli/<version> (daemon|oneshot)` User-Agent；`start` 是执行宿主，其他 CLI 命令是一次性命令。覆盖 SDK 全局 fetch 及原生 transport 回退，不改浏览器和移动端，也不包含用户标识。
+  - `tests/cli-streams-replica-checkpoints.test.ts` 用真实 SQLite 和 Streams 配合确定性响应，验证大文档覆盖后续传、多 peer 旧副本恢复、仅进程内保存与删除、临时通道关闭。HTTP transport 测试验证模式标识和授权头保留。这些是本地契约验证，不是生产出口流量收益测量。
 - **0.21.0 通过 `saveMany` 写入。** SQLite 和 IndexedDB 适配器都新增了可选的原子 `saveMany`，loro-repo 写元数据和命名 Flock 时优先用它而不是 `save`。因此崩溃测试同时在两个入口注入磁盘满错误，并断言 `saveMany` 存在。显式列举适配器方法的包装层（如 #1060 的写入观察器）必须转发 `saveMany`：漏掉它仍然正确，但会静默退回每个 payload 一次提交，抵消 #141 的收益。
 - **限制。** 升级后第一次打开会写入 checkpoint 表和触发器。如果那一刻磁盘恰好已满，工作区会打不开（loro-dev/loro-repo#139）。
 
@@ -306,7 +308,7 @@ loro-repo 0.20.0 把 Flock 版本向量当作"其下所有内容都已保存"的
 - **待办。**
   - 升级后第一次打开数据库时，如果磁盘已满，仍会打开失败（loro-dev/loro-repo#139）。
   - 存储适配器的包装层必须转发 `saveMany`。#1060 的写入观察器正在补这一项；漏掉不会出错，但会退回每个 payload 各提交一次。
-  - 上游如果提供绑定到副本的 LoroDoc checkpoint，就能省掉一次性命令对每个 LoroDoc 的 bootstrap。这不影响正确性。
+  - 上游绑定到副本的 LoroDoc checkpoint 可以让数据与进度原子关联。目前已覆盖游标的进程副本通过因果播种避免 bootstrap，未覆盖的副本仍安全重放。
 - **局限。**
   - fake-indexeddb 和真实 Chromium 证明的是事务顺序，而不是断电后的持久性。
   - strict flush 的成本是在 0.20.3 上测的（见上表），#141 的批量提交还没有在 Lody 中重新测量。

@@ -2,15 +2,11 @@ import fs from 'fs/promises';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 import path from 'path';
-import {
-  InMemoryRemoteCursorStore,
-  type JsonObject,
-  type RemoteCursor,
-  type RemoteCursorStore,
-} from '@loro-dev/streams-crdt';
+import { type JsonObject, type RemoteCursor, type RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { getLoroStreamsRemoteCursorUrlAliases, type WorkspaceId } from '@lody/shared';
 import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import type { LoroDoc } from 'loro-crdt';
 import { sqliteLockReporterLegacy } from './sqlite-lock-diagnostics';
 
 export const getLoroRepoStorageBaseDir = (workspaceId: WorkspaceId): string =>
@@ -24,7 +20,7 @@ export const getLoroRepoSqliteDbPath = (workspaceId: WorkspaceId): string =>
 // produce different cursor keys; rejected: using the raw store would make
 // gateway flips lose checkpoints or leave stale invalidated checkpoints behind.
 // This is URL-key compatibility only, not migration of pre-SQLite JSON cursors.
-// It serves LoroDoc rooms of the daemon only (see `DocumentCursorScope`): Meta
+// The daemon writes LoroDoc cursors; commands may read covered seeds. Meta
 // and named Flock cursors are replica-bound checkpoints owned by
 // `SqliteRepoStore` itself (no alias fallback there, so a gateway flip costs
 // those rooms one bootstrap).
@@ -72,7 +68,7 @@ const remoteCursor = z.object({
     .string()
     .min(1)
     .refine((offset) => offset !== '-1'),
-  serverLowerBoundVersion: z.record(z.string(), z.unknown()),
+  serverLowerBoundVersion: z.record(z.string(), z.json()),
   updatedAtMs: z.number(),
 });
 
@@ -109,7 +105,7 @@ export type CliSqliteRepoStore = {
   storageAdapter: SqliteRepoStore['storage'];
   /**
    * LoroDoc room cursors shared by every process opening this file; see
-   * `AliasedRemoteCursorStore`. Only the daemon may resume from them — use
+   * `AliasedRemoteCursorStore`. Only the daemon may write them — use
    * `createDocumentRemoteCursorStore`, never this field directly.
    */
   sharedDocumentRemoteCursorStore: RemoteCursorStore;
@@ -141,27 +137,115 @@ export const createCliSqliteRepoStore = async (
   };
 };
 
-/**
- * Which LoroDoc Streams progress a process may resume from.
- *
- * LoroDoc cursors are not replica-bound: loro-repo keeps them in a store
- * separate from the doc bytes. The daemon and one-shot commands open the same
- * `repo.sqlite3` with their own in-memory replicas, so a process that loaded a
- * doc before another process advanced its data and shared cursor would resume
- * at that tail and permanently miss the entries it never loaded.
- *
- * - `shared-durable`: the long-lived daemon. It is the only writer of the
- *   shared cursors, so they only ever describe its own replica (data may run
- *   ahead of them, which merely replays).
- * - `process`: every other process. Progress lives in memory with this
- *   process's replicas, so each doc room it opens bootstraps once.
- */
+/** Shared cursors are daemon-owned; commands may only seed covered document progress. */
 export type DocumentCursorScope = 'shared-durable' | 'process';
+
+export class ProcessDocumentRemoteCursorStore implements RemoteCursorStore {
+  private readonly cursors = new Map<string, RemoteCursor | null>();
+  private readonly documents = new Map<string, WeakRef<LoroDoc>>();
+
+  constructor(private readonly shared: Pick<RemoteCursorStore, 'load'>) {}
+
+  bindDocument(streamId: string, doc: LoroDoc): void {
+    const previous = this.documents.get(streamId);
+    if (previous && previous.deref() !== doc) {
+      for (const url of this.cursors.keys()) {
+        if (this.streamId(url) === streamId) this.cursors.set(url, null);
+      }
+    }
+    this.documents.set(streamId, new WeakRef(doc));
+  }
+
+  async load(streamUrl: string): Promise<RemoteCursor | null> {
+    if (this.cursors.has(streamUrl)) return this.cursors.get(streamUrl) ?? null;
+    const streamId = this.streamId(streamUrl);
+    const doc = this.documents.get(streamId)?.deref();
+    const cursor = await this.shared.load(streamUrl);
+    // A concurrent save/delete wins over the asynchronous disk read.
+    if (this.cursors.has(streamUrl)) return this.cursors.get(streamUrl) ?? null;
+    if (doc !== this.documents.get(streamId)?.deref()) return null;
+    const version = doc ? new Map<string, number>(doc.version().toJSON()) : undefined;
+    const hasPending = (doc?.exportPendingUpdates()?.byteLength ?? 0) > 0;
+    const clocks = cursor ? Object.entries(cursor.serverLowerBoundVersion) : [];
+    const covered =
+      version &&
+      !hasPending &&
+      clocks.length > 0 &&
+      clocks.every(
+        ([peer, clock]) =>
+          typeof clock === 'number' &&
+          Number.isSafeInteger(clock) &&
+          clock >= 0 &&
+          (version.get(peer) ?? 0) >= clock
+      );
+    const seed = covered ? cursor : null;
+    this.cursors.set(streamUrl, seed);
+    return seed;
+  }
+
+  private streamId(streamUrl: string): string {
+    return decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1) ?? '');
+  }
+
+  async save(cursor: RemoteCursor): Promise<void> {
+    this.cursors.set(cursor.streamUrl, cursor);
+  }
+
+  async delete(streamUrl: string): Promise<void> {
+    this.cursors.set(streamUrl, null);
+    for (const alias of getLoroStreamsRemoteCursorUrlAliases(streamUrl)) {
+      this.cursors.set(alias, null);
+    }
+  }
+}
 
 export const createDocumentRemoteCursorStore = (
   store: CliSqliteRepoStore,
   scope: DocumentCursorScope
-): RemoteCursorStore =>
-  scope === 'shared-durable'
-    ? store.sharedDocumentRemoteCursorStore
-    : new InMemoryRemoteCursorStore();
+): RemoteCursorStore => {
+  if (scope === 'shared-durable') return store.sharedDocumentRemoteCursorStore;
+  // The pinned SDK's cursor load deletes malformed rows. Commands must remain
+  // read-only even on that path, so read the same SQLite format without repair.
+  const rowSchema = z.object({
+    next_offset: z.string(),
+    server_lower_bound_version: z.string(),
+    updated_at_ms: z.number(),
+  });
+  let select: Database.Statement | undefined;
+  return new ProcessDocumentRemoteCursorStore({
+    load: async (streamUrl) => {
+      const database = (store.sqliteStore as unknown as { readonly db: Database.Database }).db;
+      if (!database.open) return null;
+      try {
+        select ??= database.prepare(
+          'SELECT next_offset, server_lower_bound_version, updated_at_ms FROM remote_cursors WHERE stream_url = ?'
+        );
+      } catch {
+        return null;
+      }
+      if (!select.readonly) throw new Error('document_cursor_seed_query_must_be_readonly');
+      try {
+        for (const url of [streamUrl, ...getLoroStreamsRemoteCursorUrlAliases(streamUrl)]) {
+          const row = rowSchema.safeParse(select.get(url));
+          if (!row.success) continue;
+          let version: unknown;
+          try {
+            version = JSON.parse(row.data.server_lower_bound_version);
+          } catch {
+            continue;
+          }
+          const cursor = remoteCursor.safeParse({
+            streamUrl,
+            nextOffset: row.data.next_offset,
+            serverLowerBoundVersion: version,
+            updatedAtMs: row.data.updated_at_ms,
+          });
+          if (cursor.success) return cursor.data;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    },
+  });
+};
