@@ -9,6 +9,7 @@ Root `AGENTS.md` and [`specs/rust-cli-daemon-architecture.md`](../../specs/rust-
 - `crates/kernel` must remain a pure deterministic state machine with zero I/O, zero wall-clock reads, zero async runtime dependencies, and zero internal crate dependencies.
 - `crates/ports` defines traits and domain value types only; leaf implementation crates (`sqlite`, `acp`, `worktree`, `engine`, `backend`) depend on `lody-ports` and never on `lody-kernel`, `lody-runtime`, `lody-entry`, or each other.
 - `crates/entry` depends on `lody-app` only; `bins/lody` is the sole composition root, and its default build must not link `lody-backend` (`connected` Cargo feature only).
+- Define and read all environment variable keys and values exclusively inside `crates/env` (`lody-env`); direct calls to `std::env::var*` or `std::env::set_var` outside `lody-env` are forbidden and rejected by `clippy.toml`.
 - Preserve existing SQLite filenames and schemas during the rollout so a shared `LODY_DATA_DIR` can switch between the Node CLI and the Rust daemon without data loss.
 
 ## Engineering, code style, and testing rules

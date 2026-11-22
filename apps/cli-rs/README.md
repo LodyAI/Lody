@@ -5,6 +5,7 @@ Rust CLI (`lody`), execution daemon (`lodyd`), and black-box business conformanc
 ## Workspace layout
 
 - `bins/lody` — Composition root and single executable (`lody`). Default build wires the pure local composition without linking `lody-backend`; `--features connected` links vendor-neutral backend implementations.
+- `crates/env` (`lody-env`) — Single source of truth for all environment variable names (`keys`) and typed process environment loaders (`HostEnv`, `ConformanceEnv`), enforced workspace-wide via `clippy.toml`.
 - `crates/ports` (`lody-ports`) — Pure port traits and shared domain identifiers (`EnginePort`, `HistoryPort`, `InboxStorePort`, `AcpLauncherPort`, `WorktreePort`, `BackendPort`, `VerifiedPrincipal`).
 - `crates/kernel` (`lody-kernel`) — Pure deterministic session, turn, and unified-inbox state machines; zero I/O, zero clock, zero async runtime.
 - `crates/app` (`lody-app`) — Single application command/query interface and caller authorization shared across CLI, MCP, local IPC, and remote RPC.

@@ -272,16 +272,17 @@ fn local_ipc_client_speaks_http_and_ndjson_over_unix_socket() {
 #[test]
 fn runs_live_target_and_optional_differential_conformance_when_configured() {
     let bin = scripted_acp_binary();
+    let cfg = lody_env::ConformanceEnv::from_process();
 
-    if let Some(single) = TargetBinary::from_env("LODY_CONFORMANCE_BIN") {
+    if let Some(single) = TargetBinary::parse_opt(cfg.single_bin.as_deref()) {
         let outcomes = run_all_business_scenarios(&single, &bin)
             .expect("single-target business conformance suite failed");
         assert_eq!(outcomes.len(), 6);
     }
 
     if let (Some(baseline), Some(candidate)) = (
-        TargetBinary::from_env("LODY_CONFORMANCE_BASELINE_BIN"),
-        TargetBinary::from_env("LODY_CONFORMANCE_CANDIDATE_BIN"),
+        TargetBinary::parse_opt(cfg.baseline_bin.as_deref()),
+        TargetBinary::parse_opt(cfg.candidate_bin.as_deref()),
     ) {
         run_differential_suite(&baseline, &candidate, &bin)
             .expect("A/B differential business conformance failed");

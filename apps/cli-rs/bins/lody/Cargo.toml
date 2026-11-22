@@ -20,6 +20,7 @@ lody-app.workspace = true
 lody-backend = { workspace = true, optional = true }
 lody-engine.workspace = true
 lody-entry.workspace = true
+lody-env.workspace = true
 lody-kernel.workspace = true
 lody-ports.workspace = true
 lody-runtime.workspace = true

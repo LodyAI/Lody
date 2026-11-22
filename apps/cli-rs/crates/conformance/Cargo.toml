@@ -7,7 +7,8 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
-lody-scripted-acp = { path = "../scripted-acp" }
+lody-env.workspace = true
+lody-scripted-acp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

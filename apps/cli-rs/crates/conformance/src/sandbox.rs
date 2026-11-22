@@ -29,8 +29,8 @@ impl TargetBinary {
         })
     }
 
-    pub fn from_env(var_name: &str) -> Option<Self> {
-        std::env::var(var_name).ok().and_then(|v| Self::parse(&v))
+    pub fn parse_opt(spec: Option<&str>) -> Option<Self> {
+        spec.and_then(Self::parse)
     }
 }
 
@@ -148,10 +148,10 @@ impl ConformanceSandbox {
         cmd.args(&target.prefix_args)
             .args(args)
             .current_dir(&self.project_dir)
-            .env("HOME", &self.home_dir)
-            .env("LODY_DATA_DIR", &self.data_dir)
-            .env("LODY_PLATFORM", "local")
-            .env("NO_COLOR", "1")
+            .env(lody_env::keys::HOME, &self.home_dir)
+            .env(lody_env::keys::LODY_DATA_DIR, &self.data_dir)
+            .env(lody_env::keys::LODY_PLATFORM, "local")
+            .env(lody_env::keys::NO_COLOR, "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
