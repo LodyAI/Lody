@@ -66,8 +66,7 @@ export class AgentRolePage {
     await editor
       .getByLabel(/^(Default instruction|默认指令)$/u)
       .fill(this.fixture.initialInstruction);
-    // The isolated desktop has one local machine. A new Role starts on it, as
-    // the one row of the "Runs on" list, open on that machine's settings.
+    // The isolated desktop's one machine is the new Role's one open "Runs on" row.
     const machineRow = editor.locator('[data-machine-id] > button[aria-expanded]');
     await expect(machineRow).toHaveCount(1);
     await expect(machineRow).toHaveAttribute('aria-expanded', 'true');

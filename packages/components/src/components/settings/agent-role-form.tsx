@@ -493,8 +493,6 @@ export function AgentRoleForm({
                 {t('settings.agentRoles.form.sectionTarget')}
               </h3>
               {addable.length > 0 ? (
-                // The ghost button's own padding would leave its label short of
-                // the list's edge; the wrapper gives that inset back.
                 <span {...stylex.props(styles.headAction)}>
                   <Menu.Root>
                     <Menu.Trigger
@@ -568,7 +566,6 @@ export function AgentRoleForm({
                             ? (agentLabel ?? '')
                             : t('settings.agentRoles.form.agentConfigPlaceholder')}
                         </span>
-                        {/* No token until the Role has a name to derive it from. */}
                         {value.name.trim() ? (
                           <span
                             {...stylex.props(
