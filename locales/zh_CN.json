@@ -4904,6 +4904,8 @@
   "commands.session.cycleProvider": "循环切换 ACP 提供方",
   "commands.session.cycleModel": "循环切换模型",
   "commands.session.cycleThinkEffort": "循环切换思考强度",
+  "commands.session.openRunConfig": "打开运行配置",
+  "commands.session.openAddMenu": "打开「+」菜单",
   "commands.mention.toggleSessionProjectScope": "切换会话提及的项目范围",
   "commands.nav.back": "后退",
   "commands.nav.forward": "前进",
