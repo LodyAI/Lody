@@ -94,23 +94,27 @@ try {
         return runtime;
       }
     : undefined;
-  const recovery: MobileRecoveryConfig | null =
-    window.__LODY_NATIVE__ && Capacitor.getPlatform() === 'ios'
-      ? {
-          enabled: () => jotaiStore.get(e2eeRecoveryVaultFeatureEnabledAtom),
-          client: convexClient,
-          run: Effect.runPromise,
-          passkey: nativePasskeyPort({ enabled: true }),
-          defaultLabel: async () => {
-            const info = await Device.getInfo();
-            const device = info.model.startsWith('iPad') ? 'iPad' : 'iPhone';
-            return /^\d+(?:\.\d+){0,3}$/.test(info.osVersion)
-              ? `${device} · iOS ${info.osVersion}`
-              : device;
-          },
-          runtime: () => recoveryRuntime,
-        }
-      : null;
+  const recovery: MobileRecoveryConfig | null = window.__LODY_NATIVE__
+    ? {
+        enabled: () => jotaiStore.get(e2eeRecoveryVaultFeatureEnabledAtom),
+        client: convexClient,
+        run: Effect.runPromise,
+        passkey: nativePasskeyPort({ enabled: Capacitor.getPlatform() === 'ios' }),
+        defaultLabel: async () => {
+          const info = await Device.getInfo();
+          const android = info.platform === 'android';
+          const device = android
+            ? info.model.trim() || 'Android'
+            : info.model.startsWith('iPad')
+              ? 'iPad'
+              : 'iPhone';
+          return /^\d+(?:\.\d+){0,3}$/.test(info.osVersion)
+            ? `${device} · ${android ? 'Android' : 'iOS'} ${info.osVersion}`
+            : device;
+        },
+        runtime: () => recoveryRuntime,
+      }
+    : null;
   const router = createRouter({
     basepath,
     authClient,

@@ -141,7 +141,7 @@ function SessionIosSimulatorPanelController({
       ? machineSupportsAndroidEmulatorProtocol(machine)
         ? 'available'
         : 'upgrade-required'
-      : getIosSimulatorPanelAvailability(machine);
+      : getIosSimulatorPanelAvailability(machine, runtime?.contentMode);
   // Same-machine Electron talks to the local daemon directly, so cloud presence
   // going offline does not cut it off.
   const blocker: IosSimulatorPanelBlocker | null =
@@ -298,7 +298,7 @@ function SessionIosSimulatorPanelController({
   );
 
   const connected = Boolean(runtime && requesterUserId);
-  const live = active && blocker === null && connected;
+  const live = active && availability !== 'hidden' && blocker === null && connected;
   const loadedRef = useRef(initialSnapshot?.catalog.phase === 'ready');
   useEffect(() => {
     if (!live) return;

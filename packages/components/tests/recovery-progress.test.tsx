@@ -160,3 +160,79 @@ it('desktop progress detaches without cancelling recovery and keeps partial-key 
     window.ipc = previous;
   }
 });
+
+it('asks for the known vault password when passkey enrollment is unknown', async () => {
+  const store = createStore();
+  store.set(e2eeRecoveryVaultEnabledAtom, true);
+  const never = () => new Promise<never>(() => {});
+  let restored: { method?: string; password?: string } | undefined;
+  const port: RecoveryPort = {
+    plan: async () => ({
+      hasVault: true,
+      replacing: false,
+      methods: { hasFile: false, hasPassword: true, hasPasskey: null },
+      covered: [],
+      uncovered: [{ id: 'w1', name: 'Alpha' }],
+    }),
+    securityEvents: async () => [],
+    passkeyAvailable: async () => true,
+    create: null,
+    checkFile: null,
+    replacement: null,
+    setupWorkspace: never,
+    setupWorkspaces: never,
+    passkeyDefaultLabel: never,
+    addPasskey: never,
+    removePasskey: never,
+    restore: never,
+    listPasskeys: async (method, options) => {
+      restored = { method, password: options?.password };
+      return { outcome: 'listed', passkeys: [], pending: [] };
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const i18n = createTestI18n({ keyLabels: true });
+  const press = (key: string) => {
+    const button = [...document.body.querySelectorAll('button')].find(
+      (el) => el.textContent === key
+    );
+    expect(button).toBeDefined();
+    button!.click();
+  };
+  try {
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          <TestCloudPlatformProvider>
+            <Provider store={store}>
+              <E2eeRecoveryHostContext.Provider value={{ port }}>
+                <RecoveryVaultSection accountId="password-owner" />
+              </E2eeRecoveryHostContext.Provider>
+            </Provider>
+          </TestCloudPlatformProvider>,
+          i18n
+        )
+      )
+    );
+    await act(async () => press('e2ee.recovery.passkeyManage'));
+    const input = document.body.querySelector<HTMLInputElement>(
+      '[data-testid="e2ee-recovery-unlock-password"]'
+    );
+    expect(input).not.toBeNull();
+    expect(restored).toBeUndefined();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        'correct-password'
+      );
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => press('e2ee.lostAll.continue'));
+    expect(restored).toEqual({ method: 'password', password: 'correct-password' });
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

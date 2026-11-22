@@ -4,9 +4,46 @@ import {
   LocalMachineRpcRequestSchema,
   safeParseLocalMachineRpcRequest,
 } from '../src/local-machine-rpc';
-import { isE2eeFeatureMethod } from '../src/e2ee-rpc';
+import { isE2eeReadQuery, isE2eeFeatureMethod } from '../src/e2ee-rpc';
 
 describe('local Machine RPC', () => {
+  it('accepts the requested daemon update status while keeping status params strict', () => {
+    const request = { machineId: 'm', workspaceId: 'w', method: 'machine/status' };
+    for (const params of [
+      {},
+      { includeDaemonUpdate: true },
+      { includeDisk: true, includeDaemonUpdate: true },
+    ]) {
+      expect(LocalMachineRpcRequestSchema.parse({ ...request, params })).toEqual({
+        ...request,
+        params,
+      });
+    }
+    for (const params of [
+      { includeDaemonUpdate: false },
+      { includeDaemonUpdate: 'true' },
+      { extra: true },
+    ]) {
+      expect(LocalMachineRpcRequestSchema.safeParse({ ...request, params }).success).toBe(false);
+    }
+  });
+
+  it('admits passive diff reads without granting publishing or writable-store methods', () => {
+    for (const method of ['code-collab/open-diff-manifest', 'code-collab/read-blob']) {
+      expect(isE2eeReadQuery(method, {})).toBe(true);
+    }
+    for (const method of [
+      'code-collab/get-file-index',
+      'code-collab/open-current-diff',
+      'code-collab/open-all-changes-diff',
+      'code-collab/open-turn-diff',
+      'code-collab/save-text',
+      'code-collab/init-directory',
+    ]) {
+      expect(isE2eeReadQuery(method, {})).toBe(false);
+    }
+  });
+
   it('bounds Sorbet credential identifiers and excludes unexpected fields', () => {
     const request = {
       machineId: 'm',

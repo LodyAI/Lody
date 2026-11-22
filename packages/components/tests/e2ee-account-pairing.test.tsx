@@ -523,6 +523,26 @@ describe('automatic pairing product flow', () => {
     );
     await tick(0);
   };
+  it.each(['expired', 'revoked', 'declined', 'cancelled'] as const)(
+    'keeps lost-access recovery available after pairing is %s',
+    async (phase) => {
+      const base = waitingRuntime([]);
+      const waiting = await base.automaticPairingState!('w1');
+      const runtime = {
+        ...base,
+        automaticPairingState: async () => ({ ...waiting!, phase }),
+      } as E2eeWorkspaceRuntime;
+      await renderWaiting(runtime, {
+        workspaceName: 'Alpha',
+        accountRole: 'owner',
+        onBackToWorkspaces: () => {},
+        onRemoved: () => {},
+      });
+      expect(text()).toContain(`e2ee.auto.${phase}.title`);
+      await click('e2ee.lostAccess.entry');
+      expect(testId('e2ee-lost-access-lost')).not.toBeNull();
+    }
+  );
   /** An account removal port whose submit the test settles by hand. */
   const removalPort = (listed: () => Promise<boolean | null>) => {
     const port = {

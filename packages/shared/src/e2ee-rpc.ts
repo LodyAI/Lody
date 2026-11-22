@@ -72,6 +72,8 @@ export const E2EE_READ_QUERY_METHODS = [
   'file/download-chunk',
   'code-collab/open-text',
   'code-collab/refresh-text',
+  'code-collab/open-diff-manifest',
+  'code-collab/read-blob',
   'code-collab/lsp-definition',
   'code-collab/lsp-references',
 ] as const;

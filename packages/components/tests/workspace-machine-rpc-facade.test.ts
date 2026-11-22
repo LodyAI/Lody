@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
-  it('negotiates blob persistence while retaining writer-only encrypted diff authority', async () => {
+  it('negotiates blob persistence and admits encrypted Guest diff reads', async () => {
     for (const [plane, protectedContent, supported, persist] of [
       ['local', false, true, false],
       ['cloud', false, true, true],
@@ -68,35 +68,23 @@ describe('createWorkspaceMachineRpcFacade', () => {
         scope: workspaceId,
       });
       if (protectedContent) {
-        expect(
-          await facade.requestCodeCollabOpenDiffManifest(remoteMachineId, {
-            sessionId,
-            path: 'a.ts',
-          })
-        ).toMatchObject({ status: 'error', code: 'permission_denied' });
-        expect(
-          await facade.requestCodeCollabReadBlob(remoteMachineId, {
-            sessionId,
-            key: `sha256:${'1'.repeat(64)}`,
-            offset: 0,
-            length: 100,
-          })
-        ).toMatchObject({ status: 'error', code: 'permission_denied' });
-        role = 'write';
-        expect(
-          await facade.requestCodeCollabOpenDiffManifest(
-            remoteMachineId,
-            { sessionId, path: 'a.ts' },
-            { ownerSessionId: 'parent' }
-          )
-        ).toEqual({ status: 'ok', entries: [], nextCursor: null });
-        expect(
-          await facade.requestCodeCollabReadBlob(
-            remoteMachineId,
-            { sessionId, key: `sha256:${'1'.repeat(64)}`, offset: 0, length: 100 },
-            { ownerSessionId: 'parent' }
-          )
-        ).toMatchObject({ offset: 0, length: 0, totalBytes: 0 });
+        for (const access of ['read', 'write'] as const) {
+          role = access;
+          expect(
+            await facade.requestCodeCollabOpenDiffManifest(
+              remoteMachineId,
+              { sessionId, path: 'a.ts' },
+              { ownerSessionId: 'parent' }
+            )
+          ).toEqual({ status: 'ok', entries: [], nextCursor: null });
+          expect(
+            await facade.requestCodeCollabReadBlob(
+              remoteMachineId,
+              { sessionId, key: `sha256:${'1'.repeat(64)}`, offset: 0, length: 100 },
+              { ownerSessionId: 'parent' }
+            )
+          ).toMatchObject({ offset: 0, length: 0, totalBytes: 0 });
+        }
       }
     }
   });

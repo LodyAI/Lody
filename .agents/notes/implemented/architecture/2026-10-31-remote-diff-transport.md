@@ -21,9 +21,9 @@ production latency improvements.
 
 The additive `codeCollabDiffBlobs` v1 capability gates `open-diff-manifest` and
 `read-blob`. Missing support retains the old APIs and their budgets. Both new
-methods do not start watches or mutate evidence. Encrypted calls retain existing
-write authority and execution claims; Guest diff access is deferred to a separate PR
-by the owner decision on #2316. The plaintext-cache and compatibility decisions are recorded
+methods do not start watches or mutate evidence. Encrypted manifest/blob calls now
+use fresh read authority, including Guest, without execution claims. The original
+#2316 writer restriction deferred this access change for separate review. The plaintext-cache and compatibility decisions are recorded
 for human review in the [draft Spec](../../../../specs/remote-diff-delivery.md).
 
 The manifest enumerates the existing turn/All Changes/single-path set, focus first,
@@ -163,7 +163,7 @@ two incompatible answers to the same comparison.
 
 Writer diff activity separately renews the existing `init-directory` publication
 workflow, at most once per five minutes (five seconds after failure), to preserve
-its ten-minute watch lifetime. Guest file reads skip this action; diff access remains writer-only in encrypted workspaces. Activation is observed
+its ten-minute watch lifetime. Guest file and manifest/blob reads skip this action. Activation is observed
 background work and cannot gate content on a failed publisher; the two blob RPCs
 remain pure reads. In-flight activation is shared within the provider runtime;
 owner/root changes retire that runtime. Body RPC permits remain held through raw
@@ -243,9 +243,10 @@ pages, and rejected one additional byte. No live gateway limit probe was perform
   outside Code Collab's contract.
 - Content hashes in Flock are simpler invalidation but expose a confirmation oracle.
   Random generations preserve compatibility and avoid that disclosure.
-- Moving diff reads into Guest authority would change access to Git bases and retained
-  evidence. #2316 preserves the existing writer restriction; that feature is deferred
-  to an independently reviewed PR.
+- Guest manifest/blob reads admit Git bases and retained evidence through the same
+  session-bound read authorization. Index/current/All Changes reads retain write
+  authority because they can start watches and publish; legacy turn reads retain it
+  because their store adapter can initialize writable storage.
 - Encrypted IndexedDB plaintext has no established repository allowance. Memory-only
   caching is the implemented policy, not an unanswered prerequisite.
 - Server-persisted diff bodies would enable offline use but change ownership and are
@@ -281,7 +282,7 @@ Behavioral evidence lives in:
   legacy rows survive generation-only changes and deletion removes siblings.
 - `packages/loro-streams-rpc/tests/machine-rpc-server.test.ts` and
   `tests/e2ee-native.test.ts`: measured owner envelopes, wrong-owner refusal and real
-  signed writer authority with Guest manifest/blob and save refusals.
+  signed writer/Guest manifest/blob reads with Guest save refusals.
 - `packages/components/tests/code-collab-session-file-provider-v2.test.ts`:
   initial metadata sends zero body bytes; the first open sends base plus head;
   repeat opens revalidate metadata but send zero additional body bytes; an edit with

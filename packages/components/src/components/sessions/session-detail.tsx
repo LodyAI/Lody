@@ -2099,7 +2099,7 @@ const SessionDetail = ({
     getMachineMetaByIdAtomFamily(simulatorOwnerSession?.machineId)
   );
   const activeIosSimulatorSession =
-    simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine) !== 'hidden'
+    simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine, runtime?.contentMode) !== 'hidden'
       ? simulatorOwnerSession
       : null;
   const activeAndroidEmulatorSession =

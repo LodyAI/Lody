@@ -802,6 +802,10 @@ export function E2eeAutomaticPairingPage({
                 </Button>
               )}
             </details>
+          </>
+        )}
+        {!receiving && (
+          <>
             {lostAccess ? (
               <div className="mt-3" data-testid="e2ee-lost-all-entry">
                 <E2eeLostAccessEntry

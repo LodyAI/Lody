@@ -37,7 +37,6 @@ export function MobileRecoverySettings({
   const [notice, setNotice] = useState<'added' | 'removed'>();
   const [refresh, setRefresh] = useState<'needed' | 'failed'>();
   const [events, setEvents] = useState<readonly MobileSecurityEvent[]>([]);
-  const [activityError, setActivityError] = useState(false);
   const [naming, setNaming] = useState<string>();
   const [removing, setRemoving] = useState<{ entryId: string; label: string }>();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -51,10 +50,9 @@ export function MobileRecoverySettings({
       const next = await run(service.events());
       if (live.current && currentService.current === service) {
         setEvents(next);
-        setActivityError(false);
       }
     } catch {
-      if (live.current && currentService.current === service) setActivityError(true);
+      if (live.current && currentService.current === service) setEvents([]);
     }
   }, [run, service]);
   useEffect(() => {
@@ -260,7 +258,7 @@ export function MobileRecoverySettings({
           </Alert.Root>
         )}
       </MobileSettingsSection>
-      {(events.length > 0 || activityError) && (
+      {events.length > 0 && (
         <MobileSettingsSection title={t('e2ee.recovery.securityEvents')}>
           {events.map((event, index) => (
             <MobileSettingsRow
@@ -276,13 +274,6 @@ export function MobileRecoverySettings({
               )}
             />
           ))}
-          {activityError && (
-            <MobileSettingsRow label={tr('mobileRecovery.activityFailed')}>
-              <Button variant="secondary" onClick={() => void refreshEvents()}>
-                {t('common.retry')}
-              </Button>
-            </MobileSettingsRow>
-          )}
         </MobileSettingsSection>
       )}
       <AlertDialog.Root

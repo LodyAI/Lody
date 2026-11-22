@@ -7,7 +7,7 @@ Decision and rationale:
 - The iOS Simulator is its own side-panel tab (`ios-simulator`, mobile `?simulator=1`),
   never a Browser mode: no address bar, history, annotation or sharing, and no state
   shared with `SessionBrowserPanel`.
-- The tab exists only when the Session's TARGET machine is a Mac; read that and the
+- Encrypted workspaces hide the iOS Simulator tab. Otherwise it exists only when the Session's TARGET machine is a Mac; read that and the
   protocol capability through `getIosSimulatorPanelAvailability` only. An old Mac keeps
   the tab and asks for an update without calling it.
 - Lifecycle calls are `runtime.requestIosSimulatorControl` (`ios-simulator/control`).

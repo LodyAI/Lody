@@ -338,10 +338,10 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
         ? 'passkey'
         : hasFile
           ? 'file'
-          : passkey && hasPasskey !== false
-            ? 'passkey'
-            : hasPassword
-              ? 'password'
+          : hasPassword
+            ? 'password'
+            : passkey && hasPasskey !== false
+              ? 'passkey'
               : 'file';
 
   const triggerWithUnlock = (

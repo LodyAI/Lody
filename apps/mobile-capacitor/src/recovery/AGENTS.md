@@ -4,7 +4,7 @@ Parent mobile and repository rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
 
 - The phone Account route is composed through the private exact Vite/TS alias.
   Preserve all shared account controls and keep recovery UI/crypto lazy and behind
-  native iOS admission and `e2eeRecoveryVaultFeatureEnabledAtom`. No recovery build flag is required.
+  native iOS/Android admission and `e2eeRecoveryVaultFeatureEnabledAtom`. No recovery build flag is required.
 - Bind state and every asynchronous result to account plus login session. Disabling
   the setting or leaving that owner must prevent later writes and publication;
   no React state holds a recovery file or unlocked vault.
@@ -16,7 +16,7 @@ Parent mobile and repository rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
 - Security events retain only known kind/time pairs. The client owns navigation;
   never trust a server-provided route or expose unknown kinds as a known event.
 - The encryption console's Recovery tab is the shared section over
-  `mobileRecoveryPort`, supplied by `MobileRecoveryHostProvider` under the same native iOS
+  `mobileRecoveryPort`, supplied by `MobileRecoveryHostProvider` under the same native iOS/Android
   admission and runtime setting, one port per login. Its engine loads on first use. It creates vaults with files, native passkeys or Argon2id passwords and can add an offline file to a passkey/password vault. Whole-vault replacement remains unsupported. Account settings keep
   `RecoveryEntry`: it needs no encrypted workspace and manages passkeys by passkey too.
 - Use existing shared primitives/copy and keep synthetic previews out of Git.
