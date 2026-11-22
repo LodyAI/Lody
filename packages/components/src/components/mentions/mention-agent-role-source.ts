@@ -4,9 +4,8 @@ import {
   bindAgentRoleTarget,
   formatAgentRoleMentionValue,
   getAgentRoleEmoji,
-  getAgentRoleMentionSlug,
+  getAgentRoleTargetMentionSlug,
   getAgentRoleTargets,
-  normalizeAgentRoleMentionSlug,
   type AgentRole,
   type AgentRoleAvailability,
   type MachineId,
@@ -117,10 +116,12 @@ export const buildAgentRoleMentionItems = (
         return [
           {
             // `@Reviewer-MacBook`: the separator dot is for reading, not typing.
-            slug: multi
-              ? normalizeAgentRoleMentionSlug(target.alias || `${role.name} ${machineName}`) ||
-                getAgentRoleMentionSlug(role)
-              : getAgentRoleMentionSlug(role),
+            slug: getAgentRoleTargetMentionSlug({
+              roleName: role.name,
+              alias: target.alias,
+              machineName,
+              multiTarget: multi,
+            }),
             value: formatAgentRoleMentionValue(role.id, multi ? target.machineId : undefined),
             label,
             role: bound,
