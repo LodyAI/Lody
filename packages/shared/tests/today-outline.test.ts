@@ -454,6 +454,81 @@ describe('Today to-dos', () => {
   });
 });
 
+describe('Today snapshot caches', () => {
+  it('match a page opened afresh after every local edit, undo, redo and merged peer edit', () => {
+    let seed = 11;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    const pick = <T>(items: readonly T[]) => items[Math.floor(random() * items.length)];
+    const doc = new LoroDoc();
+    doc.setPeerId(1);
+    const outline = openTodayOutline(doc);
+    outline.paste({ kind: 'page-start' }, parseTodayPasteText('a\n  b\n    c\n  d\ne\n  f'));
+    const undo = createTodayPageUndo(doc, { setTimer: () => () => {} });
+    const peerDoc = new LoroDoc();
+    peerDoc.setPeerId(2);
+    peerDoc.import(doc.export({ mode: 'snapshot' }));
+    const peer = openTodayOutline(peerDoc);
+    const shape = (snapshot: ReturnType<TodayOutline['getSnapshot']>) => ({
+      isEmpty: snapshot.isEmpty,
+      rows: snapshot.visible.map((node) => [
+        node.id,
+        node.parentId,
+        node.depth,
+        node.text,
+        JSON.stringify(node.mentions),
+        node.collapsed,
+        node.hasChildren,
+        node.todo,
+      ]),
+    });
+    for (let step = 0; step < 400; step += 1) {
+      const all = outline.getAllNodes();
+      const node = all.length ? pick(all) : undefined;
+      const id = node?.id;
+      const action = Math.floor(random() * 14);
+      if (!id || all.length < 3) outline.paste({ kind: 'page-end' }, parseTodayPasteText('n\n  m'));
+      else if (action === 0) undo.structural(() => outline.split(id, Math.floor(random() * 3)));
+      else if (action === 1) undo.editText(outline.getText(id)!, (text) => text.insert(0, 'x'));
+      else if (action === 2) {
+        const text = outline.getText(id)!;
+        if (text.length) undo.editText(text, (target) => target.delete(0, 1));
+      } else if (action === 3) undo.structural(() => outline.mergeWithPrevious(id));
+      else if (action === 4) undo.structural(() => outline.indent([id]));
+      else if (action === 5) undo.structural(() => outline.outdent([id]));
+      else if (action === 6) undo.structural(() => outline.moveDown([id]));
+      else if (action === 7) outline.setCollapsed(id, !node.collapsed);
+      else if (action === 8) undo.structural(() => outline.cycleTodo([id]));
+      else if (action === 9 && all.length > 6) undo.structural(() => outline.deleteNodes([id]));
+      else if (action === 10)
+        undo.structural(() =>
+          outline.paste({ kind: 'after', nodeId: id }, parseTodayPasteText('p\n  q'))
+        );
+      else if (action === 11) undo.undo();
+      else if (action === 12) undo.redo();
+      else {
+        const theirs = peer.getAllNodes();
+        const target = theirs.length ? pick(theirs).id : undefined;
+        if (target) {
+          if (random() < 0.5) peer.split(target, 1);
+          else peer.indent([target]);
+          peer.getText(target)?.insert(0, 'y');
+          peerDoc.commit();
+        }
+        doc.import(peerDoc.export({ mode: 'update', from: doc.oplogVersion() }));
+        peerDoc.import(doc.export({ mode: 'update', from: peerDoc.oplogVersion() }));
+      }
+      const fresh = openTodayOutline(doc);
+      expect(shape(outline.getSnapshot()), `step ${step} action ${action}`).toEqual(
+        shape(fresh.getSnapshot())
+      );
+      fresh.dispose();
+    }
+  });
+});
+
 describe('Today folds', () => {
   const sync = (from: LoroDoc, to: LoroDoc) =>
     to.import(from.export({ mode: 'update', from: to.oplogVersion() }));

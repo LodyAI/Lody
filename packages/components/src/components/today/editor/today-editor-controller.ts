@@ -387,14 +387,14 @@ export class TodayEditorController {
   ) {
     const moving = new Set<string>(ids ?? []);
     const siblings = store.outline
-      .getAllNodes()
-      .filter((node) => node.parentId === target.parentId && !moving.has(node.id));
+      .childIds(target.parentId as TodayNodeId | null)
+      .filter((id) => !moving.has(id));
     const index =
       target.after === null
         ? 0
         : target.after === 'end'
           ? siblings.length
-          : siblings.findIndex((node) => node.id === target.after) + 1;
+          : siblings.indexOf(target.after as TodayNodeId) + 1;
     const parentId = target.parentId as TodayNodeId | null;
     store.undo.structural(() => {
       if (target.expandParent && parentId) store.outline.setCollapsed(parentId, false);
@@ -640,6 +640,16 @@ export class TodayEditorController {
 
   onOpenMember: ((userId: string) => void) | null = null;
 
+  private readonly reveals = new Map<TodayPageStore, (nodeId: TodayNodeId) => void>();
+
+  /** A virtualized page scrolls a row it has not mounted into view. */
+  registerReveal(store: TodayPageStore, reveal: (nodeId: TodayNodeId) => void) {
+    this.reveals.set(store, reveal);
+    return () => {
+      if (this.reveals.get(store) === reveal) this.reveals.delete(store);
+    };
+  }
+
   /** Sections register their open page so the caret can cross days. */
   registerDay(date: TodayDate, store: TodayPageStore) {
     this.days.set(date, store);
@@ -686,7 +696,8 @@ export class TodayEditorController {
     const row = this.surface?.querySelector<HTMLElement>(
       `[data-today-node="${CSS.escape(nodeId)}"]`
     );
-    row?.scrollIntoView?.({ block: 'nearest' });
+    if (row) row.scrollIntoView?.({ block: 'nearest' });
+    else if (this.selection) this.reveals.get(this.selection.store)?.(nodeId);
   }
 
   clearBlockSelection() {

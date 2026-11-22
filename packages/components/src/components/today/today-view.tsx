@@ -591,6 +591,7 @@ export function TodayOutlineSurface(props: {
       }}
       tabIndex={-1}
       role="tree"
+      data-today-scroller=""
       aria-multiselectable
       onKeyDown={(event) => {
         if (event.target === event.currentTarget) controller?.onBlockKey(event.nativeEvent);

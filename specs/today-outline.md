@@ -244,6 +244,12 @@ any time; when off it changes none of the app's existing behavior.
   one step on each page, with no linked undo.
 - The stream lazy-loads on scroll and releases documents far out of view; a date holding focus, a selection or a
   drag source is never released.
+- Performance target (user decision): a single day of 30,000 nodes, 7 levels deep and about a million characters
+  scrolls and edits without visible stutter. A day of 200 or more visible rows mounts only the rows near the
+  viewport, plus the row being edited wherever it is (unmounting it would end its editor and IME composition).
+  The page model keeps its snapshot incrementally: typing updates only the edited rows, and a structural change
+  rebuilds the visible rows from a JS mirror of the tree without reading every node from the document. The
+  `Today/Stress` story holds the benchmark outline.
 - The sidebar's pinned-row pointer drag bridge currently delivers only on release; it needs a hover callback to
   draw the insertion line. The change runs through pinned-section dragging and needs regression coverage there.
 - Add the deep link `lody://today/<userId>/<date>?workspace=<workspaceId>` and register it in
