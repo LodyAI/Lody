@@ -120,7 +120,7 @@ queue owns unfinished sources and ordering; the durable input owner takes over
 ready Roost inputs and their acceptance receipts.
 
 `session-attachment-preparation.ts` seeds `session-image-cache.ts` with each
-successful image preparation before releasing its source. Same-desktop images
+successful image preparation before releasing its source. Plaintext same-desktop images
 remain image payloads with local transport; ordinary files carry their absolute path and owning machine. Generated files
 use the durable path returned by preparation; originals retain their selected path
 and file metadata directly, without preparation IPC or a registration RPC. Resend,
@@ -137,8 +137,10 @@ Images are automatically published by the background upload owner when authorize
 cloud access is available, with retries after connectivity returns; publication
 never gates local execution. Sends, replay, and schedules preserve `transport`,
 `machineId`, and `localImageId` without checking daemon capability metadata.
-Desktop preparation uses the local host when its known machine ID matches the
+Plaintext desktop preparation uses the local host when its known machine ID matches the
 selected target; otherwise it transfers through the workspace's authorized path.
+Protected sends and schedules always prepare new attachments through encrypted
+transfer, including same-machine Electron targets, using the runtime attachment grant.
 Protected local preparation remains unavailable and cannot fall back to plaintext.
 Published `r2` images may target another machine while retaining their local identity.
 History, fullscreen, and queued previews resolve local images through scoped host

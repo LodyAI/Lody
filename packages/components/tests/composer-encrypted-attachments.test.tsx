@@ -43,6 +43,8 @@ import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { fetchSessionFilePreview } from '../src/lib/session-file-download';
 import { initI18n } from '../src/i18n';
+import { prepareDraftAttachments } from '../src/lib/session-attachment-preparation';
+import { prepareScheduledMessage } from '../src/components/schedules/scheduled-message-write';
 
 vi.mock('../src/components/mentions/mention-session-source', async (original) => ({
   ...(await original<object>()),
@@ -52,7 +54,8 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (original)
   ...(await original<object>()),
   useAgentRoleMentionItems: () => [],
 }));
-const local = vi.hoisted(() => ({ files: [] as string[] }));
+const local = vi.hoisted(() => ({ enabled: false, files: [] as string[] }));
+vi.mock('../src/lib/electron', () => ({ isElectronRenderer: () => local.enabled }));
 vi.mock('../src/lib/electron-session-file-sender', () => ({
   canUseElectronLocalFileSend: () => true,
   sendSessionFileToLocalRuntime: async ({ file }: { file: File }) => {
@@ -93,6 +96,7 @@ beforeEach(async () => {
   document.body.append(container);
   root = createRoot(container);
   local.files = [];
+  local.enabled = false;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -344,6 +348,99 @@ function relay() {
     },
   };
 }
+
+it.each(['send', 'schedule'] as const)(
+  'uploads same-machine Electron %s attachments encrypted with the attachment grant',
+  async (kind) => {
+    local.enabled = true;
+    const f = fixture();
+    const server = relay();
+    const sessionId = 'session' as SessionId;
+    const attachments = [
+      {
+        id: 'image',
+        kind: 'image' as const,
+        source: new Blob([imageBytes]),
+        name: 'secret.png',
+        mimeType: 'image/png',
+      },
+      {
+        id: 'file',
+        kind: 'file' as const,
+        source: new Blob(['private file bytes']),
+        name: 'secret.txt',
+        mimeType: 'text/plain',
+      },
+    ];
+    const common = {
+      sessionId,
+      attachments,
+      localMachineId: 'machine' as never,
+      signal: new AbortController().signal,
+    };
+    const inputBlocks =
+      kind === 'schedule'
+        ? (
+            await prepareScheduledMessage({
+              ...common,
+              runtime: f.runtime,
+              scheduleId: 'schedule',
+              machineId: 'machine' as never,
+              actorId: 'account',
+              inputBlocks: [],
+              token: 'ordinary-token',
+              onAttachments: () => {},
+            })
+          ).inputBlocks
+        : (
+            await prepareDraftAttachments({
+              content: { mode: 'protected' },
+              resources: f.runtime.sendResources,
+              signal: common.signal,
+              token: () => 'ordinary-token',
+              attachmentToken: f.runtime.attachmentToken,
+              localMachineId: () => common.localMachineId,
+              record: {
+                workspaceId,
+                sessionId,
+                targetMachineId: 'machine' as never,
+                attachments,
+                entry: {
+                  id: 'turn',
+                  role: 'user',
+                  userId: 'account',
+                  timestamp: '2026-10-29T00:00:00Z',
+                  items: [],
+                  fileDiff: [],
+                  inputConfig: { inputBlocks: [] },
+                },
+              },
+              update: () => {},
+            })
+          ).entry.inputConfig!.inputBlocks!;
+    expect(f.runtime.pendingSends!.canPrepareAttachmentsLocally('machine' as never)).toBe(false);
+    expect(inputBlocks.map((block) => block.type)).toEqual(['image', 'file']);
+    expect(local.files).toEqual([]);
+    expect(server.requests).toHaveLength(2);
+    for (const request of server.requests) {
+      expect(request.url).toContain('/session-encrypted-');
+      expect(request.headers.get('Authorization')).toBe('Bearer attachment-only-token');
+      expect(new TextDecoder().decode(request.bytes)).not.toContain('private file bytes');
+    }
+    for (const block of inputBlocks) {
+      if (block.type !== 'image' && block.type !== 'file') throw new Error('Expected attachment');
+      expect(block.transport).not.toBe('local');
+      expect(block.encryption).toBeDefined();
+      const blob = await protectedAttachmentBlob({
+        workspaceId,
+        sessionId,
+        encryption: block.encryption!,
+        attachmentToken: f.runtime.attachmentToken,
+      });
+      expect(await blob.text()).toBe(block.type === 'image' ? imageContent : 'private file bytes');
+    }
+  }
+);
 
 it('fails a send visibly, writing nothing, when the host refuses to sign it', async () => {
   const f = fixture();

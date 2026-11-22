@@ -1,11 +1,7 @@
 import { isElectronRenderer } from '../lib/electron';
 import { resolveAttachmentRoute } from '../lib/session-attachment-routing';
 import { assertProtectedAttachmentReferences } from '../lib/encrypted-session-attachment';
-import {
-  normalizeSessionInputBlocks,
-  type MachineId,
-  type SessionId,
-} from '@lody/shared';
+import { normalizeSessionInputBlocks, type MachineId, type SessionId } from '@lody/shared';
 import { prepareDraftAttachments } from '../lib/session-attachment-preparation';
 import { createPendingSessionSends, type PendingSessionSend } from '../lib/session-pending-sends';
 import { createWorkspaceAcceptedInputs } from '../lib/workspace-accepted-inputs';
@@ -116,6 +112,7 @@ export function createWorkspacePendingSends(args: {
   return {
     canPrepareAttachmentsLocally: (machineId: MachineId) =>
       resolveAttachmentRoute({
+        content: { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
         native: isElectronRenderer(),
         localMachineId: args.localMachineId(),
         targetMachineId: machineId,

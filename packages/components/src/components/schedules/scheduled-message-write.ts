@@ -56,6 +56,7 @@ export async function prepareScheduledMessage(args: {
     resources: args.runtime.sendResources,
     signal: args.signal,
     token: () => args.token,
+    attachmentToken: content.mode === 'protected' ? args.runtime.attachmentToken : undefined,
     localMachineId: () => args.localMachineId,
     record: {
       workspaceId: args.runtime.workspaceId,
