@@ -63,8 +63,8 @@ and what can wait or has settled.
 
 - Both the sidebar context menu and the conversation header menu (`…`)
   provide (for users with write permission on non-archived conversations):
-  - **Snooze / Later** submenu with quick presets (In 1 hour, Later today
-    +3h, Tomorrow morning 9:00, Next week Monday 9:00, Custom date/time) and
+  - **Snooze / Later** submenu with quick presets (In 1 hour, In 3 hours,
+    Tomorrow morning 9:00, Next week Monday 9:00, Custom date/time) and
     **Move to Focus** when already snoozed.
   - **Settle** when in Focus or Later, or **Move to Focus** when in Settled.
 - On desktop, Focus and Later rows reveal a one-click **Settle** action on

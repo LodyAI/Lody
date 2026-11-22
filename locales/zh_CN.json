@@ -2238,7 +2238,7 @@
   "sessions.contextMenu.pin": "置顶",
   "sessions.contextMenu.snooze": "稍后",
   "sessions.contextMenu.snoozeOneHour": "1 小时后",
-  "sessions.contextMenu.snoozeLaterToday": "今天稍后",
+  "sessions.contextMenu.snoozeLaterToday": "3 小时后",
   "sessions.contextMenu.snoozeTomorrowMorning": "明天上午",
   "sessions.contextMenu.snoozeNextWeek": "下周",
   "sessions.contextMenu.snoozeCustom": "自定义时间…",
