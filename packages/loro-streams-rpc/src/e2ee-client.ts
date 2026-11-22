@@ -191,7 +191,10 @@ export function makeE2eeRpcClient(options: {
   const authorizeRequest = Effect.fnUntraced(function* (
     input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
   ) {
-    if (!isE2eeReadQuery(input.request.method, input.request.params))
+    if (
+      !isE2eeReadQuery(input.request.method, input.request.params) ||
+      input.request.method === 'local-project/list-branches'
+    )
       return yield* requireDispatchWriter();
     const view = yield* options.ledger();
     const loss = requesterLoss(view);

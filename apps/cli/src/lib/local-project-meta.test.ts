@@ -20,6 +20,7 @@ import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import {
   readMachineLocalProjects,
   reconcileMachineLocalProjectRootPaths,
+  reconcileMissingLocalProjectGitSummaries,
   resolveWorkspaceLocalProjectRootPathWithRetry,
   resolveWorkspaceLocalProjectWithSyncOnMiss,
   shouldApplyMachineDeleteLocalProjectCommand,
@@ -205,6 +206,7 @@ describe('local project root path publishing', () => {
       expect(repaired).toEqual({
         ...oldProject,
         rootPath: realpathSync.native(target),
+        git: false,
       });
       expect(deriveRepoIdFromLocalProjectPath(repaired.rootPath)).toBe(
         deriveRepoIdFromLocalProjectPath(realpathSync.native(target))
@@ -226,8 +228,72 @@ describe('local project root path publishing', () => {
       ).toEqual({
         ...oldProject,
         rootPath: realpathSync.native(target),
+        git: false,
         lastOpenedAtMs: 2,
       });
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
+  it('populates missing Git summaries and skips tampered encrypted project paths', async () => {
+    const temp = mkdtempSync(join(tmpdir(), 'lody-git-summary-'));
+    const git = (cwd: string, args: string[]) =>
+      execFileSync('git', args, { cwd, env: { ...process.env, GIT_CONFIG_COUNT: '0' } });
+    try {
+      const validRepo = join(temp, 'valid-repo');
+      const otherRepo = join(temp, 'other-repo');
+      mkdirSync(validRepo);
+      mkdirSync(otherRepo);
+      git(validRepo, ['init', '-b', 'main']);
+      git(validRepo, [
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.com',
+        'commit',
+        '--allow-empty',
+        '-m',
+        'init',
+      ]);
+      git(otherRepo, ['init', '-b', 'main']);
+      const validId = localProjectsLegacy.createLocalProjectId(validRepo);
+      const flock = new FakeMachineFlock();
+      const { repo } = createRepo(flock);
+      const sync = { markMachineFlockDocDirty: vi.fn() };
+      writeMachineFlockRowToFlock(
+        flock,
+        {
+          key: machineFlockKeys.localProject(validId),
+          value: { id: validId, name: 'Valid', rootPath: validRepo, createdAtMs: 1 },
+        },
+        1
+      );
+      writeMachineFlockRowToFlock(
+        flock,
+        {
+          key: machineFlockKeys.localProject('local-project-tampered' as LocalProjectId),
+          value: {
+            id: 'local-project-tampered' as LocalProjectId,
+            name: 'Tampered',
+            rootPath: otherRepo,
+            createdAtMs: 1,
+          },
+        },
+        1
+      );
+
+      await reconcileMissingLocalProjectGitSummaries(repo, workspaceId, machineId, sync, {
+        verifyProjectIdentity: true,
+      });
+
+      const projects = await readMachineLocalProjects(repo, workspaceId, machineId);
+      expect(projects[validId]).toMatchObject({
+        git: true,
+        defaultBranch: 'main',
+        currentBranch: 'main',
+      });
+      expect(projects['local-project-tampered' as LocalProjectId]?.git).toBeUndefined();
     } finally {
       rmSync(temp, { recursive: true, force: true });
     }

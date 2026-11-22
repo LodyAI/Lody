@@ -72,6 +72,21 @@ export class MachineRuntime {
         requester.executionUserId
       );
     }
+    if (request.method === 'local-project/list-branches') {
+      const requester = context?.requester;
+      if (!requester || request.params.requestedByUserId !== requester.accountId)
+        throw new Error('e2ee_feature_requester');
+      return this.requireHandler().readEncryptedMachineRequest(
+        {
+          ...request,
+          params: {
+            ...request.params,
+            requestedByUserId: requester.executionUserId,
+          },
+        },
+        context
+      );
+    }
     if ('requestedByUserId' in request.params && request.params.requestedByUserId !== config.userId)
       throw new Error('e2ee_feature_requester');
     if (isE2eeReadQuery(request.method, request.params)) {

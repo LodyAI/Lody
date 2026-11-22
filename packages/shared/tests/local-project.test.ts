@@ -1023,7 +1023,110 @@ describe('local-project helpers', () => {
       expect(gitState.git).toBe(true);
       if (gitState.git) {
         expect(gitState.githubRepoFullName).toBe('loro-dev/lody');
+        expect(gitState.workingTree).toBeUndefined();
       }
+    },
+    GIT_HELPER_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'summarizes git state and paginates/filters branches without scanning working tree status',
+    async () => {
+      tempDir = makeTempDir();
+      const projectDir = createGitProjectWithRemotes(tempDir, [
+        { name: 'origin', url: 'https://github.com/loro-dev/lody.git' },
+      ]);
+      runGit(projectDir, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+      runGit(projectDir, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+      for (const branch of ['feat/alpha', 'feat/beta', 'fix/search-target']) {
+        runGit(projectDir, ['checkout', '-b', branch]);
+        fs.writeFileSync(path.join(projectDir, `${branch.replace('/', '-')}.txt`), branch, 'utf8');
+        runGit(projectDir, ['add', '.']);
+        runGit(projectDir, [
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@example.com',
+          'commit',
+          '-m',
+          branch,
+        ]);
+      }
+      fs.writeFileSync(path.join(projectDir, 'untracked-heavy.txt'), 'dirty\n', 'utf8');
+
+      const summary = await localProjectsLegacy.getLocalProjectGitSummaryAtRootPath(projectDir);
+      expect(summary).toEqual({
+        git: true,
+        currentBranch: 'fix/search-target',
+        defaultBranch: 'lody:branch:local:main',
+        githubRepoFullName: 'loro-dev/lody',
+      });
+
+      const page1 = await localProjectsLegacy.listLocalProjectBranchesAtRootPath(projectDir, {
+        limit: 2,
+      });
+      expect(page1).toMatchObject({
+        git: true,
+        currentBranch: 'fix/search-target',
+        defaultBranch: 'lody:branch:local:main',
+        pinnedBranches: ['lody:branch:local:main', 'fix/search-target'],
+        branches: ['lody:branch:local:main', 'fix/search-target'],
+        truncated: true,
+        nextCursor: '2',
+        totalCount: 5,
+      });
+
+      const page2 = await localProjectsLegacy.listLocalProjectBranchesAtRootPath(projectDir, {
+        limit: 3,
+        cursor: page1.git ? page1.nextCursor : undefined,
+      });
+      expect(page2).toMatchObject({
+        git: true,
+        truncated: false,
+        totalCount: 5,
+      });
+      if (page1.git && page2.git) {
+        expect(new Set([...page1.branches, ...page2.branches])).toEqual(
+          new Set([
+            'lody:branch:local:main',
+            'origin/main',
+            'feat/alpha',
+            'feat/beta',
+            'fix/search-target',
+          ])
+        );
+      }
+
+      const filtered = await localProjectsLegacy.listLocalProjectBranchesAtRootPath(projectDir, {
+        query: 'feat/',
+        limit: 10,
+      });
+      expect(filtered).toMatchObject({
+        git: true,
+        branches: expect.arrayContaining(['feat/alpha', 'feat/beta']),
+        truncated: false,
+        totalCount: 2,
+      });
+
+      const mainFiltered = await localProjectsLegacy.listLocalProjectBranchesAtRootPath(projectDir, {
+        query: 'main',
+        limit: 10,
+      });
+      expect(mainFiltered).toMatchObject({
+        git: true,
+        branches: ['lody:branch:local:main', 'origin/main'],
+        totalCount: 2,
+      });
+      await expect(
+        localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+          projectDir,
+          'lody:branch:local:main'
+        )
+      ).resolves.toMatchObject({ kind: 'local', branchName: 'main' });
+
+      await expect(
+        localProjectsLegacy.listLocalProjectBranchesAtRootPath(projectDir, { cursor: 'bad-cursor' })
+      ).rejects.toMatchObject({ _tag: 'LocalProjectGitError' });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );

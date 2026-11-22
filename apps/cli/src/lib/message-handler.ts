@@ -94,6 +94,7 @@ import {
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
   type LocalProjectGitStateRpcResponse,
+  type LocalProjectListBranchesRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
   HistoryWriteError,
@@ -422,6 +423,7 @@ import {
 } from '@/lib/code-collab/code-collab-v2-diff-evidence';
 import {
   readMachineLocalProjects,
+  reconcileMissingLocalProjectGitSummaries,
   removeMachineLocalProject,
   isLocalProjectReferenced,
   resolveWorkspaceLocalProject,
@@ -430,6 +432,7 @@ import {
   resolveWorkspaceLocalProjectWithSyncOnMiss,
   isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
+  updateMachineLocalProjectGitSummaryFields,
   upsertMachineLocalProject,
   readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
@@ -590,13 +593,18 @@ type MachineCommandSnapshot = {
 function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
   deleteLocalProject: boolean;
   providerSetup: boolean;
+  localProject: boolean;
 } {
   let deleteLocalProject = false;
   let providerSetup = false;
+  let localProject = false;
   for (const event of events) {
     const parsed = parseMachineFlockKey(event.key);
     if (parsed?.kind === 'deleteLocalProjectCommand') {
       deleteLocalProject = true;
+    }
+    if (parsed?.kind === 'localProject') {
+      localProject = true;
     }
     if (
       parsed?.kind === 'providerSetup' ||
@@ -606,7 +614,7 @@ function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
       providerSetup = true;
     }
   }
-  return { deleteLocalProject, providerSetup };
+  return { deleteLocalProject, providerSetup, localProject };
 }
 
 function buildMachineCommandSnapshot(
@@ -968,8 +976,9 @@ export class MessageHandler {
     expiresAt: number,
     signal: AbortSignal
   ) {
-    // Scoped history uses the feature receiver's exact-session authorization.
-    if (input.method === 'session/history-read') throw new Error('e2ee_query_method');
+    // Scoped history and branch queries require the feature receiver's authorization.
+    if (input.method === 'session/history-read' || input.method === 'local-project/list-branches')
+      throw new Error('e2ee_query_method');
     if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
     return this.encryptedQueryServer.readQuery(input, expiresAt, signal);
   }
@@ -2952,6 +2961,21 @@ export class MessageHandler {
 
     try {
       const state = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
+      void updateMachineLocalProjectGitSummaryFields(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        args.localProjectId,
+        state.git
+          ? {
+              git: true,
+              defaultBranch: state.defaultBranch,
+              currentBranch: state.currentBranch,
+              githubRepoFullName: state.githubRepoFullName,
+            }
+          : { git: false },
+        this.workspaceDocument
+      ).catch(() => undefined);
       return {
         type: 'local-project/git-state_response',
         machineId: this.machineId,
@@ -2963,6 +2987,111 @@ export class MessageHandler {
       };
     } catch (error) {
       return failure('git_state_failed', formatErrorMessage(error));
+    }
+  }
+
+  private async listLocalProjectBranchesForRpc(args: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+    query?: string;
+    limit?: number;
+    cursor?: string;
+  }): Promise<LocalProjectListBranchesRpcResponse> {
+    const failure = (error: string, message: string): LocalProjectListBranchesRpcResponse => ({
+      type: 'local-project/list-branches_response',
+      machineId: this.machineId,
+      workspaceId: this.workspaceId,
+      localProjectId: args.localProjectId,
+      success: false,
+      error,
+      message,
+    });
+
+    let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
+    try {
+      access = await this.verifyRequesterMachineAccess({
+        workspaceId: this.workspaceId,
+        machineId: this.machineId,
+        requesterUserId: args.requestedByUserId,
+        localProjectId: args.localProjectId,
+      });
+    } catch (error) {
+      return failure('access_check_failed', formatErrorMessage(error));
+    }
+
+    if (!access.allowed) {
+      return failure('access_denied', access.reason);
+    }
+
+    const isEncrypted = Boolean(this.encryptedQueryServer);
+    let rootPath: string | null = null;
+    if (isEncrypted) {
+      const peeked = this.workspaceDocument.peekLocalProjectRootPath(
+        this.machineId,
+        args.localProjectId
+      );
+      if (peeked !== null) {
+        try {
+          rootPath =
+            localProjectsLegacy.createLocalProjectId(peeked) === args.localProjectId
+              ? peeked
+              : null;
+        } catch {
+          rootPath = null;
+        }
+      }
+    } else {
+      rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        args.localProjectId,
+        {
+          requestSync: () =>
+            this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
+              reason: 'local-project-list-branches-resolve',
+              timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
+            }),
+        }
+      );
+    }
+    if (!rootPath) {
+      return failure('local_project_not_found', `Local project not found: ${args.localProjectId}`);
+    }
+
+    try {
+      const result = await localProjectsLegacy.listLocalProjectBranchesAtRootPath(rootPath, {
+        query: args.query,
+        limit: args.limit,
+        cursor: args.cursor,
+      });
+      if (!isEncrypted) {
+        void updateMachineLocalProjectGitSummaryFields(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          args.localProjectId,
+          result.git
+            ? {
+                git: true,
+                defaultBranch: result.defaultBranch,
+                currentBranch: result.currentBranch,
+              }
+            : { git: false },
+          this.workspaceDocument
+        ).catch(() => undefined);
+      }
+      return {
+        type: 'local-project/list-branches_response',
+        machineId: this.machineId,
+        workspaceId: this.workspaceId,
+        localProjectId: args.localProjectId,
+        success: true,
+        result,
+        observedAtMs: getServerNow(),
+      };
+    } catch (error) {
+      return failure('list_branches_failed', formatErrorMessage(error));
     }
   }
 
@@ -4233,6 +4362,20 @@ export class MessageHandler {
             localProjectId,
             requestedByUserId,
           }),
+        listLocalProjectBranches: async ({
+          localProjectId,
+          requestedByUserId,
+          query,
+          limit,
+          cursor,
+        }) =>
+          await this.listLocalProjectBranchesForRpc({
+            localProjectId,
+            requestedByUserId,
+            query,
+            limit,
+            cursor,
+          }),
         dispatchLocalProjectControl: async (request) =>
           await this.dispatchLocalProjectControlViaRpc(request),
         onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
@@ -4670,6 +4813,19 @@ export class MessageHandler {
     authoritative = true
   ): void {
     if (!impact || impact.deleteLocalProject) void this.processDeleteLocalProjectRequests();
+    if (!impact || impact.localProject) {
+      void reconcileMissingLocalProjectGitSummaries(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        this.workspaceDocument,
+        { verifyProjectIdentity: Boolean(this.encryptedQueryServer) }
+      ).catch((error: unknown) => {
+        this.logger.debug(
+          `[machine-flock] Failed to reconcile local project Git summaries (${this.getMachineFlockLogContext()}): ${formatErrorMessage(error)}`
+        );
+      });
+    }
     // A stale local setup row must not outrun a remote cancellation, so provider
     // setup drains only once the command room has established remote authority.
     if ((!impact || impact.providerSetup) && authoritative) {
@@ -7998,6 +8154,21 @@ export class MessageHandler {
         )
           throw new Error('Project group probe scope mismatch');
         return this.probeProjectLocalMember(request.params.localProjectId as LocalProjectId);
+      }
+      case 'local-project/list-branches': {
+        if (
+          request.machineId !== this.machineId ||
+          request.workspaceId !== this.workspaceId ||
+          request.ownerSessionId
+        )
+          throw new Error('Local project branch list scope mismatch');
+        return this.listLocalProjectBranchesForRpc({
+          localProjectId: request.params.localProjectId as LocalProjectId,
+          requestedByUserId: request.params.requestedByUserId,
+          query: request.params.query,
+          limit: request.params.limit,
+          cursor: request.params.cursor,
+        });
       }
       case 'sorbet/credentials-list':
       case 'sorbet/credentials-logout':

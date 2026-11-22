@@ -2526,6 +2526,19 @@ export const LocalProjectGitStateRequestSchema = z
   })
   .strict();
 
+export const LocalProjectListBranchesRequestSchema = z
+  .object({
+    type: z.literal('local-project/list-branches'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    localProjectId: LocalProjectIdSchema,
+    query: z.string().max(256).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    cursor: z.string().trim().min(1).max(512).optional(),
+    requestedByUserId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export const LocalProjectListFilesRequestSchema = z
   .object({
     type: z.literal('local-project/list-files'),
@@ -2708,6 +2721,7 @@ export const LocalProjectControlRequestSchema = z.discriminatedUnion('type', [
   LocalProjectRemovalPreflightRequestSchema,
   LocalProjectListRequestSchema,
   LocalProjectGitStateRequestSchema,
+  LocalProjectListBranchesRequestSchema,
   LocalProjectListFilesRequestSchema,
   LocalProjectListDirRequestSchema,
   LocalProjectListSkillsRequestSchema,
@@ -2840,7 +2854,28 @@ export const LocalProjectGitStateSchema = z.discriminatedUnion('git', [
           untracked: z.boolean(),
           conflicted: z.boolean(),
         })
-        .strict(),
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      git: z.literal(false),
+    })
+    .strict(),
+]);
+
+export const LocalProjectBranchListResultSchema = z.discriminatedUnion('git', [
+  z
+    .object({
+      git: z.literal(true),
+      currentBranch: z.string().nullable(),
+      defaultBranch: z.string().nullable(),
+      pinnedBranches: z.array(SharedStringSchema),
+      branches: z.array(SharedStringSchema),
+      truncated: z.boolean(),
+      nextCursor: SharedOptionalStringSchema,
+      totalCount: z.number().int().nonnegative(),
     })
     .strict(),
   z
@@ -2965,6 +3000,7 @@ const LocalProjectControlErrorResponseSchema = z
       'local-project/removal-preflight',
       'local-project/list',
       'local-project/git-state',
+      'local-project/list-branches',
       'local-project/list-files',
       'local-project/list-dir',
       'local-project/list-skills',
@@ -3091,6 +3127,13 @@ export const LocalProjectControlResponseSchema = z.union([
       ok: z.literal(true),
       type: z.literal('local-project/git-state'),
       result: LocalProjectGitStateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      type: z.literal('local-project/list-branches'),
+      result: LocalProjectBranchListResultSchema,
     })
     .strict(),
   z

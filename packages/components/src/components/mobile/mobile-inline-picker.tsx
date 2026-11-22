@@ -80,6 +80,11 @@ export type MobileInlinePickerProps<T extends string = string> = {
      dropdown into a dedicated slot below the row so the list can span
      the row's full width without distorting the chip's own width. */
   portalContainer?: HTMLElement | null;
+  onOpenChange?: (open: boolean) => void;
+  onQueryChange?: (query: string) => void;
+  disableClientFilter?: boolean;
+  onReachEnd?: () => void;
+  footer?: ReactNode;
 };
 
 /* ── Coordination context ────────────────────────────────────────────── */
@@ -179,6 +184,11 @@ export function MobileInlinePicker<T extends string = string>({
   expansionClassName,
   expansionPanelClassName,
   portalContainer,
+  onOpenChange,
+  onQueryChange,
+  disableClientFilter = false,
+  onReachEnd,
+  footer,
 }: MobileInlinePickerProps<T>) {
   const coordinator = useContext(PickerCoordinatorContext);
   /* Explicit `portalContainer` wins; otherwise fall back to the
@@ -235,7 +245,12 @@ export function MobileInlinePicker<T extends string = string>({
      fresh — searching for one branch, closing, then reopening shouldn't
      leave the old query filtering the list. */
   useEffect(() => {
-    if (!open) setQuery('');
+    onOpenChange?.(open);
+    if (!open) {
+      setQuery('');
+      onQueryChange?.('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- notify caller on open transitions
   }, [open]);
 
   /* Fuzzy, not substring: a provider's model list can run to dozens of ids, and
@@ -243,6 +258,7 @@ export function MobileInlinePicker<T extends string = string>({
      one the highlight lands on. An empty query returns `options` itself, which
      is every render without a search field. */
   const filteredOptions = useMemo(() => {
+    if (disableClientFilter) return options;
     const matches = filterFuzzyOptions(options, query, (opt) => ({
       primary: opt.searchText ?? String(opt.label ?? ''),
       secondary: [opt.value],
@@ -250,7 +266,7 @@ export function MobileInlinePicker<T extends string = string>({
     if (!preserveOptionOrder) return matches;
     const matchingOptions = new Set(matches);
     return options.filter((option) => matchingOptions.has(option));
-  }, [options, query, preserveOptionOrder]);
+  }, [disableClientFilter, options, query, preserveOptionOrder]);
 
   const postHog = usePostHog();
   const handleSelect = (next: T) => {
@@ -542,7 +558,10 @@ export function MobileInlinePicker<T extends string = string>({
             {searchable ? (
               <PickerSearchInput
                 query={query}
-                onQueryChange={setQuery}
+                onQueryChange={(nextQuery) => {
+                  setQuery(nextQuery);
+                  onQueryChange?.(nextQuery);
+                }}
                 placeholder={searchPlaceholder}
                 ariaLabel={searchPlaceholder ?? ariaLabel}
                 autoFocus={autoFocusSearch}
@@ -551,6 +570,13 @@ export function MobileInlinePicker<T extends string = string>({
             ) : null}
             <div
               ref={listRef}
+              onScroll={(event) => {
+                if (!onReachEnd) return;
+                const target = event.currentTarget;
+                if (target.scrollHeight - target.scrollTop - target.clientHeight <= 64) {
+                  onReachEnd();
+                }
+              }}
               className="scroll-pro scrollbar-pro max-h-[200px] overflow-y-auto py-1 [scrollbar-gutter:auto]"
             >
               {filteredOptions.length === 0 ? (
@@ -572,6 +598,9 @@ export function MobileInlinePicker<T extends string = string>({
               ) : (
                 filteredOptions.map((opt, index) => renderOption(opt, index))
               )}
+              {footer ? (
+                <div className="px-3 py-2 text-sm text-muted-foreground">{footer}</div>
+              ) : null}
             </div>
           </div>
         </motion.div>

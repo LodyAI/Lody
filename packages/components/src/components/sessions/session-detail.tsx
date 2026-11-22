@@ -1910,20 +1910,44 @@ const SessionDetail = ({
     }
     return sourceByTarget;
   }, [pendingForks]);
+  // `useResolvedMachineMeta` already merged the Machine Flock local-project rows
+  // (honouring deletions) into `sessionMachine`; do not re-scan the raw rows.
+  const sessionMachineLocalProjects = sessionMachine?.localProjects ?? EMPTY_LOCAL_PROJECTS;
+  const getSourceLocalProjectMeta = useCallback(
+    (source: SessionMeta): LocalProjectMeta | null => {
+      if (source.project?.kind !== 'local') return null;
+      if (sessionMachine?.id === source.machineId) {
+        return sessionMachineLocalProjects[source.project.localProjectId] ?? null;
+      }
+      return null;
+    },
+    [sessionMachine?.id, sessionMachineLocalProjects]
+  );
   const getForkWorktreeAvailability = useCallback(
     (source: SessionMeta): SessionForkWorktreeAvailability => {
       if (!canForkSessionToWorktree(source)) return 'hidden';
       if (source.project?.kind === 'github') return 'available';
+      if (source.project?.kind === 'local') {
+        if (source.isWorktree === true || source.project.useWorktree === true) {
+          return 'available';
+        }
+        const projectMeta = getSourceLocalProjectMeta(source);
+        if (projectMeta?.git === true) return 'available';
+        if (projectMeta?.git === false) return 'hidden';
+      }
       const cached = worktreeAvailabilityBySessionId[source.id];
       if (cached === 'unavailable') return 'hidden';
       if (cached === 'available') return 'available';
       return 'checking';
     },
-    [canForkSessionToWorktree, worktreeAvailabilityBySessionId]
+    [canForkSessionToWorktree, getSourceLocalProjectMeta, worktreeAvailabilityBySessionId]
   );
   const resolveForkWorktreeAvailability = useCallback(
     async (source: SessionMeta) => {
       if (!canForkSessionToWorktree(source) || source.project?.kind !== 'local') return;
+      if (source.isWorktree === true || source.project.useWorktree === true) return;
+      const projectMeta = getSourceLocalProjectMeta(source);
+      if (typeof projectMeta?.git === 'boolean') return;
       if (!runtime || !user?.id) return;
       if (worktreeAvailabilityRequestRef.current.has(source.id)) return;
       worktreeAvailabilityRequestRef.current.add(source.id);
@@ -1932,13 +1956,13 @@ const SessionDetail = ({
         [source.id]: 'checking',
       }));
       try {
-        const gitState = await runtime.requestLocalProjectGitState(
+        const response = await runtime.requestLocalProjectBranches(
           source.machineId,
           source.project.localProjectId,
           user.id,
-          { timeoutMs: 15_000 }
+          { limit: 1, timeoutMs: 15_000 }
         );
-        const available = gitState?.success === true && gitState.state.git === true;
+        const available = response?.success === true && response.result.git === true;
         setWorktreeAvailabilityBySessionId((current) => ({
           ...current,
           [source.id]: available ? 'available' : 'unavailable',
@@ -1952,7 +1976,7 @@ const SessionDetail = ({
         });
       }
     },
-    [canForkSessionToWorktree, runtime, user?.id]
+    [canForkSessionToWorktree, getSourceLocalProjectMeta, runtime, user?.id]
   );
   const handleForkDestination = useCallback(
     (source: SessionMeta, turnId: string, destination: SessionForkDestination = 'shared') => {
@@ -1995,9 +2019,6 @@ const SessionDetail = ({
       ),
     [isActiveSessionLocalMachine, localHomeDir, machineFlockRows]
   );
-  // `useResolvedMachineMeta` already merged the Machine Flock local-project rows
-  // (honouring deletions) into `sessionMachine`; do not re-scan the raw rows.
-  const sessionMachineLocalProjects = sessionMachine?.localProjects ?? EMPTY_LOCAL_PROJECTS;
   const sessionMachineSupportsLocalProjectHistoryRpc =
     sessionMachine?.supportsLocalProjectHistoryRpc === true;
   const resolvedLocalProjectMeta = useMemo(() => {
