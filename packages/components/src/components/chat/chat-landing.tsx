@@ -156,10 +156,7 @@ import {
   recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
-import {
-  readAgentStartDefaults,
-  persistAgentSessionDefaults,
-} from '@/lib/local-storage-cache';
+import { readAgentStartDefaults, persistAgentSessionDefaults } from '@/lib/local-storage-cache';
 import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 import {
   buildRecentRunConfigItems,
