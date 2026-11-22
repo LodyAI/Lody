@@ -67,7 +67,7 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`�
 
 _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochHistory`、`EngineKeyringSink`。_
 
-`sync()` 让 native 引擎的 keyring 与本设备的已验证状态一致：已 pin 的 genesis、所有历史上准入过的设备公钥（事后被吊销的作者写的帧仍能解开）、本设备持有的所有已验证 epoch 密钥（不含已废弃的 epoch），以及封装 epoch。当前 epoch 的密钥已安装时，封装 epoch 就是当前 epoch；否则取 `VerifiedLedger` 15 分钟预算内允许的较早保留 epoch。设备不能写时（Guest、恢复设备、已被移除，或没有可封装的 epoch），先暂停该写入者的封装；能写时，由平台装入自己的种子并恢复封装。每一步都是幂等的，所以调用方在每个触发点（准入、新 epoch、账本前进、失去权限、引擎重连）都直接调用 `sync`。这是"epoch 密钥没有公开字节导出"的唯一例外（见 `INVARIANTS.md`）：密钥字节只交给 sink，每次调用结束后擦除。返回值列出已安装和缺失的 epoch、封装 epoch，以及设备能否写入。
+`sync()` 让 native 引擎的 keyring 与本设备的已验证状态一致：已 pin 的 genesis、所有历史上准入过的设备公钥（事后被吊销的作者写的帧仍能解开）、本设备持有的所有已验证 epoch 密钥（不含已废弃的 epoch），以及封装 epoch。当前 epoch 的密钥已安装时，封装 epoch 就是当前 epoch；否则取 `VerifiedLedger` 15 分钟预算内允许的较早保留 epoch。设备不能写时（Guest、恢复设备、已被移除，或没有可封装的 epoch），在命名空间配置好之后、安装任何密钥之前，立即暂停该写入者的封装（全新的引擎会拒绝对未配置的命名空间暂停封装）；能写时，由平台装入自己的种子并恢复封装。每一步都是幂等的，所以调用方在每个触发点（准入、新 epoch、账本前进、失去权限、引擎重连）都直接调用 `sync`。这是"epoch 密钥没有公开字节导出"的唯一例外（见 `INVARIANTS.md`）：密钥字节只交给 sink，每次调用结束后擦除。返回值列出已安装和缺失的 epoch、封装 epoch，以及设备能否写入。
 
 ## KeyReceiver
 

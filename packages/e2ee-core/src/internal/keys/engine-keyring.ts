@@ -34,7 +34,9 @@ export interface EngineKeyringReport {
  * verified current epoch when its key is installed, otherwise a retained earlier
  * epoch inside VerifiedLedger's fifteen-minute budget. When this device may not
  * write (Guest, recovery, removed, or no sealable epoch) its writer's sealing is
- * held, first, so no stale seal can race; otherwise the platform installs its own
+ * held right after the namespace is configured, before any key is installed, so no
+ * stale seal can race (a fresh engine refuses a hold for an unconfigured namespace);
+ * otherwise the platform installs its own
  * writer seed and sealing is released.
  *
  * Every step is idempotent, so callers run `sync` for every trigger of the
@@ -88,9 +90,9 @@ export class EngineKeyringSync extends Context.Service<
         const permissions = contentPermissions(view, signer.publicKey);
         const mayWriteDocument =
           Result.isSuccess(permissions) && permissions.success.mayWriteDocument;
+        yield* sink.configure(genesis.toBytes());
         if (!mayWriteDocument) yield* sink.holdSealing();
 
-        yield* sink.configure(genesis.toBytes());
         const devices = [...HashMap.values(state.deviceHistory)].map((record) =>
           record.signingPublicKey.toBytes()
         );
