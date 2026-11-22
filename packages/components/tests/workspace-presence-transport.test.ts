@@ -1,6 +1,7 @@
 import { EphemeralStore } from 'loro-crdt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  createLoroStreamsTokenProviderLegacy,
   DEFAULT_LORO_STREAMS_BASE_URL,
   LODY_PRESENCE_CHANNEL,
   LODY_PRESENCE_TTL_MS,
@@ -20,6 +21,7 @@ import {
   type PresenceStoreLike,
   type PresenceTransportLike,
 } from '../src/providers/workspace-presence-transport';
+import { WorkspaceMachineMonitorTransport } from '../src/providers/workspace-machine-monitor-transport';
 import { mergePresenceSnapshots } from '../src/providers/presence-snapshot-merge';
 import type { ElectronPowerState } from '@lody/shared/electron-ipc';
 import {
@@ -95,11 +97,13 @@ describe('workspace-presence-transport', () => {
 
   class FakePresenceTransport implements PresenceTransportLike {
     readonly close = vi.fn(async () => {});
+    readonly joinStarted = Promise.withResolvers<void>();
     joinParams: JoinParams | undefined;
     readonly join = vi.fn(
       (params: JoinParams) =>
         new Promise<JoinResult>((resolve) => {
           this.joinParams = params;
+          this.joinStarted.resolve();
           this.resolveJoin = resolve;
         })
     );
@@ -345,6 +349,7 @@ describe('workspace-presence-transport', () => {
               ? { type: 'initializing', stage: 'acp' }
               : { type: 'initializing', stage: 'acp', detail: 'secret' },
           });
+          await transport.joinStarted.promise;
           transport.emitStatus('joined');
           expect(presence.getDisplaySyncState()).toBe('synced');
           const deleted = Promise.withResolvers<void>();
@@ -814,6 +819,77 @@ describe('session-viewing-presence-bridge', () => {
   });
 
   describe('production presence transport with the published Streams runtime', () => {
+    it.each(['presence', 'monitor'] as const)(
+      '%s fails closed without gateway traffic and reconnects after login rotation',
+      async (room) => {
+        let login: string | null = null;
+        const issuerCredentials: string[] = [];
+        const gatewayCredentials: Array<string | null> = [];
+        const provider = createLoroStreamsTokenProviderLegacy({
+          endpoint: 'https://convex.example.com/api/loro-streams/token',
+          workspaceId: 'workspace-test',
+          authToken: () => login,
+          storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+          fetchImpl: async (_input, init) => {
+            const credential = new Headers(init?.headers).get('Authorization')!;
+            issuerCredentials.push(credential);
+            return credential === 'Bearer denied'
+              ? new Response(null, { status: 403 })
+              : new Response(JSON.stringify({ token: 'valid-jwt', expiresIn: 900 }));
+          },
+        });
+        vi.stubGlobal('fetch', async (_input: unknown, init?: RequestInit) => {
+          gatewayCredentials.push(new Headers(init?.headers).get('Authorization'));
+          return bootstrapResponse(init?.signal);
+        });
+        const options = {
+          workspaceId: 'workspace-test' as WorkspaceId,
+          presenceShardId: 7 as const,
+        };
+        const transport =
+          room === 'presence'
+            ? new WorkspacePresenceTransport(options)
+            : new WorkspaceMachineMonitorTransport(options);
+        const detach =
+          transport instanceof WorkspaceMachineMonitorTransport
+            ? transport.subscribeMachine('machine-test' as MachineId, () => {})
+            : () => {};
+        const args = {
+          baseUrl: 'https://streams.example.com',
+          auth: provider.createAuthCallback(),
+        };
+        const startAndWait = (expected: 'error' | 'synced') => {
+          const done = Promise.withResolvers<void>();
+          let unsubscribe = () => {};
+          transport.start(args);
+          unsubscribe = transport.subscribeSyncState((state) => {
+            if (state === expected) done.resolve();
+          });
+          return done.promise.finally(() => unsubscribe());
+        };
+        try {
+          await startAndWait('error');
+          expect(transport.needsReconnect()).toBe(true);
+          expect(issuerCredentials).toEqual([]);
+          expect(gatewayCredentials).toEqual([]);
+          login = 'denied';
+          await startAndWait('error');
+          await startAndWait('error');
+          expect(issuerCredentials).toEqual(['Bearer denied']);
+          expect(gatewayCredentials).toEqual([]);
+          login = 'valid';
+          await startAndWait('synced');
+          expect(issuerCredentials).toEqual(['Bearer denied', 'Bearer valid']);
+          expect(gatewayCredentials.length).toBeGreaterThan(0);
+          expect(gatewayCredentials.every((value) => value === 'Bearer valid-jwt')).toBe(true);
+        } finally {
+          detach();
+          await transport.stop();
+          await provider.close();
+        }
+      }
+    );
+
     it.each(['set', 'delete'] as const)(
       'coalesces unsent values through a final %s, preserving in-flight bytes and the sync barrier',
       async (operation) => {
