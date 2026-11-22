@@ -1480,6 +1480,244 @@
       }
     },
     {
+      "name": "pinned-root-carries-opened-rows-at-any-depth",
+      "description": "A row opened by a row the pinned root opened follows the root into its section and nests under it, like the direct child.",
+      "input": {
+        "sessions": [
+          {
+            "id": "root",
+            "title": "root",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": "work",
+            "orderKey": "7F80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "child",
+            "title": "child",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "root",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "grandchild",
+            "title": "grandchild",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": null,
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": "child",
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "other-pin",
+            "title": "other-pin",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": true,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [
+          {
+            "id": "work",
+            "name": "Work",
+            "orderKey": "80"
+          }
+        ],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "expected": {
+        "pinned": [
+          {
+            "sectionId": null,
+            "name": null,
+            "rows": [
+              {
+                "id": "other-pin",
+                "tier": "pinned",
+                "children": [],
+                "activityAt": 1795215600000,
+                "unread": false,
+                "snoozedUntil": null,
+                "woken": false,
+                "canManage": true,
+                "canPrefer": true
+              }
+            ],
+            "hiddenCount": 0
+          },
+          {
+            "sectionId": "work",
+            "name": "Work",
+            "rows": [
+              {
+                "id": "root",
+                "tier": "pinned",
+                "children": [
+                  {
+                    "id": "child",
+                    "tier": "pinned",
+                    "children": [],
+                    "activityAt": 1795215600000,
+                    "unread": false,
+                    "snoozedUntil": null,
+                    "woken": false,
+                    "canManage": true,
+                    "canPrefer": true
+                  },
+                  {
+                    "id": "grandchild",
+                    "tier": "pinned",
+                    "children": [],
+                    "activityAt": 1795215600000,
+                    "unread": false,
+                    "snoozedUntil": null,
+                    "woken": false,
+                    "canManage": true,
+                    "canPrefer": true
+                  }
+                ],
+                "activityAt": 1795215600000,
+                "unread": false,
+                "snoozedUntil": null,
+                "woken": false,
+                "canManage": true,
+                "canPrefer": true
+              }
+            ],
+            "hiddenCount": 0
+          }
+        ],
+        "focus": [],
+        "later": [],
+        "settled": [],
+        "canManageSections": true,
+        "nextChangeAt": null
+      }
+    },
+    {
+      "name": "all-zero-order-key-reads-as-no-key",
+      "description": "An all-zero order key has no key before it, so Focus orders that row as unkeyed rather than failing later.",
+      "input": {
+        "sessions": [
+          {
+            "id": "zero",
+            "title": "zero",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "00",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "keyed",
+            "title": "keyed",
+            "lastMessageAt": 1795215600000,
+            "lastReadAt": 1795215600000,
+            "isPinned": false,
+            "pinSectionId": null,
+            "orderKey": "80",
+            "snoozedUntil": null,
+            "settledAt": null,
+            "focusRestoredAt": null,
+            "openedById": null,
+            "isWorking": false,
+            "isWaitingPermission": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "sections": [],
+        "sectionsLoaded": true,
+        "canManageSections": true,
+        "nowMs": 1795219200000
+      },
+      "expected": {
+        "pinned": [
+          {
+            "sectionId": null,
+            "name": null,
+            "rows": [],
+            "hiddenCount": 0
+          }
+        ],
+        "focus": [
+          {
+            "id": "keyed",
+            "tier": "focus",
+            "children": [],
+            "activityAt": 1795215600000,
+            "unread": false,
+            "snoozedUntil": null,
+            "woken": false,
+            "canManage": true,
+            "canPrefer": true
+          },
+          {
+            "id": "zero",
+            "tier": "focus",
+            "children": [],
+            "activityAt": 1795215600000,
+            "unread": false,
+            "snoozedUntil": null,
+            "woken": false,
+            "canManage": true,
+            "canPrefer": true
+          }
+        ],
+        "later": [],
+        "settled": [],
+        "canManageSections": true,
+        "nextChangeAt": 1795820400000
+      }
+    },
+    {
       "name": "placed-woken-row-keeps-unread-at-its-place",
       "description": "A woken row placed by a Focus reorder (focusRestoredAt at its wake-up, expired snoozedUntil kept) orders by its key and stays unread; an unplaced woken row still floats.",
       "input": {

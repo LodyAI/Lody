@@ -180,7 +180,7 @@ Implementation:
   shared runtime and lists in the `apps/mobile/ios` and `apps/mobile/android`
   submodules.
 
-Executed validation: the golden vectors (11 layout and 33 command cases) in
+Executed validation: the golden vectors (13 layout and 38 command cases) in
 `packages/shared/tests/status-view.test.ts`, against the desktop and phone adapters
 in `packages/components` and in the iOS and Android runtime tests; the Storybook
 end-to-end suite `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`

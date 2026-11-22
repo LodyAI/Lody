@@ -214,7 +214,10 @@ function planFocusMove(
   return allowed(pool, writes);
 }
 
-/** Plans against the pinned rows themselves; carried opened rows never move alone. */
+/**
+ * Plans against the pinned rows themselves; carried opened rows never move
+ * alone. Rows naming a section not read yet are held back, as the layout holds them.
+ */
 function planPinnedMove(
   state: StatusViewState,
   pool: Pool,
@@ -237,7 +240,9 @@ function planPinnedMove(
         env.nowMs
       ),
     }));
-  const layout = buildPinnedSectionLayout(placements, state.sections, (placement) => placement);
+  const layout = buildPinnedSectionLayout(placements, state.sections, (placement) => placement, {
+    sectionsLoaded: state.sectionsLoaded,
+  });
   const target = layout.find((entry) => entry.sectionId === sectionId) ?? layout[0];
   const ids = (target?.items ?? []).map((item) => item.id).filter((id) => id !== sessionId);
   const writes = planPinnedSessionMove(
@@ -284,7 +289,7 @@ export function planStatusViewCommand(
         pool,
         targets.map((session) =>
           sessionWrite(session.id, 'manage', {
-            settledAt: Math.max(nowMs, session.lastMessageAt ?? 0),
+            settledAt: Math.max(nowMs, session.lastMessageAt ?? 0, session.activityAt ?? 0),
             snoozedUntil: null,
           })
         )
@@ -305,9 +310,13 @@ export function planStatusViewCommand(
           sessionWrite(command.sessionId, 'prefer', { isPinned: false, pinSectionId: null }),
         ]);
       }
+      const sectionIds = new Set(state.sections.map((section) => section.id));
+      const inDefaultSection = (session: StatusViewSession) =>
+        !session.pinSectionId || (state.sectionsLoaded && !sectionIds.has(session.pinSectionId));
       const defaultPins = [...pool.values()]
         .filter(
-          (session) => session.isPinned && !session.pinSectionId && session.id !== command.sessionId
+          (session) =>
+            session.isPinned && inDefaultSection(session) && session.id !== command.sessionId
         )
         .map((session) => ({
           id: session.id,

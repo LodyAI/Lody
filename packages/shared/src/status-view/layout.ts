@@ -130,13 +130,27 @@ export function statusViewPinnedIds(sessions: readonly StatusViewSession[]): Set
   });
 }
 
+/** The pinned row an opened row is carried by, however many openers up. */
+function pinnedOwner(
+  session: StatusViewSession,
+  byId: ReadonlyMap<string, StatusViewSession>
+): StatusViewSession | undefined {
+  const seen = new Set<string>();
+  let cursor: StatusViewSession | undefined = session;
+  while (cursor && !cursor.isPinned && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    cursor = cursor.openedById ? byId.get(cursor.openedById) : undefined;
+  }
+  return cursor?.isPinned ? cursor : undefined;
+}
+
 /** Where a row in the Pinned area sits: an opened row follows its pinned opener. */
 export function statusViewPinPlacement(
   session: StatusViewSession,
   byId: ReadonlyMap<string, StatusViewSession>,
   nowMs: number
 ) {
-  const owner = session.isPinned ? session : byId.get(session.openedById ?? session.id);
+  const owner = pinnedOwner(session, byId);
   return {
     id: session.id,
     pinSectionId: owner?.isPinned ? owner.pinSectionId : null,

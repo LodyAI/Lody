@@ -100,7 +100,7 @@ type StatusViewCommand =
 进行中排序时为已到期的稍后条目落地真实的键，把行拖进进行中时一并恢复它的 opened-by 子对话，
 `settledAt = max(now, lastMessageAt)`，取消 pin 保留 `orderKey`。
 
-**测试样例** — `vectors/layout.json`（11 个用例）和 `vectors/commands.json`（33 个用例，固定的
+**测试样例** — `vectors/layout.json`（13 个用例）和 `vectors/commands.json`（38 个用例，固定的
 `nowMs` 和随机字节）在 `packages/shared` 里运行，在 `packages/components` 里针对桌面和手机 WebView
 的适配层运行，也在 iOS 和 Android 的 runtime 测试里运行。
 
@@ -171,7 +171,7 @@ type StatusViewCommand =
 
 已验证：
 
-- 测试样例（11 个布局用例、33 个命令用例）在 `packages/shared` 里运行，在 `packages/components` 里
+- 测试样例（13 个布局用例、38 个命令用例）在 `packages/shared` 里运行，在 `packages/components` 里
   针对桌面和手机的适配层运行，也在 iOS 和 Android 的 runtime 测试里运行。
 - 桌面：进行中拖放的 Storybook 端到端测试
   （`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`，5 个用例）。
