@@ -80,6 +80,63 @@ export const nativeLocalImportOptions = (client: RepoClient, namespace: string) 
   return writer ? { enqueueOutbox: true, writer } : {};
 };
 
+/**
+ * The remote each namespace replicates from in this process, once configured (the
+ * encrypted content remote). A plaintext namespace has none, and its reads are local.
+ */
+const namespaceRemote = new WeakMap<RepoClient, Map<string, string>>();
+const coldSynced = new WeakMap<RepoClient, Set<string>>();
+export function setNativeNamespaceRemote(
+  client: RepoClient,
+  namespace: string,
+  remoteId: string | undefined
+) {
+  let byNamespace = namespaceRemote.get(client);
+  if (!byNamespace) namespaceRemote.set(client, (byNamespace = new Map()));
+  if (remoteId) byNamespace.set(namespace, remoteId);
+  else byNamespace.delete(namespace);
+  const prefix = `${namespace}\0`;
+  const synced = coldSynced.get(client);
+  if (synced) for (const key of synced) if (key.startsWith(prefix)) synced.delete(key);
+}
+
+/** A cold read waits this long for its pull; an offline or slow remote then reads local state. */
+export const NATIVE_COLD_SYNC_MS = 5_000;
+
+/**
+ * Pulls `rooms` from the namespace's remote before a read of state this process has
+ * not observed: the engine otherwise answers from its local copy, empty for a room
+ * another device wrote. Bounded; a failure or timeout leaves the local read.
+ * `once` skips rooms this process already pulled (a live observation keeps them
+ * current afterwards); a failed pull is retried by the next read.
+ */
+export async function syncNativeColdRooms(
+  client: RepoClient,
+  namespace: string,
+  rooms: readonly RoomKey[],
+  options: { once?: boolean; timeoutMs?: number } = {}
+): Promise<void> {
+  const remoteId = namespaceRemote.get(client)?.get(namespace);
+  if (!remoteId) return;
+  let synced = coldSynced.get(client);
+  if (!synced) coldSynced.set(client, (synced = new Set()));
+  const key = (room: RoomKey) => `${namespace}\0${room.kind}\0${room.id}`;
+  const pending = options.once ? rooms.filter((room) => !synced.has(key(room))) : rooms;
+  if (!pending.length) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pulled = await Promise.race([
+    client.syncRooms(namespace, pending, remoteId).then(
+      () => true,
+      () => false
+    ),
+    new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), options.timeoutMs ?? NATIVE_COLD_SYNC_MS);
+    }),
+  ]).finally(() => clearTimeout(timer));
+  if (pulled && namespaceRemote.get(client)?.get(namespace) === remoteId)
+    for (const room of pending) synced.add(key(room));
+}
+
 /** Explicit opt-in. Both daemon and desktop read the same variable. */
 export const isNativeWorkspaceMetaEnabled = (env: NodeJS.ProcessEnv = process.env) =>
   env.LODY_NATIVE_WORKSPACE_META === '1';
