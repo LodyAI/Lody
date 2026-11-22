@@ -1600,9 +1600,6 @@ export const LoroSidebar = memo(function LoroSidebar({
             // first group is set off like the 16px between the groups below it.
             isMobile ? 'mt-4 pb-[calc(12px+env(safe-area-inset-bottom,0px))]' : 'mt-3'
           )}
-          // Overlay only while the list is scrolling. ScrollArea defaults to `hover`,
-          // which paints the thumb as soon as the pointer enters the sidebar.
-          visibility="scroll"
           // The horizontal gutter must live on the *viewport*, not the ScrollArea
           // root. The viewport is the scroll/clip container; with rows at
           // `w-full` and the gutter on the root, the selected row's 1px `outline`

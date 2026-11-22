@@ -27,6 +27,19 @@ Menu/ContextMenu、Popover、Select/Combobox、Textarea、Table 和 Drawer 中
 无需替换它们的节点。对话引擎的稳定滚动槽、显式隐藏滚动条和终端标签栏尺寸
 均保留，不引入第二套滚动控制器。
 
+所有滚动条静止时都隐藏，与 macOS 和 OverlayScrollbars 的覆盖式滚动条惯例一致。
+`ScrollArea` 默认 `scroll` 可见性。Chromium 自定义滚动条无法自动隐藏或淡出，
+因此在应用根部（与焦点模式并列）安装 `installScrollbarPresence`：在滚轮、触摸、
+滚动键或按住滚动条之后发生滚动时设置 `data-scrollbar-scrolling`，指针位于元素
+自身滚动槽内时设置 `data-scrollbar-hover`。`nativeScrollbar` 和 CSS 基础样式只在
+这些属性下绘制滑块。应用自身的滚动（例如对话跟随流式回复）保持隐藏。两类实现
+都使用 12px 的命中区域：滑块静止时 4px，悬停或拖动轨道时 8px。原生滚动条只能
+改变滑块的透明边框，覆盖式轨道则改变内边距。被否决的方案：容器悬停即显示，
+因为指针在面板任意位置都会画出滚动条（侧边栏此前已因此使用 `scroll`）；仅用 CSS
+的滑块 `:hover`，无法感知轨道其余部分；Chromium 已移除的 `overflow: overlay`；
+以及把对话滚动器换成 `ScrollArea`，因为滚动引擎拥有自己的视口和首个子节点。
+更宽的原生滚动槽使内容宽度减少 4px。
+
 Base UI 的 Content 部件替代 Radix 隐式的 `display: table` 包装。纵向内容使用
 `min-width: 0`，横向内容允许超出视口。文件树虚拟化和滚动恢复继续持有真实
 视口引用。差异面板直接接收该引用；调用方和已有检查改用稳定的
@@ -56,5 +69,9 @@ Chromium 中检查了滚轮、滑块拖动和键盘焦点；600 项文件树仍�
 格式化、类型感知 lint、i18n、边界和文档检查通过。`NODE_ENV=test pnpm check`
 覆盖组件和基础控件套件；针对性用例覆盖 API 缺失边界、弹窗关闭、受控退出动画
 及首页面板。对话水合、滚动及首页浏览器套件通过；真实的首页展开面板在框架
-移动时隐藏轨道，同时保持视口可滚动。未验证打包后的 Electron、触摸输入或
-非 Chromium 引擎。
+移动时隐藏轨道，同时保持视口可滚动。
+
+显隐状态由 `packages/ui/test/scrollbar-presence.test.ts` 固定。在 Electron 44
+（Chromium）中，属性变化会重绘自定义滑块；滑块的 `:hover` 和 `:active` 优先于
+属性规则。拖动滚动条期间不派发 `pointermove`，但会派发 `pointerup`，因此在松开时
+重新判断悬停状态。未验证打包后的 Electron、触摸输入或非 Chromium 引擎。

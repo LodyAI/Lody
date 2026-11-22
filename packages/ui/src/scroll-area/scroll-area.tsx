@@ -34,7 +34,7 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
   {
     children,
     axis = 'vertical',
-    visibility = 'hover',
+    visibility = 'scroll',
     compact = false,
     className,
     viewportRef,

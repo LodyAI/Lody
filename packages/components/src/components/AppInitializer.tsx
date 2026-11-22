@@ -14,6 +14,7 @@ import { installClientLog } from '../lib/client-log';
 import { getIpcServices } from '../lib/electron-ipc-client';
 import { useSetAtom } from 'jotai';
 import { installFocusModality } from '@lody/ui/focus-modality';
+import { installScrollbarPresence } from '@lody/ui/scrollbar-presence';
 import {
   detectBrowserLanguage,
   fallbackLanguage,
@@ -64,6 +65,7 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
 
   // Focus rings follow keyboard navigation, not whatever key was pressed last.
   useEffect(() => installFocusModality(), []);
+  useEffect(() => installScrollbarPresence(), []);
 
   /* Run a pending "clear cache" / "clear all local data" request as early as
      possible. `RuntimeProvider` also awaits it (and shares the same one-shot
