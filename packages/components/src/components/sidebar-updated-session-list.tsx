@@ -678,7 +678,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       goToOpenerSession: t('sessions.contextMenu.goToOpenerSession', 'Go to Opener Session'),
       snooze: t('sessions.contextMenu.snooze', 'Later'),
       snoozeOneHour: t('sessions.contextMenu.snoozeOneHour', 'In 1 hour'),
-      snoozeLaterToday: t('sessions.contextMenu.snoozeLaterToday', 'Later today'),
+      snoozeLaterToday: t('sessions.contextMenu.snoozeLaterToday', 'In 3 hours'),
       snoozeTomorrowMorning: t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning'),
       snoozeNextWeek: t('sessions.contextMenu.snoozeNextWeek', 'Next week'),
       snoozeCustom: t('sessions.contextMenu.snoozeCustom', 'Custom time…'),

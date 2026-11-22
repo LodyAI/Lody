@@ -81,7 +81,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   before Repo subscribes; persist merged snapshots before adoption and storage-loaded
   versions before cursor advancement. Never replace live documents. Import before
   creating the history reader to avoid replaying bulk-import events.
-- Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
+- Storage, cursors, recovery metadata and eager-sync high-water marks share a per-renderer
   cache namespace. Independently persisted replicas must not share checkpoints.
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
 - Unknown workspace mode permits local Repo access, never ordinary body egress.

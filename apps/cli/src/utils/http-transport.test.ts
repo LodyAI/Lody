@@ -3,8 +3,15 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { connect, getDefaultAutoSelectFamily, setDefaultAutoSelectFamily } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, fetch as undiciFetch } from 'undici';
+import { version } from '@/pkg';
 import { describe, expect, it, vi } from 'vitest';
-import { createCliHttpTransport, resolveCliHttpTransportConfig } from './http-transport';
+import {
+  createCliHttpTransport,
+  resolveCliHttpTransportConfig,
+  installCliHttpGlobalDispatcher,
+  getCliHttpFetch,
+} from './http-transport';
 import { createLogger } from './logger';
 import * as proxy from './proxy';
 
@@ -19,13 +26,67 @@ const envOf = (values: Record<string, string | undefined>): NodeJS.ProcessEnv =>
 };
 
 describe('resolveCliHttpTransportConfig', () => {
+  it.each(['daemon', 'oneshot'] as const)(
+    'identifies %s on SDK global fetch and the disabled-transport CLI fetch',
+    async (mode) => {
+      const previous = getGlobalDispatcher();
+      const previousFetch = globalThis.fetch;
+      const argv = process.argv;
+      const agent = new MockAgent();
+      agent.disableNetConnect();
+      const logger = createLogger({ transports: 'console', level: 'silent' });
+      try {
+        process.argv = ['node', 'lody', mode === 'daemon' ? 'start' : 'session'];
+        setGlobalDispatcher(agent);
+        globalThis.fetch = undiciFetch as unknown as typeof fetch;
+        installCliHttpGlobalDispatcher({ env: envOf({ LODY_HTTP_TRANSPORT: 'native' }), logger });
+        for (const path of ['/sdk-stream', '/cli-token']) {
+          agent
+            .get('https://diagnostics.invalid')
+            .intercept({
+              path,
+              headers: {
+                'user-agent': `lody-cli/${version} (${mode})`,
+                authorization: 'Bearer synthetic',
+              },
+            })
+            .reply(200, 'identified');
+        }
+        const sdk = await globalThis.fetch('https://diagnostics.invalid/sdk-stream', {
+          headers: { authorization: 'Bearer synthetic' },
+        });
+        expect(await sdk.text()).toBe('identified');
+        const cli = await getCliHttpFetch({
+          env: envOf({ LODY_HTTP_TRANSPORT: 'native' }),
+          logger,
+        })('https://diagnostics.invalid/cli-token', {
+          headers: {
+            authorization: 'Bearer synthetic',
+            'user-agent': 'private-machine-identifier',
+          },
+        });
+        expect(await cli.text()).toBe('identified');
+      } finally {
+        process.argv = argv;
+        globalThis.fetch = previousFetch;
+        setGlobalDispatcher(previous);
+        await agent.close();
+        await logger.close();
+      }
+    }
+  );
+
   it.each(['direct', 'proxy'])(
     'reaches IPv4 after an unavailable IPv6 address through %s transport',
     async (mode) => {
       const originalSelection = getDefaultAutoSelectFamily();
       setDefaultAutoSelectFamily(false);
       const logger = createLogger({ transports: 'console', level: 'silent' });
-      const origin = createServer((_request, response) => response.end('reachable via IPv4'));
+      let userAgent: string | undefined;
+      const origin = createServer((request, response) => {
+        userAgent = request.headers['user-agent'];
+        response.end('reachable via IPv4');
+      });
       const gateway = createServer();
       const sockets = new Set<Duplex>();
       let tunnelEstablished = false;
@@ -79,6 +140,7 @@ describe('resolveCliHttpTransportConfig', () => {
         vi.spyOn(dns, 'lookup').mockImplementation(lookup as typeof dns.lookup);
         const response = await transport.fetch(`http://origin.preview.test:${address.port}/`);
         expect(await response.text()).toBe('reachable via IPv4');
+        expect(userAgent).toBe(`lody-cli/${version} (oneshot)`);
         expect(tunnelEstablished).toBe(mode === 'proxy');
       } finally {
         await transport.close();

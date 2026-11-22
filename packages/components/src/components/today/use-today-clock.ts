@@ -42,7 +42,7 @@ export function useTodayClock(now: () => Date = systemNow): TodayDate {
 /**
  * Now, read fresh on every render; the app's shared minute ticker (the
  * sidebar's) only re-renders the subscribed mentions. Its snapshot can be up to
- * a minute old, which would round a just-chosen "Later today" countdown up an
+ * a minute old, which would round a just-chosen "In 3 hours" countdown up an
  * extra hour.
  */
 export function useTodayNow(): number {

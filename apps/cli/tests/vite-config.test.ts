@@ -44,6 +44,7 @@ describe('CLI vite config', () => {
       ['1', '', 'nightly', false],
     ] as const) {
       vi.resetModules();
+      vi.stubEnv('LODY_PLATFORM', 'local');
       vi.stubEnv('LODY_E2E_DAEMON_LOSS_BUILD', enabled);
       vi.stubEnv('LODY_ENV', environment);
       vi.stubEnv('LODY_RELEASE_CHANNEL', channel);
