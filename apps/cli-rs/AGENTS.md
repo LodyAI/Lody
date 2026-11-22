@@ -16,6 +16,7 @@ Root `AGENTS.md` and [`specs/rust-cli-daemon-architecture.md`](../../specs/rust-
 
 - During this early implementation stage, keep designs direct and avoid obsessing over minor edge details or adding premature defensive code for rare scenarios that are unlikely to occur; let real issues surface early and address them when evidenced.
 - Prefer mature, well-established third-party crates from the Rust ecosystem instead of implementing general-purpose functionality from scratch; ask the developer whenever a third-party crate choice is uncertain.
+- Do not blindly call `.clone()` merely to bypass the borrow checker. Cloning small value types or preserving clean architectural boundaries is acceptable when deliberate, but always evaluate borrowing (`&T` / slices) or reference-counted wrappers (`Rc` / `Arc`) first to avoid unnecessary copies.
 - Do not write code comments, including comments for special or subtle logic; express intent through module structure, types, and names.
 - Treat 3,000 lines as the single-file complexity ceiling; once any file exceeds 3,000 lines, refactor and split its responsibilities into smaller modules.
 - Do not write exhaustive tests covering every capability. Write tests only for explicit business or logical assumptions independent of implementation mechanics—such as assumed maximum bounds, mutual-exclusion invariants where two states or events must never co-occur, or network-independence assumptions—and omit routine capability tests.

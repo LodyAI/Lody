@@ -22,6 +22,7 @@ fn expired_entitlement_blocks_remote_dispatch_but_keeps_local_operations_usable(
         workspace_id: WorkspaceId("ws_1".to_string()),
         session_id: SessionId("s_1".to_string()),
         turn_id: TurnId("t_1".to_string()),
+        custom_acp: None,
         prompt: "hello".to_string(),
     };
 

@@ -316,11 +316,20 @@ fn begin_invocation_from_idle(
     }
 }
 
+fn take_phase(phase: &mut SessionPhase) -> SessionPhase {
+    std::mem::replace(
+        phase,
+        SessionPhase::Idle {
+            retained_turn: None,
+            warm_agent: None,
+        },
+    )
+}
+
 fn maybe_dispatch_when_idle(state: &mut SessionState, actions: &mut Vec<KernelAction>) {
-    let SessionPhase::Idle { warm_agent, .. } = &state.phase else {
+    if !matches!(state.phase, SessionPhase::Idle { .. }) {
         return;
-    };
-    let warm_clone = warm_agent.clone();
+    }
 
     if let Some(next) = state.inbox.claim_next_for_execution(
         &state.default_requester_user_id,
@@ -328,7 +337,11 @@ fn maybe_dispatch_when_idle(state: &mut SessionState, actions: &mut Vec<KernelAc
         &state.default_mcp_selection_digest,
         state.workspace_encrypted,
     ) {
-        begin_invocation_from_idle(state, warm_clone, next, actions);
+        let warm = match take_phase(&mut state.phase) {
+            SessionPhase::Idle { warm_agent, .. } => warm_agent,
+            _ => None,
+        };
+        begin_invocation_from_idle(state, warm, next, actions);
         return;
     }
 
@@ -347,7 +360,11 @@ fn maybe_dispatch_when_idle(state: &mut SessionState, actions: &mut Vec<KernelAc
             &state.default_mcp_selection_digest,
             state.workspace_encrypted,
         ) {
-            begin_invocation_from_idle(state, warm_clone, claimed, actions);
+            let warm = match take_phase(&mut state.phase) {
+                SessionPhase::Idle { warm_agent, .. } => warm_agent,
+                _ => None,
+            };
+            begin_invocation_from_idle(state, warm, claimed, actions);
         }
     }
 }
@@ -395,8 +412,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
             maybe_dispatch_when_idle(&mut state, &mut actions);
         }
         KernelEvent::EnqueueDelegationReceipt { receipt } => {
-            let session_id = state.session_id.clone();
-            if state.inbox.push_receipt(&session_id, receipt) {
+            if state.inbox.push_receipt(&state.session_id, receipt) {
                 maybe_dispatch_when_idle(&mut state, &mut actions);
             }
         }
@@ -417,16 +433,14 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 _ => {}
             }
         }
-        KernelEvent::AgentPrepared { generation, agent } => {
-            if let SessionPhase::Preparing {
+        KernelEvent::AgentPrepared { generation, agent } => match take_phase(&mut state.phase) {
+            SessionPhase::Preparing {
                 invocation,
                 generation: expected_gen,
                 user_turn_durable,
                 stale_acp_retries_used,
                 ..
-            } = state.phase.clone()
-                && expected_gen == generation
-            {
+            } if expected_gen == generation => {
                 state.inbox.mark_submitted(&invocation.turn_id);
                 let prompt_text = invocation.prompt_text.clone();
                 let turn_id = invocation.turn_id.clone();
@@ -443,73 +457,83 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     generation,
                 });
             }
-        }
+            other => state.phase = other,
+        },
         KernelEvent::AgentPrepareFailed { generation, code } => {
-            if let SessionPhase::Preparing {
-                invocation,
-                generation: expected_gen,
-                prior_warm_agent,
-                ..
-            } = state.phase.clone()
-                && expected_gen == generation
-            {
-                if let Some(old) = prior_warm_agent {
-                    actions.push(KernelAction::DetachAgentBackgroundCleanup {
-                        agent_instance_id: old.agent_instance_id,
+            match take_phase(&mut state.phase) {
+                SessionPhase::Preparing {
+                    invocation,
+                    generation: expected_gen,
+                    prior_warm_agent,
+                    ..
+                } if expected_gen == generation => {
+                    if let Some(old) = prior_warm_agent {
+                        actions.push(KernelAction::DetachAgentBackgroundCleanup {
+                            agent_instance_id: old.agent_instance_id,
+                        });
+                    }
+                    state.inbox.settle_and_retire(&invocation.turn_id);
+                    let reason = TurnTerminalReason::AgentFailed { code };
+                    actions.push(KernelAction::FinalizeTurn {
+                        turn_id: invocation.turn_id,
+                        reason,
                     });
+                    maybe_dispatch_when_idle(&mut state, &mut actions);
                 }
-                state.inbox.settle_and_retire(&invocation.turn_id);
-                let reason = TurnTerminalReason::AgentFailed { code };
-                actions.push(KernelAction::FinalizeTurn {
-                    turn_id: invocation.turn_id,
-                    reason,
-                });
-                state.phase = SessionPhase::Idle {
-                    retained_turn: None,
-                    warm_agent: None,
-                };
-                maybe_dispatch_when_idle(&mut state, &mut actions);
+                other => state.phase = other,
             }
         }
         KernelEvent::AgentDisconnectedBeforeEvents { generation } => {
-            if let SessionPhase::Running(running) = state.phase.clone()
-                && running.generation == generation
-            {
-                actions.push(KernelAction::DetachAgentBackgroundCleanup {
-                    agent_instance_id: running.agent.agent_instance_id.clone(),
-                });
-                if running.can_retry_stale_acp_before_events() {
-                    let next_gen = state.allocate_generation();
-                    let inv = running.invocation.clone();
-                    state.phase = SessionPhase::Preparing {
-                        invocation: inv.clone(),
-                        generation: next_gen,
-                        user_turn_durable: running.user_turn_durable,
-                        stale_acp_retries_used: running.stale_acp_retries_used + 1,
-                        prior_warm_agent: None,
-                    };
-                    actions.push(KernelAction::PrepareNewAgent {
-                        turn_id: inv.turn_id,
-                        adapter_id: inv.adapter_id,
-                        mcp_selection_digest: inv.mcp_selection_digest,
-                        generation: next_gen,
+            match take_phase(&mut state.phase) {
+                SessionPhase::Running(running) if running.generation == generation => {
+                    let can_retry = running.can_retry_stale_acp_before_events();
+                    let RunningTurnState {
+                        invocation,
+                        agent,
+                        user_turn_durable,
+                        stale_acp_retries_used,
+                        ..
+                    } = *running;
+                    actions.push(KernelAction::DetachAgentBackgroundCleanup {
+                        agent_instance_id: agent.agent_instance_id.clone(),
                     });
-                } else {
-                    let reason = TurnTerminalReason::AgentFailed {
-                        code: "agent_disconnected".to_string(),
-                    };
-                    state.phase = SessionPhase::Settling {
-                        invocation: running.invocation.clone(),
-                        agent: running.agent,
-                        generation,
-                        reason: reason.clone(),
-                    };
-                    actions.push(KernelAction::BeginSettling {
-                        turn_id: running.invocation.turn_id,
-                        generation,
-                        reason,
-                    });
+                    if can_retry {
+                        let next_gen = state.allocate_generation();
+                        let turn_id = invocation.turn_id.clone();
+                        let adapter_id = invocation.adapter_id.clone();
+                        let mcp_selection_digest = invocation.mcp_selection_digest.clone();
+                        state.phase = SessionPhase::Preparing {
+                            invocation,
+                            generation: next_gen,
+                            user_turn_durable,
+                            stale_acp_retries_used: stale_acp_retries_used + 1,
+                            prior_warm_agent: None,
+                        };
+                        actions.push(KernelAction::PrepareNewAgent {
+                            turn_id,
+                            adapter_id,
+                            mcp_selection_digest,
+                            generation: next_gen,
+                        });
+                    } else {
+                        let reason = TurnTerminalReason::AgentFailed {
+                            code: "agent_disconnected".to_string(),
+                        };
+                        let turn_id = invocation.turn_id.clone();
+                        state.phase = SessionPhase::Settling {
+                            invocation,
+                            agent,
+                            generation,
+                            reason: reason.clone(),
+                        };
+                        actions.push(KernelAction::BeginSettling {
+                            turn_id,
+                            generation,
+                            reason,
+                        });
+                    }
                 }
+                other => state.phase = other,
             }
         }
         KernelEvent::AgentOutputChunk { generation, text } => match &mut state.phase {
@@ -675,10 +699,8 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 }
             }
         }
-        KernelEvent::AgentPromptFinished { generation } => {
-            if let SessionPhase::Running(mut running) = state.phase.clone()
-                && running.generation == generation
-            {
+        KernelEvent::AgentPromptFinished { generation } => match take_phase(&mut state.phase) {
+            SessionPhase::Running(mut running) if running.generation == generation => {
                 if running.user_turn_durable {
                     flush_buffered_outputs(&mut running, &mut actions);
                 }
@@ -687,10 +709,13 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 } else {
                     TurnTerminalReason::SilentNoOutput
                 };
-                let turn_id = running.invocation.turn_id.clone();
+                let RunningTurnState {
+                    invocation, agent, ..
+                } = *running;
+                let turn_id = invocation.turn_id.clone();
                 state.phase = SessionPhase::Settling {
-                    invocation: running.invocation,
-                    agent: running.agent,
+                    invocation,
+                    agent,
                     generation,
                     reason: reason.clone(),
                 };
@@ -700,28 +725,34 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     reason,
                 });
             }
-        }
-        KernelEvent::AgentCrashed { generation, code } => {
-            if let SessionPhase::Running(running) = state.phase.clone()
-                && running.generation == generation
-            {
-                for req_id in running.pending_permissions.keys() {
+            other => state.phase = other,
+        },
+        KernelEvent::AgentCrashed { generation, code } => match take_phase(&mut state.phase) {
+            SessionPhase::Running(running) if running.generation == generation => {
+                let RunningTurnState {
+                    invocation,
+                    agent,
+                    pending_permissions,
+                    steer_flight,
+                    ..
+                } = *running;
+                for req_id in pending_permissions.into_keys() {
                     actions.push(KernelAction::CancelPendingPermission {
-                        turn_id: running.invocation.turn_id.clone(),
-                        request_id: req_id.clone(),
+                        turn_id: invocation.turn_id.clone(),
+                        request_id: req_id,
                     });
                 }
-                if let SteerFlightState::WaitingVerdict { replacement } = running.steer_flight {
+                if let SteerFlightState::WaitingVerdict { replacement } = steer_flight {
                     state.inbox.mark_uncertain_and_retire(&replacement.turn_id);
                 }
                 actions.push(KernelAction::DetachAgentBackgroundCleanup {
-                    agent_instance_id: running.agent.agent_instance_id.clone(),
+                    agent_instance_id: agent.agent_instance_id.clone(),
                 });
                 let reason = TurnTerminalReason::AgentFailed { code };
-                let turn_id = running.invocation.turn_id.clone();
+                let turn_id = invocation.turn_id.clone();
                 state.phase = SessionPhase::Settling {
-                    invocation: running.invocation,
-                    agent: running.agent,
+                    invocation,
+                    agent,
                     generation,
                     reason: reason.clone(),
                 };
@@ -731,10 +762,11 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     reason,
                 });
             }
-        }
+            other => state.phase = other,
+        },
         KernelEvent::CancelRequested { pause_inbox } => {
             state.inbox.paused |= pause_inbox;
-            match state.phase.clone() {
+            match take_phase(&mut state.phase) {
                 SessionPhase::Preparing {
                     invocation,
                     generation,
@@ -752,28 +784,31 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                         turn_id: invocation.turn_id,
                         reason: TurnTerminalReason::Canceled,
                     });
-                    state.phase = SessionPhase::Idle {
-                        retained_turn: None,
-                        warm_agent: None,
-                    };
                     maybe_dispatch_when_idle(&mut state, &mut actions);
                 }
                 SessionPhase::Running(running) => {
-                    for req_id in running.pending_permissions.keys() {
+                    let RunningTurnState {
+                        invocation,
+                        agent,
+                        generation,
+                        pending_permissions,
+                        steer_flight,
+                        ..
+                    } = *running;
+                    for req_id in pending_permissions.into_keys() {
                         actions.push(KernelAction::CancelPendingPermission {
-                            turn_id: running.invocation.turn_id.clone(),
-                            request_id: req_id.clone(),
+                            turn_id: invocation.turn_id.clone(),
+                            request_id: req_id,
                         });
                     }
-                    if let SteerFlightState::WaitingVerdict { replacement } = running.steer_flight {
+                    if let SteerFlightState::WaitingVerdict { replacement } = steer_flight {
                         state.inbox.mark_uncertain_and_retire(&replacement.turn_id);
                     }
-                    let generation = running.generation;
-                    let turn_id = running.invocation.turn_id.clone();
+                    let turn_id = invocation.turn_id.clone();
                     actions.push(KernelAction::InterruptAgent { generation });
                     state.phase = SessionPhase::Settling {
-                        invocation: running.invocation,
-                        agent: running.agent,
+                        invocation,
+                        agent,
                         generation,
                         reason: TurnTerminalReason::Canceled,
                     };
@@ -783,18 +818,16 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                         reason: TurnTerminalReason::Canceled,
                     });
                 }
-                _ => {}
+                other => state.phase = other,
             }
         }
-        KernelEvent::SettlingCompleted { generation } => {
-            if let SessionPhase::Settling {
+        KernelEvent::SettlingCompleted { generation } => match take_phase(&mut state.phase) {
+            SessionPhase::Settling {
                 invocation,
                 agent,
                 generation: expected_gen,
                 reason,
-            } = state.phase.clone()
-                && expected_gen == generation
-            {
+            } if expected_gen == generation => {
                 state.inbox.settle_and_retire(&invocation.turn_id);
                 let turn_id = invocation.turn_id.clone();
                 let retained_turn =
@@ -811,16 +844,15 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 };
                 maybe_dispatch_when_idle(&mut state, &mut actions);
             }
-        }
-        KernelEvent::SettlingTimedOut { generation } => {
-            if let SessionPhase::Settling {
+            other => state.phase = other,
+        },
+        KernelEvent::SettlingTimedOut { generation } => match take_phase(&mut state.phase) {
+            SessionPhase::Settling {
                 invocation,
                 agent,
                 generation: expected_gen,
                 reason,
-            } = state.phase.clone()
-                && expected_gen == generation
-            {
+            } if expected_gen == generation => {
                 state.inbox.settle_and_retire(&invocation.turn_id);
                 actions.push(KernelAction::DetachAgentBackgroundCleanup {
                     agent_instance_id: agent.agent_instance_id,
@@ -829,13 +861,10 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     turn_id: invocation.turn_id,
                     reason,
                 });
-                state.phase = SessionPhase::Idle {
-                    retained_turn: None,
-                    warm_agent: None,
-                };
                 maybe_dispatch_when_idle(&mut state, &mut actions);
             }
-        }
+            other => state.phase = other,
+        },
         KernelEvent::BeginEditAndResend {
             target_turn_id,
             replacement_invocation,
@@ -847,7 +876,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 });
                 return (state, actions);
             }
-            let prior_warm = match state.phase.clone() {
+            let prior_warm = match take_phase(&mut state.phase) {
                 SessionPhase::Idle { warm_agent, .. } => warm_agent,
                 SessionPhase::Preparing {
                     invocation,
@@ -860,11 +889,15 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     prior_warm_agent
                 }
                 SessionPhase::Running(running) => {
-                    actions.push(KernelAction::InterruptAgent {
-                        generation: running.generation,
-                    });
-                    state.inbox.settle_and_retire(&running.invocation.turn_id);
-                    Some(running.agent)
+                    let RunningTurnState {
+                        invocation,
+                        agent,
+                        generation,
+                        ..
+                    } = *running;
+                    actions.push(KernelAction::InterruptAgent { generation });
+                    state.inbox.settle_and_retire(&invocation.turn_id);
+                    Some(agent)
                 }
                 SessionPhase::Settling { agent, .. } => Some(agent),
                 SessionPhase::EditAndResendBarrier {
@@ -880,13 +913,12 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 prior_warm_agent: prior_warm,
             };
         }
-        KernelEvent::EditAndResendCommitted => {
-            if let SessionPhase::EditAndResendBarrier {
+        KernelEvent::EditAndResendCommitted => match take_phase(&mut state.phase) {
+            SessionPhase::EditAndResendBarrier {
                 replacement_invocation,
                 prior_warm_agent,
                 ..
-            } = state.phase.clone()
-            {
+            } => {
                 state
                     .durable_user_turn_ids
                     .insert(replacement_invocation.turn_id.clone());
@@ -900,7 +932,8 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     &mut actions,
                 );
             }
-        }
+            other => state.phase = other,
+        },
         KernelEvent::ConfigureGoal { goal } => {
             state.goal = Some(goal);
             maybe_dispatch_when_idle(&mut state, &mut actions);

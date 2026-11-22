@@ -5,9 +5,9 @@ pub mod actor;
 
 pub use actor::{ControlCommand, SessionHandle, SessionSpawnOptions, spawn_session_actor};
 use lody_app::{
-    AppCommand, AppQuery, AppResponse, ApplicationService, CapabilitySet, DaemonStatusView,
-    LocalProjectId, LocalProjectRecord, PortError, PortErrorKind, PortResult, ProfileId, SessionId,
-    StorageLeaseMode, VerifiedPrincipal, WorkspaceId, enforce_command_policy,
+    AppCommand, AppQuery, AppResponse, ApplicationService, CapabilitySet, CustomCommandSpec,
+    DaemonStatusView, LocalProjectId, LocalProjectRecord, PortError, PortErrorKind, PortResult,
+    ProfileId, SessionId, StorageLeaseMode, VerifiedPrincipal, WorkspaceId, enforce_command_policy,
 };
 use lody_kernel::{FrozenTurnInvocation, KernelEvent, TurnSourceKind};
 use lody_ports::{
@@ -97,6 +97,7 @@ impl DaemonRuntime {
         depth: u8,
         local_project_id: Option<LocalProjectId>,
         use_worktree: bool,
+        custom_acp: Option<CustomCommandSpec>,
     ) -> PortResult<SessionHandle> {
         let key = (workspace_id.clone(), session_id.clone());
         if let Some(existing) = self.sessions.read().expect("sessions lock").get(&key) {
@@ -130,6 +131,7 @@ impl DaemonRuntime {
                 local_project_id,
                 project_root,
                 use_worktree,
+                custom_acp,
                 settling_timeout: self.settling_timeout,
             },
             Arc::clone(&self.deps),
@@ -208,6 +210,7 @@ impl DaemonRuntime {
                 local_project_id,
                 use_worktree,
                 adapter_id,
+                custom_acp,
                 prompt,
             } => {
                 let handle = self.ensure_session_actor(
@@ -216,6 +219,7 @@ impl DaemonRuntime {
                     0,
                     local_project_id,
                     use_worktree,
+                    custom_acp,
                 )?;
                 let invocation = Self::caller_invocation(caller, &turn_id.0, &adapter_id, prompt);
                 handle
@@ -230,11 +234,26 @@ impl DaemonRuntime {
                 workspace_id,
                 session_id,
                 turn_id,
+                custom_acp,
                 prompt,
             } => {
-                let handle =
-                    self.ensure_session_actor(&workspace_id, &session_id, 0, None, false)?;
-                let invocation = Self::caller_invocation(caller, &turn_id.0, "default", prompt);
+                let adapter_id = if custom_acp.is_some() {
+                    "custom"
+                } else {
+                    "default"
+                };
+                let handle = self.ensure_session_actor(
+                    &workspace_id,
+                    &session_id,
+                    0,
+                    None,
+                    false,
+                    custom_acp.clone(),
+                )?;
+                if let Some(spec) = custom_acp {
+                    handle.set_custom_acp(spec).await?;
+                }
+                let invocation = Self::caller_invocation(caller, &turn_id.0, adapter_id, prompt);
                 handle
                     .send_event(KernelEvent::SubmitInput { invocation })
                     .await?;
@@ -295,8 +314,14 @@ impl DaemonRuntime {
                 prompt,
                 ..
             } => {
-                let handle =
-                    self.ensure_session_actor(&workspace_id, &child_session_id, 1, None, false)?;
+                let handle = self.ensure_session_actor(
+                    &workspace_id,
+                    &child_session_id,
+                    1,
+                    None,
+                    false,
+                    None,
+                )?;
                 let mut invocation =
                     Self::caller_invocation(caller, &turn_id.0, &adapter_id, prompt);
                 invocation.source = TurnSourceKind::AgentDelegationChat;

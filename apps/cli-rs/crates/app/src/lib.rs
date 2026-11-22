@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
 pub use lody_ports::{
-    BackendProfile, CapabilitySet, EntitlementStatus, HistoryTurnRecord, LocalProjectId,
-    LocalProjectRecord, MachineId, PermissionDecision, PlatformCapability, PortError,
-    PortErrorKind, PortResult, ProfileId, SessionId, SessionMetaSnapshot, SteerVerdict,
+    BackendProfile, CapabilitySet, CustomCommandSpec, EntitlementStatus, HistoryTurnRecord,
+    LocalProjectId, LocalProjectRecord, MachineId, PermissionDecision, PlatformCapability,
+    PortError, PortErrorKind, PortResult, ProfileId, SessionId, SessionMetaSnapshot, SteerVerdict,
     StorageLeaseMode, TurnDiffSummary, TurnId, UserId, VerifiedPrincipal, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
@@ -27,12 +27,14 @@ pub enum AppCommand {
         local_project_id: Option<LocalProjectId>,
         use_worktree: bool,
         adapter_id: String,
+        custom_acp: Option<CustomCommandSpec>,
         prompt: String,
     },
     SendChat {
         workspace_id: WorkspaceId,
         session_id: SessionId,
         turn_id: TurnId,
+        custom_acp: Option<CustomCommandSpec>,
         prompt: String,
     },
     SteerTurn {

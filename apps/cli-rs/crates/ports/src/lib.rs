@@ -20,9 +20,10 @@ pub use data_plane::{
 };
 pub use error::{PortError, PortErrorKind, PortResult};
 pub use execution::{
-    AcpLauncherPort, AcpSessionPort, AcpSpawnSpec, ArtifactRegistryPort, InstalledArtifact,
-    ManagedArtifactSource, McpServerMount, PermissionDecision, PtyPort, PtySpawnSpec, SteerVerdict,
-    WorktreeLease, WorktreePort,
+    AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpSessionPort, AcpSpawnSpec,
+    ArtifactRegistryPort, CustomCommandSpec, InstalledArtifact, ManagedArtifactSource,
+    McpServerMount, PermissionDecision, PtyPort, PtySpawnSpec, SteerVerdict, WorktreeLease,
+    WorktreePort,
 };
 pub use identity::{
     CapabilitySet, LocalProjectId, MachineId, PlatformCapability, ProfileId, SessionId, TurnId,

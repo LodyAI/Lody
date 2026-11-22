@@ -1,17 +1,18 @@
 use crate::DaemonDependencies;
 use lody_kernel::{
-    FrozenTurnInvocation, KernelAction, KernelEvent, SessionPhase, SessionState, SteerOutcome,
-    TurnTerminalReason, WarmAgentHandle, step,
+    FrozenTurnInvocation, Generation, KernelAction, KernelEvent, SessionPhase, SessionState,
+    SteerOutcome, TurnTerminalReason, WarmAgentHandle, step,
 };
 use lody_ports::{
-    AcpSessionPort, AcpSpawnSpec, AdmittedTurnInput, HistoryBlock, HistoryTurnRecord,
-    InboxCategory, LocalProjectId, PermissionDecision, PortError, PortErrorKind, PortResult,
-    SessionId, SteerVerdict, SubmissionStage, TurnId, TurnTerminalOutcome, UserId, WorkspaceId,
-    WorktreeLease,
+    AcpEventSink, AcpInboundEvent, AcpSessionPort, AcpSpawnSpec, AdmittedTurnInput,
+    CustomCommandSpec, HistoryBlock, HistoryTurnRecord, InboxCategory, LocalProjectId,
+    McpServerMount, PermissionDecision, PortError, PortErrorKind, PortResult, SessionId,
+    SteerVerdict, SubmissionStage, TurnId, TurnTerminalOutcome, UserId, WorkspaceId, WorktreeLease,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 
@@ -27,6 +28,9 @@ pub enum ControlCommand {
     Steer {
         invocation: FrozenTurnInvocation,
         reply: oneshot::Sender<PortResult<SteerVerdict>>,
+    },
+    SetCustomAcp {
+        spec: CustomCommandSpec,
     },
     Archive {
         reply: oneshot::Sender<PortResult<()>>,
@@ -57,6 +61,13 @@ impl SessionHandle {
         self.event_tx
             .try_send(event)
             .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session event queue full"))
+    }
+
+    pub async fn set_custom_acp(&self, spec: CustomCommandSpec) -> PortResult<()> {
+        self.control_tx
+            .send(ControlCommand::SetCustomAcp { spec })
+            .await
+            .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor closed"))
     }
 
     pub async fn cancel(&self, pause_inbox: bool) -> PortResult<()> {
@@ -133,6 +144,53 @@ impl SessionHandle {
     }
 }
 
+struct ActorAcpSink {
+    event_tx: mpsc::Sender<KernelEvent>,
+    active_generation: Arc<AtomicU64>,
+}
+
+impl AcpEventSink for ActorAcpSink {
+    fn on_acp_event(&self, event: AcpInboundEvent) {
+        let generation = Generation(self.active_generation.load(Ordering::SeqCst));
+        let mapped = match event {
+            AcpInboundEvent::MessageChunk { text } => {
+                Some(KernelEvent::AgentOutputChunk { generation, text })
+            }
+            AcpInboundEvent::ToolStatus {
+                tool_call_id,
+                title,
+                status,
+            } => Some(KernelEvent::AgentToolStatus {
+                generation,
+                tool_call_id,
+                title,
+                status,
+            }),
+            AcpInboundEvent::PermissionRequest {
+                request_id,
+                tool_call_id,
+                ..
+            } => Some(KernelEvent::AgentRequestedPermission {
+                generation,
+                request_id,
+                tool_call_id,
+            }),
+            AcpInboundEvent::PromptFinished { stop_reason } => (stop_reason != "cancelled")
+                .then_some(KernelEvent::AgentPromptFinished { generation }),
+            AcpInboundEvent::ProcessExited {
+                exit_code,
+                prompt_was_in_flight,
+            } => prompt_was_in_flight.then(|| KernelEvent::AgentCrashed {
+                generation,
+                code: format!("exit_{}", exit_code.unwrap_or(-1)),
+            }),
+        };
+        if let Some(ev) = mapped {
+            let _ = self.event_tx.blocking_send(ev);
+        }
+    }
+}
+
 pub struct SessionSpawnOptions {
     pub workspace_id: WorkspaceId,
     pub session_id: SessionId,
@@ -141,7 +199,14 @@ pub struct SessionSpawnOptions {
     pub local_project_id: Option<LocalProjectId>,
     pub project_root: Option<PathBuf>,
     pub use_worktree: bool,
+    pub custom_acp: Option<CustomCommandSpec>,
     pub settling_timeout: Duration,
+}
+
+struct LiveAgentSlot {
+    instance_id: String,
+    active_generation: Arc<AtomicU64>,
+    port: Box<dyn AcpSessionPort>,
 }
 
 struct SessionActor {
@@ -149,9 +214,10 @@ struct SessionActor {
     deps: Arc<DaemonDependencies>,
     acp_start_semaphore: Arc<Semaphore>,
     state: SessionState,
-    live_agent: Option<(String, Box<dyn AcpSessionPort>)>,
+    live_agent: Option<LiveAgentSlot>,
     worktree_lease: Option<WorktreeLease>,
     turn_records: BTreeMap<String, HistoryTurnRecord>,
+    event_tx: mpsc::Sender<KernelEvent>,
     control_rx: mpsc::Receiver<ControlCommand>,
     event_rx: mpsc::Receiver<KernelEvent>,
     next_agent_seq: u64,
@@ -178,6 +244,7 @@ pub fn spawn_session_actor(
         live_agent: None,
         worktree_lease: None,
         turn_records: BTreeMap::new(),
+        event_tx: event_tx.clone(),
         control_rx,
         event_rx,
         next_agent_seq: 0,
@@ -218,6 +285,10 @@ impl SessionActor {
 
     async fn handle_control(&mut self, cmd: ControlCommand) -> bool {
         match cmd {
+            ControlCommand::SetCustomAcp { spec } => {
+                self.opts.custom_acp = Some(spec);
+                false
+            }
             ControlCommand::Cancel { pause_inbox, reply } => {
                 let _ = self.deps.inbox.set_inbox_paused(
                     &self.opts.workspace_id,
@@ -230,6 +301,29 @@ impl SessionActor {
                 false
             }
             ControlCommand::ReplyPermission { decision, reply } => {
+                if let Some((_, rec)) = self
+                    .turn_records
+                    .iter_mut()
+                    .rev()
+                    .find(|(_, r)| r.outcome.is_none())
+                {
+                    for block in &mut rec.assistant_blocks {
+                        if let HistoryBlock::PermissionRequest {
+                            request_id,
+                            resolved_option_id,
+                            ..
+                        } = block
+                            && request_id == &decision.request_id
+                        {
+                            *resolved_option_id = decision.selected_option_id.clone();
+                        }
+                    }
+                    let _ = self.deps.history.upsert_turn_record(
+                        &self.opts.workspace_id,
+                        &self.opts.session_id,
+                        rec,
+                    );
+                }
                 self.process_event_loop(KernelEvent::UserRepliedPermission {
                     request_id: decision.request_id,
                     selected_option_id: decision.selected_option_id,
@@ -247,6 +341,7 @@ impl SessionActor {
             ControlCommand::Archive { reply } => {
                 self.process_event_loop(KernelEvent::CancelRequested { pause_inbox: true })
                     .await;
+                self.cleanup_resources();
                 let res = self.release_worktree_if_held();
                 let _ = reply.send(res);
                 true
@@ -290,7 +385,7 @@ impl SessionActor {
             } = action
             {
                 let res = match &self.live_agent {
-                    Some((_, port)) => port.steer(&prompt_text),
+                    Some(slot) => slot.port.steer(&prompt_text),
                     None => Ok(SteerVerdict::NotApplied),
                 };
                 let (v, outcome) = match res {
@@ -329,7 +424,8 @@ impl SessionActor {
                     verified_requester: UserId(invocation.requester_user_id.clone()),
                     prompt_text: invocation.prompt_text.clone(),
                 });
-                self.turn_records
+                let rec = self
+                    .turn_records
                     .entry(invocation.turn_id.clone())
                     .or_insert_with(|| HistoryTurnRecord {
                         turn_id: TurnId(invocation.turn_id.clone()),
@@ -338,6 +434,11 @@ impl SessionActor {
                         assistant_blocks: Vec::new(),
                         outcome: None,
                     });
+                let _ = self.deps.history.upsert_turn_record(
+                    &self.opts.workspace_id,
+                    &self.opts.session_id,
+                    rec,
+                );
                 if self
                     .deps
                     .history
@@ -394,15 +495,35 @@ impl SessionActor {
                         return;
                     }
                 };
+                let (command, args) = match &self.opts.custom_acp {
+                    Some(custom) => (custom.command.clone(), custom.args.clone()),
+                    None => (PathBuf::from(&adapter_id), Vec::new()),
+                };
                 let spec = AcpSpawnSpec {
                     adapter_id: adapter_id.clone(),
-                    command: PathBuf::from(&adapter_id),
-                    args: Vec::new(),
+                    command,
+                    args,
                     cwd,
                     env: BTreeMap::new(),
-                    mcp_mounts: Vec::new(),
+                    mcp_mounts: vec![McpServerMount {
+                        name: "lody".to_string(),
+                        transport_url: "http://127.0.0.1:0/mcp".to_string(),
+                        bearer_token: None,
+                    }],
                 };
-                match self.deps.acp.launch_session(&spec) {
+                let active_generation = Arc::new(AtomicU64::new(generation.0));
+                let sink = Arc::new(ActorAcpSink {
+                    event_tx: self.event_tx.clone(),
+                    active_generation: Arc::clone(&active_generation),
+                });
+                let deps = Arc::clone(&self.deps);
+                let launch_res =
+                    tokio::task::spawn_blocking(move || deps.acp.launch_session(&spec, sink))
+                        .await
+                        .unwrap_or_else(|e| {
+                            Err(PortError::new(PortErrorKind::Internal, e.to_string()))
+                        });
+                match launch_res {
                     Ok(port) => {
                         self.next_agent_seq += 1;
                         let instance_id = format!("agent-{}", self.next_agent_seq);
@@ -412,7 +533,11 @@ impl SessionActor {
                             mcp_selection_digest,
                             owner_user_id: self.state.default_requester_user_id.clone(),
                         };
-                        self.live_agent = Some((instance_id, port));
+                        self.live_agent = Some(LiveAgentSlot {
+                            instance_id,
+                            active_generation,
+                            port,
+                        });
                         follow_ups.push_back(KernelEvent::AgentPrepared {
                             generation,
                             agent: handle,
@@ -431,6 +556,9 @@ impl SessionActor {
                 generation,
                 ..
             } => {
+                if let Some(slot) = &self.live_agent {
+                    slot.active_generation.store(generation.0, Ordering::SeqCst);
+                }
                 let handle = WarmAgentHandle {
                     agent_instance_id,
                     adapter_id: self.state.default_adapter_id.clone(),
@@ -447,10 +575,10 @@ impl SessionActor {
                 if self
                     .live_agent
                     .as_ref()
-                    .is_some_and(|(id, _)| id == &agent_instance_id)
-                    && let Some((_, port)) = self.live_agent.take()
+                    .is_some_and(|slot| slot.instance_id == agent_instance_id)
+                    && let Some(slot) = self.live_agent.take()
                 {
-                    let _ = port.terminate();
+                    let _ = slot.port.terminate();
                 }
             }
             KernelAction::StartAgentPrompt {
@@ -464,8 +592,8 @@ impl SessionActor {
                     &TurnId(turn_id),
                     SubmissionStage::Submitted,
                 );
-                if let Some((_, port)) = &self.live_agent
-                    && let Err(err) = port.send_prompt(&prompt_text)
+                if let Some(slot) = &self.live_agent
+                    && let Err(err) = slot.port.send_prompt(&prompt_text)
                 {
                     follow_ups.push_back(KernelEvent::AgentCrashed {
                         generation,
@@ -495,11 +623,22 @@ impl SessionActor {
                 status,
             } => {
                 if let Some(rec) = self.turn_records.get_mut(&turn_id) {
-                    rec.assistant_blocks.push(HistoryBlock::ToolCall {
-                        tool_call_id,
-                        title,
-                        status,
-                    });
+                    if let Some(HistoryBlock::ToolCall {
+                        tool_call_id: existing_id,
+                        status: existing_status,
+                        ..
+                    }) = rec.assistant_blocks.iter_mut().find(|b| {
+                        matches!(b, HistoryBlock::ToolCall { tool_call_id: id, .. } if id == &tool_call_id)
+                    }) {
+                        let _ = existing_id;
+                        *existing_status = status;
+                    } else {
+                        rec.assistant_blocks.push(HistoryBlock::ToolCall {
+                            tool_call_id,
+                            title,
+                            status,
+                        });
+                    }
                     let _ = self.deps.history.upsert_turn_record(
                         &self.opts.workspace_id,
                         &self.opts.session_id,
@@ -531,8 +670,8 @@ impl SessionActor {
                 cancelled,
                 ..
             } => {
-                if let Some((_, port)) = &self.live_agent {
-                    let _ = port.reply_permission(&PermissionDecision {
+                if let Some(slot) = &self.live_agent {
+                    let _ = slot.port.reply_permission(&PermissionDecision {
                         request_id,
                         selected_option_id,
                         cancelled,
@@ -541,8 +680,8 @@ impl SessionActor {
                 }
             }
             KernelAction::InterruptAgent { .. } => {
-                if let Some((_, port)) = &self.live_agent {
-                    let _ = port.cancel_turn();
+                if let Some(slot) = &self.live_agent {
+                    let _ = slot.port.cancel_turn();
                 }
             }
             KernelAction::BeginSettling {
@@ -639,8 +778,8 @@ impl SessionActor {
     }
 
     fn cleanup_resources(&mut self) {
-        if let Some((_, port)) = self.live_agent.take() {
-            let _ = port.terminate();
+        if let Some(slot) = self.live_agent.take() {
+            let _ = slot.port.terminate();
         }
     }
 }

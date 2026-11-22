@@ -3,12 +3,12 @@ use lody_app::{
 };
 use lody_kernel::{Generation, KernelEvent};
 use lody_ports::{
-    AcpLauncherPort, AcpSessionPort, AcpSpawnSpec, AdmissionVerdict, AdmittedTurnInput,
-    ArtifactRegistryPort, DiffStorePort, EnginePort, EpochKeyMaterial, HistoryPort,
-    HistoryTurnRecord, InboxStorePort, InstalledArtifact, LocalProjectId, ManagedArtifactSource,
-    PermissionDecision, PortError, PortErrorKind, PortResult, QueuedDraftItem, SessionMetaSnapshot,
-    SteerVerdict, StorageLeaseMode, SubmissionStage, TurnDiffSummary, TurnTerminalOutcome,
-    WorkspaceSecurityMode, WorktreeLease, WorktreePort,
+    AcpEventSink, AcpLauncherPort, AcpSessionPort, AcpSpawnSpec, AdmissionVerdict,
+    AdmittedTurnInput, ArtifactRegistryPort, DiffStorePort, EnginePort, EpochKeyMaterial,
+    HistoryPort, HistoryTurnRecord, InboxStorePort, InstalledArtifact, LocalProjectId,
+    ManagedArtifactSource, PermissionDecision, PortError, PortErrorKind, PortResult,
+    QueuedDraftItem, SessionMetaSnapshot, SteerVerdict, StorageLeaseMode, SubmissionStage,
+    TurnDiffSummary, TurnTerminalOutcome, WorkspaceSecurityMode, WorktreeLease, WorktreePort,
 };
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
 use std::collections::HashMap;
@@ -208,7 +208,11 @@ impl AcpLauncherPort for FakeAcpLauncher {
     fn max_concurrent_starts(&self) -> usize {
         4
     }
-    fn launch_session(&self, spec: &AcpSpawnSpec) -> PortResult<Box<dyn AcpSessionPort>> {
+    fn launch_session(
+        &self,
+        spec: &AcpSpawnSpec,
+        _sink: Arc<dyn AcpEventSink>,
+    ) -> PortResult<Box<dyn AcpSessionPort>> {
         Ok(Box::new(FakeAcpSession {
             fail_on_prompt: spec.adapter_id == "broken",
             cancel_calls: Arc::clone(&self.cancel_calls),
@@ -243,21 +247,27 @@ async fn control_cancel_preempts_backlog_of_streamed_chunks_and_sibling_failure_
     };
     let ws = WorkspaceId("ws_1".to_string());
 
+    let broken_sid = SessionId("s_broken".to_string());
     runtime
         .execute_async(
             &caller,
             AppCommand::CreateSession {
                 workspace_id: ws.clone(),
-                session_id: SessionId("s_broken".to_string()),
+                session_id: broken_sid.clone(),
                 turn_id: TurnId("t_fail".to_string()),
                 local_project_id: None,
                 use_worktree: false,
                 adapter_id: "broken".to_string(),
+                custom_acp: None,
                 prompt: "crash".to_string(),
             },
         )
         .await
         .expect("broken session accepted");
+    let broken_handle = runtime
+        .session_handle(&ws, &broken_sid)
+        .expect("broken handle");
+    let _ = broken_handle.inspect_phase().await.expect("broken settled");
 
     let healthy_sid = SessionId("s_healthy".to_string());
     runtime
@@ -270,6 +280,7 @@ async fn control_cancel_preempts_backlog_of_streamed_chunks_and_sibling_failure_
                 local_project_id: None,
                 use_worktree: false,
                 adapter_id: "ok".to_string(),
+                custom_acp: None,
                 prompt: "stream".to_string(),
             },
         )

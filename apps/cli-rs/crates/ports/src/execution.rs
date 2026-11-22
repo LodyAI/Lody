@@ -5,6 +5,7 @@ use crate::identity::{LocalProjectId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -36,6 +37,12 @@ pub struct McpServerMount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomCommandSpec {
+    pub command: PathBuf,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcpSpawnSpec {
     pub adapter_id: String,
     pub command: PathBuf,
@@ -61,6 +68,34 @@ pub struct PermissionDecision {
     pub notes: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AcpInboundEvent {
+    MessageChunk {
+        text: String,
+    },
+    ToolStatus {
+        tool_call_id: String,
+        title: String,
+        status: String,
+    },
+    PermissionRequest {
+        request_id: String,
+        tool_call_id: String,
+        title: String,
+    },
+    PromptFinished {
+        stop_reason: String,
+    },
+    ProcessExited {
+        exit_code: Option<i32>,
+        prompt_was_in_flight: bool,
+    },
+}
+
+pub trait AcpEventSink: Send + Sync {
+    fn on_acp_event(&self, event: AcpInboundEvent);
+}
+
 pub trait AcpSessionPort: Send + Sync {
     fn acp_session_id(&self) -> &str;
     fn send_prompt(&self, prompt_text: &str) -> PortResult<()>;
@@ -72,7 +107,11 @@ pub trait AcpSessionPort: Send + Sync {
 
 pub trait AcpLauncherPort: Send + Sync {
     fn max_concurrent_starts(&self) -> usize;
-    fn launch_session(&self, spec: &AcpSpawnSpec) -> PortResult<Box<dyn AcpSessionPort>>;
+    fn launch_session(
+        &self,
+        spec: &AcpSpawnSpec,
+        sink: Arc<dyn AcpEventSink>,
+    ) -> PortResult<Box<dyn AcpSessionPort>>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

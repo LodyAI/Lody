@@ -84,6 +84,7 @@ dependencies = [
  "lody-ports",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
