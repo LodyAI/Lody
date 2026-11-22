@@ -1310,7 +1310,7 @@ export function SidebarSectionHeader({
     </div>
   );
   return (
-    <div className="group flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
+    <div className="group group/section-header flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
       {wrapToggle ? wrapToggle(toggle) : toggle}
       {action ? <div className="mr-2 shrink-0">{action}</div> : null}
     </div>

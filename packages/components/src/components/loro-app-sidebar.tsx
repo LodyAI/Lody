@@ -139,6 +139,7 @@ import {
   localProjectsSectionCollapseStateAtom,
   pinnedSectionCollapsedAtom,
   pinSectionsCollapsedAtom,
+  pinSectionsHiddenAtom,
   repoCollapseStateAtom,
   repoOrderAtom,
   sidebarCollapsedAtom,
@@ -3056,6 +3057,16 @@ export function LoroAppSidebar({
     },
     [setPinSectionsCollapsed]
   );
+  const [pinSectionsHidden, setPinSectionsHidden] = useAtom(pinSectionsHiddenAtom);
+  const handleSetPinSectionHidden = useCallback(
+    (sectionKey: string, hidden: boolean) => {
+      setPinSectionsHidden((prev) => {
+        const { [sectionKey]: _, ...rest } = prev;
+        return hidden ? { ...rest, [sectionKey]: true } : rest;
+      });
+    },
+    [setPinSectionsHidden]
+  );
 
   const updatedItems = useMemo(
     () => allSidebarItems.filter((item) => !pinnedSessionIds.has(item.id)),
@@ -4271,9 +4282,10 @@ export function LoroAppSidebar({
           id: section.id,
           items: section.items,
           collapsed:
-            section.id === null
+            pinSectionsHidden[pinSectionKey(section.id)] === true ||
+            (section.id === null
               ? pinnedSectionCollapsed
-              : pinSectionsCollapsed[section.id] === true,
+              : pinSectionsCollapsed[section.id] === true),
         })),
         workspace: {
           localSections: keyboardNavLocalSections,
@@ -4300,6 +4312,7 @@ export function LoroAppSidebar({
       pinnedSections,
       pinnedSectionCollapsed,
       pinSectionsCollapsed,
+      pinSectionsHidden,
       repos,
       showFullSessionGroups,
       updatedBucketCollapseState,
@@ -4390,6 +4403,8 @@ export function LoroAppSidebar({
         collapsedPinSectionIds={pinSectionsCollapsed}
         pinnedHiddenCounts={pinnedHiddenCounts}
         onTogglePinSection={handleTogglePinSection}
+        hiddenPinSectionKeys={pinSectionsHidden}
+        onSetPinSectionHidden={handleSetPinSectionHidden}
         pinSectionActions={pinSectionActions}
         updatedItems={updatedItems}
         updatedSelectedItemId={updatedSelectedItemId}

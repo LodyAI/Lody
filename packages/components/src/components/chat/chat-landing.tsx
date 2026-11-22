@@ -51,7 +51,6 @@ import {
   type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
-  githubFetchBranches,
   type LocalProjectGitState,
   type LocalProjectId,
   type MachineId,
@@ -144,6 +143,7 @@ import {
   useSessionActions,
 } from '@/hooks/use-session-actions';
 import { useChatLandingDefaults } from '@/hooks/use-chat-landing-defaults';
+import { useGitHubRepoBranches } from '@/hooks/use-github-repo-branches';
 import {
   useAcpSessionConfigSelectionState,
   useResolvedAcpSessionConfigSelection,
@@ -156,11 +156,7 @@ import {
   recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
-import {
-  agentDefaultsCache,
-  githubBranchesCache,
-  persistAgentSessionDefaults,
-} from '@/lib/local-storage-cache';
+import { agentDefaultsCache, persistAgentSessionDefaults } from '@/lib/local-storage-cache';
 import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 import {
   buildRecentRunConfigItems,
@@ -195,14 +191,7 @@ import { useOrganization } from '@/hooks/useOrganization';
 import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
 import { useResolvedTheme } from '../../theme-provider';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import {
-  areChatLandingBranchListsEqual,
-  createChatLandingBranchSnapshot,
-  getGitHubBranchesCacheId,
-  normalizeChatLandingBranches,
-  resolveChatLandingBranchSelection,
-  type ChatLandingBranchSnapshot,
-} from '@/lib/chat-landing-branches';
+import { normalizeChatLandingBranches } from '@/lib/chat-landing-branches';
 import {
   getLocalProjectBranchLabel,
   getLocalProjectGitStateLoadKey,
@@ -269,7 +258,6 @@ import { useChatLandingFileDraft } from '@/hooks/use-chat-landing-file-draft';
 import { useChatLandingDraftSession } from '@/hooks/use-chat-landing-draft-session';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { isElectronRenderer } from '@/lib/electron';
-import { withGitHubTokenRetry } from '@/lib/github-token';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import {
@@ -1320,20 +1308,6 @@ function WorkspaceChatLanding({
       ?.worktreeCleanup;
   }, [selectedRepo, workspaceReposWithStatus]);
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
-  const [repoBranches, setRepoBranches] = useState<string[]>([]);
-  const [repoDefaultBranch, setRepoDefaultBranch] = useState<string | null>(null);
-  const applyGitHubBranchSnapshot = useCallback((snapshot: ChatLandingBranchSnapshot) => {
-    setRepoDefaultBranch((prev) =>
-      prev === snapshot.defaultBranch ? prev : snapshot.defaultBranch
-    );
-    setRepoBranches((prev) =>
-      areChatLandingBranchListsEqual(prev, snapshot.branches) ? prev : snapshot.branches
-    );
-    setSelectedBranch((prev) => {
-      const next = resolveChatLandingBranchSelection(snapshot, prev);
-      return next === prev ? prev : next;
-    });
-  }, []);
 
   const [selectedLocalProject, setSelectedLocalProject] = useState<LocalProjectSelection | null>(
     null
@@ -2622,57 +2596,21 @@ function WorkspaceChatLanding({
     workspaceId,
   ]);
 
-  useLayoutEffect(() => {
-    if (contextType !== 'github') return undefined;
-    if (!workspaceId || !selectedRepo) {
-      setRepoBranches([]);
-      setRepoDefaultBranch(null);
-      setSelectedBranch(null);
-
-      return undefined;
-    }
-
-    const cached = githubBranchesCache.get(getGitHubBranchesCacheId(workspaceId, selectedRepo));
-    if (cached) {
-      applyGitHubBranchSnapshot(cached);
-      return undefined;
-    }
-
-    setRepoDefaultBranch(null);
-    setRepoBranches((prev) => (prev.length === 0 ? prev : []));
-    return undefined;
-  }, [applyGitHubBranchSnapshot, contextType, selectedRepo, workspaceId]);
-
-  useEffect(() => {
-    if (contextType !== 'github') return undefined;
-    if (!workspaceId || !selectedRepo) return undefined;
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await withGitHubTokenRetry(workspaceId, selectedRepo, (token) =>
-          githubFetchBranches(token, selectedRepo)
-        );
-        const snapshot = createChatLandingBranchSnapshot(result.branches, result.defaultBranch);
-        githubBranchesCache.set(getGitHubBranchesCacheId(workspaceId, selectedRepo), {
-          ...snapshot,
-          updatedAt: Date.now(),
-        });
-        if (cancelled) return;
-        applyGitHubBranchSnapshot(snapshot);
-      } catch (error) {
-        if (cancelled) return;
-        console.warn('Failed to load repository branches', error);
-        setSelectedBranch((prev) => {
-          const trimmed = prev?.trim() || null;
-          return trimmed === prev ? prev : trimmed;
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [applyGitHubBranchSnapshot, contextType, selectedRepo, workspaceId]);
+  const {
+    branches: repoBranches,
+    defaultBranch: repoDefaultBranch,
+    hasMore: repoBranchesHasMore,
+    loadingMore: loadingMoreRepoBranches,
+    searching: searchingRepoBranches,
+    onSearchQueryChange: handleRepoBranchSearchQueryChange,
+    onReachEnd: handleRepoBranchListEnd,
+  } = useGitHubRepoBranches({
+    enabled: contextType === 'github',
+    workspaceId,
+    repoFullName: selectedRepo,
+    selectedBranch,
+    setSelectedBranch,
+  });
 
   const applyLocalGitState = useCallback(
     (machineId: MachineId, localProjectId: LocalProjectId, result: LocalProjectGitState) => {
@@ -3764,6 +3702,7 @@ function WorkspaceChatLanding({
       branchOptionsCount: branchOptions.length,
     });
 
+  const isGitHubBranchList = contextType === 'github';
   const branchSelectorNode = showBranchSelector ? (
     <span className="inline-flex min-w-0 items-center gap-1">
       <BranchSelector
@@ -3773,11 +3712,23 @@ function WorkspaceChatLanding({
         options={branchOptions}
         placeholder={t('chat.branchPlaceholder')}
         searchPlaceholder={t('chat.branchSearchPlaceholder', { defaultValue: 'Search branches' })}
-        emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
+        emptyText={
+          isGitHubBranchList && searchingRepoBranches
+            ? t('chat.branchSearching', { defaultValue: 'Searching branches...' })
+            : t('chat.branchEmpty', { defaultValue: 'No branches found' })
+        }
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
         className="min-w-0 max-w-full"
         disabled={isBranchDisabled}
+        hasMore={isGitHubBranchList && repoBranchesHasMore}
+        onSearchQueryChange={isGitHubBranchList ? handleRepoBranchSearchQueryChange : undefined}
+        onReachEnd={isGitHubBranchList ? handleRepoBranchListEnd : undefined}
+        footer={
+          isGitHubBranchList && loadingMoreRepoBranches
+            ? t('chat.branchLoadingMore', { defaultValue: 'Loading more branches...' })
+            : undefined
+        }
       />
     </span>
   ) : null;
@@ -6710,6 +6661,12 @@ function WorkspaceChatLanding({
                 }
                 loading={contextType === 'local' && (loadingLocalGitState || runtimeInitializing)}
                 searchable
+                onQueryChange={isGitHubBranchList ? handleRepoBranchSearchQueryChange : undefined}
+                emptyText={
+                  isGitHubBranchList && searchingRepoBranches
+                    ? t('chat.branchSearching', { defaultValue: 'Searching branches...' })
+                    : undefined
+                }
                 ariaLabel={t('chat.branchPlaceholder', 'Branch')}
                 triggerClassName="h-8 rounded-lg bg-transparent px-2 hover:bg-transparent"
                 expansionPanelClassName={mobileInlinePanel}

@@ -35,6 +35,7 @@ import type {
   AgentRoleId,
   McpServerId,
   SessionMeta,
+  SessionHistory,
   SessionInputBlock,
   WorkspaceMcpServerMeta} from '@lody/shared';
 
@@ -157,7 +158,9 @@ import { queueTask } from '../src/components/sessions/message-queue/queue-task';
 import { toast } from '@/lib/toast';
 import { formatMessageQuote, getSessionRoomId } from '@lody/shared';
 import { conversationQuoteDraftKey } from '../src/lib/conversation-quote-draft';
-import { composerIn } from './composer-test-utils';
+import { composerIn, type ComposerTestHandle } from './composer-test-utils';
+import { createConversationViewFromHistory } from '../src/lib/conversation-view/create-conversation-view-from-history';
+import type { ConversationView } from '../src/lib/conversation-view/types';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -1880,5 +1883,195 @@ describe('SessionChatInputArea submission feedback', () => {
     await act(async () => acceptance.resolve(true));
     const textarea = await renderComposer(props);
     expect(textarea.value).toBe('newer unsent draft');
+  });
+
+  describe('message history recall', () => {
+    const userTurn = (id: string, text: string, extra: Partial<SessionHistory> = {}) =>
+      ({
+        id,
+        role: 'user',
+        author: { v: 1, kind: 'human', userId: 'user-1' },
+        timestamp: '2026-11-22T00:00:00.000Z',
+        items: text ? [{ type: 'text', text }] : [{ type: 'image', text: undefined }],
+        ...extra,
+      }) as unknown as SessionHistory;
+    const assistantTurn = (id: string, text: string) =>
+      ({
+        id,
+        role: 'assistant',
+        timestamp: '2026-11-22T00:00:00.000Z',
+        finished: true,
+        items: [{ type: 'text', text }],
+      }) as unknown as SessionHistory;
+    const HISTORY: SessionHistory[] = [
+      userTurn('u1', 'first question'),
+      assistantTurn('a1', 'first answer'),
+      userTurn('u2', 'second\nmultiline question'),
+      assistantTurn('a2', 'second answer'),
+      userTurn('u3', ''),
+      userTurn('u4', 'delegated prompt', {
+        author: { v: 1, kind: 'agent' } as unknown as SessionHistory['author'],
+      }),
+      assistantTurn('a3', 'third answer'),
+      userTurn('u5', 'latest question'),
+      assistantTurn('a5', 'latest answer'),
+    ];
+    const historyView = (history: readonly SessionHistory[] = HISTORY) =>
+      createConversationViewFromHistory({
+        sessionId: 'recall-session' as SessionMeta['id'],
+        getHistory: () => history,
+        subscribe: () => () => undefined,
+      });
+    const press = async (
+      composer: ComposerTestHandle,
+      key: string,
+      init: KeyboardEventInit = {}
+    ): Promise<KeyboardEvent> => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+      await act(async () => {
+        composer.dispatchEvent(event);
+      });
+      return event;
+    };
+    const renderRecall = (
+      messageHistory: ConversationView = historyView(),
+      initialInputText = ''
+    ) =>
+      renderComposer({
+        sessionId: `recall-${++nextSession}`,
+        onSendMessage: async () => true,
+        overrides: { initialInputText, messageHistory },
+      });
+
+    it('steps through sent text from an empty composer with the caret kept at the end', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+
+      const first = await press(composer, 'ArrowUp');
+      expect(first.defaultPrevented).toBe(true);
+      expect(composer.value).toBe('latest question');
+      expect(composer.selectionStart).toBe('latest question'.length);
+
+      // Attachment-only and agent-authored turns have no text of the user's to recall.
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(true);
+      expect(composer.value).toBe('second\nmultiline question');
+      expect(composer.selectionStart).toBe('second\nmultiline question'.length);
+
+      await press(composer, 'ArrowUp');
+      expect(composer.value).toBe('first question');
+      // The oldest message stays put rather than handing the key to the editor.
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(true);
+      expect(composer.value).toBe('first question');
+
+      expect((await press(composer, 'ArrowDown')).defaultPrevented).toBe(true);
+      expect(composer.value).toBe('second\nmultiline question');
+      expect(composer.selectionEnd).toBe('second\nmultiline question'.length);
+      await press(composer, 'ArrowDown');
+      expect(composer.value).toBe('latest question');
+      await press(composer, 'ArrowDown');
+      expect(composer.value).toBe('');
+      // Past the newest message the composer is an ordinary empty one again.
+      expect((await press(composer, 'ArrowDown')).defaultPrevented).toBe(false);
+    });
+
+    it('leaves arrow keys to the editor when the composer already holds a draft', async () => {
+      const composer = await renderRecall(historyView(), 'my own draft');
+      composer.focus();
+      const event = await press(composer, 'ArrowUp');
+      expect(event.defaultPrevented).toBe(false);
+      expect(composer.value).toBe('my own draft');
+    });
+
+    it('does not start recall on a modified arrow key', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+      expect((await press(composer, 'ArrowUp', { shiftKey: true })).defaultPrevented).toBe(false);
+      expect((await press(composer, 'ArrowUp', { altKey: true })).defaultPrevented).toBe(false);
+      expect(composer.value).toBe('');
+    });
+
+    it('returns to editing once the user types, keeping the edited text as the draft', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      composer.type(' again');
+      expect(composer.value).toBe('latest question again');
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(false);
+      expect(composer.value).toBe('latest question again');
+    });
+
+    it('returns to editing on a horizontal caret move', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      await press(composer, 'ArrowLeft');
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(false);
+      expect(composer.value).toBe('latest question');
+    });
+
+    it('returns to editing when the user clicks into the text', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      await act(async () => {
+        composer.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      });
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(false);
+      expect(composer.value).toBe('latest question');
+    });
+
+    const lazyHistoryView = () => {
+      const base = historyView();
+      const loaded = new Set<number>([7, 8]);
+      const load = { finish: () => undefined as void };
+      const view: ConversationView = {
+        ...base,
+        get turnCount() {
+          return base.turnCount;
+        },
+        isHydrated: (i) => loaded.has(i),
+        turn: (i) => (loaded.has(i) ? base.turn(i) : undefined),
+        acquireRange: (from, to) => ({
+          ready: new Promise<void>((resolve) => {
+            load.finish = () => {
+              for (let i = from; i < to; i += 1) loaded.add(i);
+              resolve();
+            };
+          }),
+          release: () => undefined,
+        }),
+      };
+      return { view, load };
+    };
+
+    it('loads an older message that is not hydrated yet before showing it', async () => {
+      const { view, load } = lazyHistoryView();
+      const composer = await renderRecall(view);
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      expect(composer.value).toBe('latest question');
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(true);
+      expect(composer.value).toBe('latest question');
+      await act(async () => load.finish());
+      expect(composer.value).toBe('second\nmultiline question');
+      expect(composer.selectionStart).toBe('second\nmultiline question'.length);
+    });
+
+    it('keeps text that reaches the composer while an older message is loading', async () => {
+      const { view, load } = lazyHistoryView();
+      const composerRef = createRef<SessionChatInputAreaHandle>();
+      const composer = await renderComposer({
+        sessionId: `recall-${++nextSession}`,
+        composerRef,
+        onSendMessage: async () => true,
+        overrides: { initialInputText: '', messageHistory: view },
+      });
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      await press(composer, 'ArrowUp');
+      await act(async () => composerRef.current!.setInputText('set from elsewhere'));
+      await act(async () => load.finish());
+      expect(composer.value).toBe('set from elsewhere');
+    });
   });
 });

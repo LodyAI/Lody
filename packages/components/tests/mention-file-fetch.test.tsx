@@ -168,7 +168,6 @@ it('fetches nothing for a selected repository until the file source is asked for
 
   await act(async () => root.render(<MentionFilesProbe source={github} active={false} />));
   expect(state.fetch).not.toHaveBeenCalled();
-  // An unasked source is loading, never an empty ready list.
   expect(container.textContent).toBe('loading:');
 
   await act(async () => root.render(<MentionFilesProbe source={github} active />));
@@ -213,7 +212,6 @@ it('opens the remote Files category with the host shallowest paths, loading unti
   const project = { ...remoteProject, localProjectId: 'lp-empty' } as MentionProjectSource;
 
   await act(async () => root.render(<MentionFilesProbe source={project} active />));
-  // Nothing has answered yet: never an empty ready list.
   expect(container.textContent).toBe('loading:');
 
   await act(async () => searchRemote?.(''));

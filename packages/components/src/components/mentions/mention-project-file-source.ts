@@ -270,8 +270,6 @@ export function useMentionProjectFiles(
     useLocalWorktreeSource,
   ]);
 
-  // A project on another machine is searched on that machine (see
-  // `searchRemoteFiles`) instead of pulling its whole file list here.
   const remoteSearchTransport = React.useMemo<LocalProjectFileTransport | null>(() => {
     if (useLocalWorktreeSource || sourceKind !== 'local') return null;
     if (!localWorkspaceId || !localProjectId || !localMachineId) return null;
@@ -310,8 +308,6 @@ export function useMentionProjectFiles(
 
   const searchRemoteFiles = React.useCallback(
     (term: string) => {
-      // An empty term is a real query: the Files category before anything is
-      // typed, which the host answers with the shallowest paths.
       const query = term.trim();
       if (!remoteSearchTransport || !remoteSourceKey) return;
       if (remoteQueriedRef.current.sourceKey !== remoteSourceKey) {
@@ -354,7 +350,6 @@ export function useMentionProjectFiles(
           });
         })
         .catch((error: unknown) => {
-          // Not cached: the same term is retried when it is typed again.
           queried.delete(query);
           update((prev) => ({
             ...prev,
@@ -367,8 +362,6 @@ export function useMentionProjectFiles(
     [remoteSearchTransport, remoteSourceKey]
   );
 
-  // A restored draft is hydrated once, from the first non-empty text that
-  // reaches an active remote source: look its `@` tokens up on the host.
   const remoteHydratedSourceRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!active || !useRemoteSearch || !remoteSourceKey || !hydrationText.includes('@')) return;
@@ -493,7 +486,6 @@ export function useMentionProjectFiles(
   );
 
   const fileData = React.useMemo<MentionFileDataState>(() => {
-    // Nothing asked for files yet: report loading, never an empty ready list.
     if (!active && source) {
       return { entry: null, status: 'loading' };
     }

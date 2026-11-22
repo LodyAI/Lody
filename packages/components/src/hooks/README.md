@@ -423,3 +423,12 @@ shows a local retry using the query owner's bounded retry budget, shared across 
 mounted consumers; no polling or second watch owner is added. Account, workspace or
 API changes discard retained labels. Team/public sharing and grant writes keep their
 independent permission checks even while labels are unavailable.
+
+## Local project script loading
+
+`useLocalProjectsAdmin(worktreeProjectKey)` keeps project listing and sharing independent
+of script reads. The default `null` key issues no script RPC. Desktop passes the
+project key while its Worktree tab is visible; mobile passes it when the script
+sheet or inline editor opens. Each visited project refreshes setup and cleanup once
+per hook mount, retaining persisted values during background refresh and on refresh
+failure. Offline remote projects remain unprobed.

@@ -382,7 +382,6 @@ function TwoLevelMentionMenu({
         : context.filterStore.search || null
       : null;
   React.useEffect(() => {
-    // `''` is the Files category before anything is typed; it still asks the host.
     if (fileTerm !== null) searchRemoteFiles?.(fileTerm);
   }, [fileTerm, searchRemoteFiles]);
   const fileSearch = useMentionFileSearch(fileData.entry, fileTerm);
@@ -898,9 +897,6 @@ export const CombinedMentionTextarea = React.forwardRef<
       enableSkillMentions &&
       (skillsRequested || (!templateScope && value.includes(SKILL_MENTION_TRIGGER)));
 
-    // Like skills, the file index loads only once something asks for it: the
-    // `@` menu reaching the Files category, or a draft that already carries an
-    // `@` token for the hydrators. Selecting a project alone fetches nothing.
     const [filesRequested, setFilesRequested] = React.useState(false);
     const activateFiles = React.useCallback(() => setFilesRequested(true), []);
     const filesActive = filesRequested || value.includes(MENTION_TRIGGER);

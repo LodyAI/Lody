@@ -12,6 +12,7 @@ const styles = stylex.create({
   compactFrame: { height: '48px' },
   size: { width: scrollbar.size, height: '24px', backgroundColor: scrollbar.thumb },
   inset: { padding: scrollbar.inset },
+  hoverInset: { padding: scrollbar.hoverInset },
   compact: { height: scrollbar.compactSize, width: '80px', backgroundColor: scrollbar.thumb },
   radius: {
     width: '40px',
@@ -24,6 +25,7 @@ const styles = stylex.create({
 function Dimensions() {
   const size = useMeasured<HTMLDivElement>('width');
   const inset = useMeasured<HTMLDivElement>('padding-top');
+  const hoverInset = useMeasured<HTMLDivElement>('padding-top');
   const compact = useMeasured<HTMLDivElement>('height');
   const radius = useMeasured<HTMLDivElement>('border-radius');
   return (
@@ -35,6 +37,10 @@ function Dimensions() {
       <Row>
         <span>scrollbar.inset · {inset.value}</span>
         <div ref={inset.ref} {...stylex.props(styles.inset)} />
+      </Row>
+      <Row>
+        <span>scrollbar.hoverInset · {hoverInset.value}</span>
+        <div ref={hoverInset.ref} {...stylex.props(styles.hoverInset)} />
       </Row>
       <Row>
         <span>scrollbar.compactSize · {compact.value}</span>

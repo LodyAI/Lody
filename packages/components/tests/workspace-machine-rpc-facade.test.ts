@@ -328,7 +328,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
       workspaceId,
       knownFingerprint: 'fp',
     });
-    // The old daemon still answers the skills request, just without the field it rejects.
     expect(sent).toEqual([
       { type: 'local-project/list-global-skills', machineId: remoteMachineId, workspaceId },
     ]);

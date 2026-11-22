@@ -338,8 +338,9 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
       >
         <StatusIcon display={display} />
       </button>
-      <button
-        type="button"
+      {/* A span: a button never wraps, leaving the status icon alone on the line above. */}
+      <span
+        role="button"
         {...stylex.props(styles.title, display.status === 'done' && styles.titleDone)}
         aria-label={t('today.mentionLabel', 'Session: {{title}}, {{status}}', {
           title,
@@ -349,7 +350,7 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
         onClick={(event) => controller?.onOpenSession?.(sessionId, event)}
       >
         {title}
-      </button>
+      </span>
     </span>
   );
 }

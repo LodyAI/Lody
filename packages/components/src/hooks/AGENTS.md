@@ -145,3 +145,5 @@ visibility; skipping a catalog grants no machine or execution authority.
   and unmount can end an activity the payload no longer describes.
 
 Display-only member directories retain same-account/workspace labels on failure and expose the shared query owner’s retry without blocking grant controls.
+
+Local-project admin reads worktree scripts only for the explicitly viewed project key; list-only callers omit it. Preserve persisted-cache rendering and once-per-mount background refresh.

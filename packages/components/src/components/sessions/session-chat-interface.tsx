@@ -7971,6 +7971,7 @@ export const SessionChatInterface = memo(
                             }
                             ref={inputAreaRef}
                             session={session}
+                            messageHistory={conversationView}
                             sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
                             isMachineRemoved={isMachineRemoved}
                             isAgentBusy={isAgentBusy}

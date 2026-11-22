@@ -269,7 +269,6 @@ export class LocalProjectRpcFileProvider extends LazyDirectoryFileProvider {
     });
     if (searched) return searched.paths.map((path) => toFileEntry(path));
 
-    // A daemon without host-side search: filter its full list here.
     const normalized = query.trim().toLowerCase();
     const result = await this.options.transport.listFiles({ maxFiles: DEFAULT_SEARCH_MAX_FILES });
     const paths = normalized

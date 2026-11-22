@@ -387,8 +387,6 @@ export function useProjectSkills(
             await reuseCachedEntry(cached);
             return;
           }
-          // A half that came back `unchanged` carries no groups: keep that half
-          // from the cached entry (the fingerprint matched it, so it is current).
           const combinedGroups = [
             ...(projectResult.unchanged
               ? (cached?.groups.filter((group) => group.scope === 'project') ?? [])
