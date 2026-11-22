@@ -1808,13 +1808,26 @@ export function LoroAppSidebar({
   // Local-project sessions bypass buildSessionListRows, so resolve their author
   // (creator) here from org members — only in team scope, mirroring the mapping's own
   // gate so a solo / My-Tasks view never shows a redundant "always you" author.
+  const sidebarMembers = useMemo(
+    () =>
+      sharingMembers.length > 0
+        ? sharingMembers.map((member) => ({
+            userId: member.userId,
+            user: {
+              name: member.displayName ?? member.name,
+              image: member.image ?? null,
+            },
+          }))
+        : activeOrganization?.members,
+    [activeOrganization?.members, sharingMembers]
+  );
   const membersByUserId = useMemo(() => {
     const map = new Map<string, { name?: string | null; image?: string | null }>();
-    for (const member of activeOrganization?.members ?? []) {
+    for (const member of sidebarMembers ?? []) {
       if (member.user) map.set(member.userId, { name: member.user.name, image: member.user.image });
     }
     return map;
-  }, [activeOrganization?.members]);
+  }, [sidebarMembers]);
   // Only attribute an owner on a multi-member workspace: a solo workspace's tasks
   // are "always you", so an author avatar there would be redundant. Mirrors the
   // same gate in `buildSessionListRows` so both row paths agree.
@@ -2109,7 +2122,7 @@ export function LoroAppSidebar({
           currentUserId: myAccountId,
           defaultTitle: defaultSessionTitle,
           onlineMachineIds,
-          members: activeOrganization?.members,
+          members: sidebarMembers,
           lineChangeScope: sessionSidebarCodeChangesOnly ? 'code' : 'all',
           liveSessionStatuses,
           resolveOpenerRowId,
@@ -2123,7 +2136,7 @@ export function LoroAppSidebar({
         sharing: sessionSharingById.get(task.sessionId),
       })),
     [
-      activeOrganization?.members,
+      sidebarMembers,
       myAccountId,
       allActiveSessions,
       onlineMachineIds,

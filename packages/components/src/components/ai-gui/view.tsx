@@ -10,6 +10,7 @@ import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
 import { useSessionLinkNavigator } from './session-link-context';
+import { resolveSenderDisplayName } from '@/lib/workspace-sender-identity';
 import * as stylex from '@stylexjs/stylex';
 import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
@@ -3925,6 +3926,82 @@ const MessageAuthorSourceLink = memo(function MessageAuthorSourceLink({
   );
 });
 
+export function UserMessageAuthorSlot({
+  author,
+  user,
+  isMobile,
+  showSenderIdentity,
+  onNavigateSession,
+}: {
+  author?: SessionHistoryParsed['author'];
+  user?: SessionChatUser;
+  isMobile: boolean;
+  showSenderIdentity: boolean;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
+}) {
+  const sessionLinkNavigate = useSessionLinkNavigator();
+  const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
+  return (
+    <div {...stylex.props(conversationSurface.author)}>
+      {author?.kind === 'agent' ? (
+        <MessageAuthorIdentity author={author} onNavigateSession={navigateSourceSession} />
+      ) : (
+        <UserMessageAuthorAvatar user={user} isMobile={isMobile} showProfile={showSenderIdentity} />
+      )}
+    </div>
+  );
+}
+
+export function UserMessageMetadataAuthor({
+  author,
+  sessionId,
+  user,
+  showSenderIdentity,
+  isMobile,
+  onNavigateSession,
+}: {
+  author?: SessionHistoryParsed['author'];
+  sessionId: SessionId;
+  user?: SessionChatUser;
+  showSenderIdentity: boolean;
+  isMobile: boolean;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
+}) {
+  const sessionLinkNavigate = useSessionLinkNavigator();
+  const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
+  const sourceSessionId =
+    author?.kind === 'agent' && author.sessionId && author.sessionId !== sessionId
+      ? (author.sessionId as SessionId)
+      : null;
+  const senderDisplayName = resolveSenderDisplayName(user);
+
+  if (author?.kind === 'agent') {
+    const agentLabel = author.role?.name ?? author.name;
+    return (
+      <>
+        <span title={agentLabel}>{agentLabel}</span>
+        {sourceSessionId && navigateSourceSession ? (
+          <MessageAuthorSourceLink
+            sourceSessionId={sourceSessionId}
+            isMobile={isMobile}
+            onNavigate={navigateSourceSession}
+          />
+        ) : null}
+      </>
+    );
+  }
+
+  if (showSenderIdentity && senderDisplayName) {
+    return (
+      <span {...stylex.props(conversationSurface.metadataSenderName)} title={senderDisplayName}>
+        {senderDisplayName}
+      </span>
+    );
+  }
+
+  return null;
+}
+
 const UserMessageRowView = ({
   message,
   sessionId,
@@ -3956,14 +4033,6 @@ const UserMessageRowView = ({
   const { copyContext } = useContext(SessionChatActionContext);
   const copyWorkspaceId = useSessionCopyWorkspaceId();
   const isMobile = useIsMobile();
-  const sessionLinkNavigate = useSessionLinkNavigator();
-  const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
-  const sourceSessionId =
-    message.author?.kind === 'agent' &&
-    message.author.sessionId &&
-    message.author.sessionId !== sessionId
-      ? (message.author.sessionId as SessionId)
-      : null;
   const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -4079,20 +4148,13 @@ const UserMessageRowView = ({
     <div
       {...stylex.props(conversationSurface.userRow, isMobile && conversationSurface.mobileUserRow)}
     >
-      <div {...stylex.props(conversationSurface.author)}>
-        {message.author?.kind === 'agent' ? (
-          <MessageAuthorIdentity
-            author={message.author}
-            onNavigateSession={navigateSourceSession}
-          />
-        ) : (
-          <UserMessageAuthorAvatar
-            user={user}
-            isMobile={isMobile}
-            showProfile={showSenderIdentity}
-          />
-        )}
-      </div>
+      <UserMessageAuthorSlot
+        author={message.author}
+        user={user}
+        isMobile={isMobile}
+        showSenderIdentity={showSenderIdentity}
+        onNavigateSession={onNavigateSession}
+      />
       <div
         {...withClassName(
           stylex.props(
@@ -4110,25 +4172,17 @@ const UserMessageRowView = ({
         }
       >
         <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
-          {message.author?.kind === 'agent' ? (
-            <>
-              <span title={message.author.role?.name ?? message.author.name}>
-                {message.author.role?.name ?? message.author.name}
-              </span>
-              {sourceSessionId && navigateSourceSession ? (
-                <MessageAuthorSourceLink
-                  sourceSessionId={sourceSessionId}
-                  isMobile={isMobile}
-                  onNavigate={navigateSourceSession}
-                />
-              ) : null}
-            </>
-          ) : showSenderIdentity && user?.name ? (
-            <span className="max-w-40 truncate font-medium" title={user.name}>
-              {user.name}
-            </span>
+          <UserMessageMetadataAuthor
+            author={message.author}
+            sessionId={sessionId}
+            user={user}
+            showSenderIdentity={showSenderIdentity}
+            isMobile={isMobile}
+            onNavigateSession={onNavigateSession}
+          />
+          {timestampLabel ? (
+            <span {...stylex.props(conversationSurface.metadataTimestamp)}>{timestampLabel}</span>
           ) : null}
-          {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
           {isUndelivered || isDeliveryUnknown || isUpdateInterrupted ? (
             onResendUndelivered ? (
               <button
@@ -4390,7 +4444,7 @@ function UserMessageAuthorAvatar({
   showProfile: boolean;
 }) {
   const { t } = useTranslation();
-  const displayName = user?.name?.trim() || user?.email?.trim();
+  const displayName = resolveSenderDisplayName(user);
   // One rung on both shells: the 28/32 split was a size that had drifted rather
   // than a decision, and `@lody/ui`'s ladder has nothing between them.
   const avatar = <UserAvatar user={user} size="large" showIcon />;

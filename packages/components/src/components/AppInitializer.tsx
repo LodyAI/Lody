@@ -8,7 +8,7 @@ import { CommandShortcutHost } from '../lib/commands/shortcut-host';
 import { TodayCommandPlaceholder } from './today/today-command';
 import { rehydrateAvatarMemoryCacheFromPersistent } from '../lib/avatar-cache';
 import { languageAtom } from '../atoms/settings';
-import { maybeClearLodyCacheOnBoot } from '../lib/clear-local-cache';
+import { maybeClearLodyCacheOnBoot, readPendingLocalClearMode } from '../lib/clear-local-cache';
 import { installAppActivityTracking } from '../lib/app-activity-gap';
 import { installClientLog } from '../lib/client-log';
 import { getIpcServices } from '../lib/electron-ipc-client';
@@ -36,6 +36,9 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
   // safe to call once during render.
   useState(() => {
     registerBuiltInCommands();
+    if (typeof window !== 'undefined' && readPendingLocalClearMode() === null) {
+      void rehydrateAvatarMemoryCacheFromPersistent();
+    }
   });
 
   // Before anything below can fail: the boot entry and the previous page's
@@ -69,7 +72,7 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
      sign-in, which is exactly when the crash screen's hard reset gets used —
      would otherwise carry the pending flag forever. */
   useEffect(() => {
-    void maybeClearLodyCacheOnBoot();
+    void maybeClearLodyCacheOnBoot().then(() => rehydrateAvatarMemoryCacheFromPersistent());
   }, []);
 
   useEffect(() => installAppActivityTracking(), []);
@@ -105,17 +108,6 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
       });
     };
   }, [hasCloudSync]);
-
-  /* Pre-warm the in-memory avatar blob-URL map from the persistent
-     CacheStorage so the first `<UserAvatar>` mount after a refresh
-     can hit the cache synchronously. Without this, every fresh app
-     load shows the initials fallback briefly while the persisted
-     blob is rehydrated lazily — that's the "blank then load"
-     flicker users see on GitHub avatars. Fire-and-forget; if it
-     fails, callers fall back to the raw URL path. */
-  useEffect(() => {
-    void rehydrateAvatarMemoryCacheFromPersistent();
-  }, []);
 
   return (
     <>
