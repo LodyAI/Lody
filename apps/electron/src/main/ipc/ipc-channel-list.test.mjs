@@ -368,3 +368,30 @@ void test('packaged Windows renderer admission ignores path casing without admit
     assert.equal(isTrustedProductRendererUrl('file:///other/out/renderer/index.html', posix), false)
   }
 })
+
+void test('Today window targets admit only a workspace, member and date before becoming a window route', async () => {
+  const { parseTodayWindowTarget, getTodayWindowPath } = await import('../today-window-target.ts')
+  const target = parseTodayWindowTarget({
+    workspace: 'acme',
+    member: 'local:user one',
+    date: '2026-11-21',
+    extra: 'dropped'
+  })
+  assert.deepEqual(target, { workspace: 'acme', member: 'local:user one', date: '2026-11-21' })
+  const url = new URL(getTodayWindowPath(target), 'lody://app')
+  assert.equal(url.pathname, '/acme/today-window')
+  assert.equal(url.searchParams.get('window'), 'today')
+  assert.equal(url.searchParams.get('member'), 'local:user one')
+  assert.equal(url.searchParams.get('date'), '2026-11-21')
+  assert.equal(getTodayWindowPath({ workspace: 'acme' }), '/acme/today-window?window=today')
+  for (const raw of [
+    null,
+    {},
+    { workspace: '../acme' },
+    { workspace: 'acme/sessions' },
+    { workspace: 'acme', date: '2026-11-21T00:00' },
+    { workspace: 'acme', member: 7 },
+    { workspace: 'acme', member: 'x'.repeat(257) }
+  ])
+    assert.throws(() => parseTodayWindowTarget(raw), /Invalid Today window target/)
+})

@@ -23,6 +23,7 @@ import { Route as RecoveryRouteImport } from './routes/recovery';
 import { Route as ResetPasswordRouteImport } from './routes/reset-password';
 import { Route as WorkspaceNameIndexRouteImport } from './routes/$workspaceName/index';
 import { Route as WorkspaceNameAuthRouteImport } from './routes/$workspaceName/_auth';
+import { Route as WorkspaceNameTodayWindowRouteImport } from './routes/$workspaceName/today-window';
 import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/checkout-return';
 import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install';
 import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitationId';
@@ -177,6 +178,11 @@ const WorkspaceNameIndexRoute = WorkspaceNameIndexRouteImport.update({
 } as any);
 const WorkspaceNameAuthRoute = WorkspaceNameAuthRouteImport.update({
   id: '/_auth',
+  getParentRoute: () => WorkspaceNameRoute,
+} as any);
+const WorkspaceNameTodayWindowRoute = WorkspaceNameTodayWindowRouteImport.update({
+  id: '/today-window',
+  path: '/today-window',
   getParentRoute: () => WorkspaceNameRoute,
 } as any);
 const DesktopCheckoutReturnRoute = DesktopCheckoutReturnRouteImport.update({
@@ -468,6 +474,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute;
   '/device': typeof DeviceLazyRoute;
   '/email-verified': typeof EmailVerifiedLazyRoute;
+  '/$workspaceName/today-window': typeof WorkspaceNameTodayWindowRoute;
   '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute;
   '/desktop/github-install': typeof DesktopGithubInstallRoute;
   '/invite/$invitationId': typeof InviteInvitationIdRoute;
@@ -526,6 +533,7 @@ export interface FileRoutesByTo {
   '/device': typeof DeviceLazyRoute;
   '/email-verified': typeof EmailVerifiedLazyRoute;
   '/$workspaceName': typeof WorkspaceNameIndexRoute;
+  '/$workspaceName/today-window': typeof WorkspaceNameTodayWindowRoute;
   '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute;
   '/desktop/github-install': typeof DesktopGithubInstallRoute;
   '/invite/$invitationId': typeof InviteInvitationIdRoute;
@@ -583,6 +591,7 @@ export interface FileRoutesById {
   '/device': typeof DeviceLazyRoute;
   '/email-verified': typeof EmailVerifiedLazyRoute;
   '/$workspaceName/_auth': typeof WorkspaceNameAuthRouteWithChildren;
+  '/$workspaceName/today-window': typeof WorkspaceNameTodayWindowRoute;
   '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute;
   '/desktop/github-install': typeof DesktopGithubInstallRoute;
   '/invite/$invitationId': typeof InviteInvitationIdRoute;
@@ -643,6 +652,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/device'
     | '/email-verified'
+    | '/$workspaceName/today-window'
     | '/desktop/checkout-return'
     | '/desktop/github-install'
     | '/invite/$invitationId'
@@ -701,6 +711,7 @@ export interface FileRouteTypes {
     | '/device'
     | '/email-verified'
     | '/$workspaceName'
+    | '/$workspaceName/today-window'
     | '/desktop/checkout-return'
     | '/desktop/github-install'
     | '/invite/$invitationId'
@@ -757,6 +768,7 @@ export interface FileRouteTypes {
     | '/device'
     | '/email-verified'
     | '/$workspaceName/_auth'
+    | '/$workspaceName/today-window'
     | '/desktop/checkout-return'
     | '/desktop/github-install'
     | '/invite/$invitationId'
@@ -923,6 +935,13 @@ declare module '@tanstack/react-router' {
       path: '';
       fullPath: '/$workspaceName';
       preLoaderRoute: typeof WorkspaceNameAuthRouteImport;
+      parentRoute: typeof WorkspaceNameRoute;
+    };
+    '/$workspaceName/today-window': {
+      id: '/$workspaceName/today-window';
+      path: '/today-window';
+      fullPath: '/$workspaceName/today-window';
+      preLoaderRoute: typeof WorkspaceNameTodayWindowRouteImport;
       parentRoute: typeof WorkspaceNameRoute;
     };
     '/desktop/checkout-return': {
@@ -1345,11 +1364,13 @@ const WorkspaceNameAuthRouteWithChildren = WorkspaceNameAuthRoute._addFileChildr
 
 interface WorkspaceNameRouteChildren {
   WorkspaceNameAuthRoute: typeof WorkspaceNameAuthRouteWithChildren;
+  WorkspaceNameTodayWindowRoute: typeof WorkspaceNameTodayWindowRoute;
   WorkspaceNameIndexRoute: typeof WorkspaceNameIndexRoute;
 }
 
 const WorkspaceNameRouteChildren: WorkspaceNameRouteChildren = {
   WorkspaceNameAuthRoute: WorkspaceNameAuthRouteWithChildren,
+  WorkspaceNameTodayWindowRoute: WorkspaceNameTodayWindowRoute,
   WorkspaceNameIndexRoute: WorkspaceNameIndexRoute,
 };
 

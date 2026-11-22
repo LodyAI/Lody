@@ -3251,7 +3251,9 @@ export const AgentNoticeBanner = ({
             afterDetail ? noticeStyles.detailBeforeAfterDetail : null
           )}
         >
-          <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
+          <span {...stylex.props(noticeStyles.detailText)} data-text-selectable>
+            {detail}
+          </span>
         </div>
       ) : null}
       {afterDetail ? <div {...stylex.props(noticeStyles.afterDetail)}>{afterDetail}</div> : null}
@@ -4200,7 +4202,7 @@ const UserMessageRowView = ({
                     hasWideContent ? 'min-w-[480px]' : ''
                   )
                 )}
-                data-native-selection-allow
+                data-text-selectable
               >
                 {isEditing ? (
                   <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
@@ -6271,7 +6273,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
             hasWideContent && 'min-w-[480px]'
           )}
           style={conversationTextFontSizeStyle(conversationFontSize)}
-          data-native-selection-allow
+          data-text-selectable
           data-message-quote-text={
             content.kind === 'content' && content.block.entry.content.type === 'text'
               ? ''
@@ -6421,14 +6423,14 @@ export const UserChatBubble = ({
   if (variant === 'attachments') {
     if (attachmentGroups.length === 0) return null;
     return (
-      <div {...stylex.props(conversationSurface.attachments)} data-native-selection-allow>
+      <div {...stylex.props(conversationSurface.attachments)} data-text-selectable>
         {attachmentGroups.map(renderGroup)}
       </div>
     );
   }
 
   return (
-    <div {...stylex.props(conversationSurface.attachments)} data-native-selection-allow>
+    <div {...stylex.props(conversationSurface.attachments)} data-text-selectable>
       {attachmentGroups.map(renderGroup)}
       {textGroups.map(renderGroup)}
     </div>

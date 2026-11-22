@@ -897,7 +897,7 @@ function MobileTextPreview({
     return (
       <div
         className={cn('min-h-0 flex-1 overflow-auto overscroll-contain', bottomClearanceClassName)}
-        data-native-selection-allow
+        data-text-selectable
         onScroll={(event) => onScrollActivity?.(event.currentTarget.scrollTop)}
       >
         <div className="mx-auto w-full max-w-3xl px-3 py-3 sm:px-4 sm:py-4">

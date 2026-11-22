@@ -3,7 +3,7 @@
 `CLAUDE.md` is a symlink to this file. Parent contracts apply. Behavior:
 [Status view](../../../../specs/sidebar-status-view.md) and
 [pin sections](../../../../specs/pinned-session-sections.md); design and the
-cross-platform contract: [phone note](../../../../.agents/notes/proposed/architecture/2026-11-21-status-view-on-phones.md).
+cross-platform contract: [phone note](../../../../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md).
 
 - These modules are copied verbatim into the native clients' shared runtime at a
   pinned commit. They import only each other, `../pinned-sections.ts` and

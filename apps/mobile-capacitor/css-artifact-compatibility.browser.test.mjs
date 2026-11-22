@@ -17,11 +17,14 @@ void test('lowered PDF, Monaco, Tailwind and StyleX styles preserve layout and b
         const page = await browser.newPage({ colorScheme: system });
         try {
           await page.setContent(`
-            <div class="textLayer"><span id="pdf-text">PDF text</span></div>
+            <div class="textLayer" data-text-selectable><span id="pdf-text">PDF text</span></div>
             <button id="pdf-button" class="secondaryButton">PDF action</button>
             <div class="monaco-diff-editor"><div class="gutter"><div id="monaco" class="gutterItem showAlways">action</div></div></div>
             <div id="tailwind" class="flex px-4 bg-background text-foreground">Tailwind</div>
-            <div id="stylex">StyleX</div>`);
+            <div id="stylex">StyleX</div>
+            <nav><span id="chrome-text">Sidebar</span></nav>
+            <div data-text-selectable><b id="reading-text">Prose</b><button id="reading-button"><span id="reading-button-label">Copy</span></button></div>
+            <div contenteditable="true"><span id="editor-text">Draft</span></div>`);
           await page.addStyleTag({ content: css });
           // Await module evaluation, not just insertion of a module script tag.
           await page.evaluate(
@@ -36,7 +39,17 @@ void test('lowered PDF, Monaco, Tailwind and StyleX styles preserve layout and b
               ({ theme: appTheme, system: systemTheme }) => {
                 globalThis.applyCompatibilityTheme(appTheme, systemTheme);
                 return Object.fromEntries(
-                  ['pdf-text', 'pdf-button', 'monaco', 'tailwind', 'stylex'].map((id) => {
+                  [
+                    'pdf-text',
+                    'pdf-button',
+                    'monaco',
+                    'tailwind',
+                    'stylex',
+                    'chrome-text',
+                    'reading-text',
+                    'reading-button-label',
+                    'editor-text',
+                  ].map((id) => {
                     const style = getComputedStyle(document.getElementById(id));
                     return [
                       id,
@@ -74,6 +87,10 @@ void test('lowered PDF, Monaco, Tailwind and StyleX styles preserve layout and b
       assert.equal(light['pdf-text'].color, 'rgba(0, 0, 0, 0)');
       assert.equal(light['pdf-text'].position, 'absolute');
       assert.equal(light['pdf-text'].userSelect, 'text');
+      assert.equal(light['chrome-text'].userSelect, 'none');
+      assert.equal(light['reading-text'].userSelect, 'text');
+      assert.equal(light['reading-button-label'].userSelect, 'none');
+      assert.equal(light['editor-text'].userSelect, 'text');
       assert.equal(light.monaco.position, 'absolute');
       assert.equal(light.monaco.opacity, '1');
       assert.equal(light.tailwind.display, 'flex');

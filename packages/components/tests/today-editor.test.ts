@@ -381,7 +381,6 @@ describe('Today @ picker with people', () => {
         option.dataset.todayPickerKind,
         option.textContent,
       ]);
-    // "All": the matching person, then the matching conversation.
     expect(options()).toEqual([
       ['member', 'AWAlice Wong'],
       ['session', 'Align the release'],
@@ -615,7 +614,6 @@ describe('Today outline keys read the live caret', () => {
     controller.attachRoot(rootB);
     type('!', false);
     expect(store.getSnapshot().visible.map((node) => node.text)).toEqual(['one你好', 'two!']);
-    // The composed text is an ordinary undo step.
     store.undo.undo();
     store.undo.undo();
     expect(store.getSnapshot().visible.map((node) => node.text)).toEqual(['one', 'two']);
@@ -1163,7 +1161,6 @@ describe('Today to-dos and the selection bar', () => {
       window.dispatchEvent(pointer('pointerup'));
     });
     expect(ctx.bar()).not.toBeNull();
-    // Several nodes have no single prompt to convert.
     expect(ctx.barButton('Convert to task').disabled).toBe(true);
     const mod = navigator.platform.includes('Mac') ? { metaKey: true } : { ctrlKey: true };
     await act(async () => {
@@ -1185,7 +1182,6 @@ describe('Today to-dos and the selection bar', () => {
     expect(ctx.rows()).toEqual([['a', 'todo']]);
     const id = ctx.store.getSnapshot().visible[0]!.id;
     await act(async () => void ctx.store.outline.split(id, 1));
-    // A fresh to-do line shows its checkbox; turned back into text it is blank.
     const empty = ctx.store.getSnapshot().visible[1]!.id;
     const quiet = () => ctx.row(1).querySelector('[data-today-dot="quiet"]');
     expect(quiet()).toBeNull();

@@ -32,3 +32,6 @@ Behavior: [Today Spec](../../../../../specs/today-outline.md). Files: [README.md
   Pinned with the sidebar hidden, the column's toolbar shows them instead, and main pages read
   `mainPageAtWindowEdgeAtom` (not raw sidebar visibility) for those controls and traffic-light clearance.
 - Import `../../providers/*` relatively: the Electron web build maps `@/providers` elsewhere.
+- The desktop Today window route stays outside the `_auth` workspace layout and its runtime passes
+  `backgroundWork: false`: it must not mount the sidebar, notifiers, badges or window-ownership election,
+  nor start eager-sync. Its mentions open conversations in the primary window through main.

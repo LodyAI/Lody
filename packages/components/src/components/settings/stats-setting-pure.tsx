@@ -338,7 +338,7 @@ export function StatsSettingsView({
     [locale]
   );
   return (
-    <div {...stylex.props(styles.page)}>
+    <div {...stylex.props(styles.page)} data-text-selectable>
       {/* Page header — no redundant "Usage" title (the settings tab already
          says Usage). Workspace name + the time-window selector. */}
       <div {...stylex.props(styles.header)}>

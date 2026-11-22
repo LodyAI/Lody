@@ -53,6 +53,20 @@ export function expiredSnoozeTimestamp(
   return until <= nowMs ? until : null;
 }
 
+/**
+ * The wake-up time of a row still floating at the top of Focus, or `null`. A
+ * woken row stops floating once it has been placed by hand (`focusRestoredAt`
+ * at or past the wake-up); its unread mark stays until it is read.
+ */
+export function statusViewWokenAt(
+  snoozedUntil: number | null | undefined,
+  focusRestoredAt: number | null | undefined,
+  nowMs: number
+): number | null {
+  const wokeAt = expiredSnoozeTimestamp(snoozedUntil, nowMs);
+  return wokeAt !== null && wokeAt > (finite(focusRestoredAt) ?? 0) ? wokeAt : null;
+}
+
 /** `max(activityAt, expired snoozedUntil)`: the activity a row shows and sorts by. */
 export function statusViewActivityAt(
   activityAt: number | null | undefined,

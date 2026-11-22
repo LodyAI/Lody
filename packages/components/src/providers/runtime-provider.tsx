@@ -74,7 +74,7 @@ import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-poli
 import type { EagerSyncSurface } from './background-sync-coordinator';
 import { resolveEffectiveWorkspaceId } from './resolve-effective-workspace-id';
 import { getLocalWorkspaceSlug, useImplicitLocalWorkspace } from './local-platform-provider';
-import { isWarmWindow } from '@/lib/desktop-window';
+import { isTodayWindow, isWarmWindow } from '@/lib/desktop-window';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { maybeClearLodyCacheOnBoot } from '@/lib/clear-local-cache';
 import { describeErrorType } from '@/lib/workspace-data-scope';
@@ -1229,6 +1229,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           workspaceId: effectiveWorkspaceId,
           apiBaseUrl: API_BASE_URL,
           eagerSyncSurface,
+          backgroundWork: !isTodayWindow(),
           // Platform assembly is the only authority for room topology. Do not
           // re-probe Electron or cloud configuration inside the runtime.
           syncMode: encryptedAccess ? 'cloud' : runtimeSyncMode,
