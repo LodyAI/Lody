@@ -403,8 +403,11 @@ main calls `nativeCatchUp`, which ingests the ledger and receives keys. Both end
 in the notification table's reinstall. Forged frames (`invalid_frame`) never
 trigger it.
 
-Credential-confirmed member removal calls `wipe()`, which clears the keyring,
-removes the remote and drops the namespace. Device revocation follows owner
+Credential-confirmed member removal calls `wipe()`, which removes the remote and
+then drops the namespace. The drop also clears the namespace's keyring, writer
+bindings and keyring participants, and any connection may send it. A separate
+`keyringClear` is refused to a connection that never configured the namespace while
+another process still does, so the wipe does not use one (loro-repo #351). Device revocation follows owner
 decision A (2026-11-22). It always retires the revoked writer, and it also wipes
 when no other identity of this installation is still current
 (`removeNativeLocalIdentity`). The namespace is shared, so a wipe triggered while

@@ -317,6 +317,28 @@ describe('native encrypted workspace', () => {
     expect(await nativePendingWipeMarker(daemon.dataDir, ws).read()).toBe(false);
   }, 60_000);
 
+  it('a connection that never configured the namespace still completes a wipe while another process holds it', async () => {
+    const baseUrl = await streamsServer();
+    const daemon = await device('a', baseUrl, { kind: 'machine' });
+    const main = await device('b', baseUrl, { kind: 'personal', dataDir: daemon.dataDir });
+    const wd = await daemon.attach(nativePendingWipeMarker(daemon.dataDir, ws));
+    cleanups.push(async () => wd.close());
+    await createDocRoom(daemon.client, ws, room.id);
+    await write(daemon.client, 'before-removal');
+    expect(existsSync(namespaceFile(daemon.dataDir))).toBe(true);
+
+    await removeNativeLocalIdentity({
+      workspaceId: ws,
+      reason: 'member_removed',
+      dataDir: main.dataDir,
+      writer: main.writer,
+      stillCurrent: async () => false,
+      connect: async () => ({ client: main.client }),
+    });
+    expect(await nativePendingWipeMarker(daemon.dataDir, ws).read()).toBe(false);
+    expect(existsSync(namespaceFile(daemon.dataDir))).toBe(false);
+  }, 60_000);
+
   it('revoking the last identity while the host is down drops the namespace once it is back', async () => {
     const baseUrl = await streamsServer();
     const main = await device('b', baseUrl, { kind: 'personal' });

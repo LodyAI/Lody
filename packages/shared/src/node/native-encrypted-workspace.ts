@@ -297,6 +297,11 @@ async function serveTokens(
 /**
  * Finishes an interrupted wipe: also for a removed workspace that never attaches
  * again. Every step is idempotent; only a completed drop clears the marker.
+ * `dropNamespace` also drops the namespace's keyring, writer bindings and keyring
+ * participants, and any connection may send it; `keyringClear` is refused to a
+ * connection that never configured the namespace while another process still
+ * holds it, so it is not part of the wipe. The remote goes first: removing it after
+ * the drop would reopen an empty namespace.
  */
 export async function finishNativeWipe(
   options: Pick<
@@ -305,7 +310,6 @@ export async function finishNativeWipe(
   >
 ) {
   const { client, workspaceId } = options;
-  await client.keyringClear(workspaceId);
   await client.removeRemote(workspaceId, NATIVE_CONTENT_REMOTE_ID).catch(() => {});
   await client.dropNamespace(workspaceId);
   forgetDeclaredDocRooms(client, workspaceId);
