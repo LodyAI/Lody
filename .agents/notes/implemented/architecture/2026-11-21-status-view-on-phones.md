@@ -216,8 +216,7 @@ folds past 20 rows.
   older than this rule (before LodyAI/Lody#3077) float a placed woken row back to
   the top; the data is valid both ways.
 - Known gaps: no haptics on the iOS WebView, and Chrome refuses vibration before
-  the first tap; foldable split panes cannot drag between panes; the phone WebView
-  does not show the count of pinned rows the scope hid; on all three phone surfaces
+  the first tap; on all three phone surfaces
   (WebView, Android, iOS) the long-press menu opens on release; Android reads the read-only flag once at
   connect; on a first install on iOS a read-only member sees the actions until the
   member list loads.

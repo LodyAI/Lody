@@ -609,6 +609,7 @@ export function MobileStatusSwipeRow({
         >
           <motion.button
             type="button"
+            data-status-swipe-action=""
             aria-label={pinLabel}
             title={pinLabel}
             onClick={() => run(onTogglePin)}
@@ -641,6 +642,7 @@ export function MobileStatusSwipeRow({
               <motion.button
                 key={action.id}
                 type="button"
+                data-status-swipe-action=""
                 aria-label={label}
                 title={label}
                 onClick={() => run(action.onSelect)}

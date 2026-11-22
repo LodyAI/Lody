@@ -9,6 +9,7 @@ import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { buildSnoozePresets, type SnoozePresetId } from '@lody/shared';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { isNativeAppShell } from '@/lib/native-platform';
 import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 /** Later presets with resolved times plus a custom time; the past is refused. */
@@ -34,6 +35,24 @@ export function resolveCustomLaterTime(value: string, nowMs: number): number | n
   return Number.isFinite(parsed) && parsed > nowMs ? parsed : null;
 }
 
+/**
+ * A preset's resolved time: the clock time alone when it is today, otherwise
+ * with its date, so two presets on different Mondays never read the same.
+ */
+export function presetTimeFormatter(locale: string | undefined, nowMs: number) {
+  const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' });
+  const dated = new Intl.DateTimeFormat(locale, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  const today = new Date(nowMs).toDateString();
+  return (ms: number) =>
+    new Date(ms).toDateString() === today ? time.format(ms) : dated.format(ms);
+}
+
 function defaultCustomValue(nowMs: number): string {
   const target = new Date(nowMs + 3 * 60 * 60 * 1000);
   target.setSeconds(0, 0);
@@ -57,9 +76,13 @@ function MobileFieldSheet({
   children: ReactNode;
 }) {
   const keyboard = useKeyboardAwareSheet();
-  const maxHeight = useFoldAwareSheetHeight();
+  const maxHeight = useFoldAwareSheetHeight(85, true);
   return (
-    <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
+    <Drawer
+      open={open}
+      onOpenChange={onOpenChange}
+      repositionInputs={isNativeAppShell() ? false : undefined}
+    >
       <DrawerContent
         style={{
           maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
@@ -95,14 +118,9 @@ export function MobileLaterSheet({
     if (open) setCustom(defaultCustomValue(nowMs));
   }
   const presets = useMemo(() => buildSnoozePresets(nowMs), [nowMs]);
-  const formatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(i18n.language || undefined, {
-        weekday: 'short',
-        hour: 'numeric',
-        minute: '2-digit',
-      }),
-    [i18n.language]
+  const formatPresetTime = useMemo(
+    () => presetTimeFormatter(i18n.language || undefined, nowMs),
+    [i18n.language, nowMs]
   );
   const presetLabel = (id: SnoozePresetId) =>
     id === 'oneHour'
@@ -137,15 +155,13 @@ export function MobileLaterSheet({
             <span {...stylex.props(styles.presetRow)}>
               <Clock size={16} aria-hidden="true" {...stylex.props(styles.muted)} />
               <span {...stylex.props(styles.presetLabel)}>{presetLabel(preset.id)}</span>
-              <span {...stylex.props(styles.presetTime)}>
-                {formatter.format(new Date(preset.timestamp))}
-              </span>
+              <span {...stylex.props(styles.presetTime)}>{formatPresetTime(preset.timestamp)}</span>
             </span>
           </Button>
         ))}
       </div>
       <form
-        {...stylex.props(styles.card, styles.customCard)}
+        {...stylex.props(styles.card, styles.customCard, styles.fieldFont)}
         onSubmit={(event: FormEvent) => {
           event.preventDefault();
           if (customMs !== null) pick(customMs);
@@ -200,7 +216,7 @@ export function MobileSectionNameSheet({
   return (
     <MobileFieldSheet open={open} onOpenChange={onOpenChange} heading={heading}>
       <form
-        {...stylex.props(styles.card, styles.customCard)}
+        {...stylex.props(styles.card, styles.customCard, styles.fieldFont)}
         onSubmit={(event: FormEvent) => {
           event.preventDefault();
           if (!trimmed) return;
@@ -274,6 +290,8 @@ const styles = stylex.create({
     backgroundColor: colors.raisedBackground,
   },
   customCard: { gap: space[2], padding: space[3] },
+  /** iOS Safari zooms into a field set under 16px; the input follows this token. */
+  fieldFont: { '--ui-font-size': '16px' },
   presetRow: { display: 'flex', alignItems: 'center', gap: space[3], width: '100%' },
   presetLabel: { flex: 1, minWidth: 0, textAlign: 'start' },
   presetTime: { color: colors.secondaryLabel, fontVariantNumeric: 'tabular-nums' },

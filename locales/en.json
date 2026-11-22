@@ -7055,5 +7055,6 @@
   "chat.mobileHome.status.moveToTop": "Move to top",
   "chat.mobileHome.status.moveUp": "Move up",
   "chat.mobileHome.status.moveDown": "Move down",
-  "chat.mobileHome.filters.view.byStatus": "Group: Status"
+  "chat.mobileHome.filters.view.byStatus": "Group: Status",
+  "chat.mobileHome.status.deleteSectionDescription": "Delete “{{name}}”? Its conversations stay pinned and move to Pinned."
 }

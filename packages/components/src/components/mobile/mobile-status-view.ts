@@ -37,7 +37,8 @@ export function mobileStatusFieldsOf(
 /** One phone row as the shared layout's session; `readOnly` is the management guard's predicate. */
 export function toStatusViewSession(
   chat: MobileConversationItem,
-  writable = true
+  writable = true,
+  preferable = true
 ): StatusViewSession {
   return {
     id: chat.id,
@@ -55,7 +56,7 @@ export function toStatusViewSession(
     isWorking: chat.isWorking === true,
     isWaitingPermission: chat.isWaitingPermission === true,
     canManage: writable && chat.readOnly !== true,
-    canPrefer: true,
+    canPrefer: preferable,
   };
 }
 
@@ -64,6 +65,13 @@ export type MobileStatusViewOptions = {
   sectionsLoaded: boolean;
   /** The member may write Status view state (`useStatusViewWritable`); false only pins. */
   writable: boolean;
+  /**
+   * The member may pin and place pins. False where no write can land at all: an
+   * encrypted workspace member without the write role cannot seal a pin either.
+   */
+  preferable?: boolean;
+  /** Pinned rows the list's scope hid, by pin section id (`""` = default). */
+  scopeHiddenCounts?: Record<string, number>;
   nowMs: number;
 };
 
@@ -73,10 +81,13 @@ export function buildMobileStatusViewInput(
   options: MobileStatusViewOptions
 ): StatusViewLayoutInput {
   return {
-    sessions: chats.map((chat) => toStatusViewSession(chat, options.writable)),
+    sessions: chats.map((chat) =>
+      toStatusViewSession(chat, options.writable, options.preferable ?? true)
+    ),
     sections: [...options.sections],
     sectionsLoaded: options.sectionsLoaded,
     canManageSections: options.writable && options.sectionsLoaded,
+    ...(options.scopeHiddenCounts ? { scopeHiddenCounts: options.scopeHiddenCounts } : {}),
     nowMs: options.nowMs,
   };
 }
@@ -111,6 +122,37 @@ export function findStatusViewRow(
     const index = layout[tier].findIndex((row) => row.id === sessionId);
     if (index >= 0)
       return { area: { area: tier } as StatusViewRowPlace['area'], index, rows: layout[tier] };
+  }
+  return null;
+}
+
+/**
+ * A rendered row, top-level or nested under its opener, with the top-level
+ * place it is carried by. Acting on a nested row acts on that row only.
+ */
+export function findStatusViewEntry(
+  layout: StatusViewLayout,
+  sessionId: string
+): { place: StatusViewRowPlace; row: StatusViewRow; nested: boolean } | null {
+  const lists: Array<[StatusViewRowPlace['area'], readonly StatusViewRow[]]> = [
+    ...layout.pinned.map(
+      (section) =>
+        [{ area: 'pinned', sectionId: section.sectionId }, section.rows] as [
+          StatusViewRowPlace['area'],
+          readonly StatusViewRow[],
+        ]
+    ),
+    [{ area: 'focus' }, layout.focus],
+    [{ area: 'later' }, layout.later],
+    [{ area: 'settled' }, layout.settled],
+  ];
+  for (const [area, rows] of lists) {
+    for (let index = 0; index < rows.length; index += 1) {
+      const root = rows[index]!;
+      if (root.id === sessionId) return { place: { area, index, rows }, row: root, nested: false };
+      const child = root.children.find((candidate) => candidate.id === sessionId);
+      if (child) return { place: { area, index, rows }, row: child, nested: true };
+    }
   }
   return null;
 }

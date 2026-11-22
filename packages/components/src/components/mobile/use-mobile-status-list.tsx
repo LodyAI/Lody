@@ -26,13 +26,14 @@ import {
   type StatusViewState,
 } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { AlertDialog } from '@/ui/dialog';
 import { MobileLaterSheet, MobileSectionNameSheet } from './mobile-later-sheet';
 import { MobileSessionMenuSheet, type MobileSessionMenuAction } from './mobile-session-menu-sheet';
 import type { MobileConversationItem } from './mobile-project-screen';
 import {
   applyStatusViewMove,
   buildMobileStatusViewInput,
-  findStatusViewRow,
+  findStatusViewEntry,
   statusViewNeighbourBeforeId,
   statusViewPlacementSignature,
 } from './mobile-status-view';
@@ -58,6 +59,12 @@ export type MobileStatusCommands = {
 export const sectionIdOfPinnedBucket = (bucketId: string, pinnedBucketId: string) =>
   bucketId === pinnedBucketId ? null : bucketId.slice(pinnedBucketId.length + 1);
 
+/**
+ * The longest delay `setTimeout` honours. A longer one fires at once in browsers,
+ * which re-ran the clock effect every tick; a later change re-arms on the next tick.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 const icon = (Icon: typeof Clock) => <Icon size={14} aria-hidden="true" />;
 
 export function useMobileStatusList({
@@ -65,6 +72,8 @@ export function useMobileStatusList({
   sections,
   sectionsLoaded,
   writable,
+  preferable = true,
+  scopeHiddenCounts,
   statusMode,
   commands,
   rowActions,
@@ -77,6 +86,10 @@ export function useMobileStatusList({
   sectionsLoaded: boolean;
   /** Read-only members may only pin: no status writes, no section management. */
   writable: boolean;
+  /** False when not even a pin can be written (an encrypted workspace's read role). */
+  preferable?: boolean;
+  /** Pinned rows the list's scope hid, by pin section id (`""` = default). */
+  scopeHiddenCounts?: Record<string, number>;
   /** The Status grouping is showing (drag and the row menu live there). */
   statusMode: boolean;
   commands?: MobileStatusCommands;
@@ -93,9 +106,11 @@ export function useMobileStatusList({
         sections,
         sectionsLoaded,
         writable,
+        preferable,
+        scopeHiddenCounts,
         nowMs: clock,
       }),
-    [chats, clock, sections, sectionsLoaded, writable]
+    [chats, clock, preferable, scopeHiddenCounts, sections, sectionsLoaded, writable]
   );
   const liveLayout = useMemo(() => buildStatusViewLayout(input), [input]);
 
@@ -107,7 +122,10 @@ export function useMobileStatusList({
       statusMode && liveLayout.later.length > 0 ? 60_000 : Infinity
     );
     if (!Number.isFinite(wait)) return undefined;
-    const timer = window.setTimeout(() => setClock(getServerNow()), Math.max(1_000, wait));
+    const timer = window.setTimeout(
+      () => setClock(getServerNow()),
+      Math.min(MAX_TIMER_DELAY_MS, Math.max(1_000, wait))
+    );
     return () => window.clearTimeout(timer);
   }, [liveLayout, statusMode]);
   useEffect(() => {
@@ -157,10 +175,18 @@ export function useMobileStatusList({
     | null
   >(null);
   const [sectionMenuFor, setSectionMenuFor] = useState<{ sectionId: string | null } | null>(null);
+  const [deleteSection, setDeleteSection] = useState<{ sectionId: string; name: string } | null>(
+    null
+  );
 
   const frozen = useRef<StatusViewLayout | null>(null);
   const drag = useStatusListDrag({
-    enabled: statusMode && Boolean(commands),
+    enabled: statusMode && Boolean(commands) && (writable || preferable),
+    canDrag: (rootId) => {
+      const entry = findStatusViewEntry(frozen.current ?? heldLayout, rootId);
+      if (!entry || entry.nested) return false;
+      return entry.place.area.area === 'pinned' ? entry.row.canPrefer : entry.row.canManage;
+    },
     layout: frozen.current ?? heldLayout,
     onOpenMenu: setMenuFor,
     onDrop: runMove,
@@ -175,10 +201,10 @@ export function useMobileStatusList({
   const namedSections = layout.pinned.filter((section) => section.sectionId !== null);
 
   const rowMenuActions = (sessionId: string): MobileSessionMenuAction[] => {
-    const place = findStatusViewRow(layout, sessionId);
+    const entry = findStatusViewEntry(layout, sessionId);
     const chat = chatById.get(sessionId);
-    if (!place || !chat) return [];
-    const row = place.rows[place.index]!;
+    if (!entry || !chat) return [];
+    const { place, row, nested } = entry;
     const actions: MobileSessionMenuAction[] = [];
     const area = place.area.area;
     if (row.canManage && area !== 'pinned') {
@@ -189,13 +215,12 @@ export function useMobileStatusList({
           label: t('sessions.contextMenu.moveToFocus', 'Move to Focus'),
           onClick: () => commands?.moveToFocus(sessionId),
         });
-      if (area !== 'later')
-        actions.push({
-          id: 'later',
-          icon: icon(Clock),
-          label: t('sessions.contextMenu.snooze', 'Later'),
-          onClick: () => setLaterFor(sessionId),
-        });
+      actions.push({
+        id: 'later',
+        icon: icon(Clock),
+        label: t('sessions.contextMenu.snooze', 'Later'),
+        onClick: () => setLaterFor(sessionId),
+      });
       if (area !== 'settled')
         actions.push({
           id: 'settle',
@@ -215,7 +240,7 @@ export function useMobileStatusList({
         onClick: () => rowActions.onTogglePin!(sessionId, !pinned),
         separatorBefore: actions.length > 0,
       });
-      if (namedSections.length > 0 || layout.canManageSections)
+      if ((namedSections.length > 0 || layout.canManageSections) && (pinned || area !== 'pinned'))
         actions.push({
           id: 'move-to-section',
           icon: icon(FolderInput),
@@ -223,7 +248,8 @@ export function useMobileStatusList({
           onClick: () => setSectionPickerFor(sessionId),
         });
     }
-    const reorderable = (area === 'focus' && row.canManage) || (area === 'pinned' && row.canPrefer);
+    const reorderable =
+      !nested && ((area === 'focus' && row.canManage) || (area === 'pinned' && row.canPrefer));
     if (reorderable) {
       const to = place.area as MoveCommand['to'];
       const move = (
@@ -342,16 +368,19 @@ export function useMobileStatusList({
       id: 'section-delete',
       icon: icon(Trash2),
       label: t('sidebar.pinSections.delete', 'Delete Section'),
-      onClick: () => run({ type: 'deleteSection', sectionId }),
+      onClick: () => setDeleteSection({ sectionId, name: section.name ?? '' }),
       destructive: true,
       separatorBefore: true,
     });
     return actions;
   };
 
-  /** The ⋯ control on a Pinned-area heading; absent for read-only members. */
+  /**
+   * The ⋯ control on a Pinned-area heading, in the Status grouping only: that is
+   * where pins can be dragged and placed. Absent for read-only members.
+   */
   const sectionHeaderMenu = (sectionId: string | null): ReactNode =>
-    commands && layout.canManageSections ? (
+    commands && statusMode && layout.canManageSections ? (
       <Button
         variant="ghost"
         size="small"
@@ -388,6 +417,38 @@ export function useMobileStatusList({
         infoRows={[]}
         actions={sectionMenuFor ? sectionMenuActions(sectionMenuFor.sectionId) : []}
       />
+      <AlertDialog.Root
+        open={deleteSection !== null}
+        onOpenChange={(open) => !open && setDeleteSection(null)}
+      >
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
+              {t('sidebar.pinSections.delete', 'Delete Section')}
+            </AlertDialog.Title>
+            <AlertDialog.Description>
+              {t(
+                'chat.mobileHome.status.deleteSectionDescription',
+                'Delete “{{name}}”? Its conversations stay pinned and move to Pinned.',
+                { name: deleteSection?.name ?? '' }
+              )}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (deleteSection)
+                  run({ type: 'deleteSection', sectionId: deleteSection.sectionId });
+                setDeleteSection(null);
+              }}
+            >
+              {t('sidebar.pinSections.delete', 'Delete Section')}
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
       <MobileLaterSheet
         open={laterFor !== null}
         onOpenChange={(open) => !open && setLaterFor(null)}
@@ -439,9 +500,19 @@ export function useMobileStatusList({
     </>
   ) : null;
 
+  /** Whether Later / Settle / Move to Focus may be offered on a rendered row. */
+  const canManage = (sessionId: string) =>
+    findStatusViewEntry(layout, sessionId)?.row.canManage ?? false;
+  /** Whether a rendered row may be pinned, unpinned or placed. */
+  const canPrefer = (sessionId: string) =>
+    findStatusViewEntry(layout, sessionId)?.row.canPrefer ?? false;
+
   return {
     layout,
     drag,
+    canManage,
+    canPrefer,
+    openMenu: setMenuFor,
     dropTarget,
     openLater: setLaterFor,
     sectionHeaderMenu,
