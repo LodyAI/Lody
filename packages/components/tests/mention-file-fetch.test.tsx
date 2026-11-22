@@ -203,6 +203,35 @@ it('searches a remote project on its machine instead of listing every file', asy
   expect(container.textContent).toBe('ready:src/button.tsx,src/old.ts');
 });
 
+it('opens the remote Files category with the host shallowest paths, loading until they arrive', async () => {
+  let resolve!: (value: unknown) => void;
+  state.control.mockReturnValue(
+    new Promise((r) => {
+      resolve = r;
+    })
+  );
+  const project = { ...remoteProject, localProjectId: 'lp-empty' } as MentionProjectSource;
+
+  await act(async () => root.render(<MentionFilesProbe source={project} active />));
+  // Nothing has answered yet: never an empty ready list.
+  expect(container.textContent).toBe('loading:');
+
+  await act(async () => searchRemote?.(''));
+  expect(controlRequests()).toEqual([
+    expect.objectContaining({ type: 'local-project/search-files', query: '' }),
+  ]);
+  expect(container.textContent).toBe('loading:');
+
+  await act(async () => {
+    resolve({
+      ok: true,
+      type: 'local-project/search-files',
+      result: { paths: ['README.md', 'package.json'], truncated: false },
+    });
+  });
+  expect(container.textContent).toBe('ready:package.json,README.md');
+});
+
 it('falls back to the full list when the remote daemon predates host search', async () => {
   state.control.mockImplementation(async (request: { type: string }) =>
     request.type === 'local-project/search-files'

@@ -191,6 +191,8 @@ type RemoteFileSearchState = {
   paths: readonly string[];
   truncated: boolean;
   pending: number;
+  /** A search has answered (or failed); until then the source is still loading. */
+  settled: boolean;
   error?: string;
   /** The host answered "no such request": use the full-list path instead. */
   unsupported: boolean;
@@ -201,6 +203,7 @@ const EMPTY_REMOTE_FILE_SEARCH: RemoteFileSearchState = {
   paths: [],
   truncated: false,
   pending: 0,
+  settled: false,
   unsupported: false,
 };
 
@@ -307,8 +310,10 @@ export function useMentionProjectFiles(
 
   const searchRemoteFiles = React.useCallback(
     (term: string) => {
+      // An empty term is a real query: the Files category before anything is
+      // typed, which the host answers with the shallowest paths.
       const query = term.trim();
-      if (!remoteSearchTransport || !remoteSourceKey || !query) return;
+      if (!remoteSearchTransport || !remoteSourceKey) return;
       if (remoteQueriedRef.current.sourceKey !== remoteSourceKey) {
         remoteQueriedRef.current = { sourceKey: remoteSourceKey, terms: new Set() };
       }
@@ -329,7 +334,9 @@ export function useMentionProjectFiles(
         .searchFiles({ query, limit: DEFAULT_LOCAL_PROJECT_SEARCH_LIMIT })
         .then((result) => {
           update((prev) => {
-            if (!result) return { ...prev, pending: prev.pending - 1, unsupported: true };
+            if (!result) {
+              return { ...prev, pending: prev.pending - 1, settled: true, unsupported: true };
+            }
             const known = new Set(prev.paths);
             const added = result.paths.filter((path) => !known.has(path));
             const paths =
@@ -342,6 +349,7 @@ export function useMentionProjectFiles(
               paths,
               truncated: result.truncated,
               pending: prev.pending - 1,
+              settled: true,
             };
           });
         })
@@ -351,6 +359,7 @@ export function useMentionProjectFiles(
           update((prev) => ({
             ...prev,
             pending: prev.pending - 1,
+            settled: true,
             error: error instanceof Error ? error.message : 'Failed to load files.',
           }));
         });
@@ -495,7 +504,7 @@ export function useMentionProjectFiles(
       return {
         entry: remoteEntry,
         status:
-          remoteSearch.pending > 0
+          remoteSearch.pending > 0 || !remoteSearch.settled
             ? remoteEntry
               ? 'refreshing'
               : 'loading'
@@ -528,6 +537,7 @@ export function useMentionProjectFiles(
     remoteEntry,
     remoteSearch.error,
     remoteSearch.pending,
+    remoteSearch.settled,
     source,
     sourceKind,
     useLocalWorktreeSource,

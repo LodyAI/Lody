@@ -382,7 +382,8 @@ function TwoLevelMentionMenu({
         : context.filterStore.search || null
       : null;
   React.useEffect(() => {
-    if (fileTerm) searchRemoteFiles?.(fileTerm);
+    // `''` is the Files category before anything is typed; it still asks the host.
+    if (fileTerm !== null) searchRemoteFiles?.(fileTerm);
   }, [fileTerm, searchRemoteFiles]);
   const fileSearch = useMentionFileSearch(fileData.entry, fileTerm);
   const searchedCategories = React.useMemo(

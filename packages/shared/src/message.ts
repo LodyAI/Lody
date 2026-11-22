@@ -1247,7 +1247,6 @@ export type LocalProjectControlRequest =
       workspaceId: WorkspaceId;
       localProjectId: LocalProjectId;
       skillDirs: string[];
-      /** See `ProjectSkillsResult.unchanged`; older daemons reject this field. */
       knownFingerprint?: string;
       requestedByUserId?: string;
     }
