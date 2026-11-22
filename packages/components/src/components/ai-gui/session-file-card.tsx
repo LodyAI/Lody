@@ -170,22 +170,27 @@ const card = stylex.create({
     height: `calc(${space[8]} - ${space[1]})`,
     borderRadius: radius.mini,
     color: colors.secondaryLabel,
-    transitionProperty: 'color, background-color',
+    transitionProperty: 'color, background-color, opacity',
     transitionDuration: duration.fast,
   },
-  /* One rest tone for every icon in a turn: an affordance resting dimmer than the
-     chrome around it read as disabled. Hover brightens it and sinks the chip into
-     a well; `hoverFill` would vanish against the card's own hover tint. */
+  /* Actions rest without a fill at `secondaryLabel` (a dimmer rest read as
+     disabled). Only the control under the pointer changes: it brightens and
+     sinks into a well; `hoverFill` would vanish against the card's own hover
+     tint. Hovering the card itself never paints the chip. */
   actionLive: {
-    color: {
-      default: colors.secondaryLabel,
-      [stylex.when.ancestor(':hover')]: colors.label,
-      [stylex.when.ancestor(':focus-visible')]: colors.label,
-    },
-    backgroundColor: {
-      default: 'transparent',
-      [stylex.when.ancestor(':hover')]: colors.wellBackground,
-      [stylex.when.ancestor(':focus-visible')]: colors.wellBackground,
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    backgroundColor: { default: 'transparent', ':hover': colors.wellBackground },
+  },
+  /* Preview and download appear only while the card is hovered or holds focus.
+     Where there is no hover (touch), they stay visible so a tap can find them. */
+  actionReveal: {
+    opacity: {
+      default: 1,
+      '@media (hover: hover)': {
+        default: 0,
+        [stylex.when.ancestor(':hover')]: 1,
+        [stylex.when.ancestor(':focus-within')]: 1,
+      },
     },
   },
   /* A control of its own beside the card's main button (the HTML source download). */
@@ -218,6 +223,12 @@ export const formatSessionFileMeta = (fileName: string, sizeBytes: number): stri
 
 /** The control that sits beside a card's main button, in the card's own action style. */
 export const SESSION_FILE_CARD_ACTION_CLASS = stylex.props(card.action, card.actionPress).className;
+/** The same control, shown only while its card is hovered or focused (touch keeps it visible). */
+export const SESSION_FILE_CARD_REVEALED_ACTION_CLASS = stylex.props(
+  card.action,
+  card.actionPress,
+  card.actionReveal
+).className;
 
 /** The delivered card layout, also used while attachment preparation is pending. */
 export function SessionFileCardLayout({
@@ -230,6 +241,7 @@ export function SessionFileCardLayout({
   isMuted = false,
   failed = false,
   onClick,
+  revealActionOnHover = isInteractive,
   secondaryAction,
   progress,
   className,
@@ -244,6 +256,11 @@ export function SessionFileCardLayout({
   isMuted?: boolean;
   failed?: boolean;
   onClick?: () => void;
+  /**
+   * Hide the trailing action until the card is hovered or focused. Defaults to
+   * the card being interactive: a status glyph (spinner, clock) stays visible.
+   */
+  revealActionOnHover?: boolean;
   secondaryAction?: ReactNode;
   progress?: ReactNode;
   className?: string;
@@ -252,7 +269,12 @@ export function SessionFileCardLayout({
   return (
     <Frame
       className={cn(
-        stylex.props(card.root, isInteractive && card.interactive, failed && card.failed).className,
+        stylex.props(
+          stylex.defaultMarker(),
+          card.root,
+          isInteractive && card.interactive,
+          failed && card.failed
+        ).className,
         className
       )}
     >
@@ -261,10 +283,7 @@ export function SessionFileCardLayout({
         onClick={isInteractive ? onClick : undefined}
         disabled={!isInteractive}
         aria-label={fileName}
-        className={
-          stylex.props(stylex.defaultMarker(), card.main, isInteractive ? card.pointer : card.inert)
-            .className
-        }
+        className={stylex.props(card.main, isInteractive ? card.pointer : card.inert).className}
       >
         <FileSheet
           kind={getSessionFileKind(fileName, mimeType)}
@@ -290,6 +309,7 @@ export function SessionFileCardLayout({
             {...stylex.props(
               card.action,
               isInteractive && card.actionLive,
+              revealActionOnHover && card.actionReveal,
               failed && card.actionFailed
             )}
           >
@@ -349,9 +369,9 @@ export function SessionFileCard({
 
   /* An HTML attachment's click opens the RENDERED page (browser surface or live
      file preview), which carries no control for the source bytes — so that one
-     card offers download as a second, always-visible action rather than hiding
+     card offers download as a second action beside preview rather than hiding
      the source behind the preview it replaces. Every other previewable file
-     opens the preview dialog, which already downloads from inside. */
+     opens the attachment preview, which already downloads from inside. */
   const showDownloadAction = state === 'previewable' && isHtmlSessionFile(file) && !!onDownload;
   const downloadLabel = t('sessions.fileActions.download', 'Download file');
 
@@ -364,6 +384,8 @@ export function SessionFileCard({
       isInteractive={isInteractive}
       isMuted={isMuted}
       onClick={handleClick}
+      // A download in flight keeps its spinner visible; the idle action waits for hover.
+      revealActionOnHover={isInteractive && !(state === 'downloadable' && isDownloading)}
       className={className}
       secondaryAction={
         showDownloadAction ? (
@@ -374,7 +396,11 @@ export function SessionFileCard({
             aria-busy={isDownloading}
             aria-label={downloadLabel}
             title={downloadLabel}
-            className={SESSION_FILE_CARD_ACTION_CLASS}
+            className={
+              isDownloading
+                ? SESSION_FILE_CARD_ACTION_CLASS
+                : SESSION_FILE_CARD_REVEALED_ACTION_CLASS
+            }
           >
             {isDownloading ? (
               <Spinner className="h-4 w-4" aria-hidden="true" />
