@@ -86,7 +86,6 @@ export function createRoostHistoryChanges(host: () => RoostNodeStream, scope: ()
       // attach their summary in the content transaction, avoiding this extra write.
       await host().annotateCommit(scopeBytes(scope()), through, { before, value: encode(receipt) });
     },
-    // A caller can extend its already verified interval without rescanning its prefix.
     read: async (
       since: string | ReadyChanges,
       through: bigint,

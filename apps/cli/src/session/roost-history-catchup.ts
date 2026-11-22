@@ -48,8 +48,6 @@ type CapturePreparation = CaptureRead & {
   owner: symbol;
   assertAvailable(signal: AbortSignal): void;
   onOwner<T>(read: () => Promise<T>, signal: AbortSignal): Promise<T>;
-  // The final receipt covers every change from the initial head through the
-  // head at which the owner certifies the staged bodies.
   finish<T>(
     capture: (latest: CatchupResponse, tail: ReadyChanges) => Promise<T>,
     signal: AbortSignal
@@ -218,7 +216,6 @@ export class RoostHistoryCatchup {
     if (existing) return existing;
     const count = response.historyCount;
     const start = captureFrom(query, response) ?? count;
-    // If there is no capture capacity, ordinary exact reads still verify their head.
     if (
       Math.max(changes.ids.length, count - start) > MAX_CAPTURE_TURNS ||
       this.hasCapture(owner, response, start) ||
@@ -227,8 +224,6 @@ export class RoostHistoryCatchup {
     )
       return response;
 
-    // All retries from one applied checkpoint share the same preparation.
-    // Ending an RPC releases its wait. The owner and the timer bound the work.
     const preparation: HistoryPreparation = {
       owner,
       key: preparationKey(query),
@@ -299,8 +294,6 @@ export class RoostHistoryCatchup {
           turns.set(read.turn.id, read);
           range.push(read);
         }
-        // A concurrent structural change can shorten the window. The final
-        // receipt decides which of these positions are safe to keep.
         if (page.length < end - position) break;
       }
       const remaining = changes.ids.filter((id) => !turns.has(id));
@@ -327,9 +320,6 @@ export class RoostHistoryCatchup {
           await args.validate(latest, signal);
           return { response: latest, data: { start, range, turns } };
         }
-        // Pages may have been read at different heads. Only the positions
-        // before the first structural change and IDs untouched since staging
-        // started can be reused. Read the dirty remainder at one certified head.
         const keepFrom = Math.min(latestCount, Math.max(latestStart, start));
         const keepTo = Math.max(
           keepFrom,

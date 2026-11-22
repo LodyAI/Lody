@@ -3692,7 +3692,6 @@ const createNodeServicesForLease = async (
       const through = roostCheckpointCursor(published.checkpoint);
       if (published.checkpoint === interval.changes.checkpoint)
         return { published, through, changes: interval.changes };
-      // A longer gap requires another receipt scan outside the writer queue.
       if (
         interval.changes.state !== 'ready' ||
         through <= interval.through ||

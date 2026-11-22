@@ -321,8 +321,6 @@ const createRoostSessionDataFactoryFromTransport =
         ) {
           throw new Error('Roost history read has no durable observation');
         }
-        // These bodies belong to the repair's checkpoint. The repair checks
-        // their revision and count and commits against its original cache head.
         if ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint)
           return response;
         if (!coherentProgress && ownerRevision !== undefined && revision < ownerRevision) {
@@ -746,8 +744,6 @@ const createRoostSessionDataFactoryFromTransport =
               try {
                 return await read();
               } catch (error) {
-                // Keep verified pages while retrying a timed-out body at the
-                // same checkpoint. A second failure returns to normal recovery.
                 if (!isHistoryReadTimeout(error)) throw error;
                 return read();
               }
