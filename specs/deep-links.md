@@ -12,6 +12,8 @@ Conversation references open the exact conversation in the current Lody applicat
 | Purpose                   | Address                                                              |
 | ------------------------- | -------------------------------------------------------------------- |
 | Session, all versions     | `lody://session/<sessionId>?workspace=<workspaceId>`                 |
+| Settings surface          | `lody://settings/<tab>?…`                                            |
+| Schedules surface         | `lody://schedules?…`                                                 |
 | Today page (experimental) | `lody://today/<encoded userId>/<YYYY-MM-DD>?workspace=<workspaceId>` |
 | New Stable login callback | `ai.lody.stable://auth/callback#token=…`                             |
 | Nightly login callback    | `ai.lody.nightly://auth/callback#token=…`                            |
@@ -25,6 +27,8 @@ The OS selects one default resource handler. Settings → About exposes Set as d
 Authentication bypasses resource routing. New Stable attempts explicitly select the stable channel and return to `ai.lody.stable`; Nightly retains `ai.lody.nightly`. Legacy browser callers without a channel still emit `lody` callbacks, which Stable continues accepting. Non-Stable handlers forward common legacy auth, invite, GitHub installation, checkout and machine-connect routes to Stable's private alias without exchanging credentials themselves. A missing handler, failed handoff or unknown route produces a visible, redacted error. `chat/new` and [Magpie provider import](magpie-provider-import.md) stay in the selected installation. Provider import stages a confirmation dialog; it grants no write authority. OSS retains its private `lody-oss` entry and never starts cloud authentication.
 
 A Today page link names a member's outline for one day ([Today](today-outline.md)). Its user segment is the `encodeURIComponent` form of the user id and, unlike session links, may contain `%XX` because local ids contain `:`; only the canonical encoding is accepted, so one page has one link. It opens in the app like a session link and is not handed across desktop channels.
+
+Settings (`lody://settings/<tab>`) and Schedules (`lody://schedules`) action links open an in-app surface or stage an initial creation/edit form from a closed parameter vocabulary: optional `workspace`, `agents` (`create=<builtin|preset|custom|registry:id>` or `config=<id>`, optional `machine`), `agent-roles` (`create=1` or `role=<id>`, optional `machine`), `mcp` (`create=1` or `server=<id>`), `projects` (`add=local` with optional `machine`, `add=group`, or `repo=<owner/name>` / `local=<id>&machine=<id>` with optional `page`), `prompt-shortcuts` (`create=1`), `machines`/`memory` (optional `machine`), other known settings tabs, and `schedules` (`create=1` or `schedule=<id>`). Action links never carry credentials, environment variables, commands, URLs or prompt text, never submit writes or auto-open the encryption console or destructive dialogs, degrade to the parent surface when a referenced item is unavailable, stay inert on read-only shares, and hand off across desktop channels like session links.
 
 ## Dispatch and access
 

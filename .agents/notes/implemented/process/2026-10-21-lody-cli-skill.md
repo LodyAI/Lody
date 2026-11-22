@@ -1,33 +1,19 @@
-# Lody CLI operating skill
+# Lody user and CLI skills
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [中文](2026-10-21-lody-cli-skill.zh.md)
 
 ## Abstract
 
-Agents running inside Lody sessions drive the `lody` CLI. Built-in help alone does not
-tell them which runtime a command needs, how `LODY_SESSION_ID` is used as a fallback,
-what a schedule draft looks like, or how to recover from sign-in and dispatch failures,
-so they guess. The new `lody-cli` skill records these conventions in one place, maps
-user intent to commands, explains sign-in and acceptance recovery, and flags commands
-that need human confirmation. Sign-in guidance is agent-safe: a bare `lody login` blocks
-for browser approval and can be silent when stdout is not a terminal, so the skill tells
-agents to have the user run it or to use `--auth`.
-Exact flags stay with `--help`. Verification covers the command tree and a focused
-PTY/non-TTY login check; live agent dispatch remains untested.
+Users and agents need two distinct forms of Lody guidance: broad product answers with workflows, UI paths and implementation lookup, and exact operating rules for the `lody` CLI where `--help` omits runtime, auth and retry contracts. Both user-facing skills live in the standalone `LodyAI/skills` repository mounted as the root `skills` submodule rather than bundled into the built-in MCP server, keeping `skills.sh` distribution independent of CLI releases while preserving in-repository discovery via `.agents/skills` symlinks. `lody` routes product questions across four focused references, live `lody_help`/`--help`/`llms.txt` contracts, and `LodyAI/Lody` specs and source code; `lody-cli` records safe sign-in, runtime prerequisites, work-context selection and confirmation rules. Skill markdown and cited paths are verified statically, while live end-to-end model selection across external hosts remains unverified.
 
 ## Decision
 
-- Canonical copy at `skills/lody-cli/SKILL.md`, the repository-root directory for skills
-  written for external users rather than repository maintainers. `.agents/skills/lody-cli`
-  and `.claude/skills/lody-cli` are symlinks to it, so in-repository skill discovery is
-  unchanged.
-- Audience is external: users who install `lody` globally or run `npx lody`, called by agents
-  inside Lody sessions or by outside coding agents. The skill describes product behavior only
-  and names no source paths, internal transports or build steps; maintainer evidence stays in
-  this note.
+- User-facing installable skills live in `LodyAI/skills`, mounted at the repository root as the `skills` git submodule (`skills/skills/lody/SKILL.md` and `skills/skills/lody-cli/SKILL.md`). `.agents/skills/lody`, `.agents/skills/lody-cli` and `.claude/skills/lody-cli` symlink into the submodule so in-repository skill discovery stays intact without bundling `lody` into the built-in MCP skill server yet.
+- Split responsibilities instead of duplicating one giant reference: `lody` owns product concepts, workflows, UI/shortcut/preview/Role/MCP/E2EE guidance, troubleshooting, and `LodyAI/Lody` source-code lookup (`references/*.md`), and delegates CLI flag/invocation mechanics to `lody-cli` and condition-script authoring to built-in `lody-automations`.
+- For `lody-cli`, the audience is external users who install `lody` globally or run `npx lody`, called by agents inside Lody sessions or by outside coding agents; it describes CLI behavior only and names no internal transports or build steps. For `lody`, a dedicated source-investigation map directs agents to `specs/`, `.agents/docs/`, `locales/`, `packages/`, and `apps/` in `LodyAI/Lody` (while explicitly stating the public-versus-cloud repository boundary) when user questions exceed documented summaries.
 - Scope is the signed-in cloud product only. The open-source local edition and the
   `migrate --from-oss` import are left out. The skill states this scope up front so
   agents do not apply cloud sign-in requirements to the local edition.

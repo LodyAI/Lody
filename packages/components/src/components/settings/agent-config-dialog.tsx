@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
+import type { AgentCreateLinkTarget } from '@lody/shared/session-link';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from '@/lib/toast';
 import { usePostHog } from '@/lib/posthog-context';
@@ -1307,6 +1308,36 @@ export function listAddableProviders(t: Translate): AddableProvider[] {
     initialForm: buildPresetCreateForm(preset.id),
   }));
   return [...builtins, ...presets];
+}
+
+export function buildCreateFormFromLinkTarget(
+  target: AgentCreateLinkTarget,
+  t: Translate
+): Partial<AgentConfigFormData> | null {
+  switch (target.kind) {
+    case 'builtin': {
+      const option = BUILTIN_OPTIONS.find((item) => item.agentType === target.agentType);
+      if (!option || option.agentType === 'sorbet') return null;
+      return {
+        cliType: option.cliType,
+        agentType: option.agentType,
+        name: getOptionLabel(t, option),
+      };
+    }
+    case 'preset':
+      return PRESETS_BY_ID[target.presetId] ? buildPresetCreateForm(target.presetId) : null;
+    case 'custom':
+      return { cliType: 'custom', agentType: '' };
+    case 'registry': {
+      const option = REGISTRY_OPTIONS.find((item) => item.agentType === target.agentType);
+      if (!option) return null;
+      return {
+        cliType: option.cliType,
+        agentType: option.agentType,
+        name: option.label,
+      };
+    }
+  }
 }
 
 function resolveCredentialModeBaseUrl(

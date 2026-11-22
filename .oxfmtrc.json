@@ -26,6 +26,7 @@
     "packages/acp-extension-dsh/",
     "packages/acp-extension-grok/",
     "packages/acp-extension-kimi/",
+    "skills/",
     "apps/electron/out/",
     "apps/electron/dist/",
     "apps/electron/.vscode/",

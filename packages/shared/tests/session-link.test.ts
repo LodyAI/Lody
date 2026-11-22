@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildSessionLink, parseSessionLink, resolveSessionLinkId } from '../src/session-link';
+import {
+  buildAppActionLink,
+  buildSessionLink,
+  isAppResourceLink,
+  parseAppActionLink,
+  parseSessionLink,
+  resolveSessionLinkId,
+} from '../src/session-link';
 import { normalizeSessionLinksForExport } from '../src/session-link-export';
 
 describe('session resource links', () => {
@@ -91,5 +98,131 @@ describe('Today page links', () => {
     expect(parseTodayLink('lody://today/u1/2026-11-20?workspace=w&x=1')).toBeNull();
     expect(parseTodayLink('lody://today/../2026-11-20?workspace=w')).toBeNull();
     expect(parseTodayLink('lody://session/abc?workspace=w')).toBeNull();
+  });
+});
+
+describe('in-app settings and schedules action links', () => {
+  it('parses and builds agent creation, preset, registry, custom and edit links across schemes', () => {
+    expect(
+      parseAppActionLink('lody://settings/agents?create=codex&machine=mac_1&workspace=ws_1')
+    ).toEqual({
+      kind: 'settings',
+      tab: 'agents',
+      workspaceId: 'ws_1',
+      machineId: 'mac_1',
+      create: { kind: 'builtin', agentType: 'codex' },
+    });
+    expect(
+      parseAppActionLink('ai.lody.nightly://settings/agents?create=glm-over-claude-code')
+    ).toEqual({
+      kind: 'settings',
+      tab: 'agents',
+      create: { kind: 'preset', presetId: 'glm-over-claude-code' },
+    });
+    expect(parseAppActionLink('lody-oss://settings/agents?create=registry:opencode')).toEqual({
+      kind: 'settings',
+      tab: 'agents',
+      create: { kind: 'registry', agentType: 'opencode' },
+    });
+    expect(parseAppActionLink('lody://settings/agents?create=custom')).toEqual({
+      kind: 'settings',
+      tab: 'agents',
+      create: { kind: 'custom' },
+    });
+    const edit = parseAppActionLink('lody://settings/agents?config=cfg_9&machine=mac_1');
+    expect(edit).toEqual({
+      kind: 'settings',
+      tab: 'agents',
+      configId: 'cfg_9',
+      machineId: 'mac_1',
+    });
+    expect(buildAppActionLink(edit!)).toBe('lody://settings/agents?machine=mac_1&config=cfg_9');
+  });
+
+  it('parses roles, mcp, projects, prompt-shortcuts, general tabs and schedules', () => {
+    expect(parseAppActionLink('lody://settings/agent-roles?create=1&machine=m1')).toEqual({
+      kind: 'settings',
+      tab: 'agent-roles',
+      machineId: 'm1',
+      create: true,
+    });
+    expect(parseAppActionLink('lody://settings/mcp?server=srv_1')).toEqual({
+      kind: 'settings',
+      tab: 'mcp',
+      serverId: 'srv_1',
+    });
+    const gh = parseAppActionLink('lody://settings/projects?repo=LodyAI/Lody&page=skills');
+    expect(gh).toEqual({
+      kind: 'settings',
+      tab: 'projects',
+      repoFullName: 'LodyAI/Lody',
+      page: 'skills',
+    });
+    expect(parseAppActionLink(buildAppActionLink(gh!))).toEqual(gh);
+    expect(
+      parseAppActionLink(
+        'lody://settings/projects?machine=m1&local=proj_1&page=conversations'
+      )
+    ).toEqual({
+      kind: 'settings',
+      tab: 'projects',
+      machineId: 'm1',
+      localProjectId: 'proj_1',
+      page: 'conversations',
+    });
+    expect(parseAppActionLink('lody://settings/projects?add=local&machine=m1')).toEqual({
+      kind: 'settings',
+      tab: 'projects',
+      machineId: 'm1',
+      add: 'local',
+    });
+    expect(parseAppActionLink('lody://settings/prompt-shortcuts?create=1')).toEqual({
+      kind: 'settings',
+      tab: 'prompt-shortcuts',
+      create: true,
+    });
+    expect(parseAppActionLink('lody://settings/workspace?workspace=ws_2')).toEqual({
+      kind: 'settings',
+      tab: 'workspace',
+      workspaceId: 'ws_2',
+    });
+    expect(parseAppActionLink('lody://schedules?create=1')).toEqual({
+      kind: 'schedules',
+      create: true,
+    });
+    expect(parseAppActionLink('lody://schedules?schedule=sch_1')).toEqual({
+      kind: 'schedules',
+      scheduleId: 'sch_1',
+    });
+    expect(isAppResourceLink('lody://settings/agents?create=codex')).toBe(true);
+    expect(isAppResourceLink('lody://schedules?create=1')).toBe(true);
+  });
+
+  it('rejects secret/command injection parameters, conflicts, unknown tabs and non-canonical encodings', () => {
+    expect(
+      parseAppActionLink('lody://settings/agents?create=custom&command=sh')
+    ).toBeNull();
+    expect(
+      parseAppActionLink('lody://settings/agents?create=codex&apiKey=sk-secret')
+    ).toBeNull();
+    expect(
+      parseAppActionLink('lody://settings/mcp?create=1&url=https://evil.example')
+    ).toBeNull();
+    expect(parseAppActionLink('lody://settings/workspace?panel=e2ee')).toBeNull();
+    expect(parseAppActionLink('lody://settings/agents?create=codex&config=cfg_1')).toBeNull();
+    expect(parseAppActionLink('lody://settings/agents?create=sorbet')).toBeNull();
+    expect(parseAppActionLink('lody://settings/projects?repo=LodyAI/..&page=skills')).toBeNull();
+    expect(
+      parseAppActionLink('lody://settings/projects?repo=LodyAI%2fLody&page=skills')
+    ).toBeNull();
+    expect(
+      parseAppActionLink('lody://settings/projects?repo=LodyAI/Lody&page=conversations')
+    ).toBeNull();
+    expect(parseAppActionLink('lody://settings/projects?local=proj_1')).toBeNull();
+    expect(parseAppActionLink('lody://settings/unknown-tab')).toBeNull();
+    expect(parseAppActionLink('lody://schedules/?create=1')).toBeNull();
+    expect(parseAppActionLink('lody://schedules?schedule=new')).toBeNull();
+    expect(parseAppActionLink('lody://schedules?create=1&schedule=sch_1')).toBeNull();
+    expect(parseAppActionLink('https://lody.ai/settings/agents?create=codex')).toBeNull();
   });
 });

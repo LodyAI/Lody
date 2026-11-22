@@ -2,6 +2,7 @@ import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 
 import type { CodeCollabAllChangesScope, MachineId, SupportedLanguage } from '@lody/shared';
+import type { AppActionLink } from '@lody/shared/session-link';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { isSymbolFontFamily } from '@/lib/local-fonts';
 import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
@@ -197,6 +198,22 @@ export const settingsActiveTabAtom = atom<SettingsTabId>(SETTINGS_DEFAULT_TAB);
 // switching between its Account, Agents, Projects, and machine-detail views.
 export const settingsSelectedMachineIdAtom = atom<MachineId | null>(null);
 export const settingsSelectedProjectKeyAtom = atom<string | null>(null);
+
+export type SettingsActionIntent = {
+  id: number;
+  action: Extract<AppActionLink, { kind: 'settings' }>;
+};
+
+let nextSettingsActionIntentId = 0;
+
+export function nextSettingsActionIntent(
+  action: Extract<AppActionLink, { kind: 'settings' }>
+): SettingsActionIntent {
+  nextSettingsActionIntentId += 1;
+  return { id: nextSettingsActionIntentId, action };
+}
+
+export const settingsActionIntentAtom = atom<SettingsActionIntent | null>(null);
 
 // Notification prompt dismissed state - persisted to localStorage
 // When true, the notification permission prompt will not be shown again

@@ -42,7 +42,7 @@ import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkMath from 'remark-math';
-import { Check, Copy, MessagesSquare } from 'lucide-react';
+import { CalendarClock, Check, Copy, MessagesSquare, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CONVERSATION_FONT_SIZE, inlineMathEnabledAtom } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
@@ -62,8 +62,18 @@ import {
 } from '@/lib/markdown-single-dollar-math';
 import { cn } from '@/lib/utils';
 import { usePrLinkInterceptor } from './pr-link-context';
-import { parseSessionLinkHref, useSessionLinkNavigator } from './session-link-context';
-import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import {
+  parseAppActionLinkHref,
+  parseSessionLinkHref,
+  useAppActionLinkNavigator,
+  useSessionLinkNavigator,
+} from './session-link-context';
+import {
+  buildAppActionLink,
+  parseSessionLink,
+  type AppActionLink,
+  type SessionLink,
+} from '@lody/shared/session-link';
 import {
   SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
   SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
@@ -482,6 +492,49 @@ function MarkdownSessionLink({
           tabSessionId: target.tabSessionId as SessionId | undefined,
         })
       }
+    >
+      {body}
+    </button>
+  );
+}
+
+function MarkdownActionLink({
+  target,
+  children,
+  inert,
+}: {
+  target: AppActionLink;
+  children: ReactNode;
+  inert: boolean;
+}) {
+  const navigate = useAppActionLinkNavigator();
+  const canonicalHref = buildAppActionLink(target);
+  const title = markdownLinkText(children).trim() || canonicalHref;
+  const Icon = target.kind === 'schedules' ? CalendarClock : SlidersHorizontal;
+  const body = (
+    <>
+      <Icon className="h-[0.95em] w-[0.95em] shrink-0 self-center" aria-hidden="true" />
+      <span className="min-w-0 truncate">{title}</span>
+    </>
+  );
+  if (!navigate || inert) {
+    return (
+      <span
+        data-action-link={canonicalHref}
+        title={title}
+        className={SESSION_LINK_CHIP_CLASS_NAME}
+      >
+        {body}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-action-link={canonicalHref}
+      title={title}
+      className={cn(SESSION_LINK_CHIP_CLASS_NAME, 'cursor-pointer')}
+      onClick={() => navigate(target)}
     >
       {body}
     </button>
@@ -969,7 +1022,9 @@ const StreamingMarkdown = lazy<ComponentType<StreamdownProps>>(() =>
 const MERMAID_FENCE_PATTERN = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*mermaid\b/mu;
 
 const markdownUrlTransform: UrlTransform = (value) =>
-  isMarkdownAgentFileHref(value) || parseSessionLinkHref(value)
+  isMarkdownAgentFileHref(value) ||
+  parseSessionLinkHref(value) ||
+  parseAppActionLinkHref(value) !== null
     ? value
     : defaultUrlTransform(value);
 
@@ -1377,6 +1432,14 @@ const createMarkdownComponents = ({
         <MarkdownSessionLink target={linkedSession} inert={readonly}>
           {children}
         </MarkdownSessionLink>
+      );
+    }
+    const linkedAction = parseAppActionLinkHref(href);
+    if (linkedAction) {
+      return (
+        <MarkdownActionLink target={linkedAction} inert={readonly}>
+          {children}
+        </MarkdownActionLink>
       );
     }
     // Workspace resource links are display-only in a publication, not a second
