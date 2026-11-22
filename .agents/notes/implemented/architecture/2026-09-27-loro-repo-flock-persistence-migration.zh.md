@@ -264,7 +264,7 @@ loro-repo 0.20.0 把 Flock 版本向量当作"其下所有内容都已保存"的
   - 用共享游标的两参数工厂时，过期副本最终缺少 A；
   - 用只安排、不等待的屏障时，写入失败了同步却报告成功；
   - 用内存游标时，每次重启都会 bootstrap。
-- **LoroDoc 游标保留 daemon 独占写入，命令读取前检查因果版本。** 文档字节和 `remote_cursors` 分开存储。如果命令加载文档后 daemon 又收到了更新，命令不检查实际副本就使用共享游标，会永久跳过更新。
+- **LoroDoc 游标保留 daemon 独占写入，命令读取前检查因果版本。** [实现](https://github.com/LodyAI/Lody/pull/3103). 文档字节和 `remote_cursors` 分开存储。如果命令加载文档后 daemon 又收到了更新，命令不检查实际副本就使用共享游标，会永久跳过更新。
   - 只有 daemon（`lib/lody.ts`）传 `documentCursorScope: 'shared-durable'`。默认 `process` 存储对每个流只读取一次固定版本的 SQLite 游标格式，并保留相同的 URL alias 查找。SDK 的 load 会删除坏行做修复，因此命令播种改用只读查询。只有传给 `syncDoc` 或 `joinDocRoom` 的实际文档，其 `oplogVersion()` 覆盖非空 `serverLowerBoundVersion` 的每个 peer 时钟，才采用播种游标。无效或超前时钟回退 bootstrap，保存游标前的 `persistDocNow` 屏障不变。
   - 进程保存和带墓碑的删除只改内存，不改共享表。磁盘读取与本地保存或删除并发时，不覆盖较新的本地状态。更换副本时作废本地进度，不把它带到另一个文档实例。
   - 拒绝直接共享 daemon 游标库，也拒绝用新打开的磁盘快照代替实际同步的内存文档做检查：两者都可能让旧副本从缺失数据之后继续。
