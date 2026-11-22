@@ -373,6 +373,87 @@ describe('Today outline structure', () => {
   });
 });
 
+describe('Today to-dos', () => {
+  const page = (lines: string) => {
+    const doc = new LoroDoc();
+    const outline = openTodayOutline(doc);
+    outline.paste({ kind: 'page-start' }, parseTodayPasteText(lines));
+    const undo = createTodayPageUndo(doc, { setTimer: () => () => {} });
+    const rows = () => outline.getSnapshot().visible.map((node) => [node.text, node.todo]);
+    const id = (label: string) => outline.getSnapshot().visible.find((n) => n.text === label)!.id;
+    return { doc, outline, undo, rows, id };
+  };
+
+  it('cycles each node from its own state (text, to-do, done, text) as one undo step', () => {
+    const { outline, undo, rows, id } = page('a\n- [ ] b\n- [x] c');
+    expect(rows()).toEqual([
+      ['a', undefined],
+      ['b', 'todo'],
+      ['c', 'done'],
+    ]);
+    undo.structural(() => outline.cycleTodo([id('a'), id('b'), id('c')]));
+    expect(rows()).toEqual([
+      ['a', 'todo'],
+      ['b', 'done'],
+      ['c', undefined],
+    ]);
+    undo.undo();
+    expect(rows()).toEqual([
+      ['a', undefined],
+      ['b', 'todo'],
+      ['c', 'done'],
+    ]);
+  });
+
+  it('Enter in a to-do starts another unchecked to-do, and Enter on an empty one ends the list', () => {
+    const { outline, rows, id } = page('- [x] ab');
+    const created = outline.split(id('ab'), 1) as { nodeId: never };
+    expect(rows()).toEqual([
+      ['a', 'done'],
+      ['b', 'todo'],
+    ]);
+    const empty = outline.split(created.nodeId, 1) as { nodeId: never };
+    expect(rows().at(-1)).toEqual(['', 'todo']);
+    expect(outline.enterOnEmpty(empty.nodeId)).toEqual({ nodeId: empty.nodeId, offset: 0 });
+    expect(rows()).toEqual([
+      ['a', 'done'],
+      ['b', 'todo'],
+      ['', undefined],
+    ]);
+  });
+
+  it('keeps the state through copy and paste, and reaches a peer', () => {
+    const { doc, outline, rows, id } = page('- [ ] a\n  - [x] a1');
+    outline.paste({ kind: 'page-end' }, outline.extract([id('a')]));
+    expect(rows()).toEqual([
+      ['a', 'todo'],
+      ['a1', 'done'],
+      ['a', 'todo'],
+      ['a1', 'done'],
+    ]);
+    const peer = new LoroDoc();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    expect(
+      openTodayOutline(peer)
+        .getSnapshot()
+        .visible.map((node) => node.todo)
+    ).toEqual(['todo', 'done', 'todo', 'done']);
+  });
+
+  it('reads only Markdown task markers after a bullet as to-dos, and ignores an unknown stored state', () => {
+    const { doc, outline, rows } = page('[ ] not a task\n- [X] done\n- [] text');
+    expect(rows()).toEqual([
+      ['[ ] not a task', undefined],
+      ['done', 'done'],
+      ['[] text', undefined],
+    ]);
+    const first = outline.getSnapshot().visible[0]!.id;
+    doc.getTree('outline').getNodeByID(first)!.data.set('todo', 'later');
+    doc.commit();
+    expect(outline.getNode(first)?.todo).toBeUndefined();
+  });
+});
+
 describe('Today folds', () => {
   const sync = (from: LoroDoc, to: LoroDoc) =>
     to.import(from.export({ mode: 'update', from: to.oplogVersion() }));

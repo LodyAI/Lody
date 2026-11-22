@@ -8,7 +8,8 @@ Parent instructions apply. Background: [README.md](README.md).
   ALS in `session-command-environment.ts`. Require exact workspace/machine scope
   and an active Turn (local: its user). After a clean release, the same live Agent
   still acts for that Turn until Stop, its exit or the next Turn.
-  Cloud keeps authenticated commands/recovery.
+  Cloud keeps remote/collaborator auth and catch-up; same-machine owners
+  use the daemon repo.
 
 - MCP sharing requires the active Turn user to equal the CLI authenticated account.
   Fail closed on shared-machine account mismatch; never substitute the machine owner.

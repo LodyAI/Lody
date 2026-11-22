@@ -7,8 +7,9 @@ import { Spinner } from '@lody/ui/spinner';
 import type { SessionFilePayload } from '@lody/shared';
 import { Dialog } from '@/ui/dialog';
 import { Drawer } from '@lody/ui/drawer';
-import { space } from '@lody/ui/tokens/scales.stylex';
 import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
@@ -34,12 +35,22 @@ export type SessionFilePreviewStatus =
   | { kind: 'error'; message: string }
   | { kind: 'loaded'; text: string; truncated: boolean };
 
+/**
+ * Where the preview is mounted:
+ * - `pane`: a desktop side-panel tab. The name and actions are one toolbar under
+ *   the tab strip and the body fills the panel, with no card, frame or close.
+ * - `dialog`: a centred desktop Dialog, for hosts without a side panel.
+ * - `sheet`: the mobile bottom Drawer.
+ */
+export type SessionFilePreviewVariant = 'pane' | 'dialog' | 'sheet';
+
 export type SessionFilePreviewPanelProps = {
-  mobileSheet?: boolean;
+  variant?: SessionFilePreviewVariant;
   file: SessionFilePayload;
   status: SessionFilePreviewStatus;
   onDownload?: (file: SessionFilePayload) => void;
   isDownloading?: boolean;
+  className?: string;
 };
 
 /**
@@ -53,7 +64,8 @@ export function SessionFilePreviewPanel({
   status,
   onDownload,
   isDownloading = false,
-  mobileSheet = false,
+  variant = 'dialog',
+  className,
 }: SessionFilePreviewPanelProps) {
   const { t } = useTranslation();
   const html = isHtmlSessionFile(file);
@@ -80,10 +92,151 @@ export function SessionFilePreviewPanel({
     );
   };
 
+  const pane = variant === 'pane';
+  const mobileSheet = variant === 'sheet';
   const renderMarkdown = markdown && !showRaw;
   const renderHtml = canPreviewHtml && !showRaw;
   const Title = mobileSheet ? Drawer.Title : Dialog.Title;
   const Close = mobileSheet ? Drawer.Close : Dialog.Close;
+
+  const actions = (
+    <>
+      {canPreviewHtml ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          icon
+          aria-pressed={renderHtml}
+          aria-label={
+            renderHtml
+              ? t('sessions.fileViewer.preview.hide', 'Hide preview')
+              : t('sessions.fileViewer.preview.show', 'Preview')
+          }
+          onClick={() => setShowRaw((raw) => !raw)}
+        >
+          {renderHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
+        </Button>
+      ) : null}
+      {markdown ? (
+        <Tabs.Root
+          value={showRaw ? 'raw' : 'rendered'}
+          onValueChange={(value) => setShowRaw(value === 'raw')}
+          xstyle={styles.tabs}
+        >
+          <Tabs.List size="small">
+            <Tabs.Tab value="rendered">{t('sessions.filePreviewRendered', 'Rendered')}</Tabs.Tab>
+            <Tabs.Tab value="raw">{t('sessions.filePreviewRaw', 'Raw')}</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      ) : null}
+      <Button
+        type="button"
+        variant="ghost"
+        size="small"
+        icon
+        onClick={handleCopy}
+        disabled={status.kind !== 'loaded'}
+        aria-label={t('common.copy', 'Copy')}
+      >
+        {copied ? (
+          <Check {...stylex.props(styles.glyph, styles.glyphSuccess)} />
+        ) : (
+          <Copy {...stylex.props(styles.glyph)} />
+        )}
+      </Button>
+      {onDownload && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          icon
+          onClick={() => onDownload?.(file)}
+          disabled={isDownloading}
+          aria-label={t('sessions.fileDownload', 'Download')}
+        >
+          {isDownloading ? <Spinner size="small" /> : <Download {...stylex.props(styles.glyph)} />}
+        </Button>
+      )}
+    </>
+  );
+
+  const truncatedNotice =
+    status.kind === 'loaded' && status.truncated ? (
+      <div {...stylex.props(pane ? styles.paneNotice : styles.notice)}>
+        <span {...stylex.props(styles.noticeText)}>
+          <FileWarning {...stylex.props(styles.glyph, styles.shrink)} aria-hidden="true" />
+          {t(
+            'sessions.filePreviewTruncated',
+            'Preview shows only the start of this file. Download the full file to see everything.'
+          )}
+        </span>
+        {onDownload && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="small"
+            xstyle={styles.shrink}
+            onClick={() => onDownload?.(file)}
+            disabled={isDownloading}
+          >
+            {t('sessions.fileDownloadFull', 'Download full file')}
+          </Button>
+        )}
+      </div>
+    ) : null;
+
+  const content =
+    status.kind === 'loading' ? (
+      <div {...stylex.props(styles.loading)}>
+        <Spinner size="small" />
+        {t('sessions.filePreviewLoading', 'Loading preview…')}
+      </div>
+    ) : status.kind === 'error' ? (
+      <div {...stylex.props(styles.error)}>
+        <FileWarning {...stylex.props(styles.glyphLarge, styles.glyphFaint)} aria-hidden="true" />
+        <span>{status.message}</span>
+        {onDownload && (
+          <Button type="button" variant="secondary" size="small" onClick={() => onDownload?.(file)}>
+            {t('sessions.fileDownload', 'Download')}
+          </Button>
+        )}
+      </div>
+    ) : renderHtml ? (
+      <div
+        {...stylex.props(
+          styles.htmlPreview,
+          mobileSheet && styles.fillHtmlPreview,
+          pane && styles.fillHtmlPreview
+        )}
+      >
+        <ReadOnlyHtmlPreview text={status.text} />
+      </div>
+    ) : renderMarkdown ? (
+      <div {...stylex.props(pane ? styles.paneMarkdown : styles.markdown)}>
+        <MarkdownRenderer text={status.text} size="default" />
+      </div>
+    ) : pane ? (
+      <pre {...stylex.props(styles.paneRaw)}>{status.text}</pre>
+    ) : (
+      <pre {...stylex.props(styles.raw)}>{status.text}</pre>
+    );
+
+  if (pane) {
+    return (
+      <div className={[stylex.props(styles.pane).className, className].filter(Boolean).join(' ')}>
+        <div {...stylex.props(styles.paneToolbar)}>
+          <span {...stylex.props(styles.paneName)} title={file.fileName}>
+            {file.fileName}
+          </span>
+          <span {...stylex.props(styles.paneSize)}>{formatFileSize(file.sizeBytes)}</span>
+          <div {...stylex.props(styles.paneActions)}>{actions}</div>
+        </div>
+        {truncatedNotice}
+        <div {...stylex.props(styles.paneBody, renderHtml && styles.paneBodyFill)}>{content}</div>
+      </div>
+    );
+  }
 
   return (
     // `min-w-0` is load-bearing: this panel is a grid child of Dialog.Content
@@ -100,69 +253,7 @@ export function SessionFilePreviewPanel({
           <span {...stylex.props(styles.fileMeta)}>{formatFileSize(file.sizeBytes)}</span>
         </div>
         <div {...stylex.props(styles.actions)}>
-          {canPreviewHtml ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="small"
-              icon
-              aria-pressed={renderHtml}
-              aria-label={
-                renderHtml
-                  ? t('sessions.fileViewer.preview.hide', 'Hide preview')
-                  : t('sessions.fileViewer.preview.show', 'Preview')
-              }
-              onClick={() => setShowRaw((raw) => !raw)}
-            >
-              {renderHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
-            </Button>
-          ) : null}
-          {markdown ? (
-            <Tabs.Root
-              value={showRaw ? 'raw' : 'rendered'}
-              onValueChange={(value) => setShowRaw(value === 'raw')}
-              className={stylex.props(styles.tabs).className}
-            >
-              <Tabs.List size="small">
-                <Tabs.Tab value="rendered">
-                  {t('sessions.filePreviewRendered', 'Rendered')}
-                </Tabs.Tab>
-                <Tabs.Tab value="raw">{t('sessions.filePreviewRaw', 'Raw')}</Tabs.Tab>
-              </Tabs.List>
-            </Tabs.Root>
-          ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="small"
-            icon
-            onClick={handleCopy}
-            disabled={status.kind !== 'loaded'}
-            aria-label={t('common.copy', 'Copy')}
-          >
-            {copied ? (
-              <Check {...stylex.props(styles.glyph, styles.glyphSuccess)} />
-            ) : (
-              <Copy {...stylex.props(styles.glyph)} />
-            )}
-          </Button>
-          {onDownload ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="small"
-              icon
-              onClick={() => onDownload(file)}
-              disabled={isDownloading}
-              aria-label={t('sessions.fileDownload', 'Download')}
-            >
-              {isDownloading ? (
-                <Spinner size="small" />
-              ) : (
-                <Download {...stylex.props(styles.glyph)} />
-              )}
-            </Button>
-          ) : null}
+          {actions}
           {/* Divider separates content actions (copy/download) from the window
               action (close), and the close sits inline in the same row instead
               of floating in the corner over the buttons. */}
@@ -183,78 +274,25 @@ export function SessionFilePreviewPanel({
         </div>
       </div>
 
-      {status.kind === 'loaded' && status.truncated ? (
-        <div {...stylex.props(styles.notice)}>
-          <span {...stylex.props(styles.noticeText)}>
-            <FileWarning {...stylex.props(styles.glyph)} aria-hidden="true" />
-            {t(
-              'sessions.filePreviewTruncated',
-              'Preview shows only the start of this file. Download the full file to see everything.'
-            )}
-          </span>
-          {onDownload ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="small"
-              className={stylex.props(styles.shrink).className}
-              onClick={() => onDownload(file)}
-              disabled={isDownloading}
-            >
-              {t('sessions.fileDownloadFull', 'Download full file')}
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+      {truncatedNotice}
 
       {/* Desktop caps the body to its content; the mobile sheet fills its
           remaining height and scrolls below the fixed header. */}
-      <div {...stylex.props(styles.body, mobileSheet && styles.sheetBody)}>
-        {status.kind === 'loading' ? (
-          <div {...stylex.props(styles.loading)}>
-            <Spinner size="small" />
-            {t('sessions.filePreviewLoading', 'Loading preview…')}
-          </div>
-        ) : status.kind === 'error' ? (
-          <div {...stylex.props(styles.error)}>
-            <FileWarning
-              {...stylex.props(styles.glyphLarge, styles.glyphFaint)}
-              aria-hidden="true"
-            />
-            <span>{status.message}</span>
-            {onDownload ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="small"
-                onClick={() => onDownload(file)}
-              >
-                {t('sessions.fileDownload', 'Download')}
-              </Button>
-            ) : null}
-          </div>
-        ) : renderHtml ? (
-          <div {...stylex.props(styles.htmlPreview, mobileSheet && styles.sheetHtmlPreview)}>
-            <ReadOnlyHtmlPreview text={status.text} />
-          </div>
-        ) : renderMarkdown ? (
-          <div {...stylex.props(styles.markdown)}>
-            <MarkdownRenderer text={status.text} size="default" />
-          </div>
-        ) : (
-          <pre {...stylex.props(styles.raw)}>{status.text}</pre>
-        )}
-      </div>
+      <div {...stylex.props(styles.body, mobileSheet && styles.sheetBody)}>{content}</div>
     </div>
   );
 }
 
-export type SessionFilePreviewDialogProps = SessionFilePreviewPanelProps & {
+export type SessionFilePreviewDialogProps = Omit<SessionFilePreviewPanelProps, 'variant'> & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
 
-/** Mobile bottom sheet / desktop dialog around the shared preview panel. */
+/**
+ * Mobile bottom sheet, or a desktop Dialog for hosts that have no session side
+ * panel (history readers). A desktop Session opens attachments as a side-panel
+ * tab instead (`SessionFileAttachmentPane`).
+ */
 export function SessionFilePreviewDialog({
   open,
   onOpenChange,
@@ -274,7 +312,7 @@ export function SessionFilePreviewDialog({
             overflow: 'hidden',
           }}
         >
-          <SessionFilePreviewPanel key={panelKey} {...panelProps} mobileSheet />
+          <SessionFilePreviewPanel key={panelKey} {...panelProps} variant="sheet" />
         </Drawer.Content>
       </Drawer.Root>
     );
@@ -282,7 +320,7 @@ export function SessionFilePreviewDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Content closeButton={false} width="48rem">
-        <SessionFilePreviewPanel key={panelKey} {...panelProps} />
+        <SessionFilePreviewPanel key={panelKey} {...panelProps} variant="dialog" />
       </Dialog.Content>
     </Dialog.Root>
   );
@@ -298,7 +336,7 @@ const styles = stylex.create({
   },
   body: { marginTop: space[3], maxHeight: '55vh', minWidth: 0, overflowY: 'auto' },
   sheetBody: { flex: 1, minHeight: 0, maxHeight: 'none', overscrollBehavior: 'contain' },
-  sheetHtmlPreview: { height: '100%' },
+  fillHtmlPreview: { flexGrow: 1, width: '100%', height: '100%' },
   htmlPreview: { display: 'flex', height: '55vh', minWidth: 0, overflow: 'hidden' },
   header: {
     display: 'flex',
@@ -415,5 +453,83 @@ const styles = stylex.create({
     fontSize: '13px',
     lineHeight: '1.625',
     color: themeColors.foreground,
+  },
+  pane: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+    minWidth: 0,
+    backgroundColor: colors.background,
+  },
+  /* The tab strip above already draws the panel's only edge; this bar is the
+     same surface, so it carries no border, fill or radius of its own. */
+  paneToolbar: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: space[2],
+    minWidth: 0,
+    minHeight: `calc(${control.medium} + ${space[2]})`,
+    paddingInlineStart: space[3],
+    paddingInlineEnd: space[1.5],
+  },
+  paneName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  paneSize: {
+    flexShrink: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  paneActions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: space[1],
+    marginInlineStart: 'auto',
+  },
+  paneNotice: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: space[3],
+    paddingBlock: space[2],
+    paddingInline: space[3],
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.label,
+    backgroundColor: `color-mix(in srgb, ${colors.warning} 12%, transparent)`,
+  },
+  paneBody: { flex: 1, minHeight: 0, minWidth: 0, overflowY: 'auto' },
+  paneBodyFill: { display: 'flex', overflow: 'hidden' },
+  paneMarkdown: {
+    width: '100%',
+    maxWidth: '48rem',
+    marginInline: 'auto',
+    paddingBlock: space[2],
+    paddingInline: space[4],
+    userSelect: 'text',
+  },
+  paneRaw: {
+    margin: 0,
+    paddingBlock: space[2],
+    paddingInline: space[3],
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '13px',
+    lineHeight: 1.6,
+    color: colors.label,
   },
 });

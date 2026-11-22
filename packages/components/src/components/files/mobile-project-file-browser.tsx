@@ -885,7 +885,7 @@ function MobileTextPreview({
     return (
       <div
         className={clsx(stylex.props(styles.markdownScroller).className, bottomClearanceClassName)}
-        data-native-selection-allow
+        data-text-selectable
         onScroll={(event) => onScrollActivity?.(event.currentTarget.scrollTop)}
       >
         <div {...stylex.props(styles.markdown)}>

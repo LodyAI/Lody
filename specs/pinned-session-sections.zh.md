@@ -30,7 +30,10 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 - 每个分组可以单独折叠，折叠状态只保存在本机。
 - 视图范围隐藏某个分组的全部对话时，该分组仍留在原地；展开时会在列表下方注明隐藏的对话数。
 - opener 子对话仍挂在根对话下面，跟随根对话移动，不单独排序。
-- 移动端布局显示非空分组和顺序，但不提供拖动和分组管理。
+- 手机上，手机 WebView 和原生 iOS、Android 客户端的行为一致
+  （[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md)）：长按后移动变成拖拽，可以给 pin 对话排序并跨分组
+  移动；把未 pin 的对话拖进 pin 区就是 pin；行菜单提供“移动到分组”和“移到最前”；每个分组标题的
+  菜单提供新建分组、重命名、上移、下移和删除。
 
 ## 数据归属
 
@@ -68,11 +71,11 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 - 定时任务运行结果自动进入某个分组。需要固定位置的事务性任务使用复用同一对话的投递方式
   （`own_session` / `existing_session`），pin 一次即可。
 - 个人私有的 pin 布局（不同成员看到不同分组）。
-- 原生 iOS / Android 客户端。它们忽略新字段，不受影响。
+- 原生 iOS / Android 客户端上的加密工作区：它们目前完全打不开加密工作区。手机 WebView 支持。
 
 ## 权限
 
-有工作区写权限的成员都可以新建、重命名、删除和拖动分组，加密工作区也一样；只读成员只能查看。
+有工作区写权限的成员都可以新建、重命名、删除和拖动分组，加密工作区也一样；只读成员只能查看，界面不向他们提供分组管理入口。
 成员已经会写 workspace Flock（例如创建私有 Agent Role）；如果某条写入路径拒绝有写权限的成员写
 `pinSection` 行，那是需要修复的缺口，而不是进一步收窄分组管理的理由。
 
@@ -100,4 +103,9 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 `packages/components/tests/workspace-catalog-write.test.ts`、
 `packages/components/tests/loro-sidebar-pinned-section.test.tsx`、
 `packages/components/tests/sidebar-navigation-model.test.ts`、
-`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`。分组标题拖动和 E2EE 写入准入未覆盖。
+`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`、
+`packages/shared/tests/status-view.test.ts`。Storybook 端到端测试
+（`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`）：把对话移到另一个分组、拖动
+分组标题调整分组顺序。非拥有者成员加密写入 `pinSection` 行已在加密房间层测试
+（`apps/electron/src/main/services/e2ee-runtime.test.mjs`）；托管网关的准入未覆盖。手机端见
+[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md#验证)。

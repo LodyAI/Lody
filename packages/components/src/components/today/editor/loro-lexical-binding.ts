@@ -104,14 +104,13 @@ export function bindLoroText(options: {
     tag: INBOUND_TAGS,
   });
 
-  const stopEditor = editor.registerUpdateListener(({ editorState, tags }) => {
-    if (tags.has(COLLABORATION_TAG) || composing()) return;
-    const next = editorState.read($readTodayEditorRich);
+  const commit = (showPeerEdits: boolean) => {
+    const next = editorRich();
     let splice = safeRichDiff(base, next);
     const pending = buffered;
     if (!splice) {
       // A composition ended without a change: show what peers wrote meanwhile.
-      if (pending.length > 0) realign(pending);
+      if (showPeerEdits && pending.length > 0) realign(pending);
       return;
     }
     buffered = [];
@@ -136,8 +135,13 @@ export function bindLoroText(options: {
       writing = false;
     }
     // Peer edits were held during the composition: show them, moving the caret past them.
-    if (pending.length > 0) realign(pending);
+    if (showPeerEdits && pending.length > 0) realign(pending);
     else base = next;
+  };
+
+  const stopEditor = editor.registerUpdateListener(({ tags }) => {
+    if (tags.has(COLLABORATION_TAG) || composing()) return;
+    commit(true);
   });
 
   // A composition can end with no editor change (cancelled, or the same text):
@@ -172,6 +176,8 @@ export function bindLoroText(options: {
       stopEditor();
       stopRoot();
       stopText();
+      // Leaving a node mid-composition: keep the preedit, as a browser does on blur.
+      if (!text.isDeleted()) commit(false);
     },
   };
 }

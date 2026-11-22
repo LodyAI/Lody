@@ -31,6 +31,7 @@ import {
 
 import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { MessageRowView } from '../src/components/ai-gui/view';
+import { ForceDesktopLayoutProvider } from '../src/hooks/use-mobile';
 
 import {
   PendingMessageRow,
@@ -329,6 +330,64 @@ describe('PendingMessageRow failure presentation', () => {
     await act(async () => root?.render(null));
     await render(prepared);
     expect(host.querySelector('img')?.getAttribute('src')).toBe(url);
+  });
+
+  it('preserves sender name and desktop profile trigger across uploading, accepted local input and committed history', async () => {
+    const sender = { name: 'Maya Chen', email: 'maya.chen@example.com', image: null };
+    const draw = async (node: ReturnType<typeof createElement>) => {
+      await act(async () => {
+        root?.render(createElement(ForceDesktopLayoutProvider, null, node));
+      });
+    };
+
+    await draw(
+      createElement(PendingMessageRow, {
+        record: record({
+          attachments: [{ ...readyImage, ready: undefined, progress: 30 }],
+        }),
+        user: sender,
+        showSenderIdentity: true,
+        onRetry,
+        onCancel,
+      })
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Maya Chen');
+    expect(
+      container?.querySelector('button[aria-label="View profile for Maya Chen"]')
+    ).not.toBeNull();
+
+    await draw(
+      createElement(PendingMessageRow, {
+        record: record({ inputState: 'sending', historyBackend: 'roost' }),
+        user: sender,
+        showSenderIdentity: true,
+        onRetry,
+        onCancel,
+      })
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Maya Chen');
+    expect(
+      container?.querySelector('button[aria-label="View profile for Maya Chen"]')
+    ).not.toBeNull();
+
+    await draw(
+      createElement(MessageRowView, {
+        sessionId,
+        message: { ...record().entry, status: 'seen' } as unknown as SessionHistoryParsed,
+        user: sender,
+        showSenderIdentity: true,
+      })
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Maya Chen');
+    expect(
+      container?.querySelector('button[aria-label="View profile for Maya Chen"]')
+    ).not.toBeNull();
   });
 });
 

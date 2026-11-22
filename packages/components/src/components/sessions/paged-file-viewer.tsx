@@ -130,7 +130,7 @@ export function PagedFileViewer({
           style={{ overflowX: 'auto' }}
         >
           {result.text.split('\n').map((line, index) => (
-            <div key={index} {...stylex.props(styles.line)}>
+            <div key={index} {...stylex.props(styles.line)} data-text-selectable>
               {line || ' '}
             </div>
           ))}

@@ -1,3 +1,12 @@
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeSpace,
+  themeRadius,
+  themeFontSize,
+  themeLineHeight,
+  themeFontWeight,
+} from '../style/theme-scale.stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore, useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -38,7 +47,7 @@ import {
   buildSidebarNavigationItems,
 } from '@/components/sidebar-navigation-model';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
-import { SidebarShortcutPill } from '@/components/sidebar-shortcut-pill';
+import { SidebarBindingPill, SidebarShortcutPill } from '@/components/sidebar-shortcut-pill';
 import {
   SidebarUpdatedSessionList,
   type SidebarUpdatedBucketKey,
@@ -47,6 +56,200 @@ import {
 import { useSidebarShortcutHold } from '@/hooks/use-sidebar-shortcut-hold';
 import { isMac } from '@/lib/commands/platform';
 import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
+
+const storyStyles = stylex.create({
+  sidebarPreview: { display: 'flex', width: '280px', flexDirection: 'column', gap: themeSpace[2] },
+  previewLabel: {
+    paddingInline: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+  },
+  sidebarCard: {
+    borderRadius: themeRadius.xl,
+    border: '1px solid hsl(var(--sidebar-border) / 0.8)',
+    backgroundColor: 'hsl(var(--sidebar-background))',
+    padding: themeSpace[2],
+    color: 'hsl(var(--sidebar-foreground))',
+  },
+  catalog: {
+    minHeight: '100vh',
+    backgroundColor: themeColors.background,
+    padding: themeSpace[6],
+    color: themeColors.foreground,
+    ':is(*) > :not([hidden]) ~ :not([hidden])': { marginBlockStart: themeSpace[8] },
+  },
+  section: { ':is(*) > :not([hidden]) ~ :not([hidden])': { marginBlockStart: themeSpace[3] } },
+  subsection: { ':is(*) > :not([hidden]) ~ :not([hidden])': { marginBlockStart: themeSpace[2] } },
+  rowList: { ':is(*) > :not([hidden]) ~ :not([hidden])': { marginBlockStart: themeSpace[0.5] } },
+  collapsedMachine: {
+    marginBottom: themeSpace[1],
+    ':is(*) > :not([hidden]) ~ :not([hidden])': { marginBlockStart: themeSpace[0.5] },
+  },
+  expandedMachine: {
+    marginBottom: themeSpace[4],
+    ':is(*) > :not([hidden]) ~ :not([hidden])': { marginBlockStart: themeSpace[0.5] },
+  },
+  collapsedChats: { marginBottom: themeSpace[1] },
+  expandedChats: { marginBottom: themeSpace[3] },
+  heading: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.semibold,
+  },
+  pillGrid: {
+    display: 'grid',
+    maxWidth: '48rem',
+    gap: themeSpace[4],
+    gridTemplateColumns: {
+      default: null,
+      '@media (min-width: 40rem)': 'repeat(2, minmax(0, 1fr))',
+    },
+  },
+  pillCard: {
+    borderRadius: themeRadius.xl,
+    border: '1px solid hsl(var(--sidebar-border) / 0.8)',
+    backgroundColor: 'hsl(var(--sidebar-background))',
+    padding: themeSpace[4],
+    color: 'hsl(var(--sidebar-foreground))',
+    ':is(*) > :not([hidden]) ~ :not([hidden])': { marginBlockStart: themeSpace[3] },
+  },
+  sidebarCaption: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    color: 'hsl(var(--sidebar-foreground-muted))',
+  },
+  inlineControls: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: themeSpace[2] },
+  selectedPreview: {
+    borderRadius: themeRadius.md,
+    backgroundColor: 'hsl(var(--sidebar-selection))',
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[2],
+  },
+  selectedCaption: {
+    marginBottom: themeSpace[1.5],
+    fontSize: '11px',
+    color: 'hsl(var(--sidebar-selection-foreground) / 0.8)',
+  },
+  navigationPreview: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.xl,
+    border: '1px solid hsl(var(--sidebar-border) / 0.8)',
+    backgroundColor: 'hsl(var(--sidebar-background))',
+    padding: themeSpace[4],
+    color: 'hsl(var(--sidebar-foreground))',
+  },
+  description: {
+    maxWidth: '42rem',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  previews: { display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: themeSpace[6] },
+  playground: {
+    display: 'flex',
+    height: '740px',
+    width: '100%',
+    backgroundColor: themeColors.background,
+    color: themeColors.foreground,
+  },
+  detailPane: {
+    display: 'flex',
+    flex: '1 1 0%',
+    flexDirection: 'column',
+    gap: themeSpace[5],
+    overflowY: 'auto',
+    borderLeft: '1px solid hsl(var(--border) / 0.6)',
+    padding: themeSpace[6],
+  },
+  detailHeader: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    borderBottom: '1px solid hsl(var(--border) / 0.6)',
+    paddingBottom: themeSpace[4],
+  },
+  caption: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+  },
+  sessionTitle: {
+    marginTop: themeSpace[0.5],
+    fontSize: themeFontSize.base,
+    lineHeight: themeLineHeight.base,
+    fontWeight: themeFontWeight.semibold,
+  },
+  triggerNote: {
+    marginTop: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  segmentedControls: {
+    display: 'inline-flex',
+    borderRadius: themeRadius.lg,
+    border: '1px solid hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--muted) / 0.4)',
+    padding: themeSpace[0.5],
+  },
+  instructions: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+    ':is(*) > :not([hidden]) ~ :not([hidden])': { marginBlockStart: themeSpace[2] },
+  },
+  foreground: { color: themeColors.foreground },
+  slotList: { display: 'grid', maxWidth: '36rem', gap: themeSpace[1.5] },
+  slotButton: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    borderRadius: themeRadius.lg,
+    border: '1px solid hsl(var(--border) / 0.6)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    textAlign: 'left',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    backgroundColor: { default: null, ':hover': 'hsl(var(--muted) / 0.5)' },
+  },
+  slotContent: { display: 'flex', minWidth: 0, alignItems: 'center', gap: themeSpace[2] },
+  selectedDot: {
+    height: themeSpace[1.5],
+    width: themeSpace[1.5],
+    flexShrink: 0,
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: themeColors.primary,
+  },
+  restingDot: {
+    height: themeSpace[1.5],
+    width: themeSpace[1.5],
+    flexShrink: 0,
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.3)',
+  },
+  slotTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  slotContext: { flexShrink: 0, color: themeColors.mutedForeground },
+});
 
 const meta = {
   title: 'Sidebar/Shortcut Pills',
@@ -160,10 +363,10 @@ function GallerySidebarColumn({
   }, [active, platform]);
 
   return (
-    <div className="flex w-[280px] flex-col gap-2">
-      <div className="px-1 text-xs font-medium text-muted-foreground">{heading}</div>
+    <div {...stylex.props(storyStyles.sidebarPreview)}>
+      <div {...stylex.props(storyStyles.previewLabel)}>{heading}</div>
       <Provider store={store}>
-        <div className="rounded-xl border border-sidebar-border/80 bg-sidebar p-2 text-sidebar-foreground">
+        <div {...stylex.props(storyStyles.sidebarCard)}>
           <SidebarUpdatedSessionList
             items={GALLERY_ROWS}
             now={new Date(NOW)}
@@ -186,19 +389,16 @@ function GallerySidebarColumn({
 export const PillGallery: Story = {
   render: () => (
     <Tooltip.Provider>
-      <div className="min-h-screen space-y-8 bg-background p-6 text-foreground">
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold">Pill Scale (1–9)</h2>
-          <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
+      <div {...stylex.props(storyStyles.catalog)}>
+        <div {...stylex.props(storyStyles.section)}>
+          <h2 {...stylex.props(storyStyles.heading)}>Pill Scale (1–9)</h2>
+          <div {...stylex.props(storyStyles.pillGrid)}>
             {(['mac', 'windows'] as const).map((platform) => (
-              <div
-                key={platform}
-                className="space-y-3 rounded-xl border border-sidebar-border/80 bg-sidebar p-4 text-sidebar-foreground"
-              >
-                <div className="text-xs font-medium text-sidebar-foreground-muted">
+              <div key={platform} {...stylex.props(storyStyles.pillCard)}>
+                <div {...stylex.props(storyStyles.sidebarCaption)}>
                   {platform === 'mac' ? 'macOS · Command icon' : 'Windows / Linux · Control label'}
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div {...stylex.props(storyStyles.inlineControls)}>
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((index) => (
                     <SidebarShortcutPill
                       key={index}
@@ -208,11 +408,9 @@ export const PillGallery: Story = {
                     />
                   ))}
                 </div>
-                <div className="rounded-md bg-sidebar-selection px-2.5 py-2">
-                  <div className="mb-1.5 text-[11px] text-sidebar-selection-foreground/80">
-                    On selected row
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                <div {...stylex.props(storyStyles.selectedPreview)}>
+                  <div {...stylex.props(storyStyles.selectedCaption)}>On selected row</div>
+                  <div {...stylex.props(storyStyles.inlineControls)}>
                     {[1, 2, 3].map((index) => (
                       <SidebarShortcutPill
                         key={index}
@@ -229,14 +427,25 @@ export const PillGallery: Story = {
           </div>
         </div>
 
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold">Sidebar Row Replacement &amp; Alignment</h2>
-          <p className="max-w-2xl text-xs text-muted-foreground">
+        <div {...stylex.props(storyStyles.section)}>
+          <h2 {...stylex.props(storyStyles.heading)}>Navigation Row Bindings</h2>
+          <div {...stylex.props(storyStyles.navigationPreview)}>
+            {['Mod+N', 'Mod+Shift+D', 'Mod+,', 'Alt+Shift+P', 'Ctrl+Alt+T', 'Shift+Enter'].map(
+              (binding) => (
+                <SidebarBindingPill key={binding} binding={binding} />
+              )
+            )}
+          </div>
+        </div>
+
+        <div {...stylex.props(storyStyles.section)}>
+          <h2 {...stylex.props(storyStyles.heading)}>Sidebar Row Replacement &amp; Alignment</h2>
+          <p {...stylex.props(storyStyles.description)}>
             Holding the primary modifier swaps trailing row status / PR / Mergeable / countdown
             marks for the aligned 1–9 shortcut pill so long titles truncate cleanly and no badge
             stacking occurs.
           </p>
-          <div className="flex flex-wrap items-start gap-6">
+          <div {...stylex.props(storyStyles.previews)}>
             <GallerySidebarColumn
               heading="Resting (no modifier held)"
               active={false}
@@ -293,7 +502,6 @@ const INITIAL_PIN_SECTIONS: PinSection[] = [
 ];
 
 const DEMO_SESSIONS: PlaygroundSession[] = [
-  // Pinned (default)
   {
     id: 'pin-release',
     title: 'Release 0.107 checklist',
@@ -305,7 +513,6 @@ const DEMO_SESSIONS: PlaygroundSession[] = [
     orderKey: '80',
     hasUnreadMessages: true,
   },
-  // Pinned (Maintenance section)
   {
     id: 'pin-mirror',
     title: 'Weekly mirror update check',
@@ -317,7 +524,6 @@ const DEMO_SESSIONS: PlaygroundSession[] = [
     pinSectionId: 'sec-maintenance',
     orderKey: '80',
   },
-  // Local project: lody (incl. opened-by child)
   {
     id: 'local-lody-1',
     title: 'Sidebar Command 1–9 shortcut pills',
@@ -349,7 +555,6 @@ const DEMO_SESSIONS: PlaygroundSession[] = [
     isWaitingPermission: true,
     orderKey: '81',
   },
-  // Local project: loro (6 sessions -> folds at 5 with "Show all (6)")
   {
     id: 'local-loro-1',
     title: 'Benchmark movable list CRDT',
@@ -403,7 +608,6 @@ const DEMO_SESSIONS: PlaygroundSession[] = [
     projectName: 'loro',
     latestMessageAt: NOW - 10 * DAY,
   },
-  // GitHub worktrees
   {
     id: 'gh-1',
     title: 'Fix OAuth refresh race condition',
@@ -430,7 +634,6 @@ const DEMO_SESSIONS: PlaygroundSession[] = [
     latestMessageAt: NOW - 3 * HOUR,
     orderKey: '85',
   },
-  // Chats
   {
     id: 'chat-1',
     title: 'Plan Q4 keyboard navigation polish',
@@ -524,7 +727,6 @@ function PlaygroundContent() {
   const [selectedId, setSelectedId] = useState<string>('local-lody-1');
   const [lastTriggerNote, setLastTriggerNote] = useState<string | null>(null);
 
-  // Collapse & show-more state across all views
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
   const [collapsedPinSectionIds, setCollapsedPinSectionIds] = useState<Record<string, boolean>>({});
   const [machineCollapsed, setMachineCollapsed] = useState(false);
@@ -819,8 +1021,6 @@ function PlaygroundInner({
     [onLastTriggerNote, onSelectSession, platform, sessionById, slotSessionIds]
   );
 
-  // Story-local keyboard listener so Cmd+1..9 / Ctrl+1..9 can be tested directly
-  // inside Storybook (Electron handles these via the command registry).
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.altKey || event.shiftKey) return;
@@ -847,7 +1047,13 @@ function PlaygroundInner({
 
   const topContent = (
     <div>
-      <div className={machineCollapsed ? 'mb-1 space-y-0.5' : 'mb-4 space-y-0.5'}>
+      <div
+        className={
+          machineCollapsed
+            ? stylex.props(storyStyles.collapsedMachine).className
+            : stylex.props(storyStyles.expandedMachine).className
+        }
+      >
         <SidebarSectionHeader
           label="Mac Studio"
           collapsed={machineCollapsed}
@@ -855,7 +1061,7 @@ function PlaygroundInner({
           onToggleCollapsed={onToggleMachineCollapsed}
         />
         {machineCollapsed ? null : (
-          <div className="space-y-0.5">
+          <div {...stylex.props(storyStyles.rowList)}>
             {DEMO_PROJECTS.map((project) => {
               const groupKey = getLocalProjectSessionGroupKey(MACHINE_ID, project.id);
               return (
@@ -906,7 +1112,11 @@ function PlaygroundInner({
 
   const afterSessionListContent = (
     <SessionList
-      className={chatsCollapsed ? 'mb-1' : 'mb-3'}
+      className={
+        chatsCollapsed
+          ? stylex.props(storyStyles.collapsedChats).className
+          : stylex.props(storyStyles.expandedChats).className
+      }
       sessions={chatRows}
       repos={[]}
       chatsCollapsed={chatsCollapsed}
@@ -919,7 +1129,7 @@ function PlaygroundInner({
   const selectedSession = sessionById.get(selectedId);
 
   return (
-    <div className="flex h-[740px] w-full bg-background text-foreground">
+    <div {...stylex.props(storyStyles.playground)}>
       <LoroSidebar
         workspaceName="Lody"
         userEmail="alex@lody.ai"
@@ -951,22 +1161,20 @@ function PlaygroundInner({
         onSelectUpdatedItem={(id) => onSelectSession(id)}
       />
 
-      <div className="flex flex-1 flex-col gap-5 overflow-y-auto border-l border-border/60 p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-4">
+      <div {...stylex.props(storyStyles.detailPane)}>
+        <div {...stylex.props(storyStyles.detailHeader)}>
           <div>
-            <div className="text-xs font-medium text-muted-foreground">Active Session</div>
-            <div className="mt-0.5 text-base font-semibold">
+            <div {...stylex.props(storyStyles.caption)}>Active Session</div>
+            <div {...stylex.props(storyStyles.sessionTitle)}>
               {selectedSession ? selectedSession.title : selectedId}
             </div>
             {lastTriggerNote ? (
-              <div className="mt-1 text-xs text-muted-foreground">
-                Last trigger: {lastTriggerNote}
-              </div>
+              <div {...stylex.props(storyStyles.triggerNote)}>Last trigger: {lastTriggerNote}</div>
             ) : null}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-lg border border-border/70 bg-muted/40 p-0.5">
+          <div {...stylex.props(storyStyles.inlineControls)}>
+            <div {...stylex.props(storyStyles.segmentedControls)}>
               {(
                 [
                   { id: 'workspace', label: 'Project' },
@@ -986,7 +1194,7 @@ function PlaygroundInner({
               ))}
             </div>
 
-            <div className="inline-flex rounded-lg border border-border/70 bg-muted/40 p-0.5">
+            <div {...stylex.props(storyStyles.segmentedControls)}>
               {(
                 [
                   { id: 'mac', label: 'macOS (⌘)' },
@@ -1020,15 +1228,15 @@ function PlaygroundInner({
           </div>
         </div>
 
-        <div className="space-y-2 text-xs text-muted-foreground">
+        <div {...stylex.props(storyStyles.instructions)}>
           <p>
             Hold{' '}
-            <strong className="text-foreground">
+            <strong {...stylex.props(storyStyles.foreground)}>
               {platform === 'mac' ? 'Command (⌘)' : 'Control'}
             </strong>{' '}
             for 150ms to reveal the shortcut pills on the first 9 visible rows across expanded
             sections. Overlay status:{' '}
-            <strong className="text-foreground">
+            <strong {...stylex.props(storyStyles.foreground)}>
               {overlayActive ? 'Visible' : 'Hidden (hold modifier or click Pin Pills)'}
             </strong>
             .
@@ -1041,11 +1249,11 @@ function PlaygroundInner({
           </p>
         </div>
 
-        <div className="space-y-2">
-          <div className="text-xs font-medium text-muted-foreground">
+        <div {...stylex.props(storyStyles.subsection)}>
+          <div {...stylex.props(storyStyles.caption)}>
             Current Visible Top-9 Mapping (Click to simulate shortcut)
           </div>
-          <div className="grid max-w-xl gap-1.5">
+          <div {...stylex.props(storyStyles.slotList)}>
             {slotSessionIds.map((id, index) => {
               const slot = index + 1;
               const session = sessionById.get(id);
@@ -1055,20 +1263,18 @@ function PlaygroundInner({
                   key={id}
                   type="button"
                   onClick={() => triggerSlot(slot, 'click')}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/50"
+                  {...stylex.props(storyStyles.slotButton)}
                 >
-                  <span className="flex min-w-0 items-center gap-2">
+                  <span {...stylex.props(storyStyles.slotContent)}>
                     <span
                       className={
                         isSelected
-                          ? 'h-1.5 w-1.5 shrink-0 rounded-full bg-primary'
-                          : 'h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/30'
+                          ? stylex.props(storyStyles.selectedDot).className
+                          : stylex.props(storyStyles.restingDot).className
                       }
                     />
-                    <span className="truncate font-medium text-foreground">
-                      {session?.title ?? id}
-                    </span>
-                    <span className="shrink-0 text-muted-foreground">
+                    <span {...stylex.props(storyStyles.slotTitle)}>{session?.title ?? id}</span>
+                    <span {...stylex.props(storyStyles.slotContext)}>
                       ({session?.repoFullName ?? session?.projectName ?? 'Chats'})
                     </span>
                   </span>

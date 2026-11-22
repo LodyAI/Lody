@@ -1,6 +1,6 @@
 # Message avatar continuity across session switches
 
-Status: proposed
+Status: implemented
 Translation: current
 PR: https://github.com/LodyAI/Lody/pull/1736
 
@@ -8,30 +8,28 @@ PR: https://github.com/LodyAI/Lody/pull/1736
 
 ## Abstract
 
-Message avatars can briefly show a fallback when returning to a conversation even
-though the image bytes are cached. A bounded local correction now preloads the
-cached blob used by a stable avatar and removes an effect-delayed source update.
-The same isolated Chromium experiment changes from a fallback to an immediately
-loaded image on the first blob return, with one avatar HTTP request on both runs.
-Decoding runs asynchronously only for used avatars, so cache reads and first paint
-do not wait and startup does not decode every stored avatar. Missing sender
-metadata remains a separate, unresolved condition; this note remains proposed for
-that investigation and does not attribute a deployed switch to one cause.
+Message avatars and multi-member sender names could briefly fall back or disappear when returning to a conversation, scrolling virtualized rows, or handing a pending send over to hydrated history. `use-stable-avatar-src.ts` preloads the cached blob used by a stable avatar and derives source updates during render, while `useWorkspaceSenderProfile` and `lib/workspace-sender-identity.ts` retain account/workspace-scoped member directory and sender-profile metadata across unmounts and reloads. In the isolated Chromium experiment, the first blob return changes from a fallback to an immediately loaded image with one avatar HTTP request on both runs. Decoding runs asynchronously only for used avatars so cache reads and first paint do not wait, and genuinely absent metadata still retains its fallback.
 
 ## Responsibilities and chosen scope
 
-`lib/avatar-cache.ts` owns the renderer-wide URL-keyed memory map and persistent
-`lody-avatar-image-v2` CacheStorage bucket. Reads after 24 hours serve the old image
-and revalidate in the background; equal bytes retain the existing URL. Navigation
-never clears this cache. These keys, TTL and byte-refresh behavior are unchanged.
+`lib/avatar-cache.ts` owns the renderer-wide URL-keyed memory map, bounded
+IndexedDB `lody:avatar-image-cache` store (with `lody-avatar-image-v2`
+CacheStorage fallback/migration so `file://` Electron and `capacitor://`
+origins persist reliably), and a synchronous `lody:avatar-cache-index` key set.
+Reads after 24 hours serve the old image and revalidate in the background; equal
+bytes retain the existing URL. Navigation never clears this cache; recoverable
+cache clearing removes both stores and the index.
 
-`hooks/use-stable-avatar-src.ts` preserves the initial remote URL on a cold mount
-while filling the cache. It now requests preloading of that local blob after fill,
-or when a restored entry is used. The entry retains one off-DOM `Image`, loaded
+`hooks/use-stable-avatar-src.ts` suppresses remote `<img>` fetches on new pages
+when `hasPersistedAvatar` confirms local bytes exist, switching directly to the
+persisted blob before startup rehydration finishes, while preserving the initial
+remote URL on a genuinely cold first visit. It preloads the local blob after fill
+or when a restored entry is used, and `useWorkspaceMembers` warms active member
+avatars. The entry retains one off-DOM `Image`, loaded
 with asynchronous decoding, for reuse across mounts. Replacing an already warmed
 entry warms its successor. Startup restoration alone does not decode stored images.
 No first paint or cache read awaits decoding, and preloading never fetches a remote
-URL. There are no new timers, subscriptions, profile caches or retained session DOM.
+URL.
 
 The hook also tracks the input identity alongside its resolved source. New,
 removed or newly available inputs derive their current value during render.
@@ -44,9 +42,9 @@ existing source cleanup fence.
 reuse a warmed image. A completely cold image, an unfinished preload or browser
 memory-pressure eviction can still require the normal loading fallback.
 
-The [sender identity decision](../../implemented/feature/2026-09-08-chat-sender-identity.md)
-and [UI avatar migration](../../implemented/feature/2026-09-13-ui-avatar-kbd.md)
-remain applicable. This correction changes neither identity nor avatar appearance.
+The [sender identity decision](../feature/2026-09-08-chat-sender-identity.md)
+and [UI avatar migration](../feature/2026-09-13-ui-avatar-kbd.md)
+remain applicable.
 
 ## Synthetic browser evidence
 
@@ -83,36 +81,30 @@ change fetch, revalidation, persistence and application ownership. That exceeds
 this small behavior fix, so migration is deferred without a runtime/dependency or
 ledger change.
 
-## Remaining profile investigation
+## Sender metadata continuity
 
-`ai-gui/index.tsx` first resolves the sender through `auth:getUserById`. Without
-`user.image`, the image cache has no lookup key. The authenticated adapter shares
-active queries, but its source registry and hook-local retained snapshots are not
-a durable profile cache across all unmounts. `SessionChatInterface` also watches
-the current user's profile for pending messages, so an existing same-user watch
-can preserve it: a metadata miss must be observed, not assumed for each switch.
+`ai-gui/index.tsx` and `SessionChatInterface` resolve human senders through
+`useWorkspaceSenderProfile` (`hooks/use-workspace-sender-profile.ts`), backed by
+`lib/workspace-sender-identity.ts`. Without `user.image` or `user.name`, the image
+cache has no lookup key and multi-member user rows lose their sender label while
+per-row `auth:getUserById` subscriptions reconnect across virtualized unmounts or
+session switches.
 
-If a matching deployed recording confirms missing metadata, evaluate existing
-account/workspace-scoped identity as an initial source, preserving authoritative
-updates, deletion and account/workspace invalidation. Do not broaden this patch
-into a generic stale-query cache or relax stale-access protections. Queries remain
-unchanged in the local correction; genuinely absent metadata retains its fallback.
+`useWorkspaceSenderProfile` prefers live `auth:getUserById` results (including
+explicit `null` to clear deleted accounts), then falls back to retained sender
+profiles, the same-scope `useWorkspaceMembers` directory, and the matching
+authenticated `userAtom` identity. Retention is keyed by CloudApi owner, account
+ID and workspace ID (persisted for the production cloud adapter and registered in
+`clear-local-cache.ts`), so account, workspace or adapter changes discard retained
+labels without relaxing stale-access protections on authorization queries.
 
 ## Verification and limits
 
-Five avatar-cache, seven avatar-source/component and five sender-identity tests
-pass; component type-checking passes. New cases render the real `UserAvatar` with
-explicitly signalled browser image loads and assert original first display,
-warmed return, restored offline return, decoding failure and first-commit source
-arrival/change/removal. A temporary ablation with unpatched source fails the warm
-return and first-commit regressions; the patched sources are restored afterward.
-
-Synthetic source, before/after browser results and ablation output are outside the
-repository at `/private/tmp/lody-avatar-investigation-20261020/`. The existing
-browser tab could not be connected for live validation. No deployed revision,
-live metadata gap, Electron behavior, memory-pressure eviction or product timing
-was measured. In an isolated checkout based on `7d6695cf3`, `pnpm check` and
-`pnpm format` pass, including all 586 component test files (5,739 tests), CLI tests,
-type-checking, lint and repository boundaries. Documentation checking retains six
-existing broken links into absent ACP submodules and reports no new errors.
-No dependency or Spec changed.
+`tests/avatar-cache.test.ts`, `tests/use-stable-avatar-src.test.tsx`,
+`tests/user-message-sender-identity.test.tsx`, and
+`tests/session-pending-message-row.test.tsx` cover original first display, warmed
+and restored offline return, decoding failure, first-commit source arrival/removal,
+directory-seeded sender names before `auth:getUserById` resolves, virtualized
+remount and reload retention, explicit `null` deletion, cross-account/workspace
+isolation, and pending-to-history handoff continuity. Browser memory-pressure
+eviction and device frame-time distributions remain unmeasured.

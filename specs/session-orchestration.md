@@ -234,10 +234,13 @@ that Agent holds the Session's tool binding, so Lody does not require it to repo
 its own activity; providers such as Codex report none.
 
 Recovery uses the frozen prompt, Role revision and dispatch configuration. Before
-replaying a missing target input, cloud confirms remote document catch-up; OSS
-confirms the authoritative daemon repo and rechecks the fixed Turn under the
-existing materialization claim. Missing cloud connectivity never counts as local
-authority in a cloud workspace. Completion writes directly to the native Inbox in
+replaying a missing target input, OSS and Cloud same-machine targets authored through
+the daemon's own repo confirm the authoritative daemon repo (`repo.flush()`) and
+recheck the fixed Turn under the existing materialization claim; Cloud remote-machine
+or locally absent targets confirm remote Streams document catch-up
+([availability trade-off](../.agents/notes/implemented/architecture/2026-11-21-cloud-same-machine-recovery-authority.md)).
+Missing cloud connectivity never counts as authority for remote targets or unverified
+cross-account access in a cloud workspace. Completion writes directly to the native Inbox in
 the same Operation transaction; the result-consumption rules below control execution.
 This changes local persisted storage, not the hosted API.
 

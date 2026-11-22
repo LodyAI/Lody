@@ -58,7 +58,13 @@ export function WorkspaceAvatar({ workspace, size = 'medium', className }: Works
 
   return (
     <Avatar.Root size={size} shape="tile" className={className}>
-      {avatarImage ? <Avatar.Image src={avatarImage} alt={workspace?.name || 'Workspace'} /> : null}
+      {avatarImage ? (
+        <Avatar.Image
+          src={avatarImage}
+          alt={workspace?.name || 'Workspace'}
+          referrerPolicy="no-referrer"
+        />
+      ) : null}
       <Avatar.Fallback
         style={
           initial

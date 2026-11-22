@@ -18,6 +18,7 @@ import {
   type FocusIntent,
   type TodayFragment,
   type TodayDate,
+  type TodayMentionTarget,
   type TodayNodeId,
 } from '@lody/shared';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
@@ -91,7 +92,9 @@ export type TodaySessionPickerState = {
   index: number;
   /** Offset of the `@`; the mention replaces `start..start + 1 + query.length`. */
   start: number;
+  tab: TodayPickerTab;
 };
+export type TodayPickerTab = 'all' | 'member' | 'session';
 /**
  * An `@` (or full-width `＠`) at the line start or after whitespace, then the
  * query up to the caret: no newline and no other mention inside it.
@@ -147,13 +150,11 @@ export class TodayEditorController {
   /** The `@` the user dismissed with Esc (`nodeId:offset`): it stays closed. */
   private pickerDismissedFor: string | null = null;
   /** Candidates the picker currently shows, set by its view. */
-  pickerItems: readonly string[] = [];
+  pickerItems: readonly TodayMentionTarget[] = [];
   private dropIndicator: TodayDropIndicator | null = null;
   private dragGhost: TodayDragGhost | null = null;
   private cancelSettle: (() => void) | null = null;
-  /** Opens the node menu for a bullet clicked without dragging (wired by the host). */
-  onNodeMenu: ((store: TodayPageStore, nodeId: TodayNodeId, anchor: HTMLElement) => void) | null =
-    null;
+  private pointerSelecting = false;
   /** Workspace whose session links may be pasted into a node. */
   workspaceId: string | null = null;
   /** Plain-text form of a mention in copies and the Convert to task prompt (set by the host). */
@@ -259,7 +260,14 @@ export class TodayEditorController {
           this.picker.start === start &&
           this.picker.query === query;
         if (same) return;
-        this.picker = { store: active.store, nodeId: active.nodeId, query, index: 0, start };
+        this.picker = {
+          store: active.store,
+          nodeId: active.nodeId,
+          query,
+          index: 0,
+          start,
+          tab: this.picker?.tab ?? 'all',
+        };
         this.notify();
       })
     );
@@ -299,6 +307,12 @@ export class TodayEditorController {
   }
   getEditorRoot() {
     return this.root;
+  }
+  getSurface() {
+    return this.surface;
+  }
+  isSelectingByPointer() {
+    return this.pointerSelecting;
   }
   getDropIndicator() {
     return this.dropIndicator;
@@ -392,7 +406,7 @@ export class TodayEditorController {
 
   /**
    * Bullet pressed: after 5px it drags the node (or the whole block selection
-   * it belongs to) within its day; a press without movement opens the menu.
+   * it belongs to) within its day; a press without movement selects the node.
    */
   beginNodeDrag(
     store: TodayPageStore,
@@ -450,7 +464,9 @@ export class TodayEditorController {
         );
       } else if (wasDragging) this.notify();
       if (drop) this.dropAt(store, drop, ids);
-      if (commit && !wasDragging) this.onNodeMenu?.(store, nodeId, bullet);
+      if (commit && !wasDragging && !this.isBlockSelected(store, nodeId)) {
+        this.selectBlocks(store, [nodeId]);
+      }
     };
     const move = (event: PointerEvent) => {
       // The release happened where we could not see it (another window or app):
@@ -584,10 +600,10 @@ export class TodayEditorController {
       }
       case 'Enter':
       case 'Tab': {
-        const sessionId = this.pickerItems[picker.index];
-        if (!sessionId) return false;
+        const target = this.pickerItems[picker.index];
+        if (!target) return false;
         event.preventDefault();
-        queueMicrotask(() => this.acceptPicker(sessionId));
+        queueMicrotask(() => this.acceptPicker(target));
         return true;
       }
       case 'Escape':
@@ -604,19 +620,24 @@ export class TodayEditorController {
   }
 
   /** Replace the `@query` with a mention; one undo brings `@query` back. */
-  acceptPicker(sessionId: string) {
+  acceptPicker(target: TodayMentionTarget) {
     const picker = this.picker;
     if (!picker) return;
     this.picker = null;
     const { store, nodeId, start, query } = picker;
     const focus = store.undo.structural(() =>
-      store.outline.insertMention(nodeId, start, query.length + 1, {
-        kind: 'session',
-        id: sessionId,
-      })
+      store.outline.insertMention(nodeId, start, query.length + 1, target)
     );
     this.apply(store, focus);
   }
+
+  setPickerTab(tab: TodayPickerTab) {
+    if (!this.picker || this.picker.tab === tab) return;
+    this.picker = { ...this.picker, tab, index: 0 };
+    this.notify();
+  }
+
+  onOpenMember: ((userId: string) => void) | null = null;
 
   /** Sections register their open page so the caret can cross days. */
   registerDay(date: TodayDate, store: TodayPageStore) {
@@ -759,6 +780,9 @@ export class TodayEditorController {
           visible.map((node) => node.id)
         );
         return true;
+      case 'cycle-todo':
+        this.cycleSelectionTodo();
+        return true;
       case 'indent':
       case 'outdent':
       case 'move-up':
@@ -784,6 +808,34 @@ export class TodayEditorController {
     );
     if (cut) this.deleteBlocks(store, roots);
     return true;
+  }
+
+  cycleSelectionTodo() {
+    const selection = this.selection;
+    if (!selection) return;
+    const { store, ids } = selection;
+    store.undo.structural(() => store.outline.cycleTodo(ids));
+  }
+
+  toggleDone(store: TodayPageStore, nodeId: TodayNodeId) {
+    const state = store.outline.getNode(nodeId)?.todo;
+    if (!state) return;
+    store.undo.structural(() =>
+      store.outline.setTodo([nodeId], state === 'done' ? 'todo' : 'done')
+    );
+  }
+
+  copySelection() {
+    if (!this.selection || !this.surface) return;
+    this.surface.focus({ preventScroll: true });
+    this.surface.ownerDocument.execCommand('copy');
+  }
+
+  deleteSelection() {
+    const selection = this.selection;
+    if (!selection) return;
+    const { store } = selection;
+    this.deleteBlocks(store, topLevelSelection(store.getSnapshot().visible, selection.ids));
   }
 
   private deleteBlocks(store: TodayPageStore, roots: TodayNodeId[]) {
@@ -944,7 +996,10 @@ export class TodayEditorController {
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('blur', stop);
       this.stopPointer = null;
+      this.pointerSelecting = false;
+      if (this.selection) this.notify();
     };
+    this.pointerSelecting = true;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stop);
     window.addEventListener('blur', stop);
@@ -1207,6 +1262,9 @@ export class TodayEditorController {
         return this.focusNeighbour(store, nodeId, 1, 'start');
       case 'block-select':
         return this.selectBlocks(store, [nodeId]);
+      case 'cycle-todo':
+        store.undo.structural(() => outline.cycleTodo([nodeId]));
+        return keepCaret();
       case 'extend-text':
         this.editor.update(() => $setSelectionOffsets(intent.anchor, intent.focus), {
           discrete: true,

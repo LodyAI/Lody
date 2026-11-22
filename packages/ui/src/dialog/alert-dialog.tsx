@@ -72,13 +72,12 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
         container={container === undefined ? modalContainer : container}
         className={[stylex.props(styles.portal).className, ...palette].filter(Boolean).join(' ')}
       >
-        {/* `AlertDialog.Backdrop` is the dialog's backdrop upstream, so the
-            shared part carries forceRender and the nested veil here too. */}
         <DialogBackdrop className={appendClassName(backdropClassName, noTransition)}>
           {backdropContent}
         </DialogBackdrop>
         <BaseAlertDialog.Popup
           ref={panelRef}
+          data-text-selectable=""
           {...rest}
           style={mergePanelLayout(style, { width, centre })}
           className={(state) =>

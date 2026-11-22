@@ -43,11 +43,11 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   parent children stay out of `sessionListAtom`. Read
   [session provenance rules](sessions/AGENTS.md#opener-provenance) before changing ownership.
 - Opener and unrelated top-level rows retain flat-list alignment. In the leading slot,
-  openers show disclosure and children ├/└; ⋯ reveals in the end slot before Archive,
-  painted with row fill. Draw nesting regardless of hover/status. Children alone
-  widen the slot 14→26px for a 12px title indent without shifting the background.
-  Keep geometry in `session-row-leading-slot.tsx`; context-menu expand/collapse uses
-  the same toggle.
+  an opener shows disclosure, a child ├/└, nothing else — the ⋯ menu reveals in the
+  end slot before Archive, in reserved columns with no fill of its own.
+  Draw nesting regardless of hover or working/unread/waiting status. Children alone widen the slot 14px→26px, a 12px title indent that never
+  shifts the background. Keep geometry in `session-row-leading-slot.tsx`; context-menu
+  expand/collapse uses the same toggle.
 - Conversation titles stay `font-normal`; pin with the glyph, never weight.
 - Sidebar row radius, inset, ink, hover/selected fill and title clipping use
   `sidebar-surface.ts` / `sidebar.tokens.stylex.ts` on conversation, repo and nav rows.
@@ -105,12 +105,6 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
 
 ## Conversation access
 
-- `session-sharing.tsx` owns one desktop team/web header control: team visibility
-  selects menu/button; public status selects its label; audience strip shows
-  access. Disable unavailable audiences with reasons; no narrowing,
-  tabs, search or second badge. Paths/base branch stay in ⋯. Closed headers read
-  only `useSessionShareStatus`'s management row (`unknown` means not shared).
-  Inline panel/⋯ dialog reuse one keyed publisher; panel stays open while publishing. [Contract](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
 - `session-sharing.tsx` owns the shared header control. Its button states Private,
   Team read-only or Team can edit. The panel offers Private and Team read-only;
   shared-machine editing links to machine settings. Only the machine owner can

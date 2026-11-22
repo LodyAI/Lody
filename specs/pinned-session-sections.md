@@ -46,8 +46,12 @@ place them in named pin sections, such as "Maintenance".
   place; while expanded, it names the hidden row count under its rows.
 - Opener child conversations stay under their root conversation and move with
   it; they are not ordered independently.
-- The mobile layout shows non-empty sections and their order but offers no
-  dragging or section management.
+- On phones the behavior is the same on the phone WebView and the native iOS and
+  Android clients ([phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md)): a long
+  press that turns into a drag reorders pinned conversations and moves them
+  between sections, dropping an unpinned conversation into the pin area pins it,
+  the row menu offers "Move to section" and "Move to top", and each section
+  header's menu offers New section, Rename, Move up, Move down and Delete.
 
 ## Data ownership
 
@@ -103,14 +107,14 @@ their recent-activity order among themselves. There is no migration.
   tasks that need a fixed place use a destination that reuses one conversation
   (`own_session` or `existing_session`) and are pinned once.
 - Private, per-member pin layouts.
-- Native iOS and Android clients. They ignore the new fields and are
-  unaffected.
+- Encrypted workspaces on the native iOS and Android clients, which do not open
+  encrypted workspaces at all yet. The phone WebView supports them.
 
 ## Permissions
 
 Every member with workspace write permission can create, rename, delete and
 drag sections, including in encrypted workspaces; read-only members can only
-view them. Members already write the workspace Flock, for example when creating
+view them and are not offered section management. Members already write the workspace Flock, for example when creating
 a private Agent Role. A write path that rejects a `pinSection` row from a
 member with write permission is a gap to fix, not a reason to narrow section
 management further.
@@ -139,5 +143,10 @@ Executed validation (unit and jsdom tests, not a running app):
 `packages/components/tests/workspace-catalog-write.test.ts`,
 `packages/components/tests/loro-sidebar-pinned-section.test.tsx`,
 `packages/components/tests/sidebar-navigation-model.test.ts`,
-`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`. Dragging a
-section header and E2EE write admission were not exercised.
+`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`,
+`packages/shared/tests/status-view.test.ts`. Storybook end-to-end
+(`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`): a row moved
+into another section and a section reordered by dragging its header. A non-owner
+Member sealing a `pinSection` row is tested at the encrypted room level
+(`apps/electron/src/main/services/e2ee-runtime.test.mjs`); the hosted gateway's
+admission is not exercised. Phones: see the [phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md#verification).

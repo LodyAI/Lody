@@ -6,7 +6,6 @@ import {
   type ReactEventHandler,
   type ReactNode,
 } from 'react';
-import { cn } from '@/lib/utils';
 import { useTranslation } from 'react-i18next';
 import type { SessionRowOpenedByTreeSlot } from './session-row-leading-slot';
 export {
@@ -67,6 +66,64 @@ const GROUP_HOVER = ':is(:where(.group):hover *)';
 const GROUP_OPEN = ':is(:where(.group)[data-menu-open] *)';
 
 const rowParts = stylex.create({
+  menuButton: {
+    display: 'flex',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    opacity: 0,
+    pointerEvents: 'none',
+    outline: { default: null, ':focus-visible': 'none' },
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+      ':hover': 'hsl(var(--sidebar-foreground))',
+      [GROUP_OPEN]: 'hsl(var(--sidebar-foreground))',
+      ':is(:where(.group\\/row)[data-menu-open] *)': 'hsl(var(--sidebar-foreground))',
+    },
+    boxShadow: {
+      default: null,
+      ':hover': 'inset 0 0 0 20px hsl(var(--sidebar-foreground) / 0.15)',
+      [GROUP_OPEN]: 'inset 0 0 0 20px hsl(var(--sidebar-foreground) / 0.15)',
+      ':is(:where(.group\\/row)[data-menu-open] *)':
+        'inset 0 0 0 20px hsl(var(--sidebar-foreground) / 0.15)',
+    },
+    transitionProperty: 'opacity,color,box-shadow',
+    transitionDuration: themeDuration[100],
+  },
+  actionButton: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 20,
+    display: 'inline-flex',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+      ':hover': 'hsl(var(--sidebar-foreground))',
+    },
+    opacity: 0,
+    pointerEvents: 'none',
+    transitionProperty: 'opacity,color,background-color',
+    transitionDuration: themeDuration[100],
+    outline: { default: null, ':focus-visible': 'none' },
+    boxShadow: { default: null, ':focus-visible': '0 0 0 2px hsl(var(--sidebar-ring) / 0.4)' },
+  },
+  menuSlot: {
+    position: 'absolute',
+    top: 0,
+    zIndex: 20,
+    display: 'flex',
+    height: themeSpace[5],
+    alignItems: 'center',
+  },
+  menuBeforeArchive: { right: themeSpace[5] },
+  menuAtEnd: { right: 0 },
   prAnchor: {
     display: 'inline-flex',
     width: '20px',
@@ -954,16 +1011,13 @@ export function SessionOpenedByTreeRow({
  * ③ The hover-revealed ⋯ action. It opens the row's ordinary right-click menu from
  * a left click by re-dispatching `contextmenu` at its own corner, so the button and
  * the right-click gesture can never diverge. `SidebarRowEndSlot` reserves its own
- * 20px column left of Archive and paints its revealed-action area with the row's
- * fill, so the trigger sits on the same opaque `--sidebar-hover` /
- * `--sidebar-selection` as the row beneath it. The pressed tint shades that fill
- * as an inset shadow rather than a translucent background-color that would let
- * content through again.
+ * 20px column left of Archive, so the trigger sits on the row's own fill with the
+ * title already truncated before it. The pressed tint is an inset shadow.
  */
 export function SessionRowMenuButton({
   label,
   /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+  revealClassName = stylex.props(rowParts.reveal).className,
 }: {
   label: string;
   revealClassName?: string;
@@ -986,19 +1040,9 @@ export function SessionRowMenuButton({
           })
         );
       }}
-      className={cn(
-        'flex h-5 w-5 items-center justify-center rounded-sm opacity-0 pointer-events-none',
-        'text-sidebar-foreground-muted/80 transition-[opacity,color,box-shadow] duration-100',
-        'hover:text-sidebar-foreground hover:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
-        'focus-visible:outline-hidden',
-        // The trigger itself stays pressed-looking while its menu is open,
-        // not just the row around it.
-        'group-data-[menu-open]:text-sidebar-foreground group-data-[menu-open]:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
-        'group-data-[menu-open]/row:text-sidebar-foreground group-data-[menu-open]/row:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
-        revealClassName
-      )}
+      className={clsx(stylex.props(rowParts.menuButton).className, revealClassName)}
     >
-      <MoreHorizontal className="h-3.5 w-3.5" />
+      <MoreHorizontal {...stylex.props(rowParts.fullPr)} />
     </button>
   );
 }
@@ -1054,7 +1098,7 @@ export function SidebarRowActionButton({
   icon,
   onConfirm,
   /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+  revealClassName = stylex.props(rowParts.reveal).className,
 }: {
   label: string;
   icon: ReactNode;
@@ -1074,13 +1118,7 @@ export function SidebarRowActionButton({
               event.stopPropagation();
               onConfirm();
             }}
-            className={cn(
-              'absolute right-0 top-0 z-20 inline-flex h-5 w-5 items-center justify-center rounded-sm',
-              'text-sidebar-foreground-muted/80 opacity-0 pointer-events-none transition-[opacity,color,background-color] duration-100',
-              'hover:text-sidebar-foreground',
-              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40',
-              revealClassName
-            )}
+            className={clsx(stylex.props(rowParts.actionButton).className, revealClassName)}
           >
             {icon}
           </button>
@@ -1090,19 +1128,6 @@ export function SidebarRowActionButton({
     </Tooltip.Root>
   );
 }
-
-// Revealed end-slot fills, one per row group scope. Each set names only its
-// own scope so an unrelated ancestor `group` can never reveal the fill.
-const PLAIN_ROW_GROUP_FILL = cn(
-  'group-hover:bg-sidebar-hover group-data-[menu-open]:bg-sidebar-hover',
-  '[.group:hover[aria-current=page]_&]:bg-sidebar-selection',
-  '[.group[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
-);
-const NAMED_ROW_GROUP_FILL = cn(
-  'group-hover/row:bg-sidebar-hover group-data-[menu-open]/row:bg-sidebar-hover',
-  '[.group\\/row:hover[aria-current=page]_&]:bg-sidebar-selection',
-  '[.group\\/row[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
-);
 
 /**
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
@@ -1117,9 +1142,9 @@ const NAMED_ROW_GROUP_FILL = cn(
  * The hover actions (the ⋯ menu, then Archive) are absolutely overlaid on hover, so a
  * wide rest cluster never causes layout movement. The slot reserves one 20px
  * column per action even when no rest content shows, so the ⋯ stays inside the
- * row's trailing edge instead of overlaying the title, and while its actions
- * are revealed the slot paints itself with the row's own fill — every end-slot
- * action, present or added later, is opaque over its column.
+ * row's trailing edge instead of overlaying the title. The slot paints no fill
+ * of its own: the title is a flex sibling that truncates before it, so the
+ * actions sit directly on the row's hover or selection fill.
  */
 export function SidebarRowEndSlot({
   sessionId,
@@ -1133,7 +1158,6 @@ export function SidebarRowEndSlot({
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
   fadeClassName = stylex.props(rowParts.fade).className,
-  rowGroup = 'group',
 }: {
   /**
    * Reads this session's local send status here, in the leaf, so upload
@@ -1151,13 +1175,6 @@ export function SidebarRowEndSlot({
   menu?: ReactNode;
   archive?: ReactNode;
   fadeClassName?: string;
-  /**
-   * The row's own Tailwind group: plain `group`, or the named `group/row` used
-   * where the row sits inside an outer plain `group` (a section list). The
-   * revealed fill must key off the row only — matching any ancestor `group`
-   * would paint every row's slot whenever the pointer is over the list.
-   */
-  rowGroup?: 'group' | 'row';
 }) {
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
@@ -1209,21 +1226,7 @@ export function SidebarRowEndSlot({
     // the row's navigation; the hover action buttons re-enable pointer events on hover.
     // justify-end keeps a narrower resting mark's right edge exactly where the
     // revealed action lands, so the row's rightmost mark never shifts on hover.
-    // The revealed fill keeps the same color the row paints under these states:
-    // --sidebar-hover on hover and menu-open alike. aria-current lives on the
-    // same group element, so the selection overrides compound the state into
-    // one ancestor selector to win over the plain hover fill.
-    <div
-      data-session-row-end-slot=""
-      className={cn(
-        endSlotStyle.className,
-        showActions &&
-          cn(
-            'transition-colors duration-100',
-            rowGroup === 'row' ? NAMED_ROW_GROUP_FILL : PLAIN_ROW_GROUP_FILL
-          )
-      )}
-    >
+    <div data-session-row-end-slot="" {...endSlotStyle}>
       {hasRest ? (
         // A status mark centres in one 20px column, the same column the revealed
         // actions and a folded group's mark centre their 14px icons in, so it
@@ -1246,9 +1249,9 @@ export function SidebarRowEndSlot({
         // column to its left when both reveal — the pair stays flush at the right edge.
         <span
           data-session-row-menu=""
-          className={cn(
-            'absolute top-0 z-20 flex h-5 items-center',
-            archive ? 'right-5' : 'right-0'
+          {...stylex.props(
+            rowParts.menuSlot,
+            archive ? rowParts.menuBeforeArchive : rowParts.menuAtEnd
           )}
         >
           {menu}

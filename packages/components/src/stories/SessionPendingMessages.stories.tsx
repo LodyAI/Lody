@@ -4,6 +4,7 @@ import { Button } from '@lody/ui/button';
 import { useTranslation } from 'react-i18next';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { conversationSurface } from '@/components/ai-gui/surface';
 import { MessageRowView } from '@/components/ai-gui/view';
 import { seedSessionImageCache } from '@/lib/session-image-cache';
 import { PendingMessageRow } from '@/components/chat/session-pending-messages';
@@ -322,7 +323,9 @@ function UploadHandoff({ width = 720 }: { width?: number }) {
           </Button>
         </div>
         {phase === 'written' ? (
-          <ConversationColumn xstyle={migrationStyles.columnSpacing}>
+          <ConversationColumn
+            {...stylex.props(conversationSurface.message, conversationSurface.userMessage)}
+          >
             <MessageRowView
               sessionId={sessionId}
               message={

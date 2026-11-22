@@ -26,6 +26,17 @@ export function isWarmWindow(window: BrowserWindow): boolean {
   return warmWindows.has(window)
 }
 
+const companionWindows = new WeakSet<BrowserWindow>()
+
+/**
+ * Single-surface companions (the Today window) are user-facing but never take
+ * over the primary role: deep links, menus and Cmd+W semantics stay on a full
+ * workspace window.
+ */
+export function markCompanionWindow(window: BrowserWindow): void {
+  companionWindows.add(window)
+}
+
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }
@@ -68,7 +79,8 @@ export function registerProductWindow(window: BrowserWindow, warm: boolean): voi
     if (getMainWindow() === window) {
       setMainWindow(
         [...productWindows].find(
-          (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)
+          (candidate) =>
+            !candidate.isDestroyed() && !isWarmWindow(candidate) && !companionWindows.has(candidate)
         ) ?? null
       )
     }

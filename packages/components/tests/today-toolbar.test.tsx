@@ -28,7 +28,7 @@ describe('Today toolbar window chrome', () => {
     container = undefined;
   });
 
-  async function renderToolbar(pinned: boolean, collapsed: boolean) {
+  async function renderToolbar(pinned: boolean, collapsed: boolean, standalone = false) {
     const store = createStore();
     store.set(sidebarCollapsedAtom, collapsed);
     container = document.createElement('div');
@@ -38,7 +38,7 @@ describe('Today toolbar window chrome', () => {
       root?.render(
         withTestI18n(
           <Provider store={store}>
-            <TodayToolbar pinned={pinned} title={null}>
+            <TodayToolbar pinned={pinned} standalone={standalone} title={null}>
               <button type="button">Pick a date</button>
               <button type="button">Pin</button>
               <button type="button">More</button>
@@ -101,6 +101,20 @@ describe('Today toolbar window chrome', () => {
     await act(async () => [...hidden.toolbar.querySelectorAll('button')][0]!.click());
     expect(hidden.store.get(sidebarCollapsedAtom)).toBe(false);
     expect(hidden.toolbar.querySelectorAll('button')).toHaveLength(3);
+  });
+
+  it('makes the standalone Today window toolbar its own drag chrome, without sidebar controls', async () => {
+    // The Today window has no navigation sidebar, whatever its stored state says.
+    for (const collapsed of [false, true]) {
+      const { toolbar } = await renderToolbar(false, collapsed, true);
+      expect(toolbar.classList.contains('app-region-drag')).toBe(true);
+      const buttons = [...toolbar.querySelectorAll('button')];
+      expect(buttons.map((button) => button.textContent)).toEqual(['Pick a date', 'Pin', 'More']);
+      for (const button of buttons) expect(clickable(button, toolbar)).toBe(true);
+      flushSync(() => root?.unmount());
+      root = undefined;
+      container?.remove();
+    }
   });
 
   it('hands the sidebar controls to pinned Today: the main page no longer owns the window edge', async () => {

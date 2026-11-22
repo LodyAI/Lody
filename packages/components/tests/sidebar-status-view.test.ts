@@ -4,13 +4,11 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import {
-  buildSnoozePresets,
-  formatSnoozeCountdown,
-  isSidebarBucketCollapsed,
-  SIDEBAR_SETTLED_INACTIVITY_MS,
-  sidebarStatusGroup,
-} from '@/lib/sidebar-status-group';
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
+import { Provider as JotaiProvider, createStore } from 'jotai';
+import { runtimeAtom } from '@/atoms/runtime';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
+import { TestCloudPlatformProvider } from './test-platform';
 import {
   buildSidebarUpdatedBuckets,
   SidebarUpdatedSessionList,
@@ -24,52 +22,9 @@ import { planManualOrderMove, sortByManualOrder } from '@lody/shared';
 
 const NOW = Date.parse('2026-11-20T10:00:00.000Z');
 
-describe('sidebarStatusGroup', () => {
-  it('classifies snoozed sessions into later until snoozedUntil elapses', () => {
-    expect(
-      sidebarStatusGroup({ latestMessageAt: NOW - 1_000, snoozedUntil: NOW + 60_000 }, NOW)
-    ).toBe('later');
-    expect(sidebarStatusGroup({ latestMessageAt: NOW - 1_000, snoozedUntil: NOW }, NOW)).toBe(
-      'focus'
-    );
-  });
-
-  it('classifies manually settled sessions into settled until a newer message arrives', () => {
-    expect(sidebarStatusGroup({ latestMessageAt: NOW - 5_000, settledAt: NOW - 1_000 }, NOW)).toBe(
-      'settled'
-    );
-    expect(sidebarStatusGroup({ latestMessageAt: NOW, settledAt: NOW - 1_000 }, NOW)).toBe('focus');
-  });
-
-  it('auto-settles quiet sessions after 7 days unless working, waiting, or restored to Focus', () => {
-    const eightDaysAgo = NOW - SIDEBAR_SETTLED_INACTIVITY_MS - 86_400_000;
-    expect(sidebarStatusGroup({ latestMessageAt: eightDaysAgo }, NOW)).toBe('settled');
-    expect(sidebarStatusGroup({ latestMessageAt: eightDaysAgo, isWorking: true }, NOW)).toBe(
-      'focus'
-    );
-    expect(
-      sidebarStatusGroup({ latestMessageAt: eightDaysAgo, isWaitingPermission: true }, NOW)
-    ).toBe('focus');
-    expect(
-      sidebarStatusGroup({ latestMessageAt: eightDaysAgo, focusRestoredAt: NOW - 3_600_000 }, NOW)
-    ).toBe('focus');
-  });
-
-  it('always surfaces waiting-for-permission sessions in Focus even when snoozed or settled', () => {
-    expect(
-      sidebarStatusGroup(
-        { latestMessageAt: NOW - 5_000, snoozedUntil: NOW + 3_600_000, isWaitingPermission: true },
-        NOW
-      )
-    ).toBe('focus');
-    expect(
-      sidebarStatusGroup(
-        { latestMessageAt: NOW - 5_000, settledAt: NOW - 1_000, isWaitingPermission: true },
-        NOW
-      )
-    ).toBe('focus');
-  });
-
+// Tier rules and their order are the shared golden vectors
+// (packages/shared/src/status-view/vectors); these cover the sidebar adapter.
+describe('sidebar Status buckets', () => {
   it('classifies opened-by child sessions independently, nests them when in the same group, and indexes Focus moves over roots only', () => {
     const mk = (id: string, extra: Partial<SidebarUpdatedItem> = {}): SidebarUpdatedItem => ({
       id,
@@ -152,64 +107,12 @@ describe('sidebarStatusGroup', () => {
   });
 });
 
-describe('formatSnoozeCountdown & buildSnoozePresets', () => {
-  it('formats compact countdown units cleanly', () => {
-    expect(formatSnoozeCountdown(NOW - 1, NOW)).toBeNull();
-    expect(formatSnoozeCountdown(NOW + 20_000, NOW)).toBe('<1m');
-    expect(formatSnoozeCountdown(NOW + 45 * 60_000, NOW)).toBe('45m');
-    expect(formatSnoozeCountdown(NOW + 2 * 3_600_000, NOW)).toBe('2h');
-    expect(formatSnoozeCountdown(NOW + 3 * 86_400_000, NOW)).toBe('3d');
-  });
-
-  it('produces four future quick snooze presets', () => {
-    const presets = buildSnoozePresets(new Date(NOW));
-    expect(presets.map((p) => p.id)).toEqual([
-      'oneHour',
-      'laterToday',
-      'tomorrowMorning',
-      'nextWeek',
-    ]);
-    for (const preset of presets) {
-      expect(preset.timestamp).toBeGreaterThan(NOW);
-      expect(preset.countdown.length).toBeGreaterThan(0);
-    }
-  });
-});
-
-describe('Focus manual fractional-index ordering', () => {
-  it('sorts keyed items first and unkeyed items by stable ascending id (never recency)', () => {
-    const items = [
-      { id: 'z', orderKey: null, recency: 999 },
-      { id: 'c', orderKey: null, recency: 300 },
-      { id: 'b', orderKey: '82', recency: 100 },
-      { id: 'a', orderKey: '80', recency: 200 },
-    ];
-    const sorted = sortByManualOrder(items, (item) => item);
-    expect(sorted.map((item) => item.id)).toEqual(['a', 'b', 'c', 'z']);
-
-    const writes = planManualOrderMove(sorted, { sessionId: 'c', toIndex: 1 });
-    expect(writes).toHaveLength(1);
-    expect(writes[0]?.sessionId).toBe('c');
-
-    const updated = sorted.map((item) =>
-      item.id === 'c' ? { ...item, orderKey: writes[0]!.orderKey } : item
-    );
-    expect(sortByManualOrder(updated, (item) => item).map((item) => item.id)).toEqual([
-      'a',
-      'c',
-      'b',
-      'z',
-    ]);
-  });
-
+describe('Focus wake-up', () => {
   it('derives snooze wake-up unread state and Focus top placement without mutating lastMessageAt or orderKey', () => {
     const tenDaysAgo = NOW - 10 * 86_400_000;
     const snoozeTarget = NOW - 5_000; // already elapsed
 
     // Older >7d session surfaces in Focus once its snooze elapses, and sorts to the top of Focus.
-    expect(
-      sidebarStatusGroup({ latestMessageAt: tenDaysAgo, snoozedUntil: snoozeTarget }, NOW)
-    ).toBe('focus');
     const items: SidebarUpdatedItem[] = [
       {
         id: 'focus-a',
@@ -267,6 +170,39 @@ describe('Focus manual fractional-index ordering', () => {
           snoozedUntil: snoozeTarget,
         },
         NOW + 60_000
+      )
+    ).toBe(true);
+  });
+
+  it('keeps a woken row placed by a Focus reorder at its key and still unread', () => {
+    const tenDaysAgo = NOW - 10 * 86_400_000;
+    const wokeAt = NOW - 5_000;
+    const items: SidebarUpdatedItem[] = [
+      {
+        id: 'focus-a',
+        kind: 'chat',
+        title: 'A',
+        sectionLabel: 'Chats',
+        latestMessageAt: NOW,
+        orderKey: '80',
+      },
+      {
+        id: 'placed-woken',
+        kind: 'chat',
+        title: 'Placed',
+        sectionLabel: 'Chats',
+        latestMessageAt: tenDaysAgo,
+        orderKey: '82',
+        snoozedUntil: wokeAt,
+        focusRestoredAt: wokeAt,
+      },
+    ];
+    const focus = buildSidebarUpdatedBuckets(items, 'status', NOW).find((b) => b.key === 'focus')!;
+    expect(focus.items.map((i) => i.id)).toEqual(['focus-a', 'placed-woken']);
+    expect(
+      sessionHasUnreadMessages(
+        { lastMessageAt: tenDaysAgo, lastReadAt: tenDaysAgo, snoozedUntil: wokeAt },
+        NOW
       )
     ).toBe(true);
   });
@@ -401,5 +337,76 @@ describe('Status view row actions', () => {
     // The PR icon must sit left of the countdown — the wake-up time owns the
     // row's right edge.
     expect(countdown?.parentElement?.lastElementChild).toBe(countdown);
+  });
+});
+
+describe('Status view write gate', () => {
+  let gateRoot: Root | undefined;
+  let gateContainer: HTMLDivElement | undefined;
+
+  afterEach(() => {
+    flushSync(() => gateRoot?.unmount());
+    gateRoot = undefined;
+    gateContainer?.remove();
+    gateContainer = undefined;
+  });
+
+  function writableFor(runtime: unknown, workspaceRole?: string): () => boolean {
+    const store = createStore();
+    store.set(runtimeAtom, runtime as never);
+    const seen: boolean[] = [];
+    function Probe() {
+      seen.push(useStatusViewWritable(workspaceRole));
+      return null;
+    }
+    gateContainer = document.createElement('div');
+    document.body.append(gateContainer);
+    gateRoot = createRoot(gateContainer);
+    flushSync(() =>
+      gateRoot!.render(
+        React.createElement(
+          TestCloudPlatformProvider,
+          null,
+          React.createElement(JotaiProvider, { store }, React.createElement(Probe))
+        )
+      )
+    );
+    return () => seen.at(-1)!;
+  }
+
+  it('withholds status and section actions from an encrypted Guest until the ledger grants write', () => {
+    let role: 'read' | 'write' = 'read';
+    const listeners = new Set<() => void>();
+    const latest = writableFor({
+      workspaceId: 'ws-e2ee',
+      contentMode: 'e2ee',
+      protectedCodeCollabRole: {
+        get: () => role,
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+    });
+    expect(latest()).toBe(false);
+
+    role = 'write';
+    flushSync(() => {
+      for (const listener of listeners) listener();
+    });
+    expect(latest()).toBe(true);
+  });
+
+  it('withholds them from a known read-only membership of an ordinary workspace only', () => {
+    const ordinary = { workspaceId: 'ws-plain', contentMode: 'plaintext' };
+    expect(writableFor(ordinary, 'guest')()).toBe(false);
+  });
+
+  it('keeps them for members and while the membership is still unknown', () => {
+    const ordinary = { workspaceId: 'ws-plain', contentMode: 'plaintext' };
+    expect(writableFor(ordinary, 'member')()).toBe(true);
+    flushSync(() => gateRoot?.unmount());
+    gateContainer?.remove();
+    expect(writableFor(ordinary)()).toBe(true);
   });
 });

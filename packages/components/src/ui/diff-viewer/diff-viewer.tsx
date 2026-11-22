@@ -1333,6 +1333,7 @@ function DiffViewerImpl({
       onFocusCapture={() => setKeepContentMounted(true)}
       className={clsx('lody-pierre-diff', stylex.props(styles.diffHost).className)}
       style={pierreDiffHostStyle}
+      data-text-selectable
     >
       {diffContent}
     </div>

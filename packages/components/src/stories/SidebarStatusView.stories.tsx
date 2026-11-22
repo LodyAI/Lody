@@ -1,24 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useCallback, useMemo, useState } from 'react';
-import {
-  buildPinnedSectionLayout,
-  planManualOrderMove,
-  planNewPinPlacement,
-  planNewPinSectionOrderKey,
-  planPinSectionMove,
-  planPinnedSessionMove,
-  sortByManualOrder,
-  type PinPlacementWrite,
-  type PinSection,
-  type PinnedSessionPlacement,
-} from '@lody/shared';
+import { useState } from 'react';
+import type { PinSection } from '@lody/shared';
 import { LoroSidebar } from '@/components/loro-sidebar';
-import { isSidebarBucketCollapsed, sidebarStatusGroup } from '@/lib/sidebar-status-group';
-import type { SidebarPinSectionActions } from '@/components/sidebar-pinned-sections';
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import type {
   SidebarUpdatedBucketKey,
   SidebarUpdatedItem,
 } from '@/components/sidebar-updated-session-list';
+import { useStatusViewStoryState } from './status-view-story-state';
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -188,172 +177,13 @@ function StatusViewPlayground({
 }: {
   initialCollapsedBuckets?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
 }) {
-  const [sessions, setSessions] = useState<DemoSession[]>(INITIAL_SESSIONS);
-  const [pinSections, setPinSections] = useState<PinSection[]>(INITIAL_PIN_SECTIONS);
+  const state = useStatusViewStoryState(INITIAL_SESSIONS, INITIAL_PIN_SECTIONS, toItem);
+  const { conversations: sessions, setConversations: setSessions } = state;
   const [selectedId, setSelectedId] = useState<string>('focus-1');
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
   const [collapsedPinSectionIds, setCollapsedPinSectionIds] = useState<Record<string, boolean>>({});
   const [collapsedBuckets, setCollapsedBuckets] =
     useState<Partial<Record<SidebarUpdatedBucketKey, boolean>>>(initialCollapsedBuckets);
-
-  const pinnedLayout = useMemo(() => {
-    const pinned = sessions.filter((s) => s.isPinned).map(toItem);
-    const byId = new Map(sessions.map((s) => [s.id, s]));
-    return buildPinnedSectionLayout(pinned, pinSections, (item): PinnedSessionPlacement => {
-      const meta = byId.get(item.id);
-      return {
-        id: item.id,
-        pinSectionId: meta?.pinSectionId ?? null,
-        orderKey: meta?.orderKey ?? null,
-        recency: meta?.latestMessageAt ?? 0,
-      };
-    });
-  }, [sessions, pinSections]);
-
-  const pinnedSections = useMemo(
-    () =>
-      pinnedLayout.map((entry) => ({
-        id: entry.sectionId,
-        name: entry.section?.name ?? '',
-        items: entry.items,
-      })),
-    [pinnedLayout]
-  );
-
-  const updatedItems = useMemo(() => sessions.filter((s) => !s.isPinned).map(toItem), [sessions]);
-
-  const applyPinWrites = useCallback((writes: readonly PinPlacementWrite[]) => {
-    const byId = new Map(writes.map((w) => [w.sessionId, w]));
-    setSessions((prev) =>
-      prev.map((session) => {
-        const write = byId.get(session.id);
-        return write
-          ? {
-              ...session,
-              isPinned: true,
-              pinSectionId: write.pinSectionId,
-              orderKey: write.orderKey,
-            }
-          : session;
-      })
-    );
-  }, []);
-
-  const pinSectionActions = useMemo<SidebarPinSectionActions>(
-    () => ({
-      onDropItem: (itemId, sectionId, toIndex) => {
-        const placements = buildPinnedSectionLayout(
-          sessions
-            .filter((s) => s.isPinned)
-            .map((s) => ({
-              id: s.id,
-              pinSectionId: s.pinSectionId ?? null,
-              orderKey: s.orderKey ?? null,
-              recency: s.latestMessageAt,
-            })),
-          pinSections,
-          (p) => p
-        );
-        applyPinWrites(
-          planPinnedSessionMove(placements, { sessionId: itemId, toSectionId: sectionId, toIndex })
-        );
-      },
-      onMoveSection: (sectionId, toIndex) => {
-        const nextOrderKey = planPinSectionMove(pinSections, sectionId, toIndex);
-        setPinSections((prev) =>
-          prev.map((s) => (s.id === sectionId ? { ...s, orderKey: nextOrderKey } : s))
-        );
-      },
-      onCreateSection: (name, moveItemId) => {
-        const id = `sec-${Date.now()}`;
-        const orderKey = planNewPinSectionOrderKey(pinSections);
-        setPinSections((prev) => [...prev, { id, name, orderKey }]);
-        if (moveItemId) {
-          applyPinWrites([{ sessionId: moveItemId, pinSectionId: id, orderKey: '80' }]);
-        }
-      },
-      onRenameSection: (sectionId, name) => {
-        setPinSections((prev) => prev.map((s) => (s.id === sectionId ? { ...s, name } : s)));
-      },
-      onDeleteSection: (sectionId) => {
-        setPinSections((prev) => prev.filter((s) => s.id !== sectionId));
-      },
-    }),
-    [applyPinWrites, pinSections, sessions]
-  );
-
-  const handleDropFocusItem = useCallback(
-    (sessionId: string, toIndex: number) => {
-      const nowMs = Date.now();
-      const focusSessions = sortByManualOrder(
-        sessions.filter(
-          (s) =>
-            !s.isPinned &&
-            sidebarStatusGroup(
-              {
-                latestMessageAt: s.latestMessageAt,
-                isWorking: s.isWorking,
-                isWaitingPermission: s.isWaitingPermission,
-                snoozedUntil: s.snoozedUntil,
-                settledAt: s.settledAt,
-                focusRestoredAt: s.focusRestoredAt,
-              },
-              nowMs
-            ) === 'focus'
-        ),
-        (s) => ({ id: s.id, orderKey: s.orderKey ?? null, recency: s.latestMessageAt })
-      );
-      const writes = planManualOrderMove(
-        focusSessions.map((s) => ({
-          id: s.id,
-          orderKey: s.orderKey ?? null,
-          recency: s.latestMessageAt,
-        })),
-        { sessionId, toIndex }
-      );
-      const byId = new Map(writes.map((w) => [w.sessionId, w.orderKey]));
-      setSessions((prev) =>
-        prev.map((s) => {
-          const nextKey = byId.get(s.id);
-          if (!nextKey) return s;
-          return {
-            ...s,
-            orderKey: nextKey,
-            ...(s.id === sessionId
-              ? { snoozedUntil: undefined, settledAt: undefined, focusRestoredAt: nowMs }
-              : {}),
-          };
-        })
-      );
-    },
-    [sessions]
-  );
-
-  const handleTogglePin = useCallback((sessionId: string, nextPinned: boolean) => {
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id !== sessionId) return s;
-        if (!nextPinned) {
-          return { ...s, isPinned: false, pinSectionId: undefined };
-        }
-        const { orderKey } = planNewPinPlacement(
-          buildPinnedSectionLayout(
-            prev
-              .filter((entry) => entry.isPinned && !entry.pinSectionId && entry.id !== sessionId)
-              .map((entry) => ({
-                id: entry.id,
-                pinSectionId: null,
-                orderKey: entry.orderKey ?? null,
-                recency: entry.latestMessageAt,
-              })),
-            [],
-            (p) => p
-          )
-        );
-        return { ...s, isPinned: true, pinSectionId: undefined, orderKey };
-      })
-    );
-  }, []);
 
   const selected = sessions.find((s) => s.id === selectedId);
 
@@ -366,15 +196,15 @@ function StatusViewPlayground({
         currentWorkspaceId="ws-1"
         organizeMode="status"
         showUpdatedProjectNames
-        pinnedSections={pinnedSections}
+        pinnedSections={state.pinnedSections}
         pinnedSectionCollapsed={pinnedCollapsed}
         onTogglePinnedSection={() => setPinnedCollapsed((prev) => !prev)}
         collapsedPinSectionIds={collapsedPinSectionIds}
         onTogglePinSection={(id) =>
           setCollapsedPinSectionIds((prev) => ({ ...prev, [id]: !prev[id] }))
         }
-        pinSectionActions={pinSectionActions}
-        updatedItems={updatedItems}
+        pinSectionActions={state.pinSectionActions}
+        updatedItems={state.updatedItems}
         updatedSelectedItemId={selectedId}
         updatedBucketsCollapsed={collapsedBuckets}
         onToggleUpdatedBucket={(key) =>
@@ -384,34 +214,11 @@ function StatusViewPlayground({
           }))
         }
         onSelectUpdatedItem={(id) => setSelectedId(id)}
-        onToggleUpdatedItemPinned={handleTogglePin}
-        onSnoozeUpdatedItem={(id, snoozedUntil) =>
-          setSessions((prev) =>
-            prev.map((s) => (s.id === id ? { ...s, snoozedUntil, settledAt: undefined } : s))
-          )
-        }
-        onSettleUpdatedItem={(id) =>
-          setSessions((prev) =>
-            prev.map((s) =>
-              s.id === id ? { ...s, settledAt: Date.now(), snoozedUntil: undefined } : s
-            )
-          )
-        }
-        onMoveUpdatedItemToFocus={(id) =>
-          setSessions((prev) =>
-            prev.map((s) =>
-              s.id === id
-                ? {
-                    ...s,
-                    snoozedUntil: undefined,
-                    settledAt: undefined,
-                    focusRestoredAt: Date.now(),
-                  }
-                : s
-            )
-          )
-        }
-        onDropFocusItem={handleDropFocusItem}
+        onToggleUpdatedItemPinned={state.togglePin}
+        onSnoozeUpdatedItem={state.snooze}
+        onSettleUpdatedItem={state.settle}
+        onMoveUpdatedItemToFocus={state.moveToFocus}
+        onDropFocusItem={state.onDropFocusItem}
         onRenameUpdatedItem={(id, nextTitle) =>
           setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: nextTitle } : s)))
         }

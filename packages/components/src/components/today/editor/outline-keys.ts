@@ -20,6 +20,7 @@ export type OutlineIntent =
   | { type: 'focus-previous-end' }
   | { type: 'focus-next-start' }
   | { type: 'block-select' }
+  | { type: 'cycle-todo' }
   /** Shift+Up/Down reached the first/last line: select to the node edge. */
   | { type: 'extend-text'; anchor: number; focus: number }
   /** Shift+Up/Down with the selection already at the node edge: select the node. */
@@ -58,6 +59,7 @@ export function resolveOutlineKey(
   const plain = !mod && !event.altKey && !event.shiftKey;
   switch (event.key) {
     case 'Enter':
+      if (mod && !event.shiftKey && !event.altKey) return { type: 'cycle-todo' };
       if (event.shiftKey || mod || event.altKey) return null;
       return caret.length === 0 ? { type: 'enter-empty' } : { type: 'split' };
     case 'Tab':

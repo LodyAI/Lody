@@ -95,7 +95,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { buildSnoozePresets, sidebarStatusGroup } from '@/lib/sidebar-status-group';
+import { buildSnoozePresets, expiredSnoozeTimestamp, statusViewTier } from '@lody/shared';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
+import { useOrganization } from '@/hooks/useOrganization';
 import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
@@ -293,6 +295,7 @@ import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import type { WorkspaceMember } from '@/hooks/use-workspace-members';
+import { useWorkspaceSenderProfile } from '@/hooks/use-workspace-sender-profile';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import {
   unlinkSessionPullRequestFromUi,
@@ -871,6 +874,10 @@ const styles = stylex.create({
   composerContents: { display: 'contents' },
   composerHidden: { display: 'none' },
 });
+
+function reportStatusActionError(error: unknown): void {
+  toast.error(error instanceof Error ? error.message : String(error));
+}
 
 function getErrorMessage(err: unknown): string {
   const syncError = loroSyncErrorTools?.formatLoroSyncError(err);
@@ -1528,10 +1535,10 @@ export function SessionHeaderMenu({
   const [customSnoozeTarget, setCustomSnoozeTarget] = useState<CustomSnoozeDialogTarget | null>(
     null
   );
-  const statusNow = new Date();
-  const statusGroup = sidebarStatusGroup(
+  const statusNow = new Date(getServerNow());
+  const statusGroup = statusViewTier(
     {
-      latestMessageAt: session.lastMessageAt ?? session.createdAt,
+      activityAt: session.lastMessageAt ?? (Date.parse(session.createdAt ?? '') || 0),
       isWorking: session.status?.type === 'running' || session.status?.type === 'initializing',
       isWaitingPermission: session.status?.type === 'requestPermission',
       snoozedUntil: session.snoozedUntil,
@@ -1892,7 +1899,7 @@ export function SessionHeaderMenu({
                           preset.id === 'oneHour'
                             ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
                             : preset.id === 'laterToday'
-                              ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                              ? t('sessions.contextMenu.snoozeLaterToday', 'In 3 hours')
                               : preset.id === 'tomorrowMorning'
                                 ? t(
                                     'sessions.contextMenu.snoozeTomorrowMorning',
@@ -2372,6 +2379,8 @@ export interface SessionChatInterfaceProps {
   onFilePathClick?: (filePath: string) => void;
   /** Opens an agent-uploaded HTML source path directly in rendered file preview. */
   onOpenHtmlFile?: (filePath: string) => void;
+  /** Opens an attachment preview as a side-panel tab; false when there is no panel. */
+  onOpenFileAttachment?: (file: SessionFilePayload, sessionId: SessionId) => boolean;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   /** Optional replacement for the GitHub badge area in the header. */
   headerActionsSlot?: React.ReactNode;
@@ -2604,6 +2613,7 @@ export const SessionChatInterface = memo(
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onOpenFileAttachment,
       messageFileDiffEntriesByTurn,
       headerActionsSlot,
       headerEndSlot,
@@ -2777,7 +2787,7 @@ export const SessionChatInterface = memo(
           (!!localMachineId &&
             !!getAutomationProofIssuer() &&
             workspaceSupports(automationContent, 'rpc') &&
-            currentUser?.id === session.userId))
+            !!currentUser?.id))
         ? {
             workspaceId,
             machineId: session.machineId,
@@ -3247,6 +3257,7 @@ export const SessionChatInterface = memo(
       settleSession,
       moveSessionToFocus,
     } = useSessionActions();
+    const statusViewWritable = useStatusViewWritable(useOrganization().role);
     // Linked pull requests: the user unlinks through their own records (the reconciler
     // alone publishes `pullRequests`). Rows open the primary PR's tab, others on GitHub.
     const prOwnerMeta = workspaceSession ?? session;
@@ -4509,15 +4520,26 @@ export const SessionChatInterface = memo(
       }
 
       const liveEngagement = getLatestWindowReadEngagement();
+      const readGate = {
+        rendersConversation: !hideMessageArea,
+        isVisible: surfaceVisible,
+        isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
+        hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
+      };
+      const rootWokeAt =
+        session.parentSessionId && workspaceSession
+          ? expiredSnoozeTimestamp(parseTimestamp(workspaceSession.snoozedUntil), getServerNow())
+          : null;
       if (
-        !shouldMarkSessionRead({
-          rendersConversation: !hideMessageArea,
-          isVisible: surfaceVisible,
-          isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
-          hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
-          lastMessageAt,
-          lastReadAt,
-        })
+        !shouldMarkSessionRead({ ...readGate, lastMessageAt, lastReadAt }) &&
+        !(
+          rootWokeAt !== null &&
+          shouldMarkSessionRead({
+            ...readGate,
+            lastMessageAt: rootWokeAt,
+            lastReadAt: parseTimestamp(workspaceSession?.lastReadAt),
+          })
+        )
       ) {
         return;
       }
@@ -4535,8 +4557,10 @@ export const SessionChatInterface = memo(
       session.id,
       session.lastMessageAt,
       session.lastReadAt,
+      session.parentSessionId,
       session.snoozedUntil,
       windowReadEngagementRevision,
+      workspaceSession,
     ]);
 
     const isDispatching = inputActionState === 'dispatching';
@@ -4680,16 +4704,19 @@ export const SessionChatInterface = memo(
       workspaceId,
     ]);
     const isFinalizing = isSessionFinalizing(liveSessionStatus);
-    // Resolve the same sender as the formal user row before owner confirmation.
-    const pendingSender = useCloudQuery(
-      cloudOperations.auth.getUserById,
-      currentUser?.id && workspaceId ? { userId: currentUser.id, workspaceId } : 'skip'
-    );
+    const pendingSenderUserId =
+      (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ?? currentUser?.id ?? null;
+    const pendingSender = useWorkspaceSenderProfile({
+      userId: pendingSenderUserId,
+      workspaceId,
+    });
     const pendingMessages = useSessionPendingMessages({
       sessionId: session.id,
       history: conversationView,
       user: pendingSender,
+      showSenderIdentity: isMultiMember,
       conversationFontSize,
+      onNavigateSession,
     });
     // Presence owns liveness; the same pending queue as the composer supplies
     // the kind of human input. Core metadata works for every ACP provider.
@@ -7442,19 +7469,30 @@ export const SessionChatInterface = memo(
                 }
         }
         onSnooze={
-          headerSharing?.access !== 'read'
+          statusViewWritable && headerSharing?.access !== 'read'
             ? (snoozedUntil) =>
-                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(() => undefined)
+                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
             : undefined
         }
         onSettle={
-          headerSharing?.access !== 'read'
-            ? () => settleSessionWithConfirmation(session.id).then(() => undefined)
+          statusViewWritable && headerSharing?.access !== 'read'
+            ? () =>
+                settleSessionWithConfirmation(session.id).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
             : undefined
         }
         onMoveToFocus={
-          headerSharing?.access !== 'read'
-            ? () => moveToFocusWithConfirmation(session.id).then(() => undefined)
+          statusViewWritable && headerSharing?.access !== 'read'
+            ? () =>
+                moveToFocusWithConfirmation(session.id).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
             : undefined
         }
         owner={ownerMenuState}
@@ -7785,6 +7823,7 @@ export const SessionChatInterface = memo(
                                 onFileDiffClick={onFileDiffClick}
                                 onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                                 onOpenHtmlFile={handleOpenHtmlAttachment}
+                                onOpenFileAttachment={onOpenFileAttachment}
                                 onAnnotateImage={
                                   isArchivedSession ? undefined : handleAnnotateImage
                                 }

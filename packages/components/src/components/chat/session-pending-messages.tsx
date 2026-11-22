@@ -25,14 +25,20 @@ import {
   SessionFileCardList,
 } from '@/components/ai-gui/session-file-card';
 import { peekSessionImageUrl } from '@/lib/session-image-cache';
-import { UserChatBubble, type SessionChatUser } from '@/components/ai-gui/view';
+import { conversationSurface } from '@/components/ai-gui/surface';
+import {
+  UserChatBubble,
+  UserMessageAuthorSlot,
+  UserMessageMetadataAuthor,
+  type SessionChatUser,
+} from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { UserAvatar } from '@/components/user-avatar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { ConversationView } from '@/lib/conversation-view/types';
 import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp';
 import { toIntlLocale } from '@/lib/intl-locale';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
+import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { isQueueBoundSend } from '@/lib/session-send-status';
 import { Button } from '@lody/ui/button';
@@ -77,11 +83,39 @@ function useAttachmentStatus(attachment: SessionAttachmentDraft, active: boolean
 
 const styles = stylex.create({
   progress: { position: 'absolute', insetInline: 0, bottom: 0, pointerEvents: 'none' },
-  metadata: { maxWidth: '100%' },
-  timestamp: { flexShrink: 0, whiteSpace: 'nowrap' },
-  status: { minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' },
+  status: {
+    display: 'inline-flex',
+    minWidth: 0,
+    alignItems: 'center',
+    columnGap: space[1],
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    color: colors.secondaryLabel,
+  },
   statusLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' },
-  acceptedBubble: { position: 'relative', minWidth: 0, maxWidth: '100%' },
+  selectableBubble: {
+    minWidth: 0,
+    maxWidth: '100%',
+    width: 'fit-content',
+    color: colors.label,
+  },
+  pendingDraftStack: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: '100%',
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    rowGap: space[2],
+  },
+  pendingActions: {
+    display: 'flex',
+    minHeight: `calc(${space[6]} + ${space[1]})`,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[2],
+  },
   sendingSpinner: {
     position: 'absolute',
     bottom: 13,
@@ -411,7 +445,14 @@ function PendingImageAttachment({
   const failed = state === 'failed';
   const readyPreviewUrl =
     attachment.ready?.type === 'image'
-      ? peekSessionImageUrl({ ...attachment.ready, workspaceId, sessionId, imageId: attachment.ready.imageId, transport: attachment.ready.transport, machineId: attachment.ready.machineId })
+      ? peekSessionImageUrl({
+          ...attachment.ready,
+          workspaceId,
+          sessionId,
+          imageId: attachment.ready.imageId,
+          transport: attachment.ready.transport,
+          machineId: attachment.ready.machineId,
+        })
       : null;
   const displayedPreviewUrl = readyPreviewUrl ?? previewUrl;
 
@@ -498,14 +539,18 @@ function PendingFileAttachment({
 export function PendingMessageRow({
   record,
   user,
+  showSenderIdentity = false,
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+  onNavigateSession,
   onRetry,
   onCancel,
   busy = false,
 }: {
   record: PendingSessionSend;
   user?: SessionChatUser;
+  showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
   busy?: boolean;
   onRetry: () => void;
   onCancel: () => void;
@@ -530,8 +575,6 @@ export function PendingMessageRow({
   const images = record.attachments.filter((attachment) => attachment.kind === 'image');
   const files = record.attachments.filter((attachment) => attachment.kind === 'file');
   const uploading = record.attachments.some((attachment) => !attachment.ready);
-  // Only fall back to the record-level reason when no card shows one, so the
-  // same failure is never spelled out twice. Image frames carry no caption.
   const reasonOnACard = files.some((attachment) => attachmentState(attachment) === 'failed');
   const messageStatus = failed
     ? t('sessions.pendingMessageUploadFailed')
@@ -540,17 +583,39 @@ export function PendingMessageRow({
       : t('sessions.pendingMessageWaiting');
 
   return (
-    <ConversationColumn className={stylex.props(styles.column).className}>
-      <article {...stylex.props(styles.row, isMobile ? styles.rowMobile : styles.rowDesktop)}>
-        <div {...stylex.props(styles.avatar)}>
-          <UserAvatar user={user} size="large" showIcon />
-        </div>
-        <div {...stylex.props(styles.body, isMobile ? styles.bodyMobile : styles.bodyDesktop)}>
-          <div {...stylex.props(styles.metadataRow, styles.metadata)}>
+    <ConversationColumn
+      {...stylex.props(conversationSurface.message, conversationSurface.userMessage)}
+    >
+      <article
+        {...stylex.props(
+          conversationSurface.userRow,
+          isMobile && conversationSurface.mobileUserRow
+        )}
+      >
+        <UserMessageAuthorSlot
+          author={record.entry.author}
+          user={user}
+          isMobile={isMobile}
+          showSenderIdentity={showSenderIdentity}
+          onNavigateSession={onNavigateSession}
+        />
+        <div
+          {...stylex.props(
+            conversationSurface.userStack,
+            isMobile && conversationSurface.mobileUserStack
+          )}
+        >
+          <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
+            <UserMessageMetadataAuthor
+              author={record.entry.author}
+              sessionId={record.sessionId}
+              user={user}
+              showSenderIdentity={showSenderIdentity}
+              isMobile={isMobile}
+              onNavigateSession={onNavigateSession}
+            />
             {timestampLabel ? (
-              <span {...stylex.props(styles.timestampLabel, styles.timestamp)}>
-                {timestampLabel}
-              </span>
+              <span {...stylex.props(conversationSurface.metadataTimestamp)}>{timestampLabel}</span>
             ) : null}
             {acceptedInput ? (
               <span
@@ -594,20 +659,24 @@ export function PendingMessageRow({
             )}
           </div>
           {acceptedInput ? (
-            <div {...stylex.props(styles.acceptedBubble)}>
-              {showSendingSpinner ? (
-                <span {...stylex.props(styles.sendingSpinner)}>
-                  <Spinner {...stylex.props(styles.sendingGlyph)} />
-                </span>
-              ) : null}
-              <UserChatBubble
-                message={{ id: record.id, items: record.entry.items ?? [] }}
-                sessionId={record.sessionId}
-                conversationFontSize={conversationFontSize}
-              />
+            <div {...stylex.props(conversationSurface.userBubbleSlot)}>
+              <div {...stylex.props(conversationSurface.userBubbleFrame)}>
+                {showSendingSpinner ? (
+                  <span {...stylex.props(styles.sendingSpinner)}>
+                    <Spinner {...stylex.props(styles.sendingGlyph)} />
+                  </span>
+                ) : null}
+                <div {...stylex.props(styles.selectableBubble)} data-text-selectable>
+                  <UserChatBubble
+                    message={{ id: record.id, items: record.entry.items ?? [] }}
+                    sessionId={record.sessionId}
+                    conversationFontSize={conversationFontSize}
+                  />
+                </div>
+              </div>
             </div>
           ) : (
-            <div {...stylex.props(styles.held)}>
+            <div {...stylex.props(styles.pendingDraftStack)}>
               {images.length ? (
                 <div {...stylex.props(styles.heldImages)}>
                   {images.map((attachment) => (
@@ -634,13 +703,21 @@ export function PendingMessageRow({
                 </SessionFileCardList>
               ) : null}
               {text ? (
-                <div {...stylex.props(styles.heldTextRow)}>
-                  <div {...stylex.props(styles.heldBubble)}>
-                    <div
-                      {...stylex.props(styles.heldText)}
-                      style={conversationTextFontSizeStyle(conversationFontSize)}
-                    >
-                      {text}
+                <div {...stylex.props(conversationSurface.userBubbleSlot)}>
+                  <div {...stylex.props(conversationSurface.userBubbleFrame)}>
+                    <div {...stylex.props(conversationSurface.bubbleRow)}>
+                      <div
+                        {...stylex.props(conversationSurface.bubble)}
+                        data-user-message-bubble=""
+                      >
+                        <div
+                          {...stylex.props(conversationSurface.userText)}
+                          style={conversationTextFontSizeStyle(conversationFontSize)}
+                          data-text-selectable
+                        >
+                          {text}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -648,21 +725,18 @@ export function PendingMessageRow({
             </div>
           )}
           {failed && !reasonOnACard ? <PendingFailureNotice reason={record.error!} clamp /> : null}
-          {/* Always in the flow at the delivered row's 28px action height, so
-              committing (which swaps these for hover-revealed copy/fork) does
-              not move anything below. */}
-          <div {...stylex.props(styles.actions)}>
-            {!acceptedInput || failed ? (
+          {!acceptedInput || failed ? (
+            <div {...stylex.props(styles.pendingActions)}>
               <Button size="small" variant="ghost" disabled={busy} onClick={onCancel}>
                 {t(acceptedInput ? 'sessions.removeLocalInput' : 'sessions.cancelPendingSend')}
               </Button>
-            ) : null}
-            {failed ? (
-              <Button size="small" disabled={busy} onClick={onRetry}>
-                {t('sessions.retryPendingSend')}
-              </Button>
-            ) : null}
-          </div>
+              {failed ? (
+                <Button size="small" disabled={busy} onClick={onRetry}>
+                  {t('sessions.retryPendingSend')}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </article>
     </ConversationColumn>
@@ -678,12 +752,16 @@ export function useSessionPendingMessages({
   sessionId,
   history,
   user,
+  showSenderIdentity = false,
   conversationFontSize,
+  onNavigateSession,
 }: {
   sessionId: SessionId;
   history?: Pick<ConversationView, 'indexOf' | 'turn' | 'subscribe'> | null;
   user?: SessionChatUser;
+  showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
 }) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const pendingSends = runtime?.pendingSends;
@@ -751,14 +829,16 @@ export function useSessionPendingMessages({
             key={send.id}
             record={send}
             user={user}
+            showSenderIdentity={showSenderIdentity}
             conversationFontSize={conversationFontSize}
+            onNavigateSession={onNavigateSession}
             busy={busy === send.id}
             onRetry={() => void action(send, 'retry')}
             onCancel={() => void action(send, 'cancel')}
           />
         ),
       })),
-    [pending, user, conversationFontSize, busy, action]
+    [pending, user, showSenderIdentity, conversationFontSize, onNavigateSession, busy, action]
   );
   const failureNotice = useMemo(
     () =>

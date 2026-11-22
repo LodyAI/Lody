@@ -12,6 +12,9 @@ Migration rationale: [Tailwind to StyleX](../../.agents/notes/implemented/archit
 ## General rules
 
 - Native shells do not emit `$pageview` or `$pageleave`; browser page tracking remains enabled. Mention file-fetch failures stay visible to consumers but are not analytics events. Authenticated account readiness is represented by `app/active`, not a second `onboarding/account_ready` event.
+- Text is unselectable by default on every host. A reading surface marks its container
+  `data-text-selectable`, not a `select-text` utility, which skips descendants; see
+  [text selection](../../.agents/docs/components-package.md#text-selection).
 - Regenerate TanStack routes after changing route files.
 - Use `pnpm --filter @lody/components dev` to generate and format the route tree
   with Oxfmt before CI compares it with the committed file.

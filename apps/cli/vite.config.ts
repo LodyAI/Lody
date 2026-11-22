@@ -8,6 +8,7 @@ import { validateNightlyVersion } from '../electron/nightly-version.mjs';
 import desktopPackage from '../electron/package.json';
 import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
 import { externalWasmPlugin } from './scripts/external-wasm.mjs';
+import { inlinePackageManifestPlugin } from './scripts/inline-package-manifest.mjs';
 import { workspaceModuleSideEffects } from './scripts/workspace-module-side-effects.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -130,6 +131,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     wasm(),
     externalWasmPlugin(),
+    inlinePackageManifestPlugin(),
     devinRuntimeContractPlugin(),
     {
       name: 'lody-cli-desktop-provenance',

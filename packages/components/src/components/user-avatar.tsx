@@ -38,7 +38,12 @@ interface UserAvatarProps {
  * 用户头像组件
  * 统一处理用户头像的显示，支持图片和首字母fallback
  */
-export function UserAvatar({ user, size = 'medium', className, showIcon = false }: UserAvatarProps) {
+export function UserAvatar({
+  user,
+  size = 'medium',
+  className,
+  showIcon = false,
+}: UserAvatarProps) {
   const avatarImage = useStableAvatarSrc(user?.image);
   // 获取用户名首字母作为 fallback
   const getInitials = () => {
@@ -55,7 +60,9 @@ export function UserAvatar({ user, size = 'medium', className, showIcon = false 
 
   return (
     <Avatar.Root size={size} className={className}>
-      {avatarImage ? <Avatar.Image src={avatarImage} alt={user?.name || 'User'} /> : null}
+      {avatarImage ? (
+        <Avatar.Image src={avatarImage} alt={user?.name || 'User'} referrerPolicy="no-referrer" />
+      ) : null}
       <Avatar.Fallback>
         {showIcon || !initials ? (
           // The glyph box is the primitive's and follows the rung; the icon

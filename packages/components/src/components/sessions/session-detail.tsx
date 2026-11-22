@@ -17,11 +17,20 @@ import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+import { getEffectiveSessionActivitySummary } from './session-list-rows';
+import { MobileLaterSheet } from '../mobile/mobile-later-sheet';
+import {
+  useCanManageSessionStatus,
+  useMobileStatusActions,
+} from '../mobile/use-mobile-status-actions';
 import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  CircleCheck,
+  Clock,
   Ellipsis,
+  Focus,
   FileText,
   Folder,
   GitBranch,
@@ -48,6 +57,7 @@ import { usePostHog } from '@/lib/posthog-context';
 import {
   getProjectRefBranch,
   getServerNow,
+  statusViewTier,
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -60,6 +70,7 @@ import {
   type LocalProjectId,
   type LocalProjectMeta,
   type ProjectRef,
+  type SessionFilePayload,
   type SessionId,
   type SessionMeta,
   type SessionStatus,
@@ -199,6 +210,7 @@ import { toast } from '@/lib/toast';
 
 import { SessionConversationDiffPanel } from './session-conversation-diff-panel';
 import { SessionFileContentView, type SessionFileSaveViewState } from './session-file-content-view';
+import { SessionFileAttachmentPane } from '../ai-gui/session-file-attachment';
 import { SessionFileQuickOpen } from './session-file-quick-open';
 import { PrTabContainer } from './pr-tab-container';
 import { SessionBrowserPanel } from './session-browser-panel';
@@ -397,7 +409,19 @@ type ViewerTab =
       focusRequestSeq: number;
       mode?: 'conversation' | 'base';
       label: string;
+    }
+  | {
+      /** A message attachment: bytes come from the attachment store, not a workspace path. */
+      id: string;
+      type: 'attachment';
+      file: SessionFilePayload;
+      /** The Session whose message carried it; `file.storageSessionId` wins when set. */
+      sessionId: SessionId;
+      label: string;
     };
+
+const getViewerTabAnalyticsType = (tabId: string): 'file' | 'diff' | 'attachment' =>
+  tabId.startsWith('file:') ? 'file' : tabId.startsWith('attachment:') ? 'attachment' : 'diff';
 
 type SessionDetailOpenFileOptions = {
   /** Analytics only. */
@@ -868,6 +892,16 @@ const areViewerTabsEquivalent = (prev: ViewerTab, next: ViewerTab): boolean => {
       prev.endLine === next.endLine &&
       prev.focusRequestSeq === next.focusRequestSeq &&
       prev.htmlPreviewRequestSeq === next.htmlPreviewRequestSeq
+    );
+  }
+
+  if (prev.type === 'attachment' && next.type === 'attachment') {
+    // A re-click hands over a fresh payload object for the same upload; keeping
+    // the existing tab avoids refetching the preview it already shows.
+    return (
+      prev.sessionId === next.sessionId &&
+      prev.file.fileId === next.file.fileId &&
+      prev.file.storageSessionId === next.file.storageSessionId
     );
   }
 
@@ -4219,6 +4253,21 @@ const SessionDetail = ({
     });
   });
 
+  /** Desktop opens a message attachment as a side-panel tab; mobile keeps its Drawer. */
+  const handleOpenFileAttachment = useStableCallback(
+    (file: SessionFilePayload, chatSessionId: SessionId): boolean => {
+      if (isMobile) return false;
+      upsertViewerTab({
+        id: `attachment:${file.storageSessionId ?? chatSessionId}:${file.fileId}`,
+        type: 'attachment',
+        file,
+        sessionId: chatSessionId,
+        label: file.fileName,
+      });
+      return true;
+    }
+  );
+
   /**
    * Every entry point whose path came from the file index. Kept stable so the
    * file tree's memoized rows do not re-render on each parent commit.
@@ -4514,7 +4563,7 @@ const SessionDetail = ({
       }
       captureSessionDetailEvent('session/viewer_tab_selected', {
         viewer_tab_id: tabId,
-        viewer_tab_type: tabId.startsWith('file:') ? 'file' : 'diff',
+        viewer_tab_type: getViewerTabAnalyticsType(tabId),
       });
     },
     [captureSessionDetailEvent, isMobile, revealRightSidebar, selectSidePanelTab]
@@ -4648,9 +4697,15 @@ const SessionDetail = ({
     () =>
       viewerTabs.map((tab) => ({
         id: tab.id,
-        type: tab.type,
+        // An attachment tab reads as a file tab: same glyph by name, same strip slot.
+        type: tab.type === 'diff' ? 'diff' : 'file',
         label: tab.label,
-        filePath: tab.type === 'file' ? tab.filePath : undefined,
+        filePath:
+          tab.type === 'file'
+            ? tab.filePath
+            : tab.type === 'attachment'
+              ? tab.file.fileName
+              : undefined,
         dirty: tab.type === 'file' ? viewerTabSaveStates[tab.id]?.dirty === true : false,
         saving: tab.type === 'file' ? viewerTabSaveStates[tab.id]?.saving === true : false,
         conflict:
@@ -4837,7 +4892,7 @@ const SessionDetail = ({
         }
         captureSessionDetailEvent('session/viewer_tab_closed', {
           viewer_tab_id: tabId,
-          viewer_tab_type: tabId.startsWith('file:') ? 'file' : 'diff',
+          viewer_tab_type: getViewerTabAnalyticsType(tabId),
           remaining_viewer_tab_count: Math.max(0, viewerTabs.length - 1),
         });
       }
@@ -4947,6 +5002,10 @@ const SessionDetail = ({
       chatRefsMap.current.get(activeTabSessionId)?.focusInput();
     });
   }, [activeTabSessionId, isMobile]);
+
+  const mobileStatusActions = useMobileStatusActions();
+  const canManageActiveStatus = useCanManageSessionStatus(activeSession);
+  const [mobileLaterSheetOpen, setMobileLaterSheetOpen] = useState(false);
 
   // Drafts and pending children can resolve to the parent for display only.
   const canRenameCurrentSession =
@@ -5156,7 +5215,8 @@ const SessionDetail = ({
         : activeTabSessionId;
     writeStoredLastActiveTabState(sessionId, {
       sessionTabId: persistedSessionTabId,
-      viewerTab: activeViewerTab,
+      // Attachment tabs are not restored: their payload is message data, not a path.
+      viewerTab: activeViewerTab?.type === 'attachment' ? null : activeViewerTab,
       sidePanel: {
         open: isSidebarOpen,
         tab: activeSidebarTab,
@@ -5440,6 +5500,29 @@ const SessionDetail = ({
     [conversationSessionIds]
   );
   const conversationLiveStatusMap = useAtomValue(conversationLiveStatusAtom);
+  /** The conversation's tier, from the same Tab roll-up the home list classifies with. */
+  const activeStatusTier = useMemo(() => {
+    if (!activeSession || activeSession.isArchived || activeSession.isPinned) return null;
+    const live = new Map<string, SessionStatus>();
+    for (const [id, status] of Object.entries(conversationLiveStatusMap))
+      if (status) live.set(id, status);
+    const activity = getEffectiveSessionActivitySummary(
+      activeSession,
+      new Map([[activeSession.id, [...visibleChildSessions, ...visibleSideSessions]]]),
+      live
+    );
+    return statusViewTier(
+      {
+        activityAt: activity.latestMessageAt,
+        isWorking: activity.isWorking,
+        isWaitingPermission: activity.isWaitingPermission,
+        snoozedUntil: activeSession.snoozedUntil ?? null,
+        settledAt: activeSession.settledAt ?? null,
+        focusRestoredAt: activeSession.focusRestoredAt ?? null,
+      },
+      getServerNow()
+    );
+  }, [activeSession, conversationLiveStatusMap, visibleChildSessions, visibleSideSessions]);
 
   const mobileConversations = useMemo<ConversationTabEntry[]>(() => {
     const conversationTabActive = effectiveActiveViewerTabId == null;
@@ -6009,7 +6092,14 @@ const SessionDetail = ({
     className = stylex.props(detailStyles.rootFill).className,
     active = true
   ) =>
-    tab.type === 'file' ? (
+    tab.type === 'attachment' ? (
+      <SessionFileAttachmentPane
+        key={`${activeSession.id}:${tab.id}`}
+        file={tab.file}
+        sessionId={tab.sessionId}
+        className={className}
+      />
+    ) : tab.type === 'file' ? (
       <SessionFileContentView
         key={`${activeSession.id}:${tab.id}`}
         sessionId={activeSession.id}
@@ -6237,6 +6327,32 @@ const SessionDetail = ({
           }
         }
       }
+      if (activeStatusTier && canManageActiveStatus) {
+        const statusSessionId = activeSession.id;
+        mobileMenuActions.push({
+          id: 'later',
+          icon: <Clock {...stylex.props(detailStyles.icon14)} />,
+          label: t('sessions.contextMenu.snooze', 'Later'),
+          onClick: () => setMobileLaterSheetOpen(true),
+          separatorBefore: true,
+        });
+        if (activeStatusTier !== 'settled') {
+          mobileMenuActions.push({
+            id: 'settle',
+            icon: <CircleCheck {...stylex.props(detailStyles.icon14)} />,
+            label: t('sessions.contextMenu.settle', 'Settle'),
+            onClick: () => mobileStatusActions.settle(statusSessionId),
+          });
+        }
+        if (activeStatusTier !== 'focus') {
+          mobileMenuActions.push({
+            id: 'move-to-focus',
+            icon: <Focus {...stylex.props(detailStyles.icon14)} />,
+            label: t('sessions.contextMenu.moveToFocus', 'Move to Focus'),
+            onClick: () => mobileStatusActions.moveToFocus(statusSessionId),
+          });
+        }
+      }
       if (canRenameCurrentSession) {
         mobileMenuActions.push({
           id: 'rename',
@@ -6409,6 +6525,13 @@ const SessionDetail = ({
           onCloseConversation={(id) => {
             void handleTabClose(id);
           }}
+        />
+        <MobileLaterSheet
+          open={mobileLaterSheetOpen}
+          onOpenChange={setMobileLaterSheetOpen}
+          title={activeSession.title ?? undefined}
+          nowMs={getServerNow()}
+          onPick={(until) => mobileStatusActions.snooze(activeSession.id, until)}
         />
         <SessionShareMobileMenu
           key={`${currentWorkspaceId}:${activeTabSessionId}`}
@@ -7242,6 +7365,7 @@ const SessionDetail = ({
       onFileDiffClick: handleOpenFileDiffForChat,
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
+      onOpenFileAttachment: handleOpenFileAttachment,
       onOpenIosSimulator: () => handleOpenIosSimulator(),
       onOpenAndroidEmulator: () => handleOpenAndroidEmulator(),
       onOpenBrowser: previewAllowed ? () => handleOpenBrowser(chatSession.id, true) : undefined,

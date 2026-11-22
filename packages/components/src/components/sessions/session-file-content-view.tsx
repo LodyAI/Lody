@@ -217,15 +217,14 @@ const styles = stylex.create({
     flexDirection: 'column',
     overflow: 'hidden',
   },
+  /* The surface's own edge (the side-panel tab strip, the mobile drawer header)
+     already separates it; the bar is the same surface as the body, not a frame. */
   toolbar: {
     display: 'flex',
     height: '2rem',
     flexShrink: 0,
     alignItems: 'center',
     gap: '4px',
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: 'hsl(var(--border) / 0.5)',
     backgroundColor: 'hsl(var(--background))',
     paddingInline: '8px',
   },
@@ -1571,7 +1570,7 @@ function SessionFileContentViewImpl({
   // Typography tracks conversationFontSize so side-panel README preview matches
   // the left chat Markdown (default = text-sm; was hard-coded large/"base").
   const previewSurface: ReactNode = isMarkdownTextFile ? (
-    <div {...stylex.props(styles.markdownPreview)} data-native-selection-allow>
+    <div {...stylex.props(styles.markdownPreview)} data-text-selectable>
       <SessionLinkProvider enabled={sessionLinksEnabled}>
         {fileProvider ? (
           <MarkdownFileResources
@@ -2299,7 +2298,7 @@ function NativeMarkdownSource({
       wrap={wordWrap ? 'soft' : 'off'}
       spellCheck={false}
       aria-label={ariaLabel}
-      data-native-selection-allow
+      data-text-selectable
       {...stylex.props(styles.sourceTextarea)}
       onChange={(event) => {
         const nextValue = event.currentTarget.value;

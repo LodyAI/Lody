@@ -199,9 +199,6 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
   const modalContainer = useModalContainer();
   const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
   const centre = useInlineCentre(centerOn);
-  // A portalled panel leaves the subtree whose palette it should be using, so
-  // the classes that declare that palette travel with it and land on the
-  // portal, where they cascade into the backdrop and the panel alike.
   const palette = useForcedThemeClassNames();
   const noTransition = noAnimation ? stylex.props(modal.noTransition).className : undefined;
   const panelStyle = mergePanelLayout(style, { width, centre });
@@ -219,6 +216,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
       </DialogBackdrop>
       <BaseDialog.Popup
         ref={panelRef}
+        data-text-selectable=""
         {...rest}
         style={
           xstyle
