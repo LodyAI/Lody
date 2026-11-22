@@ -110,7 +110,7 @@ function TodayMentionStatusMenuContent(props: {
   const laterLabel = t('sessions.contextMenu.snooze', 'Later');
   const presetLabel: Record<SnoozePresetId, string> = {
     oneHour: t('sessions.contextMenu.snoozeOneHour', 'In 1 hour'),
-    laterToday: t('sessions.contextMenu.snoozeLaterToday', 'Later today'),
+    laterToday: t('sessions.contextMenu.snoozeLaterToday', 'In 3 hours'),
     tomorrowMorning: t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning'),
     nextWeek: t('sessions.contextMenu.snoozeNextWeek', 'Next week'),
   };

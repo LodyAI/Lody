@@ -126,7 +126,7 @@ export function MobileLaterSheet({
     id === 'oneHour'
       ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
       : id === 'laterToday'
-        ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+        ? t('sessions.contextMenu.snoozeLaterToday', 'In 3 hours')
         : id === 'tomorrowMorning'
           ? t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning')
           : t('sessions.contextMenu.snoozeNextWeek', 'Next week');

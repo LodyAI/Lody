@@ -1790,7 +1790,7 @@ export function SessionHeaderMenu({
                           preset.id === 'oneHour'
                             ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
                             : preset.id === 'laterToday'
-                              ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                              ? t('sessions.contextMenu.snoozeLaterToday', 'In 3 hours')
                               : preset.id === 'tomorrowMorning'
                                 ? t(
                                     'sessions.contextMenu.snoozeTomorrowMorning',
