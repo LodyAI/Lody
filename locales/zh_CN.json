@@ -7002,6 +7002,8 @@
   "today.convertTitle": "转换为任务",
   "today.convertSubmit": "开始任务",
   "today.convertToTask": "转换为任务",
+  "today.convertIncludeAncestors": "包含上级节点",
+  "today.convertAncestorsEdited": "提示词已修改",
   "today.selectionActions": "选中的节点",
   "today.todo.make": "转为待办",
   "today.todo.markDone": "标记为完成",

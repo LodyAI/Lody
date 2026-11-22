@@ -707,6 +707,7 @@ function TodayDragLayer() {
 export type TodayConvertDialogComponent = ComponentType<{
   open: boolean;
   prompt: string;
+  promptWithAncestors?: string | null;
   onAccepted: (sessionId: SessionId) => void;
   onOpenChange: (open: boolean) => void;
 }>;
@@ -728,6 +729,7 @@ export function TodayNodeActions(props: {
     store: TodayPageStore;
     nodeId: TodayNodeId;
     prompt: string;
+    promptWithAncestors: string | null;
     /** The node's text when the dialog opened: unchanged, the line becomes the mention. */
     snapshot: TodayRichText;
   } | null>(null);
@@ -739,10 +741,24 @@ export function TodayNodeActions(props: {
             const [fragment] = store.outline.extract([nodeId]);
             const text = store.outline.getText(nodeId);
             if (!fragment || !text || !controller) return;
+            const ancestors: TodayRichText[] = [];
+            for (
+              let parent = store.outline.getNode(nodeId)?.parentId ?? null;
+              parent;
+              parent = store.outline.getNode(parent)?.parentId ?? null
+            ) {
+              const node = store.outline.getNode(parent);
+              if (!node) break;
+              ancestors.unshift({ text: node.text, mentions: [...node.mentions] });
+            }
             setConverting({
               store,
               nodeId,
               prompt: buildConvertPrompt(fragment, controller.mentionText),
+              promptWithAncestors:
+                ancestors.length > 0
+                  ? buildConvertPrompt(fragment, controller.mentionText, ancestors)
+                  : null,
               snapshot: readTodayText(text),
             });
           }}
@@ -751,6 +767,7 @@ export function TodayNodeActions(props: {
       <ConvertDialog
         open={converting !== null}
         prompt={converting?.prompt ?? ''}
+        promptWithAncestors={converting?.promptWithAncestors ?? null}
         onOpenChange={(open) => {
           if (!open) {
             setConverting(null);

@@ -38,6 +38,7 @@ import {
   blockRange,
   parseTodayClipboard,
   resolveBlockKey,
+  escalateSelection,
   extendFocus,
   selectionCovers,
   linkifyTodayFragments,
@@ -774,12 +775,11 @@ export class TodayEditorController {
         this.revealRow(next);
         return true;
       }
-      case 'select-all':
-        this.selectBlocks(
-          store,
-          visible.map((node) => node.id)
-        );
+      case 'select-all': {
+        const next = escalateSelection(visible, selection.ids);
+        if (next) this.selectBlocks(store, next);
         return true;
+      }
       case 'cycle-todo':
         this.cycleSelectionTodo();
         return true;

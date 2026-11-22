@@ -102,6 +102,15 @@ export function resolveOutlineKey(
         : null;
     case 'Escape':
       return plain ? { type: 'block-select' } : null;
+    case 'a':
+    case 'A': {
+      if (!mod || event.shiftKey || event.altKey) return null;
+      const start = Math.min(caret.anchor ?? caret.offset, caret.focus ?? caret.offset);
+      const end = Math.max(caret.anchor ?? caret.offset, caret.focus ?? caret.offset);
+      return caret.length === 0 || (start === 0 && end === caret.length)
+        ? { type: 'select-from-text' }
+        : null;
+    }
     default:
       return null;
   }
