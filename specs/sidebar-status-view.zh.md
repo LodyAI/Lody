@@ -29,7 +29,17 @@ Translation: current
 - 桌面端「进行中」与「稍后」的行在 hover 槽位提供一键 **标记为已完成**（取代其它视图在该位置的归档按钮）；「已完成」的行在该位置保持归档。「稍后」行的唤醒倒计时位于行最右侧，使用中性配色。
 - 暂缓、标记为已完成或移回进行中时，若对话存在活跃 opened-by 子对话，会先询问是否对子对话执行相同操作——仅作用于当前对话，或整棵 opened-session 树。包含的 Tab 跟随其拥有者所在分区，不会被单独写入，与归档确认展示的子对话统计一致。将行拖入「进行中」时其 opened-by 子对话默认一并恢复、不再询问；仅被拖拽的行写入 `orderKey`。
 - 向「稍后」或「已完成」的对话发送消息时，自动清除 `snoozedUntil` / `settledAt` 并回到「进行中」。
-- 在「进行中」拖拽重排时，会为顶部已到期的稍后条目落地真实 `orderKey` 并清除已过期的 `snoozedUntil`（同时保留 `focusRestoredAt`），保证用户显式拖拽后的顺序稳定生效。将「稍后」或「已完成」中的对话拖入「进行中」时，自动清除暂缓/完成状态并落在松手位置的 `orderKey` 处。
+- 在「进行中」拖拽重排时，会为顶部已到期的稍后条目落地真实 `orderKey`，保证用户显式拖拽后的顺序稳定生效。把「稍后」「已完成」或置顶区（会取消 pin）的行拖入「进行中」时，它被恢复并落在松手位置的 `orderKey` 处；「移回进行中」则原地恢复；选择包含时，opened-by 子对话一起恢复。放置和恢复都不会消耗唤醒，只有打开对话、在其中发送消息或标记为已完成才会。被放置或恢复的行记下 `focusRestoredAt`，并保留已过期的 `snoozedUntil`，因此它停在被放置的位置，并保持未读直到被阅读；恢复时仍在未来的稍后时间会被清除。被唤醒的行只在已过期的 `snoozedUntil` 晚于 `focusRestoredAt` 时浮到「进行中」最前面，所以再次稍后的对话到期时会重新浮上来。
+
+### 手机端
+
+手机 WebView 布局和原生 iOS、Android 客户端显示与桌面侧栏相同的 Pinned 区和相同的三个状态区，顺序也相同。三者都已实现；设计、限制和验证情况见[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md)。
+
+- 所有界面都用同一份共享实现来推导列表和规划写入。原生客户端只显示共享 runtime 算好的布局，自己不对这些列表做排序或分类。
+- 长按弹出完整操作菜单，按住不放并移动就变成拖拽：在「进行中」排序，或把「稍后」「已完成」的行拖进「进行中」。每一种拖拽结果都有对应的菜单项和无障碍操作。
+- 左滑时，「进行中」和「稍后」的行提供「标记为已完成」和「稍后」，「已完成」的行提供归档。「稍后」打开底部面板，包含预设和自定义日期时间。标记为已完成和稍后之后给出带「撤销」的提示。对话页的「…」面板提供同样的状态操作。
+- 原生客户端原有的状态分组（需要你、运行中、刚完成、PR、空闲）由这三个区取代。
+- 原生客户端没有实时的会话在线状态，按已同步的状态判断对话是否在运行或等待审批。因此已稍后或已完成的对话正在等待审批时，或七天没有消息的对话正在运行时，它在原生端可能短暂落在不同的区。
 
 ## 数据归属与排序
 
@@ -52,13 +62,24 @@ Translation: current
 - 进行中列表的键盘排序移动。
 - Agent 托管未读抑制与 MCP 成员目录/Owner 指定工具（留待独立改动）。
 - 个人私有的排序布局与基于 LoroDoc 的 Today 大纲编辑器（留待后续实验特性阶段）。
-- 原生 iOS / Android 客户端。
+- 原生 iOS / Android 客户端上的加密工作区：它们目前完全打不开加密工作区。手机 WebView 支持。
+- 原生客户端上的实时会话在线状态。
 
 ## 证据
 
 实现：
 
 - 共享 schema、排序与未读汇总：`packages/shared/src/schema.ts`、`packages/shared/src/pinned-sections.ts`、`packages/shared/src/live-activity-summary.ts`
-- 状态分类、已读回执与倒计时：`packages/components/src/lib/sidebar-status-group.ts`、`packages/components/src/lib/session-read-receipt.ts`
+- 状态布局、写入规划、倒计时与测试样例：`packages/shared/src/status-view/`
+- 已读回执：`packages/components/src/lib/session-read-receipt.ts`
 - 侧栏渲染、拖拽、菜单与写入：`packages/components/src/components/sidebar-updated-session-list.tsx`、`packages/components/src/components/loro-sidebar.tsx`、`packages/components/src/components/loro-app-sidebar.tsx`、`packages/components/src/components/sessions/session-chat-interface.tsx`、`packages/components/src/hooks/use-session-actions.ts`、`packages/components/src/atoms/doc-meta.ts`、`packages/components/src/atoms/sidebar-state.ts`
 - Storybook：`packages/components/src/stories/SidebarStatusView.stories.tsx`
+- 手机：`packages/components/src/components/mobile/`（WebView）；原生共享 runtime 和列表在
+  `apps/mobile/ios`、`apps/mobile/android` 子模块里。
+
+已执行的验证：测试样例（13 个布局用例、38 个命令用例）在 `packages/shared/tests/status-view.test.ts`
+里运行，也在 `packages/components` 的桌面和手机适配层、iOS 和 Android 的 runtime 测试里运行；Storybook
+端到端测试 `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`（5 个用例）；手机
+WebView 在 iOS 模拟器和 Android 模拟器上的 Storybook；原生列表在模拟器上用离线测试数据。没有验证：
+真机、原生客户端登录后的云端工作区、桌面应用写入真实副本、真实的加密 Guest 会话和托管网关接受加密写入、
+设备上的 VoiceOver、Capacitor 打包后的 App。详见[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md#验证)。

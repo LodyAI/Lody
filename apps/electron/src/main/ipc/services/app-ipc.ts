@@ -11,6 +11,9 @@ import { isDefaultLodyProtocolClient, setDefaultLodyProtocolClient } from '../..
 import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
+import { parseTodayWindowTarget } from '../../today-window-target'
+import { isTodayWindow, openTodayWindow } from '../../today-windows'
+import { openLinkInMainWindow } from '../../window'
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
@@ -128,6 +131,14 @@ export function installNativeThemeWatch(): void {
   }
 }
 
+function todayWindowSender(): BrowserWindow {
+  const { event } = getIpcContext()
+  assertProductWindowSender(event)
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (!isTodayWindow(window)) throw new Error('Not a Today window')
+  return window
+}
+
 export class AppIpc extends ProductWindowIpcService {
   static override readonly groupName = 'app'
 
@@ -187,6 +198,35 @@ export class AppIpc extends ProductWindowIpcService {
     const { event } = getIpcContext()
     assertProductWindowSender(event)
     openSessionWindow(parseWindowTarget(raw))
+  }
+
+  @IpcMethod()
+  async openTodayWindow(raw: { workspace: string; member?: string; date?: string }) {
+    assertProductWindowSender(getIpcContext().event)
+    openTodayWindow(parseTodayWindowTarget(raw))
+  }
+
+  /** The Today window's pin: keep it above every other window. */
+  @IpcMethod()
+  async setTodayWindowAlwaysOnTop(enabled: boolean): Promise<boolean> {
+    const window = todayWindowSender()
+    if (typeof enabled !== 'boolean') throw new Error('Invalid always-on-top value')
+    window.setAlwaysOnTop(enabled)
+    return window.isAlwaysOnTop()
+  }
+
+  @IpcMethod()
+  async getTodayWindowAlwaysOnTop(): Promise<boolean> {
+    return todayWindowSender().isAlwaysOnTop()
+  }
+
+  /** A conversation opened from the Today window shows in the primary window. */
+  @IpcMethod()
+  async openSessionInMainWindow(raw: string) {
+    todayWindowSender()
+    if (typeof raw !== 'string' || !parseSessionLink(raw)?.workspaceId)
+      throw new Error('Invalid session link')
+    openLinkInMainWindow(raw)
   }
 
   @IpcMethod()

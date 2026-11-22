@@ -340,6 +340,12 @@ type RuntimeDeps = {
   getAuthorizedMachineIds?: () => ReadonlySet<MachineId> | null;
   eagerSyncSurface?: EagerSyncSurface;
   /**
+   * Window-wide background work: session eager-sync and the startup ACP
+   * capability refresh. Off in a single-surface window (the Today window),
+   * which syncs only the rooms it shows; another window keeps doing it.
+   */
+  backgroundWork?: boolean;
+  /**
    * The ready doc-meta projection for this runtime's repo. Startup readers use
    * it instead of rescanning the whole meta namespace; absent or not ready, they
    * scan.
@@ -3466,6 +3472,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
   const scheduleStartupAcpCapabilitiesRefresh = (): void => {
     if (
+      deps.backgroundWork === false ||
       startupAcpCapabilitiesRefreshCompleted ||
       startupAcpCapabilitiesRefreshAbortController ||
       cancelDelayedStartupAcpCapabilitiesRefresh ||
@@ -6023,7 +6030,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   startBackgroundSyncCoordinator = () => {
-    if (protectedContent) return;
+    if (protectedContent || deps.backgroundWork === false) return;
     if (
       backgroundSyncCoordinator ||
       backgroundSyncCoordinatorStartPromise ||

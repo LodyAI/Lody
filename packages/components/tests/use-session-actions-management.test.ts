@@ -2,6 +2,7 @@ import { createSessionControlPlaneMirror } from '@lody/shared/session-control-pl
 // @vitest-environment jsdom
 import { cloudOperations } from '../src/lib/cloud-api-operations';
 import { buildVisibleMachineIndex } from '../src/lib/visible-machine-index';
+import { statusViewSessionFromMeta } from '../src/lib/status-view-state';
 import { useVisibleSessionMetas } from '../src/hooks/use-visible-session-metas';
 import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { userAtom } from '../src/atoms';
@@ -1713,6 +1714,52 @@ describe('useSessionActions', () => {
     });
   });
 
+  it('a send in a contained Tab brings its snoozed conversation back to Focus', async () => {
+    const tree = createOpenedSubTree('send-in-tab');
+    tree.metaRepo.setMeta(getSessionRoomId(tree.rootSession.id), {
+      ...tree.rootSession,
+      snoozedUntil: Date.now() + 60 * 60_000,
+    });
+    const actions = await renderActions(createRuntime({ repo: tree.metaRepo.repo }));
+
+    await actions.touchSessionActivity(tree.tabSession.id);
+
+    expect(tree.metaRepo.getSession(tree.rootSession.id)?.snoozedUntil).toBeUndefined();
+  });
+
+  it("reading a contained Tab clears its conversation's woken unread mark", async () => {
+    const tree = createOpenedSubTree('read-in-tab');
+    const wokeAt = Date.now() - 60_000;
+    const root = {
+      ...tree.rootSession,
+      lastMessageAt: wokeAt - 10 * 60_000,
+      lastReadAt: wokeAt - 10 * 60_000,
+      snoozedUntil: wokeAt,
+    };
+    const tab = { ...tree.tabSession, lastMessageAt: wokeAt - 5 * 60_000 };
+    tree.metaRepo.setMeta(getSessionRoomId(root.id), root);
+    tree.metaRepo.setMeta(getSessionRoomId(tab.id), tab);
+    const actions = await renderActions(createRuntime({ repo: tree.metaRepo.repo }), {
+      sessionMetaCache: { [getSessionRoomId(root.id)]: root, [getSessionRoomId(tab.id)]: tab },
+    });
+
+    await actions.markSessionRead(tab.id, tab.lastMessageAt);
+
+    expect(tree.metaRepo.getSession(root.id)?.lastReadAt).toBeGreaterThanOrEqual(wokeAt);
+  });
+
+  it('status actions on an opened tree leave archived sub-conversations alone', async () => {
+    const tree = createOpenedSubTree('tree-archived');
+    const until = Date.now() + 60 * 60_000;
+    const actions = await renderActions(createRuntime({ repo: tree.metaRepo.repo }));
+
+    await actions.snoozeSession(tree.rootSession.id, until, { includeOpenedSessions: true });
+
+    expect(tree.metaRepo.getSession(tree.openedSession.id)?.snoozedUntil).toBe(until);
+    expect(tree.metaRepo.getSession(tree.openedFromTabSession.id)?.snoozedUntil).toBe(until);
+    expect(tree.metaRepo.getSession(tree.archivedOpened.id)?.snoozedUntil).toBeUndefined();
+  });
+
   it('restores opened sub-conversations when the parent row is dragged into Focus', async () => {
     const tree = createOpenedSubTree('drag-focus');
     tree.metaRepo.setMeta(getSessionRoomId(tree.openedSession.id), {
@@ -1721,13 +1768,26 @@ describe('useSessionActions', () => {
     });
     const actions = await renderActions(createRuntime({ repo: tree.metaRepo.repo }));
 
-    await actions.applySessionFocusOrder(
-      [{ sessionId: tree.rootSession.id, orderKey: 'a0' }],
-      tree.rootSession.id
+    // The list shows the root settled; its opened sub-conversations are not listed.
+    await actions.runStatusViewCommand(
+      { type: 'move', sessionId: tree.rootSession.id, to: { area: 'focus' }, beforeId: null },
+      {
+        sessions: [
+          {
+            ...statusViewSessionFromMeta(tree.rootSession, null),
+            settledAt: Date.now(),
+          },
+        ],
+        sections: [],
+        sectionsLoaded: true,
+        canManageSections: true,
+        nowMs: Date.now(),
+      }
     );
 
     const root = tree.metaRepo.getSession(tree.rootSession.id);
-    expect(root?.orderKey).toBe('a0');
+    expect(isPinOrderKey(root?.orderKey)).toBe(true);
+    expect(root?.settledAt).toBeUndefined();
     expect(root?.focusRestoredAt).toBeGreaterThan(0);
     // The dropped parent's opened sub-conversations restore without order keys.
     for (const session of [tree.openedSession, tree.openedFromTabSession]) {

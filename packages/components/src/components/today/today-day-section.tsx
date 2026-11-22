@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { ChevronRight } from 'lucide-react';
+import { Check, ChevronRight } from 'lucide-react';
 import {
   Fragment,
   useCallback,
@@ -47,10 +47,15 @@ const styles = stylex.create({
     marginInlineStart: `calc(-1 * ${todayOutline.foldOverhang})`,
   },
   // 12px wide and flush against the bullet box (the negative end margin takes
-  // back the row gap), so its centre is 14px left of the dot's. It shows only
+  // back the row gap), so its centre is 14px left of the dot's. Its hit area
+  // (the `::before`) reaches 6px further left into the empty margin and stops
+  // 2px short of the bullet, whose own hit area is inset 1px: a 3px dead gap
+  // between the two. Only the glyph rotates, so an open toggle's box never
+  // turns sideways over the bullet. It shows only
   // while its line is hovered, focused from the keyboard or being edited; a
   // folded node keeps its ringed dot as the resting cue.
   fold: {
+    position: 'relative',
     width: 12,
     height: 28,
     marginInlineEnd: `calc(-1 * ${space[1]})`,
@@ -70,11 +75,32 @@ const styles = stylex.create({
     },
     transitionProperty: 'opacity',
     transitionDuration: '100ms',
+    pointerEvents: 'none',
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: -6,
+      right: 2,
+      pointerEvents: 'auto',
+    },
   },
   foldShown: { opacity: 1 },
   foldHidden: { visibility: 'hidden' },
   foldOpen: { transform: 'rotate(90deg)' },
   bullet: {
+    position: 'relative',
+    pointerEvents: 'none',
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: 1,
+      right: 1,
+      pointerEvents: 'auto',
+    },
     width: 16,
     height: 28,
     display: 'inline-flex',
@@ -82,8 +108,53 @@ const styles = stylex.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
+  halo: {
+    width: 16,
+    height: 16,
+    borderRadius: radius.full,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    pointerEvents: 'auto',
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    transitionProperty: 'background-color',
+    transitionDuration: '100ms',
+  },
   dot: { width: 6, height: 6, borderRadius: radius.full, backgroundColor: colors.secondaryLabel },
   dotFolded: { boxShadow: `0 0 0 4px ${colors.selectedFill}` },
+  dotQuiet: {
+    opacity: { default: 0, [stylex.when.ancestor(':hover')]: 1 },
+    transitionProperty: 'opacity',
+    transitionDuration: '100ms',
+  },
+  check: {
+    width: 16,
+    height: 28,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    cursor: 'pointer',
+  },
+  checkBox: {
+    boxSizing: 'border-box',
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderStyle: 'solid',
+    borderColor: { default: colors.tertiaryLabel, ':hover': colors.secondaryLabel },
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: colors.onAccent,
+  },
+  checkBoxDone: {
+    backgroundColor: colors.accent,
+    borderColor: { default: colors.accent, ':hover': colors.accent },
+  },
+  textDone: { color: colors.secondaryLabel, textDecorationLine: 'line-through' },
   text: {
     flex: 1,
     minWidth: 0,
@@ -103,7 +174,7 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   editable: { outline: 'none', cursor: 'text' },
-  handle: { cursor: 'grab', touchAction: 'none' },
+  handle: { cursor: 'pointer', touchAction: 'none' },
   blockSelected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 14%, transparent)` },
   joinTop: { borderTopLeftRadius: 0, borderTopRightRadius: 0 },
   joinBottom: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
@@ -218,6 +289,8 @@ function TodayRow(props: {
   const controller = useTodayEditor();
   const active = !!node && !!controller?.isActive(store, node.id);
   const selected = !!node && !!controller?.isBlockSelected(store, node.id);
+  const done = node?.todo === 'done';
+  const blank = !!node && !node.text.trim() && !node.hasChildren && !node.todo;
   return (
     <div
       {...stylex.props(
@@ -232,14 +305,17 @@ function TodayRow(props: {
       aria-selected={selected || undefined}
       aria-expanded={node?.hasChildren ? !node.collapsed : undefined}
       data-today-node={node?.id}
+      onPointerDown={(event) => {
+        // The gaps between controls are inert: they must not take focus from the editor.
+        if (event.target === event.currentTarget) event.preventDefault();
+      }}
     >
       <button
         type="button"
         {...stylex.props(
           styles.fold,
           active && styles.foldShown,
-          !node?.hasChildren && styles.foldHidden,
-          node?.hasChildren && !node.collapsed && styles.foldOpen
+          !node?.hasChildren && styles.foldHidden
         )}
         aria-label={node?.collapsed ? t('today.expand', 'Expand') : t('today.collapse', 'Collapse')}
         tabIndex={-1}
@@ -249,18 +325,45 @@ function TodayRow(props: {
           store.outline.setCollapsed(node.id, !node.collapsed);
         }}
       >
-        <ChevronRight size={12} />
+        <ChevronRight
+          size={12}
+          {...stylex.props(node?.hasChildren && !node.collapsed && styles.foldOpen)}
+        />
       </button>
       <span
         {...stylex.props(styles.bullet, styles.handle)}
+        data-today-bullet
         onPointerDown={(event) => {
           if (!controller || !node || event.button !== 0) return;
           event.preventDefault();
           controller.beginNodeDrag(store, node.id, event.currentTarget, event);
         }}
       >
-        <span {...stylex.props(styles.dot, node?.collapsed && styles.dotFolded)} />
+        <span {...stylex.props(styles.halo)}>
+          <span
+            {...stylex.props(
+              styles.dot,
+              node?.collapsed && styles.dotFolded,
+              blank && !active && !selected && styles.dotQuiet
+            )}
+            data-today-dot={blank && !active && !selected ? 'quiet' : undefined}
+          />
+        </span>
       </span>
+      {node?.todo ? (
+        <span
+          {...stylex.props(styles.check)}
+          role="checkbox"
+          aria-checked={done}
+          aria-label={t('today.todo.done', 'Done')}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => controller?.toggleDone(store, node.id)}
+        >
+          <span {...stylex.props(styles.checkBox, done && styles.checkBoxDone)}>
+            {done ? <Check size={10} strokeWidth={3.5} /> : null}
+          </span>
+        </span>
+      ) : null}
       {active && controller ? (
         <>
           <div
@@ -271,7 +374,7 @@ function TodayRow(props: {
             spellCheck={false}
             role="textbox"
             aria-multiline
-            {...stylex.props(styles.text, styles.editable)}
+            {...stylex.props(styles.text, styles.editable, done && styles.textDone)}
             onPointerDown={(event) => {
               if (!node || event.button !== 0 || event.metaKey || event.ctrlKey) return;
               if (event.shiftKey || event.altKey || event.detail > 1) return;
@@ -283,7 +386,11 @@ function TodayRow(props: {
       ) : (
         <div
           key="static"
-          {...stylex.props(styles.text, (!node || !node.text) && styles.placeholder)}
+          {...stylex.props(
+            styles.text,
+            (!node || !node.text) && styles.placeholder,
+            done && styles.textDone
+          )}
           onPointerDown={(event) => {
             if (!controller || event.button !== 0 || event.metaKey || event.ctrlKey) return;
             if (event.altKey) return;

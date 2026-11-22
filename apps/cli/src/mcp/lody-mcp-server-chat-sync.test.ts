@@ -950,6 +950,26 @@ describe('chat Machine offline verdicts', () => {
     });
   });
 
+  it('hands off an accepted chat for daemon replay on post-accept transient sync failure', async () => {
+    mocks.sendSessionChatResult.mockRejectedValue(
+      new WorkspaceSyncUnavailableError({
+        message: 'Document sync failed: ECONNRESET',
+        cause: new Error('ECONNRESET'),
+      })
+    );
+
+    const result = await startSessionChatOperation({
+      operationId: 'sync-error-after-accept',
+      sessionId: remoteSession.id,
+      prompt: 'continue',
+    });
+
+    expect(result).toEqual({
+      state: 'active',
+      items: [expect.objectContaining({ status: 'active', inputDurable: false })],
+    });
+  });
+
   it('keeps the validator offline verdict retryable instead of COMMAND_REJECTED', async () => {
     mocks.validateSessionChatTarget.mockRejectedValue(
       new MachineOfflineError({ machineId: 'remote-machine-id' })

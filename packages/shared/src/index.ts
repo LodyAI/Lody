@@ -135,6 +135,7 @@ export * from './agent-role';
 export * from './agent-role-proposal';
 export * from './workspace-flock';
 export * from './pinned-sections';
+export * from './status-view';
 export { FractionalIndex, type JitterOptions } from './vendor/loro-fractional-index';
 export * from './local-machine-rpc';
 export * from './local-loro-data-plane';

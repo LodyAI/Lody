@@ -2,6 +2,7 @@ import type {
   LodyError,
   LodyOperationOutputAttachment,
   LodyOperationOutputPreview,
+  MachineId,
   MessageContent,
   SessionHistoryInput,
   SessionImagePayload,
@@ -210,4 +211,41 @@ export function progressIsSettled(
   return [...expected].every(
     ([key, status]) => status !== 'created' && status !== 'running' && published.get(key) === status
   );
+}
+
+export function resolveOperationTargetMachineId(args: {
+  operation: Pick<StoredLodyOperation, 'kind' | 'canonicalCommand'>;
+  index: number;
+  targetMeta?: Pick<SessionMeta, 'machineId'>;
+  requesterMeta?: Pick<SessionMeta, 'machineId'>;
+}): MachineId | undefined {
+  if (args.targetMeta?.machineId) return args.targetMeta.machineId;
+  if (args.operation.kind !== 'session_create' && args.operation.kind !== 'session_create_many') {
+    return undefined;
+  }
+  const root = args.operation.canonicalCommand;
+  if (!root || typeof root !== 'object' || Array.isArray(root)) {
+    return args.requesterMeta?.machineId;
+  }
+  const rootRecord = root as Record<string, unknown>;
+  const selected =
+    args.operation.kind === 'session_create_many'
+      ? Array.isArray(rootRecord.items)
+        ? rootRecord.items[args.index]
+        : undefined
+      : rootRecord;
+  const command =
+    selected && typeof selected === 'object' && !Array.isArray(selected)
+      ? (selected as Record<string, unknown>)
+      : undefined;
+  if (typeof command?.machineId === 'string' && command.machineId.length > 0) {
+    return command.machineId as MachineId;
+  }
+  if (typeof command?.agentRoleMachineId === 'string' && command.agentRoleMachineId.length > 0) {
+    return command.agentRoleMachineId as MachineId;
+  }
+  if (typeof command?.agentRoleId === 'string' && command.agentRoleId.length > 0) {
+    return undefined;
+  }
+  return args.requesterMeta?.machineId;
 }

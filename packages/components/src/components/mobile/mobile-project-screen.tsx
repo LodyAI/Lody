@@ -1,3 +1,6 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -132,6 +135,15 @@ export type MobileConversationItem = {
   /** Pin section and manual order of a pinned conversation (see specs/pinned-session-sections.md). */
   pinSectionId?: string | null;
   orderKey?: string | null;
+  /** The conversation's own message and read times; the Status view derives unread from them. */
+  lastMessageAt?: number | null;
+  lastReadAt?: number | null;
+  /** Status view state (specs/sidebar-status-view.md). */
+  snoozedUntil?: number | null;
+  settledAt?: number | null;
+  focusRestoredAt?: number | null;
+  /** Later rows: how long until the conversation returns to Focus (`3h`). */
+  snoozeCountdown?: string | null;
   readOnly?: boolean;
   /** Machine id the conversation lives on. Powers the machine filter. */
   machineId?: string | null;
@@ -609,6 +621,11 @@ export function ConversationRow({
           />
         ) : null}
       </div>
+      {conversation.snoozeCountdown ? (
+        <span data-snooze-countdown="" {...stylex.props(rowStyles.countdown)}>
+          {conversation.snoozeCountdown}
+        </span>
+      ) : null}
       {showMergeablePill ? (
         <SessionMergeablePill />
       ) : hasChanges && !isMergeable ? (
@@ -1272,3 +1289,13 @@ function ProjectEmptyState({ label }: { label: string }) {
     </div>
   );
 }
+
+const rowStyles = stylex.create({
+  countdown: {
+    flexShrink: 0,
+    fontSize: textScale.captionSize,
+    lineHeight: 1,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+});

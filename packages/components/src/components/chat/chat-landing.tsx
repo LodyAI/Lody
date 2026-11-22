@@ -198,6 +198,7 @@ import {
 } from '@/hooks/use-workspace-agent-roles';
 import { useAvailableCommands } from '@/hooks/use-available-commands';
 import { useOrganization } from '@/hooks/useOrganization';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
 import { useResolvedTheme } from '../../theme-provider';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
@@ -349,6 +350,9 @@ import {
   NO_PROJECT_BUCKET_ID,
   PINNED_BUCKET_ID,
 } from '@/components/mobile/mobile-chat-list';
+import { mobileStatusFieldsOf } from '@/components/mobile/mobile-status-view';
+import { useMobileStatusActions } from '@/components/mobile/use-mobile-status-actions';
+import type { MobileStatusCommands } from '@/components/mobile/use-mobile-status-list';
 import { Tooltip } from '@lody/ui/tooltip';
 import {
   MobileHomeScreen,
@@ -725,9 +729,17 @@ function WorkspaceChatLanding({
   const userId =
     currentUser?.id ??
     (runtime?.contentMode === 'e2ee' ? (runtime.accountId ?? undefined) : undefined);
-  const { activeOrganization, organizations, switchOrganization } = useOrganization({
+  const {
+    activeOrganization,
+    organizations,
+    switchOrganization,
+    role: workspaceRole,
+  } = useOrganization({
     targetSlug: workspaceSlug,
   });
+  const statusViewWritable = useStatusViewWritable(workspaceRole);
+  /** An encrypted workspace's read role cannot seal a pin either; elsewhere pins are preferences. */
+  const statusViewPreferable = runtime?.contentMode === 'e2ee' ? statusViewWritable : true;
   const viewportIsMobile = useIsMobile();
   // An embedded landing is a desktop surface (Today has no mobile layout in v1).
   const isMobile = viewportIsMobile && !isEmbedded;
@@ -1111,6 +1123,7 @@ function WorkspaceChatLanding({
     archiveSession,
     restoreSession,
     deleteArchivedSession,
+    runStatusViewCommand,
   } = useSessionActions();
   const openMobileDrawer = useSetAtom(setMobileDrawerOpenAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
@@ -4247,13 +4260,7 @@ function WorkspaceChatLanding({
     >
       {/* Embedded, the scope pills are items of the composer's one property row,
           beside the run config, so each pill shrinks by its own rule. */}
-      <div
-        className={
-          isEmbedded
-            ? 'contents'
-            : 'flex w-full min-w-0 items-center gap-2'
-        }
-      >
+      <div className={isEmbedded ? 'contents' : 'flex w-full min-w-0 items-center gap-2'}>
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
           visibleLocalMachineId={visibleLocalMachineId}
@@ -5000,7 +5007,10 @@ function WorkspaceChatLanding({
   /* Coerce stored value into Project | Date. Older builds stored
      'none' / 'type' / 'pr-status' / 'running-status'; anything other
      than 'date' becomes 'project' (No Group is no longer offered). */
-  const chatViewMode: MobileChatGroupBy = storedChatViewMode === 'date' ? 'date' : 'project';
+  const chatViewMode: MobileChatGroupBy =
+    storedChatViewMode === 'date' || storedChatViewMode === 'status'
+      ? storedChatViewMode
+      : 'project';
   /* Drives the mobile home's connection-status banner. Mirrors the
      desktop sidebar's `ConnectionPill` data source so users see the
      same reconnecting state regardless of platform. */
@@ -5114,6 +5124,7 @@ function WorkspaceChatLanding({
       activityCache.set(session.id, activity);
       return activity;
     };
+    const rowCap = chatViewMode === 'status' && !mobileHomeShowArchived ? undefined : 200;
     return sourceSessions
       .filter((session) => {
         if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId)) return false;
@@ -5131,7 +5142,7 @@ function WorkspaceChatLanding({
         const rightTime = getSessionActivity(right).latestMessageAt;
         return rightTime - leftTime;
       })
-      .slice(0, 200)
+      .slice(0, rowCap)
       .map<MobileConversationItem>((session) => {
         const prInfo = getLatestPullRequestInfo(session);
         const activity = getSessionActivity(session);
@@ -5198,6 +5209,7 @@ function WorkspaceChatLanding({
           isPinned: Boolean(session.isPinned),
           pinSectionId: session.pinSectionId ?? null,
           orderKey: session.orderKey ?? null,
+          ...mobileStatusFieldsOf(session),
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* Provenance for the list's opened-by tree. TWO fields, never
@@ -5255,6 +5267,7 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    chatViewMode,
     myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
@@ -5272,6 +5285,18 @@ function WorkspaceChatLanding({
     visibleLocalProjectMap,
     visibleSessions,
   ]);
+
+  /** Pinned rows My Tasks hid, by pin section, as the desktop Pinned area counts them. */
+  const mobileScopeHiddenCounts = useMemo(() => {
+    if (chatScope !== 'my' || mobileHomeShowArchived) return undefined;
+    const counts: Record<string, number> = {};
+    for (const session of visibleSessions) {
+      if (!session.isPinned || isSessionInMyScope(session, myAccountId)) continue;
+      const key = session.pinSectionId ?? '';
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return Object.keys(counts).length > 0 ? counts : undefined;
+  }, [chatScope, mobileHomeShowArchived, myAccountId, visibleSessions]);
 
   /* Pill bar config for the Chat tab. Multi-select pills model state
      as EXCLUDED sets: `selectedIds = (allOptionIds − excluded)` and
@@ -5452,13 +5477,14 @@ function WorkspaceChatLanding({
       {
         kind: 'single',
         id: 'view',
-        fallbackLabel: t('chat.mobileHome.filters.view.byProject', 'Group: Project'),
+        fallbackLabel: t('chat.mobileHome.filters.view.byStatus', 'Group: Status'),
         options: [
+          { id: 'status', label: t('chat.mobileHome.filters.view.byStatus', 'Group: Status') },
           { id: 'project', label: t('chat.mobileHome.filters.view.byProject', 'Group: Project') },
           { id: 'date', label: t('chat.mobileHome.filters.view.byDate', 'Group: Date') },
         ],
         selectedId: chatViewMode,
-        onSelect: (id) => setChatViewMode(id === 'date' ? 'date' : 'project'),
+        onSelect: (id) => setChatViewMode(id === 'date' || id === 'status' ? id : 'project'),
       },
       {
         kind: 'aggregate',
@@ -5804,6 +5830,33 @@ function WorkspaceChatLanding({
   /* Pin / archive callbacks for the mobile swipe-to-reveal drawer.
      Cast the id to `SessionId` — the row only knows it as `string`,
      but our session-action helpers want the branded type. */
+  const {
+    snooze: snoozeMobileStatus,
+    settle: settleMobileStatus,
+    moveToFocus: focusMobileStatus,
+    report: reportMobileStatus,
+  } = useMobileStatusActions();
+  const mobileStatusCommands = useMemo<MobileStatusCommands>(
+    () => ({
+      run: async (command, state) => {
+        const writes = await runStatusViewCommand(command, state);
+        if (command.type === 'move' && writes.length === 0)
+          throw new Error(t('sidebar.status.moveRefused'));
+      },
+      snooze: snoozeMobileStatus,
+      settle: settleMobileStatus,
+      moveToFocus: focusMobileStatus,
+      report: reportMobileStatus,
+    }),
+    [
+      focusMobileStatus,
+      reportMobileStatus,
+      runStatusViewCommand,
+      settleMobileStatus,
+      snoozeMobileStatus,
+      t,
+    ]
+  );
   const handleMobileChatTogglePin = useCallback(
     (chatId: string, nextPinned: boolean) => {
       void setSessionPinned(chatId as SessionId, nextPinned).catch((error: unknown) =>
@@ -6122,6 +6175,7 @@ function WorkspaceChatLanding({
           isPinned: Boolean(session.isPinned),
           pinSectionId: session.pinSectionId ?? null,
           orderKey: session.orderKey ?? null,
+          ...mobileStatusFieldsOf(session),
           readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* See the home Chat-tab builder: precise opener for navigation, row
@@ -7138,6 +7192,10 @@ function WorkspaceChatLanding({
           onGitHubRepositorySelect={handleMobileHomeGitHubRepositorySelect}
           onChatSelect={handleMobileHomeChatSelect}
           onChatTogglePin={handleMobileChatTogglePin}
+          chatStatusCommands={mobileStatusCommands}
+          chatStatusWritable={statusViewWritable}
+          chatStatusPreferable={statusViewPreferable}
+          chatScopeHiddenCounts={mobileScopeHiddenCounts}
           onChatArchive={handleMobileChatArchive}
           onChatRestore={handleMobileChatRestore}
           onChatPermanentDelete={handleMobileChatPermanentDelete}

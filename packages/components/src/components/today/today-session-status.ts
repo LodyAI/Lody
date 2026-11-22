@@ -1,9 +1,5 @@
 import type { SessionMeta, SessionStatus } from '@lody/shared';
-import {
-  formatSnoozeCountdown,
-  sidebarStatusGroup,
-  type SidebarStatusGroup,
-} from '@/lib/sidebar-status-group';
+import { formatSnoozeCountdown, statusViewTier, type StatusViewTier } from '@lody/shared';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 
 /** The one leading icon a mention shows, in priority order. */
@@ -17,7 +13,7 @@ export type TodaySessionDisplay =
       title: string;
       status: TodaySessionState;
       /** The sidebar's status group: Move to Focus is offered from Later and Settled. */
-      group: SidebarStatusGroup;
+      group: StatusViewTier;
       /** Has unread output (agent-managed sessions never do): the menu offers Mark as read. */
       unread: boolean;
       lastMessageAt: number | null;
@@ -30,7 +26,7 @@ const finite = (value: unknown): number | null =>
 
 /**
  * What a conversation mention shows, from the same signals as the sidebar row:
- * live presence for running/waiting, `sidebarStatusGroup` for Later and
+ * live presence for running/waiting, `statusViewTier` for Later and
  * Settled, read receipts for unread (hidden for agent-managed sessions), and
  * archive. Priority: waiting > running > later > done > unread > idle.
  * Metadata absence means deleted or no access only once the metadata
@@ -50,9 +46,9 @@ export function todaySessionDisplay(input: {
   const running = live != null;
   const lastMessageAt = finite(meta.lastMessageAt);
   const snoozedUntil = finite(meta.snoozedUntil);
-  const group = sidebarStatusGroup(
+  const group = statusViewTier(
     {
-      latestMessageAt: lastMessageAt,
+      activityAt: lastMessageAt,
       isWorking: running,
       isWaitingPermission: waiting,
       snoozedUntil,

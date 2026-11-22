@@ -11,11 +11,11 @@ In the iOS app, long-pressing a link in a message showed the system link preview
 
 ## Cause and scope
 
-`body.native-mobile-shell` disables `-webkit-touch-callout` everywhere, then restores the default inside text fields and `[data-native-selection-allow]` regions so native text selection works. Markdown messages, file previews and attachments sit in such regions, and their anchors are `target="_blank"`. Restoring the callout on those anchors also restored the WKWebView link preview, whose "Open Link" action follows a different path from an ordinary tap (WebKit sends a synthetic click at the press location). The stuck state that turns every later tap into that link lives in the native WebView, outside this repository.
+`body.native-mobile-shell` disables `-webkit-touch-callout` everywhere, then restores the default inside text fields and `[data-text-selectable]` regions so native text selection works. Markdown messages, file previews and attachments sit in such regions, and their anchors are `target="_blank"`. Restoring the callout on those anchors also restored the WKWebView link preview, whose "Open Link" action follows a different path from an ordinary tap (WebKit sends a synthetic click at the press location). The stuck state that turns every later tap into that link lives in the native WebView, outside this repository.
 
 ## Decision
 
-`[data-native-selection-allow] a[href]` and its descendants keep `-webkit-touch-callout: none` in the native shell. Text selection still starts on a long press, and a tap still opens the link through the existing anchor handling. Lost: the system "Copy Link" / "Share" preview menu on message links.
+`[data-text-selectable] a[href]` and its descendants keep `-webkit-touch-callout: none` in the native shell. Text selection still starts on a long press, and a tap still opens the link through the existing anchor handling. Lost: the system "Copy Link" / "Share" preview menu on message links.
 
 Alternatives not taken: setting `allowsLinkPreview = false` in the native shell would fix it at the source but needs a shell release and is outside this repository; intercepting anchor taps in JavaScript would not help, because the stuck taps still arrive as clicks on the old anchor.
 

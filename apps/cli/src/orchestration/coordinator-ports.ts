@@ -1,13 +1,26 @@
 import type {
   LodyOperationItemResult,
+  MachineId,
   SessionHistoryInput,
   SessionId,
   SessionMeta,
   StoredLodyOperation,
 } from '@lody/shared';
 import type { HistoryAction, SessionTurnRead } from '@lody/shared/session-data';
-import { Context, Effect } from 'effect';
+import { Context, Data, Effect } from 'effect';
 import type { InboxBatch } from './inbox/model';
+
+export const TARGET_CATCH_UP_TIMEOUT_MS = 8_000;
+
+export class TargetCatchUpTimeoutError extends Data.TaggedError('TargetCatchUpTimeoutError')<{
+  readonly sessionId: SessionId;
+  readonly reason: string;
+  readonly timeoutMs: number;
+}> {
+  override get message(): string {
+    return `Target document catch-up timed out after ${this.timeoutMs}ms (${this.sessionId}, ${this.reason})`;
+  }
+}
 
 export type CoordinatorHistory = {
   meta: SessionMeta;
@@ -22,15 +35,17 @@ export class CoordinatorPorts extends Context.Service<
   {
     metadata(id: SessionId): Effect.Effect<{ meta: SessionMeta } | undefined, unknown>;
     execution(id: SessionId): { activeTurnId?: string };
-    operation(key: string): Effect.Effect<{ signal: { readonly aborted: boolean } }, unknown>;
-    cancelInactive(keys: Set<string>): Effect.Effect<void>;
     receipts: Effect.Effect<InboxBatch[], unknown>;
     wakeInbox: Effect.Effect<void, unknown>;
     active(): boolean;
     now(): number;
     claimToken: string;
     session(id: SessionId): Effect.Effect<CoordinatorHistory, unknown>;
-    confirmReadable(id: SessionId, reason: string): Effect.Effect<void, unknown>;
+    confirmReadable(
+      id: SessionId,
+      reason: string,
+      targetMachineId?: MachineId
+    ): Effect.Effect<void, unknown>;
     materialize(
       operation: StoredLodyOperation,
       item: Extract<LodyOperationItemResult, { status: 'active' }>,

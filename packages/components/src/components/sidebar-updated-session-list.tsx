@@ -107,16 +107,17 @@ import {
   pinnedFirstRootRank,
   type OpenedBySessionTreeNode,
 } from '@/lib/session-opened-by-tree';
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import {
   buildSnoozePresets,
-  expiredSnoozeTimestamp,
+  buildStatusViewTiers,
+  flattenStatusViewRows,
   formatSnoozeCountdown,
-  isSidebarBucketCollapsed,
-  SIDEBAR_STATUS_GROUPS,
-  sidebarStatusGroup,
-  type SidebarStatusGroup,
-} from '@/lib/sidebar-status-group';
-import { sortByManualOrder } from '@lody/shared';
+  STATUS_VIEW_TIERS,
+  statusViewTier,
+  type StatusViewSession,
+  type StatusViewTier,
+} from '@lody/shared';
 import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from './sidebar-status-snooze-dialog';
 import { SidebarFocusDndContainer } from './sidebar-status-focus-dnd';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
@@ -220,10 +221,10 @@ export type SidebarUpdatedItem = {
 /**
  * The Updated organize mode renders ONE section ("Chats") — a flat
  * recency-sorted list keyed 'all'. The Status organize mode renders one
- * section per {@link SidebarStatusGroup}, keyed by the group, skipping empty
+ * section per {@link StatusViewTier}, keyed by the group, skipping empty
  * groups. Both share the collapse / show-all state maps.
  */
-export type SidebarUpdatedBucketKey = 'all' | SidebarStatusGroup;
+export type SidebarUpdatedBucketKey = 'all' | StatusViewTier;
 
 /** How the list splits its rows: one recency list, or the status groups. */
 /** `manual` keeps the caller's order (pinned sections); the others sort by activity. */
@@ -321,57 +322,39 @@ export function buildSidebarUpdatedBuckets(
   if (grouping === 'manual') return [{ key: 'all', items: [...items] }];
   if (!items.length) return [];
   if (grouping === 'recency') return [{ key: 'all', items: sortUpdatedItems(items) }];
-  const byGroup = new Map<SidebarStatusGroup, SidebarUpdatedItem[]>();
-  for (const item of items) {
-    const group = sidebarStatusGroup(item, nowMs);
-    const members = byGroup.get(group);
-    if (members) members.push(item);
-    else byGroup.set(group, [item]);
-  }
-  return SIDEBAR_STATUS_GROUPS.flatMap<SidebarUpdatedBucket>((key) => {
-    const members = byGroup.get(key);
-    if (!members?.length) {
-      // Keep Focus mounted even when empty so Later/Settled rows can be dragged back into it.
-      return key === 'focus' ? [{ key, items: [] }] : [];
-    }
-    if (key === 'focus') {
-      const woken: SidebarUpdatedItem[] = [];
-      const regular: SidebarUpdatedItem[] = [];
-      for (const item of members) {
-        if (expiredSnoozeTimestamp(item.snoozedUntil, nowMs) !== null) {
-          woken.push(item);
-        } else {
-          regular.push(item);
-        }
-      }
-      woken.sort((a, b) => {
-        const byWake = (b.snoozedUntil ?? 0) - (a.snoozedUntil ?? 0);
-        return byWake !== 0 ? byWake : a.id.localeCompare(b.id);
-      });
-      const orderedRegular = sortByManualOrder(regular, (item) => ({
-        id: item.id,
-        orderKey: item.orderKey ?? null,
-        recency: getSortKey(item),
-      }));
-      return [{ key, items: [...woken, ...orderedRegular] }];
-    }
-    if (key === 'later') {
-      return [
-        {
-          key,
-          items: [...members].sort((a, b) => {
-            const aUntil =
-              typeof a.snoozedUntil === 'number' ? a.snoozedUntil : Number.MAX_SAFE_INTEGER;
-            const bUntil =
-              typeof b.snoozedUntil === 'number' ? b.snoozedUntil : Number.MAX_SAFE_INTEGER;
-            if (aUntil !== bUntil) return aUntil - bUntil;
-            return a.id.localeCompare(b.id);
-          }),
-        },
-      ];
-    }
-    return [{ key, items: sortUpdatedItems(members) }];
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const tiers = buildStatusViewTiers(items.map(toStatusViewSession), nowMs);
+  return STATUS_VIEW_TIERS.flatMap<SidebarUpdatedBucket>((key) => {
+    const rows = tiers[key];
+    // Keep Focus mounted even when empty so Later/Settled rows can be dragged back into it.
+    if (!rows.length) return key === 'focus' ? [{ key, items: [] }] : [];
+    return [{ key, items: flattenStatusViewRows(rows).map((row) => byId.get(row.id)!) }];
   });
+}
+
+/**
+ * One sidebar row as the shared Status view reads it. Pinned rows never reach
+ * the Status tiers, so pin fields are left out.
+ */
+export function toStatusViewSession(item: SidebarUpdatedItem): StatusViewSession {
+  return {
+    id: item.id,
+    title: item.title,
+    lastMessageAt: getSortKey(item),
+    activityAt: getSortKey(item),
+    lastReadAt: null,
+    isPinned: false,
+    pinSectionId: null,
+    orderKey: item.orderKey ?? null,
+    snoozedUntil: item.snoozedUntil ?? null,
+    settledAt: item.settledAt ?? null,
+    focusRestoredAt: item.focusRestoredAt ?? null,
+    openedById: SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS.getOpenedBySessionId(item),
+    isWorking: Boolean(item.isWorking),
+    isWaitingPermission: Boolean(item.isWaitingPermission),
+    canManage: true,
+    canPrefer: true,
+  };
 }
 
 /**
@@ -985,7 +968,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             onShareWithTeam={onShareItemWithTeam}
                             onOpenPullRequest={onOpenPullRequest}
                             onBeginRename={beginRename}
-                            pinSectionMenu={pinSectionMenu}
+                            pinSectionMenu={node.item.isPinned ? pinSectionMenu : undefined}
                             nativeDrag={!pinDrag}
                             openedByTree={treeSlot}
                             contextMenuLabels={contextMenuLabels}
@@ -1247,7 +1230,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
   const nowMs = now instanceof Date ? now.getTime() : Date.now();
-  const statusGroup = sidebarStatusGroup(item, nowMs);
+  const statusGroup = statusViewTier({ ...item, activityAt: getSortKey(item) }, nowMs);
   const snoozeCountdown =
     showSnoozeCountdown && typeof item.snoozedUntil === 'number'
       ? formatSnoozeCountdown(item.snoozedUntil, nowMs)
@@ -1488,7 +1471,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
-            rowGroup="row"
             restIcon={
               snoozeCountdown ||
               showPr ||

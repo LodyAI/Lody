@@ -1,19 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   buildPinnedSectionLayout,
-  planNewPinPlacement,
-  planNewPinSectionOrderKey,
-  planPinSectionMove,
-  planPinnedSessionMove,
-  type PinPlacementWrite,
   type PinSection,
   type PinnedSessionPlacement,
 } from '@lody/shared';
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { SessionMentionDropLayer } from '@/components/sessions/session-mention-drop-layer';
-import type { SidebarPinSectionActions } from '@/components/sidebar-pinned-sections';
 import type { SidebarUpdatedItem } from '@/components/sidebar-updated-session-list';
+import { useStatusViewStoryState } from './status-view-story-state';
 
 const NOW = Date.now();
 const HOUR = 60 * 60 * 1000;
@@ -124,119 +119,19 @@ const toPlacement = (conversation: DemoConversation): PinnedSessionPlacement => 
 });
 
 /**
- * Interactive pin sections. State lives in the story, but every key comes from
- * the same planners the app uses, so drags and menu moves behave as in the app.
+ * Interactive pin sections. State lives in the story, but layout, planning and
+ * drop resolution are the app's own, so drags and menu moves behave as in the app.
  */
 function PinnedSectionsPlayground() {
-  const [conversations, setConversations] = useState(INITIAL_CONVERSATIONS);
-  const [sections, setSections] = useState(INITIAL_SECTIONS);
+  const state = useStatusViewStoryState(INITIAL_CONVERSATIONS, INITIAL_SECTIONS, toItem);
+  const { conversations, setConversations, pinnedSections, updatedItems } = state;
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [defaultCollapsed, setDefaultCollapsed] = useState(false);
   const [selected, setSelected] = useState<string | null>('c3');
   const [mentioned, setMentioned] = useState<string | null>(null);
-
-  const pinned = useMemo(() => conversations.filter((entry) => entry.isPinned), [conversations]);
-  const layout = useMemo(
-    () => buildPinnedSectionLayout(pinned, sections, toPlacement),
-    [pinned, sections]
-  );
-  const pinnedSections = useMemo(
-    () =>
-      layout.map((entry) => ({
-        id: entry.sectionId,
-        name: entry.section?.name ?? '',
-        items: entry.items.map(toItem),
-      })),
-    [layout]
-  );
-  const pinnedItems = useMemo(() => pinned.map(toItem), [pinned]);
-  const updatedItems = useMemo(
-    () => conversations.filter((entry) => !entry.isPinned).map(toItem),
+  const pinnedItems = useMemo(
+    () => conversations.filter((entry) => entry.isPinned).map(toItem),
     [conversations]
-  );
-
-  const apply = useCallback((writes: readonly PinPlacementWrite[]) => {
-    const byId = new Map(writes.map((write) => [write.sessionId, write]));
-    setConversations((previous) =>
-      previous.map((entry) => {
-        const write = byId.get(entry.id);
-        return write
-          ? {
-              ...entry,
-              isPinned: true,
-              pinSectionId: write.pinSectionId,
-              orderKey: write.orderKey,
-            }
-          : entry;
-      })
-    );
-  }, []);
-
-  const plan = useCallback(
-    (itemId: string, toSectionId: string | null, toIndex: number, nextSections = sections) =>
-      planPinnedSessionMove(
-        buildPinnedSectionLayout(pinned.map(toPlacement), nextSections, (entry) => entry),
-        { sessionId: itemId, toSectionId, toIndex }
-      ),
-    [pinned, sections]
-  );
-
-  const actions = useMemo<SidebarPinSectionActions>(
-    () => ({
-      onDropItem: (itemId, sectionId, toIndex) => apply(plan(itemId, sectionId, toIndex)),
-      onMoveSection: (sectionId, toIndex) =>
-        setSections((previous) =>
-          previous.map((entry) =>
-            entry.id === sectionId
-              ? { ...entry, orderKey: planPinSectionMove(previous, sectionId, toIndex) }
-              : entry
-          )
-        ),
-      onCreateSection: (name, moveItemId) => {
-        const section: PinSection = {
-          id: `section-${Math.random().toString(36).slice(2, 8)}`,
-          name,
-          orderKey: planNewPinSectionOrderKey(sections),
-        };
-        const nextSections = [...sections, section];
-        setSections(nextSections);
-        if (moveItemId) apply(plan(moveItemId, section.id, 0, nextSections));
-      },
-      onRenameSection: (sectionId, name) =>
-        setSections((previous) =>
-          previous.map((entry) => (entry.id === sectionId ? { ...entry, name } : entry))
-        ),
-      onDeleteSection: (sectionId) =>
-        setSections((previous) => previous.filter((entry) => entry.id !== sectionId)),
-    }),
-    [apply, plan, sections]
-  );
-
-  const togglePinned = useCallback(
-    (itemId: string, nextPinned: boolean) => {
-      if (!nextPinned) {
-        setConversations((previous) =>
-          previous.map((entry) =>
-            entry.id === itemId
-              ? { ...entry, isPinned: false, pinSectionId: undefined, orderKey: undefined }
-              : entry
-          )
-        );
-        return;
-      }
-      const defaultPins = pinned.filter((entry) => !entry.pinSectionId).map(toPlacement);
-      const { orderKey } = planNewPinPlacement(
-        buildPinnedSectionLayout(defaultPins, [], (entry) => entry)
-      );
-      setConversations((previous) =>
-        previous.map((entry) =>
-          entry.id === itemId
-            ? { ...entry, isPinned: true, pinSectionId: undefined, orderKey }
-            : entry
-        )
-      );
-    },
-    [pinned]
   );
 
   return (
@@ -258,11 +153,11 @@ function PinnedSectionsPlayground() {
           onTogglePinSection={(sectionId) =>
             setCollapsed((previous) => ({ ...previous, [sectionId]: !previous[sectionId] }))
           }
-          pinSectionActions={actions}
+          pinSectionActions={state.pinSectionActions}
           updatedItems={updatedItems}
           updatedSelectedItemId={selected}
           onSelectUpdatedItem={setSelected}
-          onToggleUpdatedItemPinned={togglePinned}
+          onToggleUpdatedItemPinned={state.togglePin}
           onArchiveUpdatedItem={(itemId) =>
             setConversations((previous) => previous.filter((entry) => entry.id !== itemId))
           }

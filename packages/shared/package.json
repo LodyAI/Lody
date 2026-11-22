@@ -45,6 +45,10 @@
       "types": "./src/prompt-shortcuts/*.ts",
       "import": "./src/prompt-shortcuts/*.ts"
     },
+    "./status-view": {
+      "types": "./src/status-view/index.ts",
+      "import": "./src/status-view/index.ts"
+    },
     "./session-sharing": {
       "types": "./src/session-sharing.ts",
       "import": "./src/session-sharing.ts"

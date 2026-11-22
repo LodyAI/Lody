@@ -32,7 +32,7 @@ context/message-flow.md "Upstream".
   Claude single-question forms retain their request-message prompt. The shared bridge
   maps recognized Droid AskUser labels and custom answers back to its option IDs and
   companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
-- `antigravity-background.ts` — keeps Antigravity background work after `end_turn` safe from idle GC with synthesized `sessionActivity`.
+- `antigravity-background.ts` — identifies Antigravity ACP v1 servers (builtin or custom `Antigravity ACP Server`) while excluding legacy `antigravity-acp`.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
@@ -318,12 +318,12 @@ negotiates the `realpath` of the workdir as the ACP `cwd`, because agy compares 
 targets by realpath and would otherwise ask permission for in-workspace edits under a
 symlinked path such as macOS `/tmp`.
 
-agy ends `session/prompt` with `end_turn` while background work (commands, timers,
-subagents, swarms) is still running, then stops writing to stdout. Lody ends the turn
-normally, and `antigravity-background.ts` reports `sessionActivity` from side-effect-free
-`session/list` activity so idle GC keeps the process until that work has woken the model
-and gone quiet. Output from those wakeups is not replayed: `session/load` restarts the
-session's MCP servers. See the
+Lody does not synthesize Core `sessionActivity` from stdout heuristics or `session/list`
+polling for `agy`: without an authoritative activity signal from the server, heuristic
+counting over-counts in-turn completed background tasks and merged wakeups, locking
+sessions in `running` presence and suppressing completion signals for up to 24 hours.
+If `agy` advertises Core `sessionActivity` v1 in the future, `AgentClient` will consume
+it authoritatively. See the
 [background work decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-antigravity-background-wakeup.md).
 
 `antigravity-usage.ts` projects end-turn `PromptResponse.usage` into disjoint token
