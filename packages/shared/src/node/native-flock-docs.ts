@@ -4,6 +4,7 @@ import {
   nativeLocalImportOptions,
   nativeRoomEncryption,
   observeFlockRegisters,
+  syncNativeColdRooms,
 } from './native-repo';
 import { registersToBundle, type FlockExportBundle } from '../native-flock-bundle';
 
@@ -35,6 +36,7 @@ export async function observeNativeFlockDoc(
 ) {
   const room = { kind: 'flock' as const, id: flockDocId };
   await client.createRoom(namespace, room, nativeRoomEncryption(client, namespace));
+  await syncNativeColdRooms(client, namespace, [room], { once: true });
   return observeFlockRegisters(client, namespace, room, listener);
 }
 

@@ -385,6 +385,23 @@ Opening never waits on the network. The engine persists the remote, and each
 install (attach, refresh or reconnect) configures it until a content token is
 issued; offline edits stay queued meanwhile.
 
+The engine answers reads from its local copy, so a room only another device wrote
+reads empty until something pulls it. Once the remote is configured, the
+attachment holds room interest in Meta, the Workspace Flock, the Schedule registry
+and (on the daemon) its own Machine Flock (`nativeLiveRooms`), which keeps them
+replicated while nothing observes them. Every other room is pulled on its first read
+(`syncNativeColdRooms`), bounded at 5 s:
+
+- the first observation of a Meta, Flock or Loro room in a process, before its
+  first snapshot, after which the live observation keeps it current;
+- every remote Session port (`createNativeRemoteHistoryPort`), because the daemon's
+  idle reader has no observation.
+
+A failed or timed-out pull reads local state and is retried by the next read. So
+loro-repo's `firstSyncedWithRemote`, which an external owner resolves on open,
+follows a pull attempt rather than an empty local room. An offline cold read
+still sees only local state.
+
 The keyring and snapshot policy live in engine memory, so they are reinstalled on
 every reconnect (host restart or build handoff). `refresh()` reruns the install
 for the Spec's notification table. Daemon and main share the namespace, and each

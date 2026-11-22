@@ -1,9 +1,22 @@
 import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { createLodyWorkspaceRoutes, type RepoClient } from '@loro-dev/loro-repo-client';
+import {
+  createLodyWorkspaceRoutes,
+  META_ROOM,
+  type RepoClient,
+  type RoomKey,
+} from '@loro-dev/loro-repo-client';
 import { encryptedWorkspaceNamespace } from '../workspace-streams-content';
 import { forgetDeclaredDocRooms } from './native-docs';
-import { setNativeNamespaceEncryption, setNativeNamespaceWriter } from './native-repo';
+import {
+  nativeRoomEncryption,
+  setNativeNamespaceEncryption,
+  setNativeNamespaceRemote,
+  setNativeNamespaceWriter,
+} from './native-repo';
+import { nativeFlockDocIds } from '../native-workspace-meta-ipc';
+import { getMachineFlockDocId } from '../machine-flock';
+import type { MachineId, WorkspaceId } from '../ids';
 
 /**
  * Connects one encrypted workspace's native namespace to its encrypted content
@@ -49,6 +62,20 @@ export interface NativeEncryptedWorkspaceOptions {
    * which the notification table reinstalls; forged frames never trigger it.
    */
   readonly onOpenPending?: () => void;
+  /** This process's own machine, whose Machine Flock stays live like the workspace's. */
+  readonly machineId?: string;
+}
+
+/**
+ * Rooms kept live while the workspace is attached, whether or not anything here
+ * observes them: Meta, the Workspace Flock, the Schedule registry and the own
+ * Machine Flock. Other rooms are pulled when first read.
+ */
+export function nativeLiveRooms(workspaceId: string, machineId?: string): RoomKey[] {
+  const flocks = nativeFlockDocIds(workspaceId);
+  if (machineId)
+    flocks.push(getMachineFlockDocId(workspaceId as WorkspaceId, machineId as MachineId));
+  return [META_ROOM, ...flocks.map((id) => ({ kind: 'flock' as const, id }))];
 }
 
 /** Open holds a ledger or key catch-up can clear (not `invalid_frame`). */
@@ -235,6 +262,13 @@ export async function attachNativeEncryptedWorkspace(
   let serial: Promise<unknown> = Promise.resolve();
   let closed = false;
   let slot: { source?: TokenSource } | undefined;
+  let interest: Promise<{ release(): Promise<void> } | undefined> | undefined;
+  const holdLiveRooms = async () => {
+    const rooms = nativeLiveRooms(workspaceId, options.machineId);
+    for (const room of rooms)
+      await client.createRoom(workspaceId, room, nativeRoomEncryption(client, workspaceId));
+    return client.holdRoomInterest(workspaceId, rooms);
+  };
   const install = async () => {
     const { mayWrite } = await options.syncKeyring();
     await client.setSnapshotPolicy(workspaceId, {
@@ -243,12 +277,20 @@ export async function attachNativeEncryptedWorkspace(
     });
     if (!closed) slot ??= await serveTokens(client, workspaceId, options.contentToken, mayWrite);
     if (!closed && !remoteConfigured) await configureContentRemote().catch(() => {});
+    if (!closed && remoteConfigured)
+      interest ??= holdLiveRooms().catch(() => {
+        interest = undefined;
+        return undefined;
+      });
   };
   const stopServing = () => {
     closed = true;
     offState();
     void pendingWatch?.unsubscribe().catch(() => {});
     if (slot?.source === options.contentToken) slot.source = undefined;
+    setNativeNamespaceRemote(client, workspaceId, undefined);
+    void interest?.then((held) => held?.release()).catch(() => {});
+    interest = undefined;
   };
   const run = <A>(work: () => Promise<A>): Promise<A> => {
     const next = serial.then(work, work);
@@ -272,6 +314,7 @@ export async function attachNativeEncryptedWorkspace(
       }),
     });
     remoteConfigured = true;
+    if (!closed) setNativeNamespaceRemote(client, workspaceId, NATIVE_CONTENT_REMOTE_ID);
   };
   await run(install);
 

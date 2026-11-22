@@ -1212,6 +1212,7 @@ async function openWorkspaceOwned(
       syncKeyring: () => run(opened.runtime.syncEngineKeyring(sink)),
       pendingWipe: nativePendingWipeMarker(dataDir, ws),
       onOpenPending: () => contentCatchUp.pending(),
+      ...(options.machineId ? { machineId: options.machineId } : {}),
     });
     if (closed) {
       attached.close();

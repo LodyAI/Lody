@@ -19,6 +19,7 @@ import {
   nativeRoomEncryption,
   nativeWriteOptions,
   observeFlock,
+  syncNativeColdRooms,
   type FlockObservation,
 } from './native-repo';
 
@@ -233,6 +234,7 @@ export function createNativeWorkspaceMeta(
   const start = () =>
     (opening ??= (async () => {
       await client.createRoom(namespace, META_ROOM, nativeRoomEncryption(client, namespace));
+      await syncNativeColdRooms(client, namespace, [META_ROOM], { once: true });
       observation = observeFlock(client, namespace, META_ROOM, [], (event) => {
         if (event.kind === 'invalidated') return;
         const docIds = new Set<string>();

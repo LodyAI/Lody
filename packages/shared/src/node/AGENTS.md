@@ -166,3 +166,6 @@ Control, probe and Loro data-plane requests require the private daemon token bef
   content-open admission; a pending wipe is finished before anything else opens it.
   Every local write to it names this process's writer (`nativeWriteOptions`), and a
   replica's local edits import with `nativeLocalImportOptions` so they upload.
+  The attachment keeps Meta and the fixed Flock rooms live with room interest; any
+  other first read pulls its room through `syncNativeColdRooms`, bounded, so a room
+  another device wrote is never answered from an empty local copy.
