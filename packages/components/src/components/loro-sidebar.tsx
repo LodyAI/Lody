@@ -249,6 +249,9 @@ export interface LoroSidebarProps {
    */
   pinnedHiddenCounts?: Readonly<Record<string, number>>;
   onTogglePinSection?: (sectionId: string) => void;
+  /** Pin sections hidden on this device, by `pinSectionKey(section.id)`. */
+  hiddenPinSectionKeys?: Readonly<Record<string, boolean>>;
+  onSetPinSectionHidden?: (sectionKey: string, hidden: boolean) => void;
   /** Create, rename, delete and move between pin sections; absent hides those controls. */
   pinSectionActions?: SidebarPinSectionActions;
   /** Selected item id used to highlight a row in 'updated' mode. */
@@ -848,6 +851,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   collapsedPinSectionIds,
   pinnedHiddenCounts,
   onTogglePinSection,
+  hiddenPinSectionKeys,
+  onSetPinSectionHidden,
   pinSectionActions,
   updatedSelectedItemId,
   updatedBucketsCollapsed,
@@ -1625,6 +1630,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                   collapsedSectionIds={collapsedPinSectionIds}
                   hiddenCounts={pinnedHiddenCounts}
                   onToggleSection={onTogglePinSection}
+                  hiddenSectionKeys={hiddenPinSectionKeys}
+                  onSetSectionHidden={onSetPinSectionHidden}
                   headerAction={sectionHeaderFilterAction ?? undefined}
                   actions={pinSectionActions}
                   onDropIntoFocus={organizeMode === 'status' ? onDropFocusItem : undefined}
