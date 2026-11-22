@@ -1,9 +1,17 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { createAliasedIncompleteRecoveryStore } from '@lody/shared/workspace-streams-persistence';
 import fs from 'fs/promises';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 import path from 'path';
 import { type JsonObject, type RemoteCursor, type RemoteCursorStore } from '@loro-dev/streams-crdt';
-import { getLoroStreamsRemoteCursorUrlAliases, type WorkspaceId } from '@lody/shared';
+import {
+  getLoroStreamsRemoteCursorUrlAliases,
+  getLoroStreamIdForDocId,
+  createLoroStreamUrl,
+  LORO_STREAMS_BUCKET_ID,
+  type WorkspaceId,
+} from '@lody/shared';
 import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { LoroDoc } from 'loro-crdt';
@@ -22,8 +30,7 @@ export const getLoroRepoSqliteDbPath = (workspaceId: WorkspaceId): string =>
 // This is URL-key compatibility only, not migration of pre-SQLite JSON cursors.
 // The daemon writes LoroDoc cursors; commands may read covered seeds. Meta
 // and named Flock cursors are replica-bound checkpoints owned by
-// `SqliteRepoStore` itself (no alias fallback there, so a gateway flip costs
-// those rooms one bootstrap).
+// `SqliteRepoStore` itself, including URL alias resolution.
 export class AliasedRemoteCursorStore<
   TVersion extends JsonObject = JsonObject,
 > implements RemoteCursorStore<TVersion> {
@@ -101,6 +108,7 @@ export function hasPersistedFlockRemoteState(dbPath: string, flockDocId: string)
 }
 
 export type CliSqliteRepoStore = {
+  workspaceId: WorkspaceId;
   sqliteStore: SqliteRepoStore;
   storageAdapter: SqliteRepoStore['storage'];
   /**
@@ -124,11 +132,16 @@ export const createCliSqliteRepoStore = async (
   // only durable together with FileSystemStorageAdaptor snapshots; migrating
   // cursors without doc/meta state could skip required stream replay.
   const dbPath = path.join(baseDir, 'repo.sqlite3');
-  const sqliteStore = new SqliteRepoStore({ path: dbPath, onWriteFailure });
+  const sqliteStore = new SqliteRepoStore({
+    path: dbPath,
+    onWriteFailure,
+    resolveStreamUrlAliases: getLoroStreamsRemoteCursorUrlAliases,
+  });
   // Lock contention reported for this database will name its other openers.
   sqliteLockReporterLegacy.register(dbPath);
 
   return {
+    workspaceId,
     sqliteStore,
     storageAdapter: sqliteStore.storage,
     sharedDocumentRemoteCursorStore: new AliasedRemoteCursorStore(sqliteStore.cursorStore),
@@ -201,51 +214,79 @@ export class ProcessDocumentRemoteCursorStore implements RemoteCursorStore {
 
 export const createDocumentRemoteCursorStore = (
   store: CliSqliteRepoStore,
-  scope: DocumentCursorScope
+  scope: DocumentCursorScope,
+  bucketId = LORO_STREAMS_BUCKET_ID
 ): RemoteCursorStore => {
   if (scope === 'shared-durable') return store.sharedDocumentRemoteCursorStore;
-  // The pinned SDK's cursor load deletes malformed rows. Commands must remain
-  // read-only even on that path, so read the same SQLite format without repair.
-  const rowSchema = z.object({
-    next_offset: z.string(),
-    server_lower_bound_version: z.string(),
-    updated_at_ms: z.number(),
-  });
-  let select: Database.Statement | undefined;
-  return new ProcessDocumentRemoteCursorStore({
-    load: async (streamUrl) => {
-      const database = (store.sqliteStore as unknown as { readonly db: Database.Database }).db;
-      if (!database.open) return null;
+  return new ProcessDocumentRemoteCursorStore(
+    store.sqliteStore.createProcessDocumentCursorStore({
+      // Older Lody writers did not populate docCursorIndex. Resolve only this
+      // workspace/document/bucket's existing URLs inside the capture transaction.
+      documentStreamUrls: (docId) => {
+        const pathname = new URL(
+          createLoroStreamUrl({
+            bucketId,
+            baseUrl: 'https://cursor-mapping.invalid',
+            streamId: getLoroStreamIdForDocId(store.workspaceId, docId),
+          })
+        ).pathname;
+        const database = (store.sqliteStore as unknown as { readonly db: Database.Database }).db;
+        const rows = database
+          .prepare('SELECT stream_url FROM remote_cursors WHERE stream_url LIKE ?')
+          .all('%' + pathname) as Array<{ stream_url: string }>;
+        return rows
+          .filter(({ stream_url }) => {
+            try {
+              return new URL(stream_url).pathname === pathname;
+            } catch {
+              return false;
+            }
+          })
+          .map(({ stream_url }) => stream_url);
+      },
+      resolveStreamUrlAliases: getLoroStreamsRemoteCursorUrlAliases,
+    })
+  );
+};
+
+/** Only the daemon publishes metadata; commands keep their modifications private. */
+export function createCliIncompleteRecoveryStore(
+  store: CliSqliteRepoStore,
+  scope: DocumentCursorScope
+) {
+  const directory = path.join(store.baseDir, 'incomplete-recovery');
+  const local = new Map<string, unknown>();
+  const fileOf = (key: string) =>
+    path.join(directory, createHash('sha256').update(key).digest('hex') + '.json');
+  return createAliasedIncompleteRecoveryStore({
+    async load(key) {
+      if (local.has(key)) return local.get(key);
       try {
-        select ??= database.prepare(
-          'SELECT next_offset, server_lower_bound_version, updated_at_ms FROM remote_cursors WHERE stream_url = ?'
-        );
-      } catch {
-        return null;
-      }
-      if (!select.readonly) throw new Error('document_cursor_seed_query_must_be_readonly');
-      try {
-        for (const url of [streamUrl, ...getLoroStreamsRemoteCursorUrlAliases(streamUrl)]) {
-          const row = rowSchema.safeParse(select.get(url));
-          if (!row.success) continue;
-          let version: unknown;
-          try {
-            version = JSON.parse(row.data.server_lower_bound_version);
-          } catch {
-            continue;
-          }
-          const cursor = remoteCursor.safeParse({
-            streamUrl,
-            nextOffset: row.data.next_offset,
-            serverLowerBoundVersion: version,
-            updatedAtMs: row.data.updated_at_ms,
-          });
-          if (cursor.success) return cursor.data;
-        }
-        return null;
+        return JSON.parse(await fs.readFile(fileOf(key), 'utf8')) as unknown;
       } catch {
         return null;
       }
     },
+    async save(key, value) {
+      if (scope === 'process') {
+        local.set(key, value);
+        return;
+      }
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      const temporary = fileOf(key) + '.' + randomUUID();
+      try {
+        await fs.writeFile(temporary, JSON.stringify(value), { flag: 'wx', mode: 0o600 });
+        await fs.rename(temporary, fileOf(key));
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    },
+    async delete(key) {
+      if (scope === 'process') {
+        local.set(key, null);
+        return;
+      }
+      await fs.rm(fileOf(key), { force: true });
+    },
   });
-};
+}

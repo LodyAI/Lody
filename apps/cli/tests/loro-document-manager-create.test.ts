@@ -169,6 +169,7 @@ vi.mock('loro-repo/storage/sqlite', () => ({
       save: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     };
+    createProcessDocumentCursorStore = () => this.cursorStore;
     close = mocks.sqliteClose;
   },
 }));

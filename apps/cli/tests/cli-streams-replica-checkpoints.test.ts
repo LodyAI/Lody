@@ -16,6 +16,8 @@ import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
 import {
   getLoroMetaStreamId,
+  DEFAULT_LORO_STREAMS_BASE_URL,
+  LEGACY_LORO_STREAMS_BASE_URL,
   getLoroStreamIdForDocId,
   getWorkspaceFlockDocId,
   type WorkspaceId,
@@ -24,6 +26,7 @@ import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { LoroRepo } from 'loro-repo';
 import {
   createCliSqliteRepoStore,
+  createCliIncompleteRecoveryStore,
   hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
   ProcessDocumentRemoteCursorStore,
@@ -163,12 +166,19 @@ async function closeCliProcess(cliProcess: CliProcess): Promise<void> {
 
 async function withTransport<T>(
   cliProcess: CliProcess,
-  run: (adapter: Awaited<ReturnType<typeof createCliStreamsTransport>>['adapter']) => Promise<T>
+  run: (adapter: Awaited<ReturnType<typeof createCliStreamsTransport>>['adapter']) => Promise<T>,
+  baseUrl = gatewayBaseUrl
 ): Promise<T> {
   const { adapter } = await createCliStreamsTransport({
     content: { mode: 'plaintext' },
+    incompleteRecoveryStore: createCliIncompleteRecoveryStore(
+      cliProcess.store,
+      cliProcess.documentRemoteCursorStore instanceof ProcessDocumentRemoteCursorStore
+        ? 'process'
+        : 'shared-durable'
+    ),
     workspaceId,
-    tokenProvider,
+    tokenProvider: { ...tokenProvider, getGatewayBaseUrl: () => baseUrl },
     repo: cliProcess.repo,
     documentRemoteCursorStore: cliProcess.documentRemoteCursorStore,
     logger: silentLogger,
@@ -419,6 +429,155 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
     expect(server.bootstraps()).toBe(2);
   });
 
+  it.each(['meta', 'flock'] as const)(
+    'resumes %s across gateway aliases without bootstrap',
+    async (kind) => {
+      const server = createStreamsServer(metaSnapshotWithA());
+      const id = 'named-flock';
+      const first = await openCliProcess();
+      const sync = async (cli: CliProcess, baseUrl: string) => {
+        const flock =
+          kind === 'meta' ? cli.repo.getMeta() : (await cli.repo.openFlockDoc(id)).flock;
+        const result = await withTransport(
+          cli,
+          (adapter) =>
+            kind === 'meta' ? adapter.syncMeta(flock) : adapter.syncFlockDoc(id, flock),
+          baseUrl
+        );
+        expect(result.ok).toBe(true);
+        expect(flock.get(keyA)).toBe('A');
+      };
+      await sync(first, LEGACY_LORO_STREAMS_BASE_URL);
+      await first.repo.flush();
+      await closeCliProcess(first);
+      expect(server.bootstraps()).toBe(1);
+      const next = await openCliProcess();
+      await sync(next, DEFAULT_LORO_STREAMS_BASE_URL);
+      expect(server.bootstraps()).toBe(1);
+    }
+  );
+
+  it('freezes a process cursor with document load before another connection advances it', async () => {
+    const id = 'session-atomic';
+    const remote = new LoroDoc();
+    remote.getText('t').insert(0, 'cached');
+    const server = createStreamsServer(remote.export({ mode: 'snapshot' }));
+    const daemon = await openCliProcess();
+    const doc = (await daemon.repo.openPersistedDoc(id)).doc;
+    expect((await syncDoc(daemon, id, doc)).ok).toBe(true);
+    const oneShot = await openCliProcess('process');
+    const loaded = (await oneShot.repo.openPersistedDoc(id)).doc;
+    const row = daemon.store.sqliteStore.db
+      .prepare('SELECT stream_url FROM remote_cursors')
+      .get() as { stream_url: string };
+    const original = await daemon.documentRemoteCursorStore.load(row.stream_url);
+    if (!original) throw new Error('missing cursor');
+    await daemon.documentRemoteCursorStore.save({ ...original, nextOffset: '200' });
+    const before = daemon.store.sqliteStore.db.prepare('SELECT * FROM remote_cursors').all();
+    server.requests.length = 0;
+    expect((await syncDoc(oneShot, id, loaded)).ok).toBe(true);
+    expect(server.bootstraps()).toBe(0);
+    expect(server.requests.some((url) => url.searchParams.get('offset') === tail100)).toBe(true);
+    expect(daemon.store.sqliteStore.db.prepare('SELECT * FROM remote_cursors').all()).toEqual(
+      before
+    );
+  });
+
+  it('uses only HEAD after a daemon persists an unchanged incomplete tail', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const author = new LoroDoc();
+    author.getText('t').insert(0, 'prefix');
+    author.commit();
+    const from = author.version();
+    author.getText('t').push('|tail');
+    author.commit();
+    const dependent = author.export({ mode: 'update', from });
+    const frame = new Uint8Array(4 + dependent.byteLength);
+    new DataView(frame.buffer).setUint32(0, dependent.byteLength);
+    frame.set(dependent, 4);
+    const methods: string[] = [];
+    const server = createStreamsServer(new Uint8Array(), (url, method) => {
+      methods.push(method);
+      if (method === 'HEAD')
+        return new Response(null, {
+          headers: {
+            'Stream-Next-Offset': tail100,
+            'Stream-Snapshot-Offset': '-1',
+            'Content-Type': 'application/octet-stream',
+          },
+        });
+      if (url.pathname.endsWith('/bootstrap'))
+        return new Response(
+          '--cp\r\nContent-Type: application/octet-stream\r\n\r\n\r\n--cp--\r\n',
+          {
+            headers: {
+              'Content-Type': 'multipart/mixed; boundary=cp',
+              'Stream-Snapshot-Offset': '-1',
+              'Stream-Next-Offset': '-1',
+              'Stream-Up-To-Date': 'false',
+            },
+          }
+        );
+      return new Response(toArrayBuffer(frame), {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Stream-Next-Offset': tail100,
+          'Stream-Up-To-Date': 'true',
+        },
+      });
+    });
+    const daemon = await openCliProcess();
+    const id = 'incomplete';
+    const doc = (await daemon.repo.openPersistedDoc(id)).doc;
+    const url = `${gatewayBaseUrl}/ds/lody/${getLoroStreamIdForDocId(workspaceId, id)}`;
+    const records = createCliIncompleteRecoveryStore(daemon.store, 'shared-durable');
+    await withTransport(daemon, async (adapter) => {
+      const live = adapter.joinDocRoom(id, doc);
+      void live.firstSyncedWithRemote.catch(() => {});
+      try {
+        await vi.waitFor(async () => expect(await records.load(url)).not.toBeNull(), {
+          interval: 0,
+        });
+      } finally {
+        live.unsubscribe();
+      }
+    });
+    await closeCliProcess(daemon);
+    const restarted = await openCliProcess('process');
+    const loaded = (await restarted.repo.openPersistedDoc(id)).doc;
+    methods.length = 0;
+    const before = server.bootstraps();
+    expect((await syncDoc(restarted, id, loaded)).ok).toBe(false);
+    expect(methods).toEqual(['HEAD']);
+    expect(server.bootstraps()).toBe(before);
+    expect(loaded.getText('t').toString()).toBe('');
+    author.free();
+  });
+
+  it('shares recovery metadata across connections while command writes remain private', async () => {
+    const daemon = await openCliProcess();
+    const url = `${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/recovery`;
+    const alias = `${DEFAULT_LORO_STREAMS_BASE_URL}/ds/lody/recovery`;
+    const record = {
+      streamUrl: url,
+      observedTailOffset: tail100,
+      observedSnapshotOffset: null,
+      attempts: 1,
+      updatedAtMs: 0,
+    };
+    await createCliIncompleteRecoveryStore(daemon.store, 'shared-durable').save(record);
+    const command = await openCliProcess('process');
+    const privateStore = createCliIncompleteRecoveryStore(command.store, 'process');
+    expect(await privateStore.load(alias)).toEqual({ ...record, streamUrl: alias });
+    await privateStore.save({ ...record, observedTailOffset: '200' });
+    await privateStore.delete?.(alias);
+    expect(await privateStore.load(url)).toBeNull();
+    const restarted = createCliIncompleteRecoveryStore(command.store, 'shared-durable');
+    expect(await restarted.load(alias)).toEqual({ ...record, streamUrl: alias });
+    await restarted.delete?.(alias);
+    expect(await createCliIncompleteRecoveryStore(daemon.store, 'process').load(url)).toBeNull();
+  });
+
   it('seeds a covered large session from SQLite without bootstrap or shared cursor writes', async () => {
     const docId = 'session-covered';
     const remote = new LoroDoc();
@@ -601,22 +760,23 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
     const daemon = await openCliProcess();
     const daemonDoc = (await daemon.repo.openPersistedDoc(docId)).doc;
     expect((await syncDoc(daemon, docId, daemonDoc)).ok).toBe(true);
-    const oneShot = await openCliProcess('process');
-    const oldDoc = (await oneShot.repo.openPersistedDoc(docId)).doc;
     remote.setPeerId('2');
     remote.getText('t').push('new peer');
-    createStreamsServer(remote.export({ mode: 'snapshot' }));
-    // A fresh daemon transport first checks the old checkpoint; invalidate it to
-    // model a full receive of the new snapshot and its matching durable cursor.
     const rows = daemon.store.sqliteStore.db
       .prepare('SELECT stream_url FROM remote_cursors')
       .all() as Array<{ stream_url: string }>;
     const streamUrl = rows[0]?.stream_url;
     if (!streamUrl) throw new Error('missing daemon cursor');
-    await daemon.documentRemoteCursorStore.delete?.(streamUrl);
-    expect((await syncDoc(daemon, docId, daemonDoc)).ok).toBe(true);
+    const cursor = await daemon.documentRemoteCursorStore.load(streamUrl);
+    if (!cursor) throw new Error('missing daemon cursor');
+    // Capture a cursor with an uncovered peer alongside the older durable doc.
+    await daemon.documentRemoteCursorStore.save({
+      ...cursor,
+      serverLowerBoundVersion: Object.fromEntries(remote.version().toJSON()),
+    });
     const future = await daemon.documentRemoteCursorStore.load(streamUrl);
-    expect(Object.keys(future?.serverLowerBoundVersion ?? {})).toHaveLength(2);
+    const oneShot = await openCliProcess('process');
+    const oldDoc = (await oneShot.repo.openPersistedDoc(docId)).doc;
     expect(oldDoc.getText('t').toString()).toBe('base|');
     const recovery = createStreamsServer(remote.export({ mode: 'snapshot' }));
     expect((await syncDoc(oneShot, docId, oldDoc)).ok).toBe(true);

@@ -141,6 +141,8 @@ import {
   createCliSqliteRepoStore,
   hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
+  createCliIncompleteRecoveryStore,
+  ProcessDocumentRemoteCursorStore,
   type DocumentCursorScope,
 } from './sqlite-repo-store';
 import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-binding';
@@ -660,6 +662,11 @@ export class LoroDocumentManager {
       `[${workspaceId}] Initializing local-first Loro repo: storageDb=${cliSqliteRepoStore.dbPath}`
     );
 
+    const documentRemoteCursorStore = createDocumentRemoteCursorStore(
+      cliSqliteRepoStore,
+      options.documentCursorScope ?? 'process',
+      options.encryptedWorkspace?.bucketId()
+    );
     let repo: LoroRepo | null = null;
     let presenceRuntime: CliPresenceRuntimeLegacy | null = null;
     let manager: LoroDocumentManager | null = null;
@@ -732,10 +739,7 @@ export class LoroDocumentManager {
         promptSuggestions,
         localLoroDataPlaneServer,
         sqliteRepoStore: cliSqliteRepoStore,
-        documentRemoteCursorStore: createDocumentRemoteCursorStore(
-          cliSqliteRepoStore,
-          options.documentCursorScope ?? 'process'
-        ),
+        documentRemoteCursorStore,
         remoteStreamsAttached: false,
         attachCloudEphemeralSinks: options.attachCloudEphemeralSinks,
         streamsTokens: options.streamsTokens ?? null,
@@ -938,6 +942,12 @@ export class LoroDocumentManager {
     if (this.encryptedWorkspace) await streamsTokens.legacy.getToken();
     const streamsTransport = await createCliStreamsTransport({
       incompleteRecoveryScope: this.incompleteRecoveryScope,
+      incompleteRecoveryStore: createCliIncompleteRecoveryStore(
+        this.sqliteRepoStore,
+        this.documentRemoteCursorStore instanceof ProcessDocumentRemoteCursorStore
+          ? 'process'
+          : 'shared-durable'
+      ),
       content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
       bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
