@@ -330,7 +330,7 @@ const randomByte = () => Math.floor(Math.random() * 256);
 const emptyStatusViewState = (): StatusViewState => ({
   sessions: [],
   sections: [],
-  sectionsLoaded: true,
+  sectionsLoaded: false,
   canManageSections: true,
   nowMs: getServerNow(),
 });
@@ -783,6 +783,24 @@ export function useSessionActions(): SessionActions {
         { lastReadAt: readAt },
         assertReadablePreferences
       );
+      const rootId = cachedMeta?.parentSessionId;
+      const rootMeta = rootId
+        ? (store.get(sessionMetaCacheAtom)[getSessionRoomId(rootId)] as SessionMeta | undefined)
+        : undefined;
+      const rootSnoozedUntil = getFiniteTimestamp(rootMeta?.snoozedUntil);
+      if (
+        rootId &&
+        rootSnoozedUntil !== null &&
+        rootSnoozedUntil <= now &&
+        rootSnoozedUntil > readAt
+      ) {
+        await touchSessionActivityMeta(
+          runtime,
+          rootId,
+          { lastReadAt: rootSnoozedUntil },
+          assertReadablePreferences
+        );
+      }
     },
     [runtime, store, assertReadablePreferences]
   );
@@ -1136,8 +1154,9 @@ export function useSessionActions(): SessionActions {
   );
 
   const runStatusViewCommand = useCallback(
-    async (command: StatusViewCommand, state?: StatusViewState) => {
+    async (requested: StatusViewCommand, state?: StatusViewState) => {
       if (!runtime) throw new Error('Runtime not ready');
+      let command = requested;
       const base = state ?? emptyStatusViewState();
       const listed = new Set(base.sessions.map((session) => session.id));
       let reached: SessionMeta[] = [];
@@ -1154,16 +1173,23 @@ export function useSessionActions(): SessionActions {
             command.to.area === 'focus'
           );
           break;
-        case 'touchOnSend':
+        case 'touchOnSend': {
           reached = await readSessionMetas(command.sessionId as SessionId, false);
+          const rootId = reached[0]?.parentSessionId;
+          if (rootId) {
+            command = { type: 'touchOnSend', sessionId: rootId };
+            reached = await readSessionMetas(rootId, false);
+          }
           break;
+        }
         case 'setPinned': {
-          const target = await readSessionMetas(command.sessionId as SessionId, false);
+          const pinnedId = command.sessionId;
+          const target = await readSessionMetas(pinnedId as SessionId, false);
           if (target.length === 0) return [];
           // The new pin's key is planned against every pin in the default section.
           reached = [
             ...Object.values(store.get(sessionMetaCacheAtom)).filter(
-              (meta) => meta.isArchived !== true && meta.id !== command.sessionId
+              (meta) => meta.isArchived !== true && meta.id !== pinnedId
             ),
             ...target,
           ];
@@ -1172,9 +1198,9 @@ export function useSessionActions(): SessionActions {
         default:
           break;
       }
-      const related = statusViewSessionsFromMetas(reached).filter(
-        (session) => !listed.has(session.id)
-      );
+      const related = statusViewSessionsFromMetas(reached, {
+        keepArchivedId: 'sessionId' in command ? command.sessionId : undefined,
+      }).filter((session) => !listed.has(session.id));
       const writes = planStatusViewCommand(
         { ...base, related: [...(base.related ?? []), ...related] },
         command,

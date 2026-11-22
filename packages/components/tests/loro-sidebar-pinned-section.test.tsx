@@ -594,6 +594,76 @@ describe('LoroSidebar pinned section', () => {
     expect(onDropItem).toHaveBeenCalledWith('pinned-session', 'maintenance', 0);
   });
 
+  it('keeps rows a pinned root opened at any depth in its section, without Move to Section', async () => {
+    const chat = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      kind: 'chat' as const,
+      title: id,
+      sectionLabel: 'Chats',
+      latestMessageAt: new Date(Date.UTC(2026, 6, 14, 9, 0)),
+      ...extra,
+    });
+    const root = chat('root', { isPinned: true });
+    const child = chat('child', { openedByRowSessionId: 'root' });
+    const grandchild = chat('grandchild', { openedByRowSessionId: 'child' });
+    renderSidebar({
+      pinnedItems: [root, child, grandchild],
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [] },
+        { id: 'maintenance', name: 'Maintenance', items: [root, child, grandchild] },
+      ],
+      onToggleUpdatedItemPinned: () => {},
+      pinSectionActions: {
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+
+    const section = container?.querySelector('[data-pin-section="maintenance"]');
+    expect(
+      Array.from(section?.querySelectorAll('[data-sidebar-updated-id]') ?? []).map((row) =>
+        row.getAttribute('data-sidebar-updated-id')
+      )
+    ).toEqual(['root', 'child', 'grandchild']);
+
+    const row = container?.querySelector('[data-sidebar-updated-id="grandchild"]');
+    flushSync(() => {
+      row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));
+    });
+    await flushFrame();
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).map(
+      (item) => item.textContent
+    );
+    expect(items.length).toBeGreaterThan(0);
+    expect(items).not.toContain('Move to Section');
+  });
+
+  it('places Status rows by the clock the layout was planned at', () => {
+    const wakeAt = Date.now() + 60 * 60_000;
+    renderSidebar({
+      organizeMode: 'status',
+      updatedItems: [
+        {
+          id: 'snoozed',
+          kind: 'chat',
+          title: 'snoozed',
+          sectionLabel: 'Chats',
+          latestMessageAt: new Date(Date.now() - 60_000),
+          snoozedUntil: wakeAt,
+        },
+      ],
+      updatedBucketsCollapsed: { later: false },
+      onDropFocusItem: () => {},
+      statusNow: new Date(wakeAt + 60_000),
+    });
+
+    const focus = container?.querySelector('[data-pin-section="__status_focus__"]');
+    expect(focus?.querySelector('[data-sidebar-updated-id="snoozed"]')).not.toBeNull();
+  });
+
   describe('dragging a conversation into a pin section', () => {
     const chat = (id: string) => ({
       id,
