@@ -5998,6 +5998,7 @@ function WorkspaceChatLanding({
           ? createLocalProjectIpcFileTransport({
               workspaceId,
               localProjectId: mobileProjectContext.projectId as LocalProjectId,
+              machineId: mobileProjectContext.machineId as MachineId,
             })
           : workspaceRuntime && userId
             ? createLocalProjectRpcFileTransport({

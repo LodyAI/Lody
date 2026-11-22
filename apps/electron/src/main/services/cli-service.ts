@@ -270,6 +270,7 @@ type CliServiceOptions = {
 function resolveLocalProjectControlTimeoutMs(type: LocalProjectControlRequest['type']): number {
   if (
     type === 'local-project/list-files' ||
+    type === 'local-project/search-files' ||
     type === 'local-project/list-skills' ||
     type === 'local-project/list-global-skills' ||
     type === 'worktree/list-files' ||

@@ -89,6 +89,8 @@ function TwoLevelMentionMenu({
   fileSourceKind,
   enableFileMentions,
   onLazyDirectoryOpen,
+  onFilesActivate,
+  searchRemoteFiles,
   enableIssueMentions,
   repoFullName,
   issuePrData,
@@ -117,6 +119,10 @@ function TwoLevelMentionMenu({
   fileSourceKind: MentionFileSourceKind;
   enableFileMentions: boolean;
   onLazyDirectoryOpen?: (directoryId: string) => void;
+  /** Starts the file index; the composer keeps it off until something asks. */
+  onFilesActivate: () => void;
+  /** Present when the host searches files: called with each typed file term. */
+  searchRemoteFiles?: (term: string) => void;
   enableIssueMentions: boolean;
   repoFullName?: string;
   issuePrData: ReturnType<typeof useKnownIssuePrItems>['issuePrData'];
@@ -207,10 +213,11 @@ function TwoLevelMentionMenu({
               'Project is very large; local file list was truncated.'
             )
         : undefined,
+      onActivate: onFilesActivate,
       // Attach worker results after resolving the registered namespaces.
       getCandidates: () => [],
     }),
-    [enableFileMentions, fileData, fileSourceKind, t]
+    [enableFileMentions, fileData, fileSourceKind, onFilesActivate, t]
   );
 
   // `refresh` is async, but `onActivate` is fire-and-forget (`() => void`).
@@ -374,6 +381,9 @@ function TwoLevelMentionMenu({
           : null
         : context.filterStore.search || null
       : null;
+  React.useEffect(() => {
+    if (fileTerm) searchRemoteFiles?.(fileTerm);
+  }, [fileTerm, searchRemoteFiles]);
   const fileSearch = useMentionFileSearch(fileData.entry, fileTerm);
   const searchedCategories = React.useMemo(
     () =>
@@ -887,8 +897,14 @@ export const CombinedMentionTextarea = React.forwardRef<
       enableSkillMentions &&
       (skillsRequested || (!templateScope && value.includes(SKILL_MENTION_TRIGGER)));
 
-    const { fileData, initializeLazyDirectory, getKnownFileTokens } =
-      useMentionProjectFiles(mentionSource);
+    // Like skills, the file index loads only once something asks for it: the
+    // `@` menu reaching the Files category, or a draft that already carries an
+    // `@` token for the hydrators. Selecting a project alone fetches nothing.
+    const [filesRequested, setFilesRequested] = React.useState(false);
+    const activateFiles = React.useCallback(() => setFilesRequested(true), []);
+    const filesActive = filesRequested || value.includes(MENTION_TRIGGER);
+    const { fileData, initializeLazyDirectory, getKnownFileTokens, searchRemoteFiles } =
+      useMentionProjectFiles(mentionSource, { active: filesActive, hydrationText: value });
     // `initializeLazyDirectory` is async, but the menu's `onLazyDirectoryOpen`
     // is fire-and-forget (`=> void`). Wrap once so the promise is explicitly
     // discarded while keeping a stable identity — the consumer effect lists it
@@ -1179,6 +1195,8 @@ export const CombinedMentionTextarea = React.forwardRef<
           fileSourceKind={fileSourceKind}
           enableFileMentions={enableFileMentions}
           onLazyDirectoryOpen={handleLazyDirectoryOpen}
+          onFilesActivate={activateFiles}
+          searchRemoteFiles={searchRemoteFiles}
           enableIssueMentions={enableIssueMentions}
           repoFullName={githubRepoFullName}
           issuePrData={issuePrData}

@@ -125,6 +125,8 @@ import {
   sessionEditAndResendFailure,
 } from '@lody/shared';
 import { createAsyncConcurrencyGate } from '@/lib/async-concurrency-gate';
+import { adaptLocalProjectControlRequestToMachine } from '@lody/shared';
+import { unsupportedLocalProjectControlResponse } from '@/lib/local-project-rpc-file-provider';
 import {
   protectedFileWriteDeniedMessage,
   protectedPreviewControlDeniedMessage,
@@ -1898,6 +1900,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   ): Promise<LocalProjectControlResponse | null> => {
     try {
       await waitForMachineRoute(request.machineId);
+      const adapted = adaptLocalProjectControlRequestToMachine(
+        { protocolCapabilities: await deps.getMachineProtocolCapabilities(request.machineId) },
+        request
+      );
+      if (!adapted) return unsupportedLocalProjectControlResponse(request.type);
+      request = adapted;
       if (
         window.__LODY_ELECTRON__ &&
         getIpcServices() &&
