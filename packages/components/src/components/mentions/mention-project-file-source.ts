@@ -4,6 +4,7 @@ import type { LocalProjectId, MachineId, SessionId, WorkspaceId } from '@lody/sh
 
 import { runtimeAtom, userAtom } from '@/atoms';
 import { buildPathSuggestions, useRepoFilePaths } from '@/components/mentions/file-at-mention';
+import { forEachAtTokenSpan } from '@/components/mentions/mention-hydration';
 import type {
   FileWorkspaceProvider,
   FileWorkspaceProviderEntry,
@@ -11,6 +12,8 @@ import type {
 import {
   createLocalProjectIpcFileTransport,
   createLocalProjectRpcFileTransport,
+  DEFAULT_LOCAL_PROJECT_SEARCH_LIMIT,
+  type LocalProjectFileTransport,
 } from '@/lib/local-project-rpc-file-provider';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import {
@@ -178,7 +181,48 @@ function providerFileDataErrorState(
   };
 }
 
-export function useMentionProjectFiles(source?: MentionProjectSource) {
+/** Draft tokens looked up on the host when a restored draft needs hydration. */
+const REMOTE_HYDRATION_MAX_TOKENS = 20;
+/** Bounds the paths a long-lived composer accumulates from host searches. */
+const REMOTE_SEARCH_MAX_KNOWN_PATHS = 20_000;
+
+type RemoteFileSearchState = {
+  sourceKey: string | null;
+  paths: readonly string[];
+  truncated: boolean;
+  pending: number;
+  /** A search has answered (or failed); until then the source is still loading. */
+  settled: boolean;
+  error?: string;
+  /** The host answered "no such request": use the full-list path instead. */
+  unsupported: boolean;
+};
+
+const EMPTY_REMOTE_FILE_SEARCH: RemoteFileSearchState = {
+  sourceKey: null,
+  paths: [],
+  truncated: false,
+  pending: 0,
+  settled: false,
+  unsupported: false,
+};
+
+export type UseMentionProjectFilesOptions = {
+  /**
+   * Whether anything needs the file list yet: the `@` menu asked, or the draft
+   * carries an `@` token to hydrate. Nothing is fetched while false.
+   */
+  active?: boolean;
+  /** The draft text; a remote search source looks up its `@` tokens once. */
+  hydrationText?: string;
+};
+
+export function useMentionProjectFiles(
+  source?: MentionProjectSource,
+  options: UseMentionProjectFilesOptions = {}
+) {
+  const active = options.active ?? true;
+  const hydrationText = options.hydrationText ?? '';
   const runtime = useAtomValue(runtimeAtom);
   const requestedByUserId = useAtomValue(userAtom)?.id ?? null;
   const localDaemonMachineId = useAtomValue(localMachineIdAtom);
@@ -226,15 +270,123 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
     useLocalWorktreeSource,
   ]);
 
-  const githubFileData = useRepoFilePaths(repoFullName);
-  const localFileData = useLocalProjectFilePaths(localSource);
+  const remoteSearchTransport = React.useMemo<LocalProjectFileTransport | null>(() => {
+    if (useLocalWorktreeSource || sourceKind !== 'local') return null;
+    if (!localWorkspaceId || !localProjectId || !localMachineId) return null;
+    if (getIpcServices() && localMachineId === localDaemonMachineId) return null;
+    if (!runtime || !requestedByUserId) return null;
+    return createLocalProjectRpcFileTransport({
+      workspaceId: localWorkspaceId,
+      machineId: localMachineId,
+      localProjectId,
+      requestedByUserId,
+      requestLocalProjectControl: (request, requestOptions) =>
+        runtime.requestLocalProjectControl(request, requestOptions),
+    });
+  }, [
+    localDaemonMachineId,
+    localMachineId,
+    localProjectId,
+    localWorkspaceId,
+    requestedByUserId,
+    runtime,
+    sourceKind,
+    useLocalWorktreeSource,
+  ]);
+  const remoteSourceKey = remoteSearchTransport
+    ? `${localWorkspaceId}:${localMachineId}:${localProjectId}`
+    : null;
+  const [remoteSearchState, setRemoteSearchState] =
+    React.useState<RemoteFileSearchState>(EMPTY_REMOTE_FILE_SEARCH);
+  const remoteSearch =
+    remoteSearchState.sourceKey === remoteSourceKey ? remoteSearchState : EMPTY_REMOTE_FILE_SEARCH;
+  const useRemoteSearch = Boolean(remoteSearchTransport) && !remoteSearch.unsupported;
+  const remoteQueriedRef = React.useRef<{ sourceKey: string | null; terms: Set<string> }>({
+    sourceKey: null,
+    terms: new Set(),
+  });
+
+  const searchRemoteFiles = React.useCallback(
+    (term: string) => {
+      const query = term.trim();
+      if (!remoteSearchTransport || !remoteSourceKey) return;
+      if (remoteQueriedRef.current.sourceKey !== remoteSourceKey) {
+        remoteQueriedRef.current = { sourceKey: remoteSourceKey, terms: new Set() };
+      }
+      const queried = remoteQueriedRef.current.terms;
+      if (queried.has(query)) return;
+      queried.add(query);
+
+      const update = (apply: (prev: RemoteFileSearchState) => RemoteFileSearchState) =>
+        setRemoteSearchState((prev) =>
+          apply(
+            prev.sourceKey === remoteSourceKey
+              ? prev
+              : { ...EMPTY_REMOTE_FILE_SEARCH, sourceKey: remoteSourceKey }
+          )
+        );
+      update((prev) => ({ ...prev, pending: prev.pending + 1 }));
+      void remoteSearchTransport
+        .searchFiles({ query, limit: DEFAULT_LOCAL_PROJECT_SEARCH_LIMIT })
+        .then((result) => {
+          update((prev) => {
+            if (!result) {
+              return { ...prev, pending: prev.pending - 1, settled: true, unsupported: true };
+            }
+            const known = new Set(prev.paths);
+            const added = result.paths.filter((path) => !known.has(path));
+            const paths =
+              added.length === 0 || known.size >= REMOTE_SEARCH_MAX_KNOWN_PATHS
+                ? prev.paths
+                : [...prev.paths, ...added].sort((left, right) => left.localeCompare(right));
+            const { error: _previousError, ...rest } = prev;
+            return {
+              ...rest,
+              paths,
+              truncated: result.truncated,
+              pending: prev.pending - 1,
+              settled: true,
+            };
+          });
+        })
+        .catch((error: unknown) => {
+          queried.delete(query);
+          update((prev) => ({
+            ...prev,
+            pending: prev.pending - 1,
+            settled: true,
+            error: error instanceof Error ? error.message : 'Failed to load files.',
+          }));
+        });
+    },
+    [remoteSearchTransport, remoteSourceKey]
+  );
+
+  const remoteHydratedSourceRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!active || !useRemoteSearch || !remoteSourceKey || !hydrationText.includes('@')) return;
+    if (remoteHydratedSourceRef.current === remoteSourceKey) return;
+    remoteHydratedSourceRef.current = remoteSourceKey;
+    const tokens = new Set<string>();
+    forEachAtTokenSpan(hydrationText, ({ token }) => {
+      if (token && tokens.size < REMOTE_HYDRATION_MAX_TOKENS)
+        tokens.add(token.replace(/\/+$/u, ''));
+      return false;
+    });
+    for (const token of tokens) searchRemoteFiles(token);
+  }, [active, hydrationText, remoteSourceKey, searchRemoteFiles, useRemoteSearch]);
+
+  const githubFileData = useRepoFilePaths(active ? repoFullName : undefined);
+  const localFileData = useLocalProjectFilePaths(
+    active && !useRemoteSearch ? localSource : undefined
+  );
   const [providerFileData, setProviderFileData] = React.useState<MentionFileDataState>({
     entry: null,
     status: 'idle',
   });
 
   React.useEffect(() => {
-    if (sourceKind !== 'provider') {
+    if (sourceKind !== 'provider' || !active) {
       return undefined;
     }
 
@@ -303,7 +455,7 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
       cancelled = true;
       unsubscribeFiles?.();
     };
-  }, [provider, providerMessage, providerPending, sourceKind]);
+  }, [active, provider, providerMessage, providerPending, sourceKind]);
 
   const initializeLazyDirectory = React.useCallback(
     async (directoryId: string): Promise<void> => {
@@ -325,9 +477,34 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
     [provider, sourceKind]
   );
 
+  const remoteEntry = React.useMemo<MentionFilePathsEntry | null>(
+    () =>
+      remoteSearch.paths.length === 0
+        ? null
+        : { paths: [...remoteSearch.paths], truncated: remoteSearch.truncated, fetchedAt: 0 },
+    [remoteSearch.paths, remoteSearch.truncated]
+  );
+
   const fileData = React.useMemo<MentionFileDataState>(() => {
+    if (!active && source) {
+      return { entry: null, status: 'loading' };
+    }
     if (sourceKind === 'provider') {
       return providerFileData;
+    }
+    if (useRemoteSearch) {
+      return {
+        entry: remoteEntry,
+        status:
+          remoteSearch.pending > 0 || !remoteSearch.settled
+            ? remoteEntry
+              ? 'refreshing'
+              : 'loading'
+            : remoteSearch.error && !remoteEntry
+              ? 'error'
+              : 'ready',
+        ...(remoteSearch.error ? { error: remoteSearch.error } : {}),
+      };
     }
     if (sourceKind === 'local' || useLocalWorktreeSource) {
       return localFileData;
@@ -344,7 +521,20 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
       status: githubFileData.status,
       error: githubFileData.error,
     };
-  }, [githubFileData, localFileData, providerFileData, sourceKind, useLocalWorktreeSource]);
+  }, [
+    active,
+    githubFileData,
+    localFileData,
+    providerFileData,
+    remoteEntry,
+    remoteSearch.error,
+    remoteSearch.pending,
+    remoteSearch.settled,
+    source,
+    sourceKind,
+    useLocalWorktreeSource,
+    useRemoteSearch,
+  ]);
 
   // Expanding every indexed path into its suggestion tokens is O(repo file
   // count) and its only consumer is draft hydration, which no-ops on an empty
@@ -384,6 +574,7 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
           return await createLocalProjectIpcFileTransport({
             workspaceId: localWorkspaceId,
             localProjectId,
+            machineId: localDaemonMachineId,
           }).readFile({ relativePath: path, maxBytes: options?.maxBytes });
         }
         if (!runtime || !requestedByUserId || !localMachineId) {
@@ -430,6 +621,8 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
     initializeLazyDirectory,
     getKnownFileTokens,
     readLocalProjectFile,
+    /** Set when the host searches for the menu; the menu feeds it each typed term. */
+    searchRemoteFiles: useRemoteSearch ? searchRemoteFiles : undefined,
   };
 }
 

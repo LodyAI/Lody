@@ -88,8 +88,6 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
   footer?: ReactNode;
 }
 
-// Rows from the end at which `onReachEnd` fires, so the next page lands before the
-// user hits the bottom.
 const OPTION_SELECTOR_REACH_END_ROWS = 5;
 
 const styles = stylex.create({

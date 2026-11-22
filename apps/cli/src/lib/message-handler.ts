@@ -487,6 +487,7 @@ type LocalProjectFileRpcRequest = Extract<
   {
     type:
       | 'local-project/list-files'
+      | 'local-project/search-files'
       | 'local-project/list-dir'
       | 'local-project/list-skills'
       | 'local-project/read-file';
@@ -517,6 +518,7 @@ function isLocalProjectFileRpcRequest(
 ): request is LocalProjectFileRpcRequest {
   return (
     request.type === 'local-project/list-files' ||
+    request.type === 'local-project/search-files' ||
     request.type === 'local-project/list-dir' ||
     request.type === 'local-project/list-skills' ||
     request.type === 'local-project/read-file'
@@ -11823,6 +11825,17 @@ export class MessageHandler {
         };
       }
 
+      if (request.type === 'local-project/search-files') {
+        return {
+          ok: true,
+          type: 'local-project/search-files',
+          result: await this.localProjectControlService.searchProjectFiles(rootPath, {
+            query: request.query,
+            limit: request.limit,
+          }),
+        };
+      }
+
       if (request.type === 'local-project/list-dir') {
         return {
           ok: true,
@@ -11841,7 +11854,8 @@ export class MessageHandler {
           type: 'local-project/list-skills',
           result: await this.localProjectControlService.listProjectSkills(
             rootPath,
-            request.skillDirs
+            request.skillDirs,
+            { knownFingerprint: request.knownFingerprint }
           ),
         };
       }
@@ -11892,7 +11906,9 @@ export class MessageHandler {
       return {
         ok: true,
         type: 'local-project/list-global-skills',
-        result: await this.localProjectControlService.listGlobalSkills(),
+        result: await this.localProjectControlService.listGlobalSkills({
+          knownFingerprint: request.knownFingerprint,
+        }),
       };
     } catch (error) {
       return this.toLocalProjectControlError(

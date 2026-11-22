@@ -4,6 +4,7 @@ import type {
   LocalProjectDirectoryListResult,
   LocalProjectFileListResult,
   LocalProjectFileReadResult,
+  LocalProjectFileSearchResult,
   LocalProjectId,
   MachineId,
   WorkspaceId,
@@ -24,6 +25,8 @@ import type {
 
 const DEFAULT_LIST_DIR_LIMIT = 1_000;
 const DEFAULT_SEARCH_MAX_FILES = 80_000;
+export const DEFAULT_LOCAL_PROJECT_SEARCH_LIMIT = 100;
+const UNSUPPORTED_PROTOCOL_REASON = 'unsupported_protocol';
 const DEFAULT_READ_MAX_BYTES = 1024 * 1024;
 
 export type LocalProjectFileTransport = {
@@ -32,6 +35,14 @@ export type LocalProjectFileTransport = {
     readonly limit?: number;
   }) => Promise<LocalProjectDirectoryListResult>;
   listFiles: (args?: { readonly maxFiles?: number }) => Promise<LocalProjectFileListResult>;
+  /**
+   * Host-side search. Resolves `null` when the daemon predates
+   * `local-project/search-files`; the caller then filters `listFiles` itself.
+   */
+  searchFiles: (args: {
+    readonly query: string;
+    readonly limit?: number;
+  }) => Promise<LocalProjectFileSearchResult | null>;
   readFile: (args: {
     readonly relativePath: string;
     readonly maxBytes?: number;
@@ -41,6 +52,52 @@ export type LocalProjectFileTransport = {
 export type LocalProjectRpcFileProviderOptions = {
   readonly transport: LocalProjectFileTransport;
 };
+
+/** What the request facade answers instead of sending a request the daemon cannot parse. */
+export function unsupportedLocalProjectControlResponse(
+  type: LocalProjectControlRequest['type']
+): LocalProjectControlResponse {
+  return {
+    ok: false,
+    type,
+    error: 'invalid_request',
+    message: 'The machine does not support this request yet.',
+    data: { reason: UNSUPPORTED_PROTOCOL_REASON },
+  };
+}
+
+function isUnsupportedLocalProjectControlResponse(
+  response: LocalProjectControlResponse | null
+): boolean {
+  if (!response || response.ok) return false;
+  // A local daemon that predates the request rejects it as invalid outright.
+  if (response.error === 'invalid_request') return true;
+  const data = response.data;
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as { reason?: unknown }).reason === UNSUPPORTED_PROTOCOL_REASON
+  );
+}
+
+/**
+ * Sends `request` and returns null for the facade's "daemon too old" answer, so
+ * callers can choose their legacy path; every other failure still throws.
+ */
+export async function requestLocalProjectControlIfSupported<
+  TType extends LocalProjectControlRequest['type'],
+>(
+  requestLocalProjectControl: (
+    request: LocalProjectControlRequest,
+    options?: { timeoutMs?: number }
+  ) => Promise<LocalProjectControlResponse | null>,
+  request: Extract<LocalProjectControlRequest, { type: TType }>,
+  options?: { timeoutMs?: number }
+): Promise<Extract<LocalProjectControlResponse, { ok: true; type: TType }> | null> {
+  const response = await requestLocalProjectControl(request, options);
+  if (isUnsupportedLocalProjectControlResponse(response)) return null;
+  return assertLocalProjectControlResponse(response, request.type as TType);
+}
 
 export function assertLocalProjectControlResponse<TType extends LocalProjectControlRequest['type']>(
   response: LocalProjectControlResponse | null,
@@ -61,6 +118,12 @@ export function assertLocalProjectControlResponse<TType extends LocalProjectCont
 export function createLocalProjectIpcFileTransport(args: {
   readonly workspaceId: WorkspaceId;
   readonly localProjectId: LocalProjectId;
+  /**
+   * The local daemon's machine id. Host-side search goes through the generic
+   * control channel, which addresses a machine; without it search reports
+   * unsupported and callers filter the full list.
+   */
+  readonly machineId?: MachineId | null;
 }): LocalProjectFileTransport {
   return {
     listDir: async ({ relativePath, limit }) => {
@@ -85,6 +148,26 @@ export function createLocalProjectIpcFileTransport(args: {
         throw new Error('Local project file IPC is unavailable.');
       }
       return result;
+    },
+    searchFiles: async ({ query, limit }) => {
+      const localProjects = getIpcServices()?.localProjects;
+      if (!localProjects) {
+        throw new Error('Local project file IPC is unavailable.');
+      }
+      const machineId = args.machineId;
+      if (!machineId) return null;
+      const response = await requestLocalProjectControlIfSupported(
+        (request) => localProjects.control(request),
+        {
+          type: 'local-project/search-files',
+          machineId,
+          workspaceId: args.workspaceId,
+          localProjectId: args.localProjectId,
+          query,
+          limit,
+        }
+      );
+      return response?.result ?? null;
     },
     readFile: async ({ relativePath, maxBytes }) => {
       if (!getIpcServices()) {
@@ -140,6 +223,22 @@ export function createLocalProjectRpcFileTransport(args: {
       );
       return assertLocalProjectControlResponse(response, 'local-project/list-files').result;
     },
+    searchFiles: async ({ query, limit }) => {
+      const response = await requestLocalProjectControlIfSupported(
+        args.requestLocalProjectControl,
+        {
+          type: 'local-project/search-files',
+          machineId: args.machineId,
+          workspaceId: args.workspaceId,
+          localProjectId: args.localProjectId,
+          query,
+          limit,
+          requestedByUserId: args.requestedByUserId,
+        },
+        { timeoutMs: 120_000 }
+      );
+      return response?.result ?? null;
+    },
     readFile: async ({ relativePath, maxBytes }) => {
       const response = await args.requestLocalProjectControl(
         {
@@ -164,6 +263,12 @@ export class LocalProjectRpcFileProvider extends LazyDirectoryFileProvider {
   }
 
   async searchFiles(query: string): Promise<readonly FileWorkspaceProviderEntry[]> {
+    const searched = await this.options.transport.searchFiles({
+      query,
+      limit: DEFAULT_LOCAL_PROJECT_SEARCH_LIMIT,
+    });
+    if (searched) return searched.paths.map((path) => toFileEntry(path));
+
     const normalized = query.trim().toLowerCase();
     const result = await this.options.transport.listFiles({ maxFiles: DEFAULT_SEARCH_MAX_FILES });
     const paths = normalized

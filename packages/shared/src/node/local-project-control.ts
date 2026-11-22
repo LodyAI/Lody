@@ -107,7 +107,8 @@ function isProjectSkillsResult(value: unknown): boolean {
         (typeof group.error === 'undefined' || typeof group.error === 'string')
     ) &&
     (typeof value.contentFingerprint === 'undefined' ||
-      typeof value.contentFingerprint === 'string')
+      typeof value.contentFingerprint === 'string') &&
+    (typeof value.unchanged === 'undefined' || typeof value.unchanged === 'boolean')
   );
 }
 
@@ -368,6 +369,16 @@ export function isLocalProjectControlRequest(value: unknown): value is LocalProj
     );
   }
 
+  if (value.type === 'local-project/search-files') {
+    return (
+      typeof value.workspaceId === 'string' &&
+      typeof value.localProjectId === 'string' &&
+      typeof value.query === 'string' &&
+      isOptionalInteger(value.limit) &&
+      isOptionalString(value.requestedByUserId)
+    );
+  }
+
   if (value.type === 'local-project/list-dir') {
     return (
       typeof value.workspaceId === 'string' &&
@@ -383,12 +394,17 @@ export function isLocalProjectControlRequest(value: unknown): value is LocalProj
       typeof value.workspaceId === 'string' &&
       typeof value.localProjectId === 'string' &&
       isStringArray(value.skillDirs) &&
+      isOptionalString(value.knownFingerprint) &&
       isOptionalString(value.requestedByUserId)
     );
   }
 
   if (value.type === 'local-project/list-global-skills') {
-    return typeof value.workspaceId === 'string' && isOptionalString(value.requestedByUserId);
+    return (
+      typeof value.workspaceId === 'string' &&
+      isOptionalString(value.knownFingerprint) &&
+      isOptionalString(value.requestedByUserId)
+    );
   }
 
   if (value.type === 'local-project/read-file') {
@@ -573,7 +589,11 @@ export function isLocalProjectControlResponse(
     );
   }
 
-  if (value.type === 'local-project/list-files' || value.type === 'worktree/list-files') {
+  if (
+    value.type === 'local-project/list-files' ||
+    value.type === 'local-project/search-files' ||
+    value.type === 'worktree/list-files'
+  ) {
     return isLocalProjectFileListResult(value.result);
   }
 

@@ -98,6 +98,38 @@ const EMPTY_INTERNAL_STATE: ProjectSkillsInternalState = {
   stale: false,
 };
 
+const LOCAL_PROJECT_FINGERPRINT_PREFIX = 'project:';
+const LOCAL_GLOBAL_FINGERPRINT_PREFIX = 'global:';
+
+function formatLocalSkillsFingerprint(
+  project: string | undefined,
+  global: string | undefined
+): string {
+  return `${LOCAL_PROJECT_FINGERPRINT_PREFIX}${project ?? ''}|${LOCAL_GLOBAL_FINGERPRINT_PREFIX}${global ?? ''}`;
+}
+
+/** The host fingerprints a cached local entry was built from, to send back as `knownFingerprint`. */
+function parseLocalSkillsFingerprint(
+  value: string | undefined
+): { project?: string; global?: string } | null {
+  if (!value) return null;
+  const [projectPart, globalPart] = value.split('|');
+  if (
+    !projectPart?.startsWith(LOCAL_PROJECT_FINGERPRINT_PREFIX) ||
+    !globalPart?.startsWith(LOCAL_GLOBAL_FINGERPRINT_PREFIX)
+  ) {
+    return null;
+  }
+  const project = projectPart.slice(LOCAL_PROJECT_FINGERPRINT_PREFIX.length);
+  const global = globalPart.slice(LOCAL_GLOBAL_FINGERPRINT_PREFIX.length);
+  return { ...(project ? { project } : {}), ...(global ? { global } : {}) };
+}
+
+function parseGlobalSkillsFingerprint(value: string | undefined): string | undefined {
+  if (!value?.startsWith(LOCAL_GLOBAL_FINGERPRINT_PREFIX) || value.includes('|')) return undefined;
+  return value.slice(LOCAL_GLOBAL_FINGERPRINT_PREFIX.length) || undefined;
+}
+
 function normalizeSource(
   source: ProjectSkillsSource | null | undefined
 ): NormalizedProjectSkillsSource | null {
@@ -338,24 +370,31 @@ export function useProjectSkills(
             requestLocalProjectControl: (request, requestOptions) =>
               runtime.requestLocalProjectControl(request, requestOptions),
           });
+          const knownParts = parseLocalSkillsFingerprint(cached?.contentFingerprint);
           const [projectResult, globalResult] = await Promise.all([
-            transport.listSkills({ skillDirs: scanDirs }),
-            transport.listGlobalSkills(),
+            transport.listSkills({ skillDirs: scanDirs, knownFingerprint: knownParts?.project }),
+            transport.listGlobalSkills({ knownFingerprint: knownParts?.global }),
           ]);
           if (cancelled) {
             return;
           }
 
-          const contentFingerprint = [
-            `project:${projectResult.contentFingerprint ?? ''}`,
-            `global:${globalResult.contentFingerprint ?? ''}`,
-          ].join('|');
-          const combinedGroups = [...projectResult.groups, ...globalResult.groups];
-
+          const contentFingerprint = formatLocalSkillsFingerprint(
+            projectResult.contentFingerprint,
+            globalResult.contentFingerprint
+          );
           if (cached && cached.contentFingerprint === contentFingerprint) {
             await reuseCachedEntry(cached);
             return;
           }
+          const combinedGroups = [
+            ...(projectResult.unchanged
+              ? (cached?.groups.filter((group) => group.scope === 'project') ?? [])
+              : projectResult.groups),
+            ...(globalResult.unchanged
+              ? (cached?.groups.filter((group) => group.scope !== 'project') ?? [])
+              : globalResult.groups),
+          ];
 
           const nextEntry: ProjectSkillsCacheEntry = {
             key: sourceCacheKey,
@@ -383,12 +422,14 @@ export function useProjectSkills(
             requestLocalProjectControl: (request, requestOptions) =>
               runtime.requestLocalProjectControl(request, requestOptions),
           });
-          const globalResult = await transport.listGlobalSkills();
+          const globalResult = await transport.listGlobalSkills({
+            knownFingerprint: parseGlobalSkillsFingerprint(cached?.contentFingerprint),
+          });
           if (cancelled) {
             return;
           }
 
-          const contentFingerprint = `global:${globalResult.contentFingerprint ?? ''}`;
+          const contentFingerprint = `${LOCAL_GLOBAL_FINGERPRINT_PREFIX}${globalResult.contentFingerprint ?? ''}`;
           if (cached && cached.contentFingerprint === contentFingerprint) {
             await reuseCachedEntry(cached);
             return;

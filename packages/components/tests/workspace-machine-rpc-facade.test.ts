@@ -294,6 +294,45 @@ describe('createWorkspaceMachineRpcFacade', () => {
     ).toEqual({ status: 'error', code: 'unsupported_protocol' });
   });
 
+  it('keeps file search and skill fingerprints away from daemons that cannot parse them', async () => {
+    vi.stubGlobal('window', {});
+    const sent: unknown[] = [];
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({}),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestLocalProjectControl: async ({ request }: { request: { type: string } }) => {
+            sent.push(request);
+            return { ok: true, type: request.type, result: { groups: [] } };
+          },
+        }) as never,
+    });
+
+    const search = await facade.requestLocalProjectControl({
+      type: 'local-project/search-files',
+      machineId: remoteMachineId,
+      workspaceId,
+      localProjectId: 'lp-1' as never,
+      query: 'btn',
+    });
+    expect(search).toMatchObject({ ok: false, data: { reason: 'unsupported_protocol' } });
+
+    await facade.requestLocalProjectControl({
+      type: 'local-project/list-global-skills',
+      machineId: remoteMachineId,
+      workspaceId,
+      knownFingerprint: 'fp',
+    });
+    expect(sent).toEqual([
+      { type: 'local-project/list-global-skills', machineId: remoteMachineId, workspaceId },
+    ]);
+  });
+
   it('does not fall back to cloud for a local file download without IPC', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
@@ -1431,9 +1470,7 @@ describe('encrypted file and preview routing', () => {
       expect.objectContaining({ operation: { action: 'revoke', stopProcess: true } }),
       'test-login-token'
     );
-    expect(rpcRevoke).toHaveBeenLastCalledWith(
-      expect.objectContaining({ stopProcess: true })
-    );
+    expect(rpcRevoke).toHaveBeenLastCalledWith(expect.objectContaining({ stopProcess: true }));
   });
 
   it('forks an encrypted session through the protected feature channel, never ordinary RPC', async () => {

@@ -2537,6 +2537,18 @@ export const LocalProjectListFilesRequestSchema = z
   })
   .strict();
 
+export const LocalProjectSearchFilesRequestSchema = z
+  .object({
+    type: z.literal('local-project/search-files'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    localProjectId: LocalProjectIdSchema,
+    query: SharedStringSchema,
+    limit: z.number().int().positive().optional(),
+    requestedByUserId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export const LocalProjectListDirRequestSchema = z
   .object({
     type: z.literal('local-project/list-dir'),
@@ -2556,6 +2568,7 @@ export const LocalProjectListSkillsRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     localProjectId: LocalProjectIdSchema,
     skillDirs: z.array(SharedTrimmedNonEmptyStringSchema),
+    knownFingerprint: SharedOptionalStringSchema,
     requestedByUserId: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -2565,6 +2578,7 @@ export const LocalProjectListGlobalSkillsRequestSchema = z
     type: z.literal('local-project/list-global-skills'),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
+    knownFingerprint: SharedOptionalStringSchema,
     requestedByUserId: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -2709,6 +2723,7 @@ export const LocalProjectControlRequestSchema = z.discriminatedUnion('type', [
   LocalProjectListRequestSchema,
   LocalProjectGitStateRequestSchema,
   LocalProjectListFilesRequestSchema,
+  LocalProjectSearchFilesRequestSchema,
   LocalProjectListDirRequestSchema,
   LocalProjectListSkillsRequestSchema,
   LocalProjectListGlobalSkillsRequestSchema,
@@ -2785,6 +2800,7 @@ const ProjectSkillsResultSchema = z
   .object({
     groups: z.array(ProjectSkillGroupSchema),
     contentFingerprint: SharedOptionalStringSchema,
+    unchanged: z.boolean().optional(),
   })
   .strict();
 
@@ -2966,6 +2982,7 @@ const LocalProjectControlErrorResponseSchema = z
       'local-project/list',
       'local-project/git-state',
       'local-project/list-files',
+      'local-project/search-files',
       'local-project/list-dir',
       'local-project/list-skills',
       'local-project/list-global-skills',
@@ -3097,6 +3114,13 @@ export const LocalProjectControlResponseSchema = z.union([
     .object({
       ok: z.literal(true),
       type: z.literal('local-project/list-files'),
+      result: LocalProjectFileListResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      type: z.literal('local-project/search-files'),
       result: LocalProjectFileListResultSchema,
     })
     .strict(),
@@ -3580,7 +3604,10 @@ export const ScheduleProposalRuleSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z
-    .object({ kind: z.literal('hours'), every: z.number().int().min(1).max(SCHEDULE_CUSTOM_HOURS_MAX) })
+    .object({
+      kind: z.literal('hours'),
+      every: z.number().int().min(1).max(SCHEDULE_CUSTOM_HOURS_MAX),
+    })
     .strict(),
   z.object({ kind: z.literal('daily'), ...proposalTimeOfDay }).strict(),
   z.object({ kind: z.literal('weekdays'), ...proposalTimeOfDay }).strict(),
