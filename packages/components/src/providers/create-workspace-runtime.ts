@@ -53,7 +53,10 @@ import {
   type RepoRoomSubscription,
   type RepoWatchHandle,
 } from 'loro-repo';
-import { createWorkspaceRepoStorage } from './workspace-repo-storage';
+import {
+  createWorkspaceRepoStorage,
+  createWorkspaceIncompleteRecoveryStore,
+} from './workspace-repo-storage';
 import {
   reportWorkspaceCloseFailure,
   type WorkspaceCloseStage,
@@ -610,6 +613,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | ((room: WorkspaceTransportRoom) => WorkspaceTransportRoute)
     | null = null;
   const repoStorage = createWorkspaceRepoStorage(cacheIdentity.repoDbName);
+  const incompleteRecoveryStore = createWorkspaceIncompleteRecoveryStore(cacheIdentity.repoDbName);
   const openSessionWithSnapshot = createSessionSnapshotLoader(repoStorage);
   const repo = await LoroRepo.create({
     storageAdapter: repoStorage,
@@ -3765,6 +3769,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): StreamsTransportAdapter => {
     durableStreamsBaseUrl = streamsBaseUrl;
     return createWorkspaceStreamsTransport({
+      incompleteRecoveryStore,
       webSocketEnabled: isLoroStreamsWebSocketEnabled(
         deps.streamsWebSocketEnabled,
         import.meta.env.VITE_LORO_STREAMS_WS_ENABLED

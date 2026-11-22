@@ -1,3 +1,6 @@
+import { z } from 'zod';
+import { getLoroStreamsRemoteCursorUrlAliases } from './loro-streams-routing';
+import type { IncompleteRecoveryStore } from '@loro-dev/streams-crdt';
 import type { JsonObject, RemoteCursor, StreamsAuthProvider } from '@loro-dev/streams-crdt';
 import type {
   StreamsReplicaPersistence,
@@ -183,4 +186,32 @@ export function createWorkspaceStreamsTransportAdapter<
     return result;
   };
   return adapter;
+}
+
+const incompleteRecoveryRecord = z.object({
+  streamUrl: z.string().url(),
+  observedTailOffset: z.string().min(1),
+  observedSnapshotOffset: z.string().nullable(),
+  attempts: z.number().int().nonnegative(),
+  updatedAtMs: z.number().finite(),
+});
+
+/** Advisory recovery metadata is separate from replica-bound replay cursors. */
+export function createAliasedIncompleteRecoveryStore(backend: {
+  load(key: string): Promise<unknown>;
+  save(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<void>;
+}): IncompleteRecoveryStore {
+  const keyOf = (url: string) =>
+    [url, ...getLoroStreamsRemoteCursorUrlAliases(url)].sort().at(0) ?? url;
+  return {
+    async load(streamUrl) {
+      const record = incompleteRecoveryRecord.safeParse(await backend.load(keyOf(streamUrl)));
+      return record.success && keyOf(record.data.streamUrl) === keyOf(streamUrl)
+        ? { ...record.data, streamUrl }
+        : null;
+    },
+    save: (record) => backend.save(keyOf(record.streamUrl), record),
+    delete: (url) => backend.delete(keyOf(url)),
+  };
 }

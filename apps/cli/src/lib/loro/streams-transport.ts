@@ -5,7 +5,7 @@ import {
   WorkspaceStreamsConfigurationError,
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
-import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
+import type { IncompleteRecoveryStore, RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { registerLoroSyncErrorFormatter } from '../../utils/format-error';
@@ -76,6 +76,7 @@ export async function createCliStreamsTransport(args: {
   repo: LoroRepo;
   /** Owner bound to the manager's replica/account/content lifetime. */
   incompleteRecoveryScope?: object;
+  incompleteRecoveryStore?: IncompleteRecoveryStore;
   /**
    * LoroDoc room cursors only. Meta and named Flock cursors are replica-bound:
    * `SqliteRepoStore` restores each one in the same transaction as the data it
@@ -108,6 +109,7 @@ export async function createCliStreamsTransport(args: {
         new CliStreamsTransportAdapter(
           {
             incompleteRecoveryScope: args.incompleteRecoveryScope,
+            incompleteRecoveryStore: args.incompleteRecoveryStore,
             diagnostics: (event) => {
               const diagnostic = getLoroSyncDiagnostic(event);
               if (diagnostic) {
