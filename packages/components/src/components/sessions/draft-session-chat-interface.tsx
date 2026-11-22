@@ -125,6 +125,8 @@ export type DraftSessionSendPayload = {
 export interface DraftSessionChatInterfaceProps {
   draft: DraftSessionTab;
   parentSession: SessionMeta;
+  isRepoPublic?: boolean;
+  isRepoLinked?: boolean;
   commandsEnabled?: boolean;
   onDraftChange: (draftId: DraftSessionTab['id'], patch: Partial<DraftSessionTab>) => void;
   onSendDraft: (payload: DraftSessionSendPayload) => Promise<boolean>;
@@ -146,6 +148,8 @@ export const DraftSessionChatInterface = memo(
       {
         draft,
         parentSession,
+        isRepoPublic,
+        isRepoLinked,
         commandsEnabled = true,
         onDraftChange,
         onSendDraft,
@@ -196,8 +200,17 @@ export const DraftSessionChatInterface = memo(
       // Same resolution the composer uses: a local project may carry its repo
       // only in project.githubRepoFullName, not in repoFullName.
       const parentRepoFullName = resolveSessionRepoFullName(parentSession);
+      const issuePrRepoFullName =
+        parentSession.project?.kind === 'local'
+          ? isRepoLinked
+            ? parentRepoFullName || undefined
+            : undefined
+          : isRepoLinked === false
+            ? undefined
+            : parentRepoFullName || undefined;
       const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(
-        parentRepoFullName || undefined
+        issuePrRepoFullName,
+        isRepoPublic
       );
       const {
         doc: parentSessionDoc,
@@ -674,6 +687,8 @@ export const DraftSessionChatInterface = memo(
             }
             configOptionSelectors={configOptionSelectors}
             configOptionValues={configOptionValues}
+            isRepoPublic={isRepoPublic}
+            isRepoLinked={isRepoLinked}
             availableCommands={availableCommands}
             onModeChange={selectMode}
             onModelChange={selectModel}

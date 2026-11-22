@@ -493,6 +493,7 @@ export interface SessionChatInputAreaProps {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   /** Whether the session's repo is public (for #mention feature) */
   isRepoPublic?: boolean;
+  isRepoLinked?: boolean;
   /** Available slash commands from the ACP agent. */
   availableCommands?: AcpCommandSummary[];
   /** False while this retained composer is hidden behind another session tab. */
@@ -623,6 +624,7 @@ export const SessionChatInputArea = memo(
       configOptionSelectors,
       configOptionValues,
       isRepoPublic,
+      isRepoLinked,
       availableCommands,
       commandsEnabled = true,
       hideTopSpacer = false,
@@ -2210,6 +2212,7 @@ export const SessionChatInputArea = memo(
       session,
       sessionLocalProjectRootPath,
       isRepoPublic,
+      isRepoLinked,
       // No index is borrowed until someone could actually type `@`.
       enableCodeCollabProvider: userInput.includes('@'),
       debugLabel: 'session-chat-input:mention-provider',
