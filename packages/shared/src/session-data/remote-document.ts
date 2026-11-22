@@ -224,10 +224,15 @@ export function createRemoteControlState<S extends Record<string, unknown>>(
   roots: readonly string[],
   initial: S
 ): RemoteControlState<S> {
-  let state = initial;
+  /** The engine's state as last read, and the head each root was read at. */
+  let confirmed = initial;
   const readAt = new Map<string, number>();
+  /** Writes not yet settled, replayed over `confirmed` for the optimistic state. */
+  const pending: ((draft: S) => void)[] = [];
+  let state = initial;
   const listeners = new Set<(state: S) => void>();
-  const notify = () => {
+  const project = () => {
+    state = pending.reduce<S>((value, updater) => produce(value, updater), confirmed);
     for (const listener of [...listeners]) listener(state);
   };
   let queue: Promise<unknown> = Promise.resolve();
@@ -238,13 +243,13 @@ export function createRemoteControlState<S extends Record<string, unknown>>(
   };
   const reload = async (names: readonly string[]) => {
     const values = await Promise.all(names.map((name) => port.readPathAt([name])));
-    const next = { ...state } as Record<string, unknown>;
+    const next = { ...confirmed } as Record<string, unknown>;
     names.forEach((name, i) => {
       next[name] = values[i]!.value;
       readAt.set(name, values[i]!.roomTxId);
     });
-    state = next as S;
-    notify();
+    confirmed = next as S;
+    project();
   };
   const ready = reload(roots);
   const observation = port.observePaths((event) => {
@@ -262,30 +267,40 @@ export function createRemoteControlState<S extends Record<string, unknown>>(
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    /**
+     * Applies optimistically now; commits in order, each write diffed from the
+     * state the previous one's reload confirmed and based at the head it was read at.
+     */
     update(updater) {
-      const before = state;
-      const bases = new Map(readAt);
-      const after = produce(before, updater as (draft: S) => void);
-      state = after;
-      notify();
+      const write = updater as (draft: S) => void;
+      pending.push(write);
+      project();
       return serial(async () => {
-        let frontiers: unknown;
-        for (const root of roots) {
-          const ops = diffJson(before[root], after[root], [root]);
-          if (!ops.length) continue;
-          try {
-            ({ frontiers } = await port.applyPatch(ops, {
-              mode: 'rebase',
-              base_room_tx_id: bases.get(root) ?? 0,
-            }));
-          } catch (error) {
-            if (error instanceof RemoteWriteIndeterminateError) throw error;
-            throw new RemoteWriteRejectedError(error);
-          } finally {
-            await reload([root]).catch(() => {});
+        try {
+          const before = confirmed;
+          const bases = new Map(readAt);
+          const after = produce(before, write);
+          let frontiers: unknown;
+          for (const root of roots) {
+            const ops = diffJson(before[root], after[root], [root]);
+            if (!ops.length) continue;
+            try {
+              ({ frontiers } = await port.applyPatch(ops, {
+                mode: 'rebase',
+                base_room_tx_id: bases.get(root) ?? 0,
+              }));
+            } catch (error) {
+              if (error instanceof RemoteWriteIndeterminateError) throw error;
+              throw new RemoteWriteRejectedError(error);
+            } finally {
+              await reload([root]).catch(() => {});
+            }
           }
+          return { frontiers };
+        } finally {
+          pending.splice(pending.indexOf(write), 1);
+          project();
         }
-        return { frontiers };
       });
     },
     settled: () => queue.then(() => {}),

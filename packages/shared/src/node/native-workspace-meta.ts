@@ -31,6 +31,34 @@ import {
 const DOC_BODY_PREFIXES = ['m', 'f', 'ld'] as const;
 const READ_BUDGET = { maxRows: 4096, maxBytes: 1024 * 1024 };
 const MAX_CONFLICT_RETRIES = 4;
+/** A takeover of the host completes in about a second; past this the write fails as unsent. */
+const HANDOFF_WAIT_MS = 30_000;
+
+/** The engine refused because it is handing the directory to its successor: nothing applied. */
+const isHandingOff = (error: unknown) =>
+  error instanceof RepoRpcError &&
+  `${error.message} ${String((error as { detail?: unknown }).detail ?? '')}`.includes(
+    'ENGINE_HANDING_OFF'
+  );
+
+/** Resolves on the next connection (after the current one is lost), within `ms`. */
+function nextConnection(client: RepoClient, ms: number) {
+  return new Promise<void>((resolve, reject) => {
+    let lost = client.connectionState !== 'connected';
+    const timer = setTimeout(() => {
+      off();
+      reject(new Error('native_repo_handoff_timeout'));
+    }, ms);
+    const off = client.onConnectionStateChange((state) => {
+      if (state !== 'connected') lost = true;
+      else if (lost) {
+        clearTimeout(timer);
+        off();
+        resolve();
+      }
+    });
+  });
+}
 
 type DocState = { exists?: boolean; meta: JsonObject };
 type FlockState = { exists?: boolean; expiresAtMs?: number };
@@ -221,6 +249,8 @@ export function createNativeWorkspaceMeta(
   let revision = 0;
   let observation: FlockObservation | undefined;
   let opening: Promise<void> | undefined;
+  /** Commits waiting for the first reload after a lost connection. */
+  const reloadWaiters = new Set<{ invalidated: boolean; resolve: () => void }>();
 
   const emit = (update: IncrementalExternalMetadataUpdate<JsonObject>) => {
     for (const listener of listeners) {
@@ -234,7 +264,10 @@ export function createNativeWorkspaceMeta(
     (opening ??= (async () => {
       await client.createRoom(namespace, META_ROOM, nativeRoomEncryption(client, namespace));
       observation = observeFlock(client, namespace, META_ROOM, [], (event) => {
-        if (event.kind === 'invalidated') return;
+        if (event.kind === 'invalidated') {
+          for (const waiter of reloadWaiters) waiter.invalidated = true;
+          return;
+        }
         const docIds = new Set<string>();
         const flockIds = new Set<string>();
         if (event.kind === 'snapshot') {
@@ -245,6 +278,11 @@ export function createNativeWorkspaceMeta(
         revision += 1;
         if (event.kind === 'snapshot') {
           emit({ kind: 'snapshot', snapshot: projection.snapshot(revision), by: 'live' });
+          for (const waiter of reloadWaiters)
+            if (waiter.invalidated) {
+              reloadWaiters.delete(waiter);
+              waiter.resolve();
+            }
           return;
         }
         const docs: RepoDocMeta<JsonObject>[] = [];
@@ -276,12 +314,36 @@ export function createNativeWorkspaceMeta(
       throw error;
     }));
 
+  /** Nothing was sent: any failure here is a certain non-commit. */
+  const beforeWrite = async <A>(work: () => Promise<A>): Promise<A> => {
+    try {
+      return await work();
+    } catch (error) {
+      throw notCommitted(error instanceof Error ? error.message : 'native_repo_unavailable');
+    }
+  };
+  /**
+   * A committed write is visible once the observation reaches its transaction, or,
+   * after a lost connection, once the reload that follows has read the room again.
+   */
+  const whenCommitVisible = (txId: number) => {
+    let waiter!: { invalidated: boolean; resolve: () => void };
+    const reloaded = new Promise<void>((resolve) => {
+      waiter = { invalidated: client.connectionState !== 'connected', resolve };
+      reloadWaiters.add(waiter);
+    });
+    return Promise.race([observation!.whenVisible(txId), reloaded]).finally(() =>
+      reloadWaiters.delete(waiter)
+    );
+  };
   const commit = async (command: ExternalMetadataCommand<JsonObject>) => {
-    await start();
+    await beforeWrite(start);
     const selectors = selectorsFor(command);
     for (let attempt = 0; attempt < MAX_CONFLICT_RETRIES; attempt++) {
       if (client.connectionState !== 'connected') throw notCommitted('native_repo_disconnected');
-      const read = await client.flockReadMany(namespace, META_ROOM, selectors, READ_BUDGET);
+      const read = await beforeWrite(() =>
+        client.flockReadMany(namespace, META_ROOM, selectors, READ_BUDGET)
+      );
       const ops = opsFor(command, read.results);
       if (ops.length === 0) return { outcome: 'committed' as const, revision };
       let txId: number;
@@ -297,9 +359,13 @@ export function createNativeWorkspaceMeta(
         ).txId;
       } catch (error) {
         if (error instanceof RepoRpcError && error.code === 'precondition_failed') continue;
+        if (isHandingOff(error)) {
+          await beforeWrite(() => nextConnection(client, HANDOFF_WAIT_MS));
+          continue;
+        }
         throw error;
       }
-      await observation!.whenVisible(txId);
+      await whenCommitVisible(txId);
       return { outcome: 'committed' as const, revision };
     }
     throw notCommitted('native_meta_conflict');
