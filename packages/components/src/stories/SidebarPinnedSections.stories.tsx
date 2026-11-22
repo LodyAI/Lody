@@ -135,9 +135,14 @@ function PinnedSectionsPlayground({
   const [hidden, setHidden] = useState<Record<string, boolean>>(initialHidden);
   const [selected, setSelected] = useState<string | null>('c3');
   const [mentioned, setMentioned] = useState<string | null>(null);
+  const [newChatSection, setNewChatSection] = useState<string | null>(null);
   const pinnedItems = useMemo(
     () => conversations.filter((entry) => entry.isPinned).map(toItem),
     [conversations]
+  );
+  const pinSectionActions = useMemo(
+    () => ({ ...state.pinSectionActions, onNewChat: setNewChatSection }),
+    [state.pinSectionActions]
   );
 
   return (
@@ -163,7 +168,7 @@ function PinnedSectionsPlayground({
           onSetPinSectionHidden={(key, value) =>
             setHidden((previous) => ({ ...previous, [key]: value }))
           }
-          pinSectionActions={state.pinSectionActions}
+          pinSectionActions={pinSectionActions}
           updatedItems={updatedItems}
           updatedSelectedItemId={selected}
           onSelectUpdatedItem={setSelected}
@@ -186,12 +191,16 @@ function PinnedSectionsPlayground({
           <p>Drag a section header to reorder sections.</p>
           <p>Right-click a pinned conversation for “Move to Section” and “New Section…”.</p>
           <p>Use a named section’s ⋯ menu to hide, rename or delete it.</p>
+          <p>A named section’s ⋯ menu also opens a new chat pinned into that section.</p>
           <p>Use Pinned → ⋯ → Visible Sections to show or hide any section.</p>
           <p className="mt-4">
             Drop a conversation on this pane to mention it, as on a conversation.
           </p>
           <p className="mt-2 text-foreground" data-story-mentioned="">
             {mentioned ? `Mentioned: ${mentioned}` : 'Nothing mentioned yet'}
+          </p>
+          <p className="mt-2 text-foreground" data-story-new-chat-section="">
+            {newChatSection ? `New chat for section: ${newChatSection}` : 'No new chat started'}
           </p>
         </div>
       </SessionMentionDropLayer>

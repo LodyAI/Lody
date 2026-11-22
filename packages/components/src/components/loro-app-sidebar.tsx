@@ -208,7 +208,7 @@ import {
   type EffectiveSessionActivitySummary,
   type SessionListScope,
 } from './sessions/session-list-rows';
-import { getSelectedLocalProjectKey } from './chat/chat-landing-derived';
+import { getSelectedLocalProjectKey, parseChatLandingSearch } from './chat/chat-landing-derived';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import {
   useLocalProjectRemovalResultNotifications,
@@ -3042,9 +3042,22 @@ export function LoroAppSidebar({
           reportStatusViewError
         );
       },
+      onNewChat: (sectionId) => {
+        if (!workspaceSlug) return;
+        const { pathname, search } = router.state.location;
+        const { context, machine, project, repo, group } =
+          pathname === `/${workspaceSlug}/chat` ? parseChatLandingSearch(search) : {};
+        void router.navigate({
+          to: '/$workspaceName/chat',
+          params: { workspaceName: workspaceSlug },
+          search: { context, machine, project, repo, group, pinSection: sectionId },
+        });
+      },
     };
   }, [
     reportStatusViewError,
+    router,
+    workspaceSlug,
     runSidebarStatusViewCommand,
     runStatusViewCommand,
     runtime,

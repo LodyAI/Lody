@@ -45,7 +45,8 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionToCreate,
-  type WorkspaceId} from '@lody/shared';
+  type WorkspaceId,
+} from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
@@ -1431,6 +1432,37 @@ describe('useSessionActions', () => {
     await expect(
       actions.createSession(createSessionPayload('new-session-while-loading' as SessionId))
     ).resolves.toMatchObject({ sessionId: 'new-session-while-loading' });
+  });
+
+  it('pins a conversation started from a pin section at the top of that section', async () => {
+    const existingId = 'existing-top' as SessionId;
+    const sessionMetaCache = {
+      [getSessionRoomId(existingId)]: {
+        id: existingId,
+        isPinned: true,
+        pinSectionId: 'maintenance',
+        orderKey: '80',
+      } as SessionMeta,
+    };
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: { upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime, { docMetaCacheReady: true, sessionMetaCache });
+    const sessionId = 'session-in-section' as SessionId;
+
+    const { sessionMeta } = await actions.createSession({
+      ...createSessionPayload(sessionId),
+      isPinned: true,
+      pinSectionId: 'maintenance',
+    });
+
+    expect(sessionMeta).toMatchObject({ isPinned: true, pinSectionId: 'maintenance' });
+    expect(sessionMeta.orderKey! < '80').toBe(true);
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      getSessionRoomId(sessionId),
+      expect.objectContaining({ isPinned: true, pinSectionId: 'maintenance' })
+    );
   });
 
   it('does not mutate through a runtime from a different workspace slug', async () => {
