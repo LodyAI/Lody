@@ -15,19 +15,17 @@ import {
   togglePinMutation,
 } from './shared';
 
-function buildIssueReadyWaitProgram(identifier: string): string {
-  const argsLiteral = JSON.stringify({ identifier });
-  return `async ({ ctx }) => {
-  const { value } = await ctx.read('plugin.issue-context.issues.state', ${argsLiteral});
+const ISSUE_READY_WAIT_PROGRAM = `async ({ ctx }) => {
+  const identifier = String(ctx.params.identifier ?? '');
+  const { value } = await ctx.read('plugin.issue-context.issues.state', { identifier });
   if (value.state !== 'ready') return false;
   return {
-    resumeText: 'Tracker marked ${identifier} ready; begin implementation and open a PR.',
+    resumeText: 'Tracker marked ' + identifier + ' ready; begin implementation and open a PR.',
     payload: value,
   };
 }`;
-}
 
-function IssueSidePanel({ session, project }: SessionPanelProps) {
+function IssueSidePanel({ session, project, params }: SessionPanelProps) {
   const host = useHost();
   const scratchpad = useQuery(session, sessionScratchpadQuery, {});
 
@@ -43,21 +41,29 @@ function IssueSidePanel({ session, project }: SessionPanelProps) {
     );
   }
 
-  return <ProjectIssuesList session={session} project={project} host={host} />;
+  return (
+    <ProjectIssuesList
+      session={session}
+      project={project}
+      focusedIdentifier={params.identifier}
+      host={host}
+    />
+  );
 }
 
 function ProjectIssuesList({
   session,
   project,
+  focusedIdentifier,
   host,
 }: {
   session: SessionPanelProps['session'];
   project: NonNullable<SessionPanelProps['project']>;
+  focusedIdentifier?: string;
   host: ReturnType<typeof useHost>;
 }) {
-  const issues = useQuery(project, listIssuesQuery, {});
+  const issues = useQuery(project, listIssuesQuery, { query: focusedIdentifier ?? '' });
   const watchedSessions = useQuery(project, hostQueries.sessions, {
-    createdByMe: true,
     createdByPlugin: true,
     archived: false,
   });
@@ -147,10 +153,12 @@ function ProjectIssuesList({
                     void host.sessions.create(project, {
                       requestId: crypto.randomUUID(),
                       businessKey: watchKey,
+                      businessKeyScope: 'project',
                       pullRequestUrl: issue.pullRequestUrl,
                       prompt: `Implement ${issue.identifier} (${issue.title}) once unblocked.`,
                       waitCondition: {
-                        program: buildIssueReadyWaitProgram(issue.identifier),
+                        program: ISSUE_READY_WAIT_PROGRAM,
+                        params: { identifier: issue.identifier },
                         reason: `Wait until ${issue.identifier} reaches ready state`,
                       },
                     })

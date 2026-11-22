@@ -1,4 +1,4 @@
-import { defineMutation, defineQuery, hostQueries } from '@lody/plugin-sdk';
+import { defineMutation, defineObservation, defineQuery, hostQueries } from '@lody/plugin-sdk';
 import { defineMachinePlugin } from '@lody/plugin-sdk/machine';
 import { z } from 'zod';
 import { runSuiteTool } from './examples/test-report/shared';
@@ -16,6 +16,11 @@ const sessionMonitorQuery = defineQuery('session', 'monitor.state', {
   output: z.object({ activeStep: z.string().nullable() }),
 });
 
+const queueDepthObservation = defineObservation('project', 'queue.depth', {
+  input: z.object({}),
+  output: z.object({ ready: z.boolean() }),
+});
+
 const recoverReviewMutation = defineMutation('project', 'review.ensure', {
   input: z.object({
     requestId: z.string().uuid(),
@@ -29,26 +34,39 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
   machine.query(machineDigestQuery, (ctx, input) => {
     const limit: number = input.limit;
     const machineId: string = ctx.target.machineId;
+    const absentSessionDir: undefined = ctx.sessionDataDir;
     void machineId;
+    void absentSessionDir;
     // @ts-expect-error Machine-scoped context does not expose projectId.
     void ctx.target.projectId;
     return { count: limit };
   });
 
   machine.query(sessionMonitorQuery, async (ctx) => {
+    const sessionDir: string = ctx.sessionDataDir;
+    void sessionDir;
     const detail = await ctx.host.read(ctx.target, hostQueries.sessionDetail, {
       recentTurnLimit: 3,
     });
     return { activeStep: detail.recentTurns[0]?.previewText ?? null };
   });
 
+  machine.observation(queueDepthObservation, async () => ({
+    value: { ready: true },
+    observedAt: Date.now(),
+    revision: 'depth-v1',
+  }));
+
   machine.mutation(recoverReviewMutation, async (ctx, input) => {
     const key = `review/${input.prNumber}/${input.headSha}`;
+    // Push-assist wakeup hint for waiting Sessions watching this project observation.
+    ctx.invalidate(queueDepthObservation, ctx.target);
     // Replaying the original request also recovers an archived Session; an active-only
     // catalog lookup must not decide whether this operation has already been accepted.
     const created = await ctx.host.sessions.create(ctx.target, {
       requestId: input.requestId,
       businessKey: key,
+      businessKeyScope: 'project',
       pullRequestUrl: `https://github.com/lodyai/lody/pull/${input.prNumber}`,
       prompt: `Review PR #${input.prNumber} at ${input.headSha}.`,
     });

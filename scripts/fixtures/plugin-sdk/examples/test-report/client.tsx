@@ -1,4 +1,4 @@
-import { defineClientPlugin, type ToolRenderProps } from '@lody/plugin-sdk/client';
+import { defineClientPlugin, useHost, type ToolRenderProps } from '@lody/plugin-sdk/client';
 import { Badge, Button, Switch, Table, type TableColumn } from '@lody/ui';
 import { useState } from 'react';
 import type { z } from 'zod';
@@ -26,7 +26,16 @@ const columns: readonly TableColumn<TestCaseResult>[] = [
   { key: 'duration', header: 'Time', numeric: true, cell: (row) => `${row.durationMs} ms` },
 ];
 
-function TestReportCard({ output, appendToDraft }: ReportProps) {
+function CompletedTestReport({
+  output,
+  session,
+  appendToDraft,
+}: {
+  output: z.infer<typeof runSuiteTool.output>;
+  session: ReportProps['session'];
+  appendToDraft: ReportProps['appendToDraft'];
+}) {
+  const host = useHost();
   const [failedOnly, setFailedOnly] = useState(output.failed > 0);
   const [selected, setSelected] = useState<string[]>([]);
 
@@ -58,6 +67,17 @@ function TestReportCard({ output, appendToDraft }: ReportProps) {
         >
           Add to draft ({selected.length})
         </Button>
+        {selected[0] && (
+          <Button
+            size="small"
+            variant="ghost"
+            onClick={() =>
+              host.panels.openSession(session, 'suite-inspector', { caseId: selected[0]! })
+            }
+          >
+            Inspect case
+          </Button>
+        )}
       </div>
       <Table
         columns={columns}
@@ -68,6 +88,25 @@ function TestReportCard({ output, appendToDraft }: ReportProps) {
         empty="No matching test cases."
       />
     </div>
+  );
+}
+
+function TestReportCard(props: ReportProps) {
+  if (props.status === 'running') {
+    return (
+      <div>
+        <Badge tone="running">
+          Running suite{props.input.filter ? ` (${props.input.filter})` : ''}…
+        </Badge>
+      </div>
+    );
+  }
+  return (
+    <CompletedTestReport
+      output={props.output}
+      session={props.session}
+      appendToDraft={props.appendToDraft}
+    />
   );
 }
 

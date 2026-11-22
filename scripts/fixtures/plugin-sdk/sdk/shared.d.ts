@@ -48,11 +48,23 @@ export type ScopeTarget<S extends PluginScope> = S extends 'workspace'
       : SessionRef;
 
 /**
- * Maximum UTF-8 byte length of a validated `defineTool` output persisted inline
- * inside Loro Session history (`tool_call.pluginOutput`). Larger payloads must be
- * stored in `ctx.dataDir` and fetched on demand via `defineQuery`.
+ * Maximum UTF-8 byte length of a validated `defineTool` or `results.add` payload persisted
+ * inline inside Loro Session history. Larger payloads must be stored in `ctx.sessionDataDir`
+ * (or `ctx.dataDir`) and fetched on demand via `defineQuery`.
  */
 export const MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES = 16_384;
+
+/**
+ * Maximum serialized UTF-8 byte length for a `plugin/query` or `plugin/mutate` request so
+ * desktop-to-machine E2EE calls remain on the single-frame Iroh fast path (`<= 256 KiB`).
+ */
+export const MAX_PLUGIN_RPC_REQUEST_BYTES = 262_144;
+
+/**
+ * Maximum combined byte size of a packed `client.js` bundle plus `assets/`, bounded well
+ * within the 64-page / 16 MiB E2EE paged read-query response ceiling.
+ */
+export const MAX_PACKED_CLIENT_BUNDLE_BYTES = 4_194_304;
 
 export type PluginCallErrorCode =
   | 'revision_mismatch'
@@ -142,28 +154,39 @@ export interface ObservationDescriptor<
   readonly output: TOutput;
 }
 
+export type BusinessKeyScope = 'user' | 'project';
+
 export interface CreateSessionRequest {
   /**
-   * Stable operation identity under `(workspace, user, project, pluginId, requestId)`.
+   * Stable operation identity under `(workspace, user, target, pluginId, requestId)`.
    * Retrying the same normalized request returns the original SessionRef, including after
    * archive. A changed request rejects with `idempotency_conflict`. The caller retains
    * this ID and the complete request across uncertain outcomes; it never generates a new ID to retry.
    */
   readonly requestId: string;
   /**
-   * Optional active-task identity in the same workspace/user/project/plugin namespace.
+   * Optional active-task identity within the calling plugin's namespace.
    * A different requestId with an already-active businessKey rejects with
    * `business_key_conflict`. Archive releases only this active-task reservation,
    * never the original request receipt. A new generation uses a new requestId.
    */
   readonly businessKey?: string;
+  /**
+   * Reservation scope for `businessKey`. Defaults to `'user'`. `'project'` shares the
+   * active-task reservation across authorized project collaborators when targeting a `ProjectRef`,
+   * while `requestId` receipts remain strictly isolated per calling user.
+   */
+  readonly businessKeyScope?: BusinessKeyScope;
   readonly roleId?: string;
   readonly prompt: string;
   readonly skillIds?: readonly string[];
   /** Optional initial PR link so plaintext `github.*` observations have a bound PR target before Turn 1. */
   readonly pullRequestUrl?: string;
   readonly waitCondition?: {
+    /** Read-only CodeMode predicate (`ctx.exec` disabled for plugin-created waits). */
     readonly program: string;
+    /** Structured JSON parameters exposed as `ctx.params` so callers never interpolate program strings. */
+    readonly params?: Readonly<Record<string, unknown>>;
     readonly reason?: string;
     readonly intervalMs?: number;
     readonly expiresAt?: number;

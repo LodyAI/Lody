@@ -181,6 +181,7 @@ export default defineMachinePlugin((machine) => {
     return {
       value: { state: match ? match.state : ('unknown' as const) },
       observedAt: Date.now(),
+      revision: match ? `${match.identifier}:${match.state}` : undefined,
     };
   });
 });

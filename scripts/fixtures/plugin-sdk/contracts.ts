@@ -1,16 +1,24 @@
 import {
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
+  MAX_PACKED_CLIENT_BUNDLE_BYTES,
+  MAX_PLUGIN_RPC_REQUEST_BYTES,
   defineMutation,
   defineQuery,
   hostQueries,
-  type MachineRef,
   type CreateSessionRequest,
+  type MachineRef,
   type PluginCallErrorCode,
   type ProjectRef,
   type SessionRef,
   type WorkspaceRef,
 } from '@lody/plugin-sdk';
-import { useHost, useMutation, useQuery, type ProjectPageProps } from '@lody/plugin-sdk/client';
+import {
+  useHost,
+  useMutation,
+  useQuery,
+  type ProjectPageProps,
+  type ToolRenderProps,
+} from '@lody/plugin-sdk/client';
 import type { PluginManifest } from '@lody/plugin-sdk/manifest';
 import { z } from 'zod';
 
@@ -42,6 +50,8 @@ defineQuery('workspace', 'invalid.workspaceQuery', {
 });
 
 export const inlineBudgetCheck: 16384 = MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES;
+export const rpcRequestBudgetCheck: 262144 = MAX_PLUGIN_RPC_REQUEST_BYTES;
+export const packedClientBundleBudgetCheck: 4194304 = MAX_PACKED_CLIENT_BUNDLE_BYTES;
 
 export const validManifest: PluginManifest = {
   id: 'test-report',
@@ -87,6 +97,19 @@ export const invalidSdkRangeManifest: PluginManifest = {
 export const retriableOfflineCode: PluginCallErrorCode = 'machine_offline';
 export const unknownOutcomeCode: PluginCallErrorCode = 'outcome_unknown';
 export const quarantinedPluginCode: PluginCallErrorCode = 'plugin_faulted';
+
+export function verifyToolRenderStateNarrowing(
+  props: ToolRenderProps<{ readonly filter?: string }, { readonly passed: number }>
+): number | null {
+  const id: string = props.toolCallId;
+  void id;
+  if (props.status === 'running') {
+    // @ts-expect-error Running tool cards have no final output until completion.
+    void props.output.passed;
+    return null;
+  }
+  return props.output.passed;
+}
 
 export async function verifyClientTypeSafety(
   workspace: WorkspaceRef,
@@ -155,13 +178,26 @@ export async function verifyClientTypeSafety(
   });
   void sendReceipt.disposition;
   await host.sessions.requestStop(session);
+  host.panels.openSession(session, 'issues', { identifier: 'LODY-101' });
 
   const createRequest: CreateSessionRequest = {
     requestId: 'create-review-attempt-1',
     businessKey: 'review/42/abc123',
+    businessKeyScope: 'project',
     prompt: 'Review PR #42 at abc123.',
+    waitCondition: {
+      program: 'async ({ ctx }) => Boolean(ctx.params.prNumber)',
+      params: { prNumber: 42 },
+    },
   };
   await host.sessions.create(project, createRequest);
+  // Unbound Sessions and drafts can target a MachineRef without a ProjectRef.
+  await host.sessions.create(machine, {
+    requestId: 'create-unbound-triage-1',
+    prompt: 'Inspect recent daemon alerts.',
+  });
+  host.drafts.open(machine, { prompt: 'Quick machine-scoped investigation.' });
+
   // The same immutable request is used after an uncertain result, even if the
   // original Session has since been archived. A new generation gets a new ID.
   await host.sessions.create(project, createRequest);

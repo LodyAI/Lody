@@ -2,10 +2,13 @@ import type { ComponentType, ReactNode } from 'react';
 import type { z } from 'zod';
 import {
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
+  MAX_PACKED_CLIENT_BUNDLE_BYTES,
+  MAX_PLUGIN_RPC_REQUEST_BYTES,
   hostQueries,
   type AttachmentItem,
   type AttachmentSnapshot,
   type AttachmentSourceDescriptor,
+  type BusinessKeyScope,
   type CreateSessionRequest,
   type HostQueryDescriptor,
   type MachinePluginScope,
@@ -33,7 +36,10 @@ import {
 
 export {
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
+  MAX_PACKED_CLIENT_BUNDLE_BYTES,
+  MAX_PLUGIN_RPC_REQUEST_BYTES,
   hostQueries,
+  type BusinessKeyScope,
   type CreateSessionRequest,
   type HostQueryDescriptor,
   type MachinePluginScope,
@@ -76,13 +82,22 @@ export type DraftItem =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'attachment'; readonly snapshot: AttachmentSnapshot };
 
-export interface ToolRenderProps<TInput, TOutput> {
+export type ToolRenderProps<TInput, TOutput> = {
+  readonly toolCallId: string;
   readonly input: TInput;
-  readonly output: TOutput;
   readonly session: SessionRef;
   readonly project?: ProjectRef;
   readonly appendToDraft: (item: DraftItem) => void;
-}
+} & (
+  | {
+      readonly status: 'running';
+      readonly output?: undefined;
+    }
+  | {
+      readonly status: 'completed';
+      readonly output: TOutput;
+    }
+);
 
 export interface ResultRenderProps<TContent> {
   readonly content: TContent;
@@ -100,6 +115,7 @@ export interface ComposerActionProps {
 export interface SessionPanelProps {
   readonly session: SessionRef;
   readonly project?: ProjectRef;
+  readonly params: Readonly<Record<string, string>>;
 }
 
 export type RepositoryState = 'available' | 'none' | 'unavailable' | 'unknown';
@@ -229,7 +245,7 @@ export interface ClientPluginRegistry {
 export interface HostActions {
   readonly sessions: {
     open(session: SessionRef): void;
-    create(project: ProjectRef, request: CreateSessionRequest): Promise<SessionRef>;
+    create(target: MachineRef | ProjectRef, request: CreateSessionRequest): Promise<SessionRef>;
     send(
       session: SessionRef,
       request: SendSessionMessageRequest
@@ -239,7 +255,7 @@ export interface HostActions {
   };
   readonly drafts: {
     open(
-      project: ProjectRef,
+      target: MachineRef | ProjectRef,
       draft: {
         readonly prompt?: string;
         readonly roleId?: string;
@@ -248,6 +264,14 @@ export interface HostActions {
       }
     ): void;
     append(session: SessionRef, item: DraftItem): void;
+  };
+  readonly panels: {
+    /** Opens a companion Session side panel registered by this plugin and passes URL-safe params. */
+    openSession(
+      session: SessionRef,
+      panelId: string,
+      params?: Readonly<Record<string, string>>
+    ): void;
   };
   readonly pages: {
     openProject(
