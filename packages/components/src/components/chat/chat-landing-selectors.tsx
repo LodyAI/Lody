@@ -171,6 +171,16 @@ export interface BranchSelectorProps {
   loadingText?: string;
   className?: string;
   contentClassName?: string;
+  /**
+   * The options are one partial listing of the repository: keep search visible
+   * however few are loaded, and report queries and list-end scrolls so the
+   * owner can fetch the rest.
+   */
+  hasMore?: boolean;
+  onSearchQueryChange?: (query: string) => void;
+  onReachEnd?: () => void;
+  /** Status row under the options while more of them load. */
+  footer?: ReactNode;
 }
 
 /**
@@ -188,6 +198,10 @@ export function BranchSelector({
   loadingText = 'Loading branches...',
   className,
   contentClassName,
+  hasMore = false,
+  onSearchQueryChange,
+  onReachEnd,
+  footer,
 }: BranchSelectorProps) {
   return (
     <OptionSelector
@@ -200,7 +214,10 @@ export function BranchSelector({
       side="top"
       avoidCollisions={false}
       placeholderIcon={GitBranch}
-      searchable={!loading && options.length > 6}
+      searchable={!loading && (hasMore || options.length > 6)}
+      onQueryChange={onSearchQueryChange}
+      onReachEnd={hasMore ? onReachEnd : undefined}
+      footer={footer}
       searchPlaceholder={searchPlaceholder}
       emptyText={emptyText}
       appearance="toolbar"

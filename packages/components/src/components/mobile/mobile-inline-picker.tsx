@@ -19,6 +19,7 @@ import { Spinner } from '@lody/ui/spinner';
 
 import { filterFuzzyOptions } from '@/lib/fuzzy-option-filter';
 import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';
+import { useLatestRef } from '@/hooks/use-latest-ref';
 import { cn } from '@/lib/utils';
 
 // Above this many (filtered) options the dropdown list is virtualized — big branch
@@ -66,6 +67,8 @@ export type MobileInlinePickerProps<T extends string = string> = {
   searchPlaceholder?: string;
   /** Reports picks made after typing a search term (`picker/search_selected`). */
   searchAnalyticsPicker?: SearchPickerKind;
+  /** Reports each search edit, e.g. to look up options the list has not loaded. */
+  onQueryChange?: (query: string) => void;
   /** Optional className for the trigger button. */
   triggerClassName?: string;
   /** Optional className for the expansion panel wrapper. */
@@ -175,6 +178,7 @@ export function MobileInlinePicker<T extends string = string>({
   searchable = false,
   searchPlaceholder,
   searchAnalyticsPicker,
+  onQueryChange,
   triggerClassName,
   expansionClassName,
   expansionPanelClassName,
@@ -200,6 +204,7 @@ export function MobileInlinePicker<T extends string = string>({
   const expansionRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
   const [query, setQuery] = useState('');
+  const onQueryChangeRef = useLatestRef(onQueryChange);
   /* Keyboard highlight for the open dropdown. Focus stays on the trigger button
      (so the picker still works when driven by an external roving controller that
      opens it without moving focus); ↑/↓ move this index, Enter/Space select it,
@@ -235,8 +240,14 @@ export function MobileInlinePicker<T extends string = string>({
      fresh — searching for one branch, closing, then reopening shouldn't
      leave the old query filtering the list. */
   useEffect(() => {
-    if (!open) setQuery('');
-  }, [open]);
+    if (open) return;
+    setQuery('');
+    onQueryChangeRef.current?.('');
+  }, [onQueryChangeRef, open]);
+  const handleQueryChange = (next: string) => {
+    setQuery(next);
+    onQueryChange?.(next);
+  };
 
   /* Fuzzy, not substring: a provider's model list can run to dozens of ids, and
      `op5` should still find `claude-opus-5`. Ranked, so the best match is the
@@ -542,7 +553,7 @@ export function MobileInlinePicker<T extends string = string>({
             {searchable ? (
               <PickerSearchInput
                 query={query}
-                onQueryChange={setQuery}
+                onQueryChange={handleQueryChange}
                 placeholder={searchPlaceholder}
                 ariaLabel={searchPlaceholder ?? ariaLabel}
                 autoFocus={autoFocusSearch}
