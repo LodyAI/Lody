@@ -61,10 +61,12 @@ callers still await `retryCleanup` and the close receipt before replacing the ow
 
 The optional cache stays encrypted and partitioned by endpoint/workspace, with
 credential and rejected-token publication fences. Its storage/crypto failures remain
-cache misses, while interruption and cleanup failure propagate. Only the explicit
-Legacy facade's old-protocol callback maps a nonempty Cause consisting entirely of
-credential auth failures to undefined. Mixed Causes remain failures without dropping
-their non-auth reasons; native callbacks never perform this projection.
+cache misses, while interruption and cleanup failure propagate. Native and Legacy
+callbacks both preserve credential auth failures. Returning `undefined` authorizes
+an anonymous transport request; it must never represent rejected cloud credentials.
+The same credential's terminal rejection suppresses token endpoint requests until
+credentials change or `invalidate()` runs. Transport owners observe failure and
+retain their existing reconnect paths; the provider does not add a retry loop.
 
 `provider.health: Effect.Effect<LoroStreamsTokenHealth>` snapshots lifecycle,
 generation, read/lease counts, raw-work/cache presence and terminal auth status.
