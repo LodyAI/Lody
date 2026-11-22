@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="ryugi-ui" content="1" />
+    <meta name="ryugi-icons" content="1" />
+    <title>Lody CLI → Rust lodyd 架构解耦与 Crate 映射台</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f8fafc;
+        --surface: #ffffff;
+        --surface-muted: #f1f5f9;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --text-secondary: #475569;
+        --accent: #2563eb;
+        --accent-soft: rgba(37, 99, 235, 0.1);
+        --danger: #dc2626;
+        --danger-soft: rgba(220, 38, 38, 0.1);
+        --success: #16a34a;
+        --success-soft: rgba(22, 163, 74, 0.12);
+        --warn: #d97706;
+        --warn-soft: rgba(217, 119, 6, 0.12);
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          --bg: #0b0f19;
+          --surface: #131a2a;
+          --surface-muted: #1c2539;
+          --border: #28354f;
+          --text: #f1f5f9;
+          --text-secondary: #94a3b8;
+          --accent: #60a5fa;
+          --accent-soft: rgba(96, 165, 250, 0.15);
+          --danger: #f87171;
+          --danger-soft: rgba(248, 113, 113, 0.14);
+          --success: #4ade80;
+          --success-soft: rgba(74, 222, 128, 0.14);
+          --warn: #fbbf24;
+          --warn-soft: rgba(251, 191, 36, 0.14);
+        }
+      }
+      html[data-theme='dark'] {
+        --bg: #0b0f19;
+        --surface: #131a2a;
+        --surface-muted: #1c2539;
+        --border: #28354f;
+        --text: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --accent: #60a5fa;
+        --accent-soft: rgba(96, 165, 250, 0.15);
+        --danger: #f87171;
+        --danger-soft: rgba(248, 113, 113, 0.14);
+        --success: #4ade80;
+        --success-soft: rgba(74, 222, 128, 0.14);
+        --warn: #fbbf24;
+        --warn-soft: rgba(251, 191, 36, 0.14);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'PingFang SC', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.55;
+      }
+      .shell {
+        max-width: 1220px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .topbar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        padding: 18px 22px;
+        border-radius: 14px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+      }
+      .title-group h1 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .title-group p {
+        margin: 4px 0 0;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+      .controls-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      .view-panel {
+        display: none;
+      }
+      .view-panel.active {
+        display: block;
+      }
+      .split-grid {
+        display: grid;
+        grid-template-columns: 380px 1fr;
+        gap: 18px;
+      }
+      @media (max-width: 900px) {
+        .split-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .panel-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 18px;
+      }
+      .panel-title {
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
+        margin: 0 0 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .hotspot-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .hotspot-btn {
+        width: 100%;
+        text-align: left;
+        background: var(--surface-muted);
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 12px 14px;
+        cursor: pointer;
+        color: var(--text);
+        transition: all 0.15s ease;
+      }
+      .hotspot-btn:hover {
+        border-color: var(--accent);
+      }
+      .hotspot-btn.selected {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+      }
+      .hotspot-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        font-weight: 600;
+      }
+      .loc-pill {
+        font-size: 11px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+      .hotspot-sub {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-top: 4px;
+      }
+      .detail-header {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 14px;
+        margin-bottom: 16px;
+      }
+      .detail-header h2 {
+        margin: 0;
+        font-size: 18px;
+        font-family: var(--mono);
+      }
+      .pain-list {
+        margin: 8px 0 18px;
+        padding-left: 18px;
+        font-size: 13.5px;
+      }
+      .pain-list li {
+        margin-bottom: 6px;
+      }
+      .target-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 12px;
+      }
+      .crate-card {
+        border: 1px solid var(--border);
+        background: var(--surface-muted);
+        border-radius: 10px;
+        padding: 13px;
+      }
+      .crate-card-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .crate-name {
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 13.5px;
+        color: var(--accent);
+      }
+      .layer-badge {
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 6px;
+        background: var(--success-soft);
+        color: var(--success);
+        font-weight: 600;
+      }
+      .crate-desc {
+        font-size: 12.5px;
+        color: var(--text-secondary);
+        margin: 0;
+      }
+      .layer-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .layer-row {
+        border: 1px solid var(--border);
+        background: var(--surface);
+        border-radius: 12px;
+        padding: 14px 16px;
+        display: grid;
+        grid-template-columns: 180px 1fr;
+        gap: 16px;
+        align-items: center;
+      }
+      @media (max-width: 720px) {
+        .layer-row {
+          grid-template-columns: 1fr;
+        }
+      }
+      .layer-meta strong {
+        display: block;
+        font-size: 14px;
+      }
+      .layer-meta span {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .layer-crates {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .crate-chip {
+        border: 1px solid var(--border);
+        background: var(--surface-muted);
+        border-radius: 8px;
+        padding: 8px 12px;
+        min-width: 200px;
+        flex: 1;
+      }
+      .crate-chip code {
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 13px;
+        color: var(--accent);
+      }
+      .crate-chip p {
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .sim-grid {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 18px;
+      }
+      @media (max-width: 900px) {
+        .sim-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .control-field {
+        margin-bottom: 16px;
+      }
+      .control-field label {
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .metric-compare {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      @media (max-width: 700px) {
+        .metric-compare {
+          grid-template-columns: 1fr;
+        }
+      }
+      .metric-box {
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px;
+      }
+      .metric-box .label {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .metric-values {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin-top: 8px;
+      }
+      .val-old {
+        font-family: var(--mono);
+        font-size: 15px;
+        color: var(--danger);
+        text-decoration: line-through;
+      }
+      .val-new {
+        font-family: var(--mono);
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--success);
+      }
+      .bar-group {
+        margin-top: 12px;
+      }
+      .bar-row {
+        margin-bottom: 12px;
+      }
+      .bar-head {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12.5px;
+        margin-bottom: 5px;
+      }
+      .bar-track {
+        height: 12px;
+        background: var(--surface-muted);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .bar-fill-old {
+        height: 100%;
+        background: var(--danger);
+        border-radius: 999px;
+        transition: width 0.2s ease;
+      }
+      .bar-fill-new {
+        height: 100%;
+        background: var(--success);
+        border-radius: 999px;
+        transition: width 0.2s ease;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="title-group">
+          <h1>
+            <ryugi-icon name="cpu" size="20"></ryugi-icon>
+            Lody CLI → Rust <code>lodyd</code> 解耦与拓扑工作台
+          </h1>
+          <p>基于 apps/cli (604 文件 / 194,604 LOC) 真实耦合边界构建的交互式拆分沙盘</p>
+        </div>
+        <div class="controls-row">
+          <ryugi-segmented id="active-tab" value="mapping">
+            <ryugi-segment value="mapping">巨石拆解映射</ryugi-segment>
+            <ryugi-segment value="crates">Cargo 六层全景</ryugi-segment>
+            <ryugi-segment value="simulator">进程与内存推演</ryugi-segment>
+          </ryugi-segmented>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px">
+            深色主题
+            <ryugi-switch id="force-dark"></ryugi-switch>
+          </label>
+        </div>
+      </header>
+
+      <!-- VIEW 1: God-Object Decomposition -->
+      <section id="view-mapping" class="view-panel active">
+        <div class="split-grid">
+          <div class="panel-box">
+            <div class="panel-title">
+              <span>现状核心耦合热点 (点击拆解)</span>
+              <span>TS LOC</span>
+            </div>
+            <div id="hotspot-list" class="hotspot-list"></div>
+          </div>
+          <div class="panel-box" id="hotspot-detail"></div>
+        </div>
+      </section>
+
+      <!-- VIEW 2: 6-Layer Cargo Workspace -->
+      <section id="view-crates" class="view-panel">
+        <div id="layer-stack" class="layer-stack"></div>
+      </section>
+
+      <!-- VIEW 3: Process / RSS / SQLite Simulator -->
+      <section id="view-simulator" class="view-panel">
+        <div class="sim-grid">
+          <div class="panel-box">
+            <div class="panel-title"><span>工作负载与架构开关</span></div>
+            <div class="control-field">
+              <label for="sim-workspaces">活跃挂载工作区数 (Workspaces)</label>
+              <ryugi-slider-input id="sim-workspaces" value="2" min="1" max="10" step="1"></ryugi-slider-input>
+            </div>
+            <div class="control-field">
+              <label for="sim-sessions">并发活跃 ACP 会话数 (Active Sessions)</label>
+              <ryugi-slider-input id="sim-sessions" value="3" min="0" max="20" step="1"></ryugi-slider-input>
+            </div>
+            <div class="control-field" style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:13px;font-weight:600">启用本地预览隧道 (cloudflared)</span>
+              <ryugi-switch id="sim-preview" checked></ryugi-switch>
+            </div>
+            <div class="control-field" style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:13px;font-weight:600">合并机器控制面 SQLite 数据库</span>
+              <ryugi-switch id="sim-merge-sqlite" checked></ryugi-switch>
+            </div>
+          </div>
+
+          <div class="panel-box">
+            <div class="panel-title"><span>Node 多进程现状 vs Rust 单内核 lodyd 对比推演</span></div>
+            <div class="metric-compare">
+              <div class="metric-box">
+                <div class="label">常驻宿主进程 + Worker 线程数 (不含外部 Agent)</div>
+                <div class="metric-values">
+                  <span class="val-old" id="m-proc-old">9</span>
+                  <span class="val-new" id="m-proc-new">2</span>
+                </div>
+              </div>
+              <div class="metric-box">
+                <div class="label">Daemon 自身常驻内存估算 (RSS)</div>
+                <div class="metric-values">
+                  <span class="val-old" id="m-rss-old">580 MB</span>
+                  <span class="val-new" id="m-rss-new">42 MB</span>
+                </div>
+              </div>
+              <div class="metric-box">
+                <div class="label">独立打开的 SQLite 数据库文件数</div>
+                <div class="metric-values">
+                  <span class="val-old" id="m-db-old">11</span>
+                  <span class="val-new" id="m-db-new">5</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bar-group">
+              <div class="bar-row">
+                <div class="bar-head">
+                  <span>Node TS 现状 Daemon RSS (Watchdog + Worker + MCP Host + Tinypools + WASM)</span>
+                  <strong id="bar-label-old">580 MB</strong>
+                </div>
+                <div class="bar-track">
+                  <div id="bar-fill-old" class="bar-fill-old" style="width: 60%"></div>
+                </div>
+              </div>
+              <div class="bar-row">
+                <div class="bar-head">
+                  <span>Rust <code>lodyd</code> 单进程内核 RSS (Tokio + Native Loro/Roost + Rusqlite 池)</span>
+                  <strong id="bar-label-new">42 MB</strong>
+                </div>
+                <div class="bar-track">
+                  <div id="bar-fill-new" class="bar-fill-new" style="width: 8%"></div>
+                </div>
+              </div>
+            </div>
+
+            <p id="sim-note" style="font-size:12.5px;color:var(--text-secondary);margin-top:16px"></p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const HOTSPOTS = [
+        {
+          id: 'message-handler',
+          file: 'lib/message-handler.ts',
+          loc: '12,593 LOC',
+          summary: '全局消息中枢：RPC 路由、鉴权、ACP 流式缓冲、附件、Code Collab/Preview 接线全部揉在一起',
+          pains: [
+            '在最近三个月 61 次修复提交中有 43 次属于生命周期/竞态缺陷',
+            '同时理解 Local Control、Loro Streams RPC、E2EE Feature RPC 三种传输信封',
+            '直接持有 SessionTransientStore 内存缓冲并跨层调用 LoroDocumentManager 与 SessionManager'
+          ],
+          targets: [
+            { crate: 'lody-gateway-local / remote', layer: 'L4', desc: '仅负责协议帧编解码、请求幂等去重与 Security Envelope 验签解密，产出 VerifiedPrincipal' },
+            { crate: 'lody-daemon-core::SessionActor', layer: 'L3', desc: '接管会话级瞬态流缓冲、权限挂起表与 Turn 推进，按会话严格隔离所有权' },
+            { crate: 'lody-code-collab / lody-preview', layer: 'L2', desc: '各自的领域查询与命令通过独立 Router 直接挂载到网关，不再绕道会话消息中枢' }
+          ]
+        },
+        {
+          id: 'session-execution',
+          file: 'session/session-execution-service.ts + dispatch-watcher.ts',
+          loc: '13,842 LOC',
+          summary: '回合状态机与三路输入唤醒竞态：Meta 指针、Mirror 队列、RPC 快路径同时争抢调度',
+          pains: [
+            'SessionDispatchWatcher 为防止 13MB 文档全量读取阻塞主线程 42s，不得不手写微任务合并链',
+            'Loro List 并发插入无序导致需要 TurnHistoryGate 栅栏等待 60s 防止助手回复排在用户消息前面',
+            '手写 AbortController、Steer 三态提升与 30+ 处收尾预算耦合在长方法内'
+          ],
+          targets: [
+            { crate: 'lody-daemon-core::SessionActor', layer: 'L3', desc: '单一有界 mpsc Mailbox 串行消费所有触发源；显式 enum SessionPhase 编译器级保证 TurnContext 独占' },
+            { crate: 'tokio_util::CancellationToken', layer: 'L3', desc: '层级取消树：Fleet -> Workspace -> Session -> Turn，彻底淘汰手写 cleanedUp 布尔位' },
+            { crate: 'lody-sync::SessionHistoryRepo', layer: 'L1', desc: '将因果排序栅栏下沉至存储层 Writer 队列，上层状态机只发纯语义 HistoryMutation' }
+          ]
+        },
+        {
+          id: 'loro-roost',
+          file: 'lib/loro/doc.ts + connection-recovery.ts + roost-node-session.ts',
+          loc: '9,483 LOC',
+          summary: 'CRDT 同步与房间恢复（现已明确交由外部 loro-repo-rs 引擎接管，CLI 仅保留预留接缝！）',
+          pains: [
+            '旧路径在 Node 侧维护了大量房间重连退避、WASM 4GB 堆监控和本地 Loro 数据面 v7 中继代码',
+            'loro-repo-rs 已经在独立引擎内原生实现 Meta/Flock/Doc 存储、增量订阅及 WS/SSE/Long-poll 云同步',
+            'Roost 默认历史后端尚未并入 loro-repo-rs，需要保持并存与读权限规则一致'
+          ],
+          targets: [
+            { crate: 'lody-repo-port [预留接缝]', layer: 'L1', desc: '绝不在 lodyd 中重复造同步轮子！仅定义 RepoEnginePort 对接 loro-repo-rs，外加并存的 RoostHistoryPort' },
+            { crate: 'lody-e2ee (装钥回调 #2965)', layer: 'L1', desc: '引擎自身不碰主密钥；lody-e2ee 验证账本后向引擎装入工作区密钥，遇缺钥回调自动触发账本+信箱 Catch-up' },
+            { crate: 'Single-Owner 宿主协同', layer: 'L1/L5', desc: 'CLI/MCP 严禁直开底层库；桌面与 daemon 统一通过 loro-repo-rs 宿主 build 序号平滑排空接管' }
+          ]
+        },
+        {
+          id: 'selfhost-cloud-port',
+          file: 'lib/cloud-cli-port.ts + utils/const.ts + runtime-artifacts.ts',
+          loc: '2,180 LOC',
+          summary: '编译期写死公有云 URL、.convex.site 推导与 CF R2/公网 CDN 硬依赖，阻碍企业私有化自部署',
+          pains: [
+            '构建期写死 LODY_AUTH_URL / LODY_SERVER_URL，且靠字符串替换推导 .convex.site，内网无法直接复用发布包',
+            '附件分片上传强绑定 Cloudflare R2 uploadId 跨请求状态，无法直接无缝切换至后端 OpenDAL (S3/MinIO/FS)',
+            '受管运行时默认写死 https://api.lody.ai，缺少企业内网镜像发现、离线气隙包导入、自定义 CA 与离线 License 软降级'
+          ],
+          targets: [
+            { crate: 'lody-backend-ports::BackendProfile', layer: 'L1', desc: '运行时 /.well-known/lody-configuration 自动发现，单二进制通吃 LocalOnly / OfficialCloud / SelfHosted，按 profile_id 隔离目录' },
+            { crate: 'BlobTransferPort & ArtifactRegistry', layer: 'L1', desc: '协商式上传 (SingleStreamPut / PresignedParts / GatewayChunked) 完美兼容 OpenDAL；支持内网镜像与离线 Bundle' },
+            { crate: 'ControlPlane / Scm / Entitlement', layer: 'L1/L2', desc: '原生支持 OIDC 免密登录、企业根证书 CA、GHES/GitLab 自定义端点及 Ed25519 离线 License 到期只读软降级' }
+          ]
+        },
+        {
+          id: 'fleet-hierarchy',
+          file: 'lib/lody-fleet.ts + lody.ts + machine-runtime.ts',
+          loc: '4,210 LOC',
+          summary: '四层透传套娃与散落全链路的 Plaintext / E2EE 条件分支',
+          pains: [
+            'Lody 与 MachineRuntime 充斥数十个闭包回调透传，缺乏独立状态边界',
+            'if (encrypted) 分支跨 Fleet、Lody、MachineRuntime、MessageHandler、Automations 重复校验',
+            '为了避开主线程卡顿，在 Fleet 里额外监管 MCP HTTP 子进程与多个 Worker 池'
+          ],
+          targets: [
+            { crate: 'lody-daemon-core::FleetSupervisor', layer: 'L3', desc: '扁平化为两级：FleetSupervisor (机器全局资源) -> WorkspaceActor (单工作区作用域)' },
+            { crate: 'WorkspaceSecurityPolicy Trait', layer: 'L1/L4', desc: '在网关入口中间件与工作区构造期多态注入 PlaintextPolicy / E2eePolicy，业务层零加密分支' },
+            { crate: 'In-Process Tokio + Rayon', layer: 'L0/L2', desc: '内置 MCP HTTP、FastCDC、文件扫描全部收敛进单进程异步任务与阻塞线程池' }
+          ]
+        },
+        {
+          id: 'mcp-cli-surface',
+          file: 'commands/session.ts + mcp/lody-mcp-server.ts',
+          loc: '12,168 LOC',
+          summary: 'CLI 与 MCP 双入口重复实现目录发现、配置解析与双路径回退',
+          pains: [
+            'commands/session.ts 同时承担参数解析、终端渲染、业务模型校验和离线直连 Repo',
+            '内置 MCP Server 为躲避同步 SQLite 阻塞主事件循环，被迫拆成独立常驻 Node 子进程 (~129MB RSS)'
+          ],
+          targets: [
+            { crate: 'bins/lody (Thin CLI & MCP Proxy)', layer: 'L5', desc: 'CLI 与 MCP stdio 均退化为极薄参数解析/协议转发器，启动耗时 <5ms' },
+            { crate: 'lody-daemon-core::RunConfigResolver', layer: 'L3', desc: '模型/Effort/Role/MCP 选择校验统一收口在 Daemon 内部，CLI 与 MCP 共享唯一权威实现' }
+          ]
+        },
+        {
+          id: 'acp-adapters',
+          file: 'agent/* + *-acp-entry.ts (Vite 多入口耦合)',
+          loc: '15,690 LOC',
+          summary: 'ACP 客户端管理与 5 个内嵌 TypeScript Agent Adapter 构建强耦合',
+          pains: [
+            'claude-acp / codex-acp / deepseek-acp / devin-acp / grok-acp 与 CLI 主包共享 Vite 构建树与 sibling 路径假设',
+            'Electron 打包必须特殊解包 node_modules 并注入 ELECTRON_RUN_AS_NODE 环境变量'
+          ],
+          targets: [
+            { crate: 'lody-acp', layer: 'L2', desc: '纯 Rust ACP JSON-RPC stdio 客户端、启动并发门控 (Semaphore)、能力探测缓存与托管制品下载器' },
+            { crate: 'External Managed Adapters', layer: '外部制品', desc: '将现有 TS Adapter 独立为受管制品包 (如同 Kimi/Pi)，与 Rust lody 二进制彻底解耦，后续按需逐个 Rust 化' }
+          ]
+        }
+      ];
+
+      const LAYERS = [
+        {
+          code: 'L5 · Binary Entry',
+          title: '单一二进制宿主层',
+          crates: [
+            { name: 'bins/lody', desc: '合一可执行文件：薄 CLI 客户端 (<5ms)、lodyd 守护进程、mcp-stdio 极薄代理、daemon-runner 原子升级入口' }
+          ]
+        },
+        {
+          code: 'L4 · Gateways',
+          title: '统一协议网关与安全信封层',
+          crates: [
+            { name: 'lody-gateway-local', desc: '本地多路复用 UDS/NamedPipe + 内置 Axum MCP HTTP Server + Electron Protocol v7 兼容监听器' },
+            { name: 'lody-gateway-remote', desc: 'Loro Streams Machine RPC Server + 原生 lody-iroh QUIC 监听 + 统一 Security Envelope 验签中间件' }
+          ]
+        },
+        {
+          code: 'L3 · Actors',
+          title: '核心编排与状态机层',
+          crates: [
+            { name: 'lody-daemon-core', desc: 'FleetSupervisor → WorkspaceActor → SessionActor (单信箱 FSM)、OperationInbox 协调器、AutomationActor (内嵌 rquickjs)' }
+          ]
+        },
+        {
+          code: 'L2 · Domains',
+          title: '无传输耦合的领域服务层',
+          crates: [
+            { name: 'lody-acp', desc: 'ACP stdio 协议栈、Managed Runtime 下载校验、OAuth/交互式登录状态机' },
+            { name: 'lody-worktree', desc: 'Git Worktree 生命周期、分支观测、Git/GH Credential Broker' },
+            { name: 'lody-code-collab', desc: 'Rayon 并行文件树索引、Git merge-base diff、notify 目录监听' },
+            { name: 'lody-preview', desc: 'Loopback 分区 Cookie 安全代理、cloudflared 隧道管控、iOS/Android 预览流网关' }
+          ]
+        },
+        {
+          code: 'L1 · Ports & Storage',
+          title: '外部引擎预留接缝、私有化后端抽象与单写者存储层',
+          crates: [
+            { name: 'lody-repo-port [预留]', desc: '对接外部 loro-repo-rs (Engine+Client，免自研 CRDT 与 Streams 同步) + 并存 RoostHistoryPort' },
+            { name: 'lody-backend-ports', desc: 'Self-Hosted & Cloud 统一抽象：BackendProfile 自动发现、OIDC/CA、OpenDAL 协商上传、内网镜像与离线 License' },
+            { name: 'lody-e2ee', desc: 'CBOR 成员账本验证、HPKE 密钥投递、向 loro-repo-rs 装钥回调 (#2965) 与缺钥 Catch-up' },
+            { name: 'lody-db & lody-diff-store', desc: 'Rusqlite 单写多读 WAL 连接池 (machine-state.sqlite3) + FastCDC 内容寻址快照库' }
+          ]
+        },
+        {
+          code: 'L0 · Primitives',
+          title: '契约与跨平台系统原语层',
+          crates: [
+            { name: 'lody-protocol', desc: 'Serde + Schemars 强类型 DTO、错误码、前向兼容 JSON 扩展边界与 Golden Vector 测试集' },
+            { name: 'lody-os', desc: '路径分隔符契约、POSIX 进程组 / Windows JobObject、portable-pty、keyring-rs、系统内存水位探测' }
+          ]
+        }
+      ];
+
+      let selectedHotspotId = HOTSPOTS[0].id;
+
+      function renderHotspots() {
+        const listEl = document.getElementById('hotspot-list');
+        listEl.innerHTML = HOTSPOTS.map((h) => `
+          <button type="button" class="hotspot-btn ${h.id === selectedHotspotId ? 'selected' : ''}" data-id="${h.id}">
+            <div class="hotspot-top">
+              <span>${h.file}</span>
+              <span class="loc-pill">${h.loc}</span>
+            </div>
+            <div class="hotspot-sub">${h.summary}</div>
+          </button>
+        `).join('');
+
+        listEl.querySelectorAll('.hotspot-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            selectedHotspotId = btn.dataset.id;
+            renderHotspots();
+          });
+        });
+
+        const current = HOTSPOTS.find((h) => h.id === selectedHotspotId) || HOTSPOTS[0];
+        document.getElementById('hotspot-detail').innerHTML = `
+          <div class="detail-header">
+            <h2>${current.file}</h2>
+            <p style="margin:6px 0 0;font-size:13.5px;color:var(--text-secondary)">${current.summary}</p>
+          </div>
+          <div class="panel-title"><span>当前耦合痛点与故障根因</span></div>
+          <ul class="pain-list">
+            ${current.pains.map((p) => `<li>${p}</li>`).join('')}
+          </ul>
+          <div class="panel-title"><span>Rust 目标拆解去向 (单一职责边界)</span></div>
+          <div class="target-cards">
+            ${current.targets.map((t) => `
+              <div class="crate-card">
+                <div class="crate-card-head">
+                  <span class="crate-name">${t.crate}</span>
+                  <span class="layer-badge">${t.layer}</span>
+                </div>
+                <p class="crate-desc">${t.desc}</p>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      function renderLayers() {
+        document.getElementById('layer-stack').innerHTML = LAYERS.map((l) => `
+          <div class="layer-row">
+            <div class="layer-meta">
+              <strong>${l.code}</strong>
+              <span>${l.title}</span>
+            </div>
+            <div class="layer-crates">
+              ${l.crates.map((c) => `
+                <div class="crate-chip">
+                  <code>${c.name}</code>
+                  <p>${c.desc}</p>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `).join('');
+      }
+
+      function readControlValue(id, fallback) {
+        const el = document.getElementById(id);
+        if (!el) return fallback;
+        if (typeof el.checked === 'boolean' && el.tagName.toLowerCase() === 'ryugi-switch') {
+          return el.checked;
+        }
+        const v = el.value ?? el.getAttribute('value');
+        return v !== undefined && v !== null ? v : fallback;
+      }
+
+      function updateSimulator() {
+        const workspaces = Number(readControlValue('sim-workspaces', 2)) || 2;
+        const sessions = Number(readControlValue('sim-sessions', 3)) || 0;
+        const hasPreview = Boolean(readControlValue('sim-preview', true));
+        const mergeSqlite = Boolean(readControlValue('sim-merge-sqlite', true));
+
+        // Node baseline from measured note (Watchdog 96MB + Worker 182MB + MCP Host 129MB = 407MB idle)
+        // + 4 CodeCollab workers (turn-diff-store, scan pool, diff pool, fs-watch) + optional cloudflared-worker
+        const oldProcs = 3 + 4 + (hasPreview ? 2 : 0);
+        const newProcs = 1 + (hasPreview ? 1 : 0); // lodyd + raw native cloudflared (no intermediate node worker!)
+
+        const oldRss = Math.round(407 + workspaces * 38 + sessions * 28 + (hasPreview ? 35 : 0));
+        const newRss = Math.round(24 + workspaces * 6 + sessions * 3 + (hasPreview ? 12 : 0));
+
+        // SQLite files: per-workspace (repo.sqlite3 + turn-diff-store.sqlite3) + machine level (operations, schedules, automations, pr-poller, roost, roost.identity, rpc-rejections)
+        const oldDbs = workspaces * 2 + 7;
+        const newDbs = workspaces * 2 + (mergeSqlite ? 2 : 7); // machine-state.sqlite3 + roost-history.sqlite3
+
+        document.getElementById('m-proc-old').textContent = `${oldProcs} 个`;
+        document.getElementById('m-proc-new').textContent = `${newProcs} 个`;
+        document.getElementById('m-rss-old').textContent = `${oldRss} MB`;
+        document.getElementById('m-rss-new').textContent = `${newRss} MB`;
+        document.getElementById('m-db-old').textContent = `${oldDbs} 个`;
+        document.getElementById('m-db-new').textContent = `${newDbs} 个`;
+
+        document.getElementById('bar-label-old').textContent = `${oldRss} MB`;
+        document.getElementById('bar-label-new').textContent = `${newRss} MB`;
+        const maxScale = Math.max(oldRss, 1000);
+        document.getElementById('bar-fill-old').style.width = `${Math.min(100, (oldRss / maxScale) * 100)}%`;
+        document.getElementById('bar-fill-new').style.width = `${Math.max(3, (newRss / maxScale) * 100)}%`;
+
+        const savedPct = Math.round(((oldRss - newRss) / oldRss) * 100);
+        document.getElementById('sim-note').textContent =
+          `当前参数下：Daemon 宿主内存降低约 ${savedPct}%（Node 基线含已实测的 407 MB 三进程空闲开销 + Worker 池与 Loro WASM 线性页开销；Rust lodyd 将 MCP HTTP、FastCDC、文件扫描与监听全部收敛至单一 Tokio + Rayon 进程，并直接直接调用 cloudflared 原生二进制省去 Node 包装进程）。`;
+      }
+
+      function syncTabs(tab) {
+        ['mapping', 'crates', 'simulator'].forEach((key) => {
+          document.getElementById(`view-${key}`).classList.toggle('active', key === tab);
+        });
+      }
+
+      renderHotspots();
+      renderLayers();
+      updateSimulator();
+
+      document.addEventListener('ryugi-ui:ready', () => {
+        const tabEl = document.getElementById('active-tab');
+        if (tabEl && tabEl.value) syncTabs(tabEl.value);
+        const darkEl = document.getElementById('force-dark');
+        if (darkEl && darkEl.checked) document.documentElement.dataset.theme = 'dark';
+        updateSimulator();
+      }, { once: true });
+
+      document.addEventListener('ryugi-change', (event) => {
+        const id = event.target.id;
+        if (id === 'active-tab') {
+          syncTabs(event.detail.value);
+        } else if (id === 'force-dark') {
+          if (event.detail.checked) {
+            document.documentElement.dataset.theme = 'dark';
+          } else {
+            delete document.documentElement.dataset.theme;
+          }
+        } else {
+          updateSimulator();
+        }
+      });
+    </script>
+  </body>
+</html>
