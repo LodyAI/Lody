@@ -77,6 +77,9 @@ See [composition and adoption](../../packages/platform/AGENTS.md#telemetry-priva
   `<html>`. Boot failures dismiss it.
   Read [startup appearance](BUILDING.md#startup-appearance) before editing
   native theme storage, launch screens, scene startup or splash handoff.
+- `src/main.tsx` awaits `initI18n` before `createRoot`, as Electron does: a
+  component rendered before react-i18next has its instance skips its hooks and
+  crashes on its next render, including the ErrorBoundary fallback.
 
 ## Blank screen recovery
 

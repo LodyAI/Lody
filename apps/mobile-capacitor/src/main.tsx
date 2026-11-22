@@ -6,6 +6,12 @@ import { RouterProvider } from '@tanstack/react-router';
 import { createRouter } from '@lody/components/router';
 import '@lody/components/tailwind/index.css';
 import { jotaiStore } from '@lody/components/lib';
+import {
+  detectBrowserLanguage,
+  fallbackLanguage,
+  initI18n,
+  readStoredLanguagePreference,
+} from '@lody/components/i18n';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@lody/components/atoms/settings';
 import { Provider } from 'jotai';
 import { isNativePlatform } from 'better-auth-capacitor/client';
@@ -154,6 +160,13 @@ try {
     void cacheAppInfoForDiagnostics();
   }
 
+  // react-i18next only receives its instance once `initI18n` finishes, and a
+  // zh_CN boot first fetches its lazy bundle. A component that renders before
+  // then takes `useTranslation`'s no-instance path, which skips its hooks, so
+  // its next render reads mismatched hook slots and crashes (even the
+  // ErrorBoundary fallback). Commit nothing until i18n is ready, as Electron does.
+  await initI18n(readStoredLanguagePreference() ?? detectBrowserLanguage() ?? fallbackLanguage);
+
   const rootElement = document.getElementById('root');
   if (!rootElement) {
     throw new Error('Missing #root element.');
@@ -171,7 +184,7 @@ try {
     </ErrorBoundary>
   );
 
-  // The synchronous boot path completed: React committed either the app or its
+  // The boot path completed: React committed either the app or its
   // error-boundary fallback — either way the screen isn't blank — so cancel the
   // inline watchdog.
   bootGuard?.markBooted();
