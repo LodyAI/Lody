@@ -367,8 +367,16 @@ describe('native Workspace Meta', () => {
     inject = 'after-commit';
     await daemon.repo.upsertDocMeta('d', { title: 'three' });
     expect(await title()).toBe('three');
-    if (real.connectionState !== 'connected') await real.whenConnected();
-    await daemon.repo.upsertDocMeta('d', { title: 'four' });
+    /** A refusal while the connection is still settling is a retryable non-commit, never a latch. */
+    for (let attempt = 1; ; attempt++) {
+      if (real.connectionState !== 'connected') await real.whenConnected();
+      try {
+        await daemon.repo.upsertDocMeta('d', { title: 'four' });
+        break;
+      } catch (error) {
+        if (!(error instanceof ExternalMetadataNotCommittedError) || attempt === 5) throw error;
+      }
+    }
     expect(await title()).toBe('four');
   });
 
