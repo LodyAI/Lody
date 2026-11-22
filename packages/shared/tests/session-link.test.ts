@@ -211,6 +211,7 @@ describe('in-app settings and schedules action links', () => {
     expect(parseAppActionLink('lody://settings/workspace?panel=e2ee')).toBeNull();
     expect(parseAppActionLink('lody://settings/agents?create=codex&config=cfg_1')).toBeNull();
     expect(parseAppActionLink('lody://settings/agents?create=sorbet')).toBeNull();
+    expect(parseAppActionLink('lody://settings/lody-agent')).toBeNull();
     expect(parseAppActionLink('lody://settings/projects?repo=LodyAI/..&page=skills')).toBeNull();
     expect(
       parseAppActionLink('lody://settings/projects?repo=LodyAI%2fLody&page=skills')

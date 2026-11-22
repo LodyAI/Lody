@@ -117,7 +117,6 @@ export const APP_SETTINGS_LINK_TABS = [
   'people',
   'machines',
   'agents',
-  'lody-agent',
   'memory',
   'agent-roles',
   'prompt-shortcuts',
