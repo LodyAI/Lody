@@ -384,7 +384,7 @@ export interface CloudGithubWriteTokenContext {
 }
 
 export interface CloudGithubTokenManager {
-  getCredentialPolicy(context: CloudGithubWriteTokenContext): Promise<{ personalEnabled: boolean }>;
+  getCredentialPolicy(context: CloudGithubWriteTokenContext, signal?: AbortSignal): Promise<{ personalEnabled: boolean }>;
   getCredentialCandidate(
     repoFullName: string,
     context: CloudGithubWriteTokenContext,
