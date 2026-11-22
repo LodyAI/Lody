@@ -158,13 +158,18 @@ type StatusViewCommand =
 - 状态操作使用完整的会话管理权限检查。在加密工作区的手机 WebView 上，本人在其他成员共享机器上的对话
   不提供状态操作：手机发现不了那台机器（`isSessionEditableToUser`），所以这些行是 `readOnly`。pin
   仍然可用。要允许这类写入，需要的是手机所缺的可移植机器共享读取，而不是放宽检查。
+- 在 iOS 和 Android 上，队友本地项目里的对话（包括含本地成员的项目组）不提供状态操作：这个项目是否
+  与团队共享属于服务端的访问状态，runtime 读不到，而机器的 Flock 也会列出私有项目（runtime
+  `status-view.ts` 里的 `sessionPermissions`）。对话作者仍然可以 pin。桌面在项目与该成员共享时提供
+  这些操作。
 - WebView 上的加密工作区不需要特殊处理：仓库内没有任何一层过滤会话元数据字段或工作区 Flock 的行族。
   非拥有者成员加密写入 `pinSection` 行和新会话字段，已在房间层测试
   （`apps/electron/src/main/services/e2ee-runtime.test.mjs`）；托管网关是否接受，从本仓库无法查看。
 - Android 在前台打开对话时把它标为已读，所以到期唤醒对话的未读状态在那里也会清除。
 - 放置和恢复都不会消耗唤醒，只有打开、发送或标记为已完成才会。在进行中排序时，被唤醒的行落地真实排序键，并把 `focusRestoredAt` 记为唤醒时间；恢复到进行中（从「稍后」「已完成」或置顶区拖入、移回进行中，以及跟随的 opened-by 子对话）时把 `focusRestoredAt` 记为当前时间，只清除仍在未来的稍后时间。无论哪种情况，已过期的 `snoozedUntil` 都会保留，所以这一行停在被放置的位置，并保持未读直到被阅读。不需要新字段：`focusRestoredAt` 只由这些放置和恢复写入，而稍后命令总把 `snoozedUntil` 设在未来，所以再次稍后的对话到期时会重新浮上来。早于这条规则的桌面版本（LodyAI/Lody#3077 之前）会把放置过的被唤醒行重新浮到最前面；两种数据都有效。
-- 已知的小缺口：iOS WebView 没有触感反馈，Chrome 在首次轻点之前拒绝震动；三个手机界面（WebView、Android、iOS）的长按菜单都在松手时打开；Android
-  只在连接时读取一次只读标记；iOS 首次安装时，只读成员在成员列表加载前能看到这些操作。
+- 在所有手机界面上，长按菜单在原地松手时打开，按住后移动过则不打开菜单；iOS 16.4–17.3 无法用代码弹出
+  菜单，保留系统上下文菜单，按住移动时仍会变成拖拽。
+- 已知的小缺口：iOS WebView 没有触感反馈，Chrome 在首次轻点之前拒绝震动。
 
 ## 验证
 
@@ -175,14 +180,19 @@ type StatusViewCommand =
 - 桌面：进行中拖放的 Storybook 端到端测试
   （`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`，5 个用例）。
 - 手机 WebView：Storybook 里的列表、手势、面板和拖拽，分别在 iOS 模拟器的 Safari 和 Android 模拟器的
-  Chrome 里打开。
-- 原生 Android：在模拟器上用离线测试数据验证列表、菜单、滑动和拖拽。
-- 原生 iOS：在模拟器上用离线测试数据验证列表、菜单、滑动、拖拽、边缘滚动和目录读回，浅色和深色。
+  Chrome 里打开，并在 Chromium 里用真实触摸输入操作。
+- 原生 Android：在 Pixel 8 / Android 16 模拟器上用离线测试数据，完成列表、菜单、滑动和拖拽的 23 项交互
+  检查，并在最终版本上做了冒烟测试。
+- 原生 iOS：在 iOS 26.5 和 27.0 模拟器上用离线测试数据，浅色和深色，运行 `home-status` 和
+  `home-status-drag` UI 回归（折叠的分区、稍后预设、稍后和完成的撤销、在过期目录下保持并读回的「移到
+  最前」、按住拖拽在进行中排序以及把 pin 行移进空分组、原地长按菜单、两个方向的滑动），并验证拖拽时的
+  边缘滚动。
 
-都没有验证：真机；原生客户端登录后的云端工作区；桌面应用写入真实的仓库副本（而不是测试和 Storybook）；
-真实的加密 Guest 会话，以及托管网关接受新的加密写入；VoiceOver 在设备上触发上移和下移（处理函数已
-测试：每次只发送一个带正确 `beforeId` 的 `move`）；Capacitor 打包后的 App，WebView 列表只在浏览器里
-测过。
+都没有验证：真机；iOS 16.4–17.3 运行环境；原生客户端登录后的云端工作区；Android runtime 对 staging
+的 `/api/time` 读取（只通过 Mac 的端口转发到达过）；桌面应用写入真实的仓库副本（而不是测试和
+Storybook）；真实的加密 Guest 会话，以及托管网关接受新的加密写入；VoiceOver 在设备上触发上移和下移
+（处理函数已测试：每次只发送一个带正确 `beforeId` 的 `move`）；Capacitor 打包后的 App，WebView 列表只
+在浏览器里测过。
 
 ## 证据
 
@@ -190,7 +200,8 @@ type StatusViewCommand =
   [pin 分组](../../../../specs/pinned-session-sections.zh.md)。
 - Pull request：LodyAI/Lody#3063（共享布局、写入规划、桌面）、LodyAI/Lody#3065（手机 WebView）、
   LodyAI/lody-ios#130（共享 runtime）、LodyAI/lody-ios#131（iOS 列表）、LodyAI/lody-android#25
-  （Android 列表和桥接）。
+  （Android 列表和桥接）；评审修复见 LodyAI/Lody#3093、#3096、#3098，LodyAI/lody-ios#137、#138，
+  LodyAI/lody-android#33。
 - 共享列表的先例：matrix-rust-sdk 的 `RoomListService` 在共享代码里计算排好序的房间列表，再交给
   Swift 和 Kotlin。
 - 阅读过源码的交互参考：Telegram（置顶对话和文件夹）、Bluesky `SavedFeeds`（拖动柄、可访问的上移和

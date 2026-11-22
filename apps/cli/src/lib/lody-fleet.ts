@@ -1461,7 +1461,8 @@ export class LodyFleet {
           workspace.id as WorkspaceId,
           this.machineId,
           startedLody.documentManager,
-          stop.signal
+          stop.signal,
+          { verifyProjectIdentity: startedLody.documentManager.isEncryptedWorkspace?.() === true }
         ).catch((error: unknown) => {
           workspaceLogger.warn(`Failed to reconcile local projects: ${formatErrorMessage(error)}`);
         });
@@ -2865,6 +2866,23 @@ export class LodyFleet {
         };
       }
 
+      if (message.type === 'local-project/list-branches') {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId);
+        const rootPath = await this.resolveWorkspaceProjectRootPath(
+          runtime,
+          message.localProjectId
+        );
+        return {
+          ok: true,
+          type: 'local-project/list-branches',
+          result: await this.localProjectControlService.listProjectBranches(rootPath, {
+            query: message.query,
+            limit: message.limit,
+            cursor: message.cursor,
+          }),
+        };
+      }
+
       if (message.type === 'local-project/list-files') {
         const runtime = await this.resolveWorkspaceRuntime(message.workspaceId);
         const rootPath = await this.resolveWorkspaceProjectRootPath(
@@ -2876,6 +2894,22 @@ export class LodyFleet {
           type: 'local-project/list-files',
           result: await this.localProjectControlService.listProjectFiles(rootPath, {
             maxFiles: message.maxFiles,
+          }),
+        };
+      }
+
+      if (message.type === 'local-project/search-files') {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId);
+        const rootPath = await this.resolveWorkspaceProjectRootPath(
+          runtime,
+          message.localProjectId
+        );
+        return {
+          ok: true,
+          type: 'local-project/search-files',
+          result: await this.localProjectControlService.searchProjectFiles(rootPath, {
+            query: message.query,
+            limit: message.limit,
           }),
         };
       }
@@ -2908,7 +2942,8 @@ export class LodyFleet {
           type: 'local-project/list-skills',
           result: await this.localProjectControlService.listProjectSkills(
             rootPath,
-            message.skillDirs
+            message.skillDirs,
+            { knownFingerprint: message.knownFingerprint }
           ),
         };
       }
@@ -2918,7 +2953,9 @@ export class LodyFleet {
         return {
           ok: true,
           type: 'local-project/list-global-skills',
-          result: await this.localProjectControlService.listGlobalSkills(),
+          result: await this.localProjectControlService.listGlobalSkills({
+            knownFingerprint: message.knownFingerprint,
+          }),
         };
       }
 

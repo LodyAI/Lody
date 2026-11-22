@@ -67,6 +67,7 @@ export const E2EE_READ_QUERY_METHODS = [
   'machine/ping',
   'machine/acp-binary-status',
   'session/live-status',
+  'local-project/list-branches',
   'file/preview',
   'file/download-chunk',
   'code-collab/open-text',

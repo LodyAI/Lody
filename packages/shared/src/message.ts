@@ -7,6 +7,7 @@ import type {
   WorkspaceId,
   ProjectRef,
   LocalProjectId,
+  LocalProjectBranchListResult,
   LocalProjectGitState,
   LocalProjectHistoryCatalogItem,
   LocalProjectHistoryProvider,
@@ -1019,6 +1020,13 @@ export type LocalProjectFileListResult = {
   truncated: boolean;
 };
 
+export type LocalProjectFileSearchResult = {
+  /** Best matches first, at most the requested limit. */
+  paths: string[];
+  /** The host's file index hit its size cap, so a match may be missing. */
+  truncated: boolean;
+};
+
 export type LocalProjectFileReadResult = {
   path: string;
   /**
@@ -1203,11 +1211,36 @@ export type LocalProjectControlRequest =
       localProjectId: LocalProjectId;
     }
   | {
+      type: 'local-project/list-branches';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      query?: string;
+      limit?: number;
+      cursor?: string;
+      requestedByUserId?: string;
+    }
+  | {
       type: 'local-project/list-files';
       machineId: MachineId;
       workspaceId: WorkspaceId;
       localProjectId: LocalProjectId;
       maxFiles?: number;
+      requestedByUserId?: string;
+    }
+  | {
+      /**
+       * Host-side path search: the machine matches `query` against its own
+       * file list and returns only the best `limit` paths, so a client never
+       * pulls the full list to filter it. Older daemons reject this type; the
+       * client then falls back to `local-project/list-files`.
+       */
+      type: 'local-project/search-files';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      query: string;
+      limit?: number;
       requestedByUserId?: string;
     }
   | {
@@ -1225,12 +1258,14 @@ export type LocalProjectControlRequest =
       workspaceId: WorkspaceId;
       localProjectId: LocalProjectId;
       skillDirs: string[];
+      knownFingerprint?: string;
       requestedByUserId?: string;
     }
   | {
       type: 'local-project/list-global-skills';
       machineId: MachineId;
       workspaceId: WorkspaceId;
+      knownFingerprint?: string;
       requestedByUserId?: string;
     }
   | {
@@ -1390,7 +1425,9 @@ export type LocalProjectControlResponse =
       { workspaces: LocalProjectWorkspaceSummary[] }
     >
   | LocalProjectControlOkResponse<'local-project/git-state', LocalProjectGitState>
+  | LocalProjectControlOkResponse<'local-project/list-branches', LocalProjectBranchListResult>
   | LocalProjectControlOkResponse<'local-project/list-files', LocalProjectFileListResult>
+  | LocalProjectControlOkResponse<'local-project/search-files', LocalProjectFileSearchResult>
   | LocalProjectControlOkResponse<'local-project/list-dir', LocalProjectDirectoryListResult>
   | LocalProjectControlOkResponse<'local-project/list-skills', ProjectSkillsResult>
   | LocalProjectControlOkResponse<'local-project/list-global-skills', ProjectSkillsResult>

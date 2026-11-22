@@ -4,6 +4,7 @@ import { useAtomValue } from 'jotai';
 import { Bot, Check, ListChecks, LockKeyhole, Monitor, Plus, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
+  ACP_FAST_MODE_VALUE_ULTRAFAST,
   classifyPermissionModeFace,
   getAgentRoleEmoji,
   type AgentConfigCliType,
@@ -17,6 +18,7 @@ import {
 import { getAllAgentConfigAtom } from '@/atoms';
 import { getModeIcon as getPermissionModeIcon } from '@/components/chat/chat-landing-selectors';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { StackedZapIcon } from '@/components/icons/stacked-zap-icon';
 import { ComposerAgentRolePanel } from '@/components/sessions/composer-agent-role-panel';
 import {
   RecentRunConfigMenuGroup,
@@ -618,14 +620,20 @@ export function DesktopRunConfigMenu({
       <ListChecks key="plan" {...stylex.props(surface.faceLive)} aria-hidden="true" />
     );
   }
-  if (fastOn) {
-    configFaceParts.push(<Zap key="fast" {...stylex.props(surface.faceLive)} aria-hidden="true" />);
-  } else if (speedTierActive && speedTierLabel) {
+  /* Speed is a glyph only: the tier's words live in the menu, and a word here
+     wraps the chip. Ultra Fast stacks two bolts so it still reads apart. */
+  const fastRowLabel = t('chat.runConfig.fastLabel', 'Fast');
+  const speedFaceLabel = fastOn ? fastRowLabel : speedTierActive ? speedTierLabel : null;
+  if (speedFaceLabel) {
+    const SpeedIcon =
+      !fastOn && speedTierValue === ACP_FAST_MODE_VALUE_ULTRAFAST ? StackedZapIcon : Zap;
     configFaceParts.push(
-      <span key="speed" {...stylex.props(surface.faceGroup, surface.faceFixed)}>
-        <Zap {...stylex.props(surface.faceLive)} aria-hidden="true" />
-        {speedTierLabel}
-      </span>
+      <SpeedIcon
+        key="speed"
+        {...stylex.props(surface.faceLive)}
+        role="img"
+        aria-label={speedFaceLabel}
+      />
     );
   }
   /* Permission joins the face ONLY behind a Role, and only one the Role pins:
@@ -671,7 +679,6 @@ export function DesktopRunConfigMenu({
   const modelSearchEmptyLabel = t('chat.runConfig.modelSearchEmpty', 'No models match');
   const reasoningLabel = t('chat.runConfig.reasoningLabel', 'Reasoning');
   const planRowLabel = t('chat.mobileNewChat.planModeLabel', 'Plan');
-  const fastRowLabel = t('chat.runConfig.fastLabel', 'Fast');
 
   const roleLabel = t('chat.runConfig.roles.label', 'Role');
   const hasAnyRow =

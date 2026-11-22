@@ -68,6 +68,7 @@ export function makeEncryptedFeatureAuthorization(options: {
     }),
     ...(options.requesterIdentity ? { requesterIdentity: options.requesterIdentity } : {}),
     authorize: authorization.authorizeOwnedExecution,
+    authorizeProjectExecution: authorization.authorizeExecution,
     authorizeRead: authorization.authorizeRead,
     authorizeHistoryRead: Effect.fnUntraced(function* (
       workspaceId: string,
@@ -158,6 +159,11 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     requesterDevice: string,
     sessionId: string
   ) => ReturnType<AuthorizeEncryptedExecution>;
+  authorizeProjectExecution?: (
+    workspaceId: string,
+    requesterDevice: string,
+    localProjectId?: string
+  ) => ReturnType<AuthorizeEncryptedExecution>;
   requesterIdentity?: (
     requesterDevice: string
   ) => Effect.Effect<EncryptedFeatureRequester | undefined, unknown>;
@@ -189,6 +195,10 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       opened.input.request.method === 'session/history-read' ? opened.input.request : undefined;
     const forkRequest =
       opened.input.request.method === 'session/fork' ? opened.input.request : undefined;
+    const listBranchesRequest =
+      opened.input.request.method === 'local-project/list-branches'
+        ? opened.input.request
+        : undefined;
     const authorize: AuthorizeEncryptedExecution = historyRequest
       ? (workspaceId, requesterDevice) =>
           options.authorizeHistoryRead?.(
@@ -203,9 +213,16 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
               requesterDevice,
               forkRequest.params.sourceSessionId
             ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
-        : read
-          ? options.authorizeRead
-          : options.authorize;
+        : listBranchesRequest
+          ? (workspaceId, requesterDevice) =>
+              options.authorizeProjectExecution?.(
+                workspaceId,
+                requesterDevice,
+                listBranchesRequest.params.localProjectId
+              ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
+          : read
+            ? options.authorizeRead
+            : options.authorize;
     let requester: EncryptedFeatureRequester | undefined;
     const invoke = (authority: { isCurrent(): boolean; signal: AbortSignal } | undefined) =>
       Effect.acquireUseRelease(
@@ -253,7 +270,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       const authority = yield* authorize(options.workspaceId, opened.requesterDevice);
       const authoritySignal = options.authoritySignal?.();
       if (
-        forkRequest &&
+        (forkRequest || listBranchesRequest) &&
         authority._tag === 'Denied' &&
         authority.reason === 'e2ee_machine_not_shared' &&
         options.isOpen() &&
@@ -311,7 +328,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           : undefined;
       const currentAdmission = () =>
         !admittedAuthority || (!admittedAuthority.signal.aborted && admittedAuthority.isCurrent());
-      if (forkRequest) {
+      if (forkRequest || listBranchesRequest) {
         // Execution identity comes from the verified signer, never from the request.
         requester = options.requesterIdentity
           ? yield* options.requesterIdentity(opened.requesterDevice)

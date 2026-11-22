@@ -273,6 +273,40 @@ it('forks for the verified signer, owner or shared member, never a claimed reque
     'e2ee_feature_requester'
   );
   expect(forks).toHaveLength(1);
+
+  const branchReads: unknown[] = [];
+  Object.assign(handler, {
+    readEncryptedMachineRequest: async (input: unknown) => {
+      branchReads.push(input);
+      return { ok: true };
+    },
+  });
+  const branchRequest = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    method: 'local-project/list-branches' as const,
+    params: {
+      localProjectId: 'local-project-1',
+      requestedByUserId: 'member-account',
+      limit: 10,
+    },
+  };
+  await expect(runtime.handleEncryptedFeatureRpc(branchRequest, context())).rejects.toThrow(
+    'e2ee_feature_requester'
+  );
+  await expect(
+    runtime.handleEncryptedFeatureRpc(
+      { ...branchRequest, params: { ...branchRequest.params, requestedByUserId: 'owner' } },
+      context(member)
+    )
+  ).rejects.toThrow('e2ee_feature_requester');
+  await runtime.handleEncryptedFeatureRpc(branchRequest, context(member));
+  expect(branchReads).toEqual([
+    {
+      ...branchRequest,
+      params: { ...branchRequest.params, requestedByUserId: 'e2ee-member:aa' },
+    },
+  ]);
 });
 
 it('requires live verified authority for encrypted ACP interaction routing', async () => {

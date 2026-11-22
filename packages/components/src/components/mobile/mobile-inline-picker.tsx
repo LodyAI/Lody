@@ -19,6 +19,7 @@ import { Spinner } from '@lody/ui/spinner';
 
 import { filterFuzzyOptions } from '@/lib/fuzzy-option-filter';
 import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';
+import { useLatestRef } from '@/hooks/use-latest-ref';
 import { cn } from '@/lib/utils';
 
 // Above this many (filtered) options the dropdown list is virtualized — big branch
@@ -66,6 +67,8 @@ export type MobileInlinePickerProps<T extends string = string> = {
   searchPlaceholder?: string;
   /** Reports picks made after typing a search term (`picker/search_selected`). */
   searchAnalyticsPicker?: SearchPickerKind;
+  /** Reports each search edit, e.g. to look up options the list has not loaded. */
+  onQueryChange?: (query: string) => void;
   /** Optional className for the trigger button. */
   triggerClassName?: string;
   /** Optional className for the expansion panel wrapper. */
@@ -80,6 +83,10 @@ export type MobileInlinePickerProps<T extends string = string> = {
      dropdown into a dedicated slot below the row so the list can span
      the row's full width without distorting the chip's own width. */
   portalContainer?: HTMLElement | null;
+  onOpenChange?: (open: boolean) => void;
+  disableClientFilter?: boolean;
+  onReachEnd?: () => void;
+  footer?: ReactNode;
 };
 
 /* ── Coordination context ────────────────────────────────────────────── */
@@ -175,10 +182,15 @@ export function MobileInlinePicker<T extends string = string>({
   searchable = false,
   searchPlaceholder,
   searchAnalyticsPicker,
+  onQueryChange,
   triggerClassName,
   expansionClassName,
   expansionPanelClassName,
   portalContainer,
+  onOpenChange,
+  disableClientFilter = false,
+  onReachEnd,
+  footer,
 }: MobileInlinePickerProps<T>) {
   const coordinator = useContext(PickerCoordinatorContext);
   /* Explicit `portalContainer` wins; otherwise fall back to the
@@ -200,6 +212,8 @@ export function MobileInlinePicker<T extends string = string>({
   const expansionRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
   const [query, setQuery] = useState('');
+  const onOpenChangeRef = useLatestRef(onOpenChange);
+  const onQueryChangeRef = useLatestRef(onQueryChange);
   /* Keyboard highlight for the open dropdown. Focus stays on the trigger button
      (so the picker still works when driven by an external roving controller that
      opens it without moving focus); ↑/↓ move this index, Enter/Space select it,
@@ -235,14 +249,22 @@ export function MobileInlinePicker<T extends string = string>({
      fresh — searching for one branch, closing, then reopening shouldn't
      leave the old query filtering the list. */
   useEffect(() => {
-    if (!open) setQuery('');
-  }, [open]);
+    onOpenChangeRef.current?.(open);
+    if (open) return;
+    setQuery('');
+    onQueryChangeRef.current?.('');
+  }, [onOpenChangeRef, onQueryChangeRef, open]);
+  const handleQueryChange = (next: string) => {
+    setQuery(next);
+    onQueryChange?.(next);
+  };
 
   /* Fuzzy, not substring: a provider's model list can run to dozens of ids, and
      `op5` should still find `claude-opus-5`. Ranked, so the best match is the
      one the highlight lands on. An empty query returns `options` itself, which
      is every render without a search field. */
   const filteredOptions = useMemo(() => {
+    if (disableClientFilter) return options;
     const matches = filterFuzzyOptions(options, query, (opt) => ({
       primary: opt.searchText ?? String(opt.label ?? ''),
       secondary: [opt.value],
@@ -250,7 +272,7 @@ export function MobileInlinePicker<T extends string = string>({
     if (!preserveOptionOrder) return matches;
     const matchingOptions = new Set(matches);
     return options.filter((option) => matchingOptions.has(option));
-  }, [options, query, preserveOptionOrder]);
+  }, [disableClientFilter, options, query, preserveOptionOrder]);
 
   const postHog = usePostHog();
   const handleSelect = (next: T) => {
@@ -542,7 +564,7 @@ export function MobileInlinePicker<T extends string = string>({
             {searchable ? (
               <PickerSearchInput
                 query={query}
-                onQueryChange={setQuery}
+                onQueryChange={handleQueryChange}
                 placeholder={searchPlaceholder}
                 ariaLabel={searchPlaceholder ?? ariaLabel}
                 autoFocus={autoFocusSearch}
@@ -551,6 +573,13 @@ export function MobileInlinePicker<T extends string = string>({
             ) : null}
             <div
               ref={listRef}
+              onScroll={(event) => {
+                if (!onReachEnd) return;
+                const target = event.currentTarget;
+                if (target.scrollHeight - target.scrollTop - target.clientHeight <= 64) {
+                  onReachEnd();
+                }
+              }}
               className="scroll-pro scrollbar-pro max-h-[200px] overflow-y-auto py-1 [scrollbar-gutter:auto]"
             >
               {filteredOptions.length === 0 ? (
@@ -572,6 +601,9 @@ export function MobileInlinePicker<T extends string = string>({
               ) : (
                 filteredOptions.map((opt, index) => renderOption(opt, index))
               )}
+              {footer ? (
+                <div className="px-3 py-2 text-sm text-muted-foreground">{footer}</div>
+              ) : null}
             </div>
           </div>
         </motion.div>

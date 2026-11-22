@@ -144,6 +144,8 @@ export const githubReposCache = createLocalStorageCache<WorkspaceReposCache>(
 export const githubBranchesCacheSchema = z.object({
   branches: z.array(z.string()),
   defaultBranch: z.string().nullable(),
+  // Cursor for the next unloaded page; entries written before paging are complete lists.
+  nextPageUrl: z.string().nullable().optional(),
   updatedAt: z.number(),
 });
 

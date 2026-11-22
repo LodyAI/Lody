@@ -85,7 +85,10 @@ import type {
   FilePreviewV3Request,
   FilePreviewV3Response,
 } from '@lody/shared';
-import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
+import type {
+  LocalProjectGitStateRpcResponse,
+  LocalProjectListBranchesRpcResponse,
+} from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
 import type { CodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { readStoredAuthToken } from '@/lib/auth-bootstrap';
@@ -604,6 +607,12 @@ export type WorkspaceRuntime = {
     requestedByUserId: string,
     options?: { timeoutMs?: number }
   ) => Promise<LocalProjectGitStateRpcResponse | null>;
+  requestLocalProjectBranches: (
+    machineId: MachineId,
+    localProjectId: LocalProjectId,
+    requestedByUserId: string,
+    options?: { query?: string; limit?: number; cursor?: string; timeoutMs?: number }
+  ) => Promise<LocalProjectListBranchesRpcResponse | null>;
   /** Read-only `.gitmodules` probe of one local project, for the Project group editor. */
   requestProjectProbeLocalMember: (
     machineId: MachineId,

@@ -1,3 +1,4 @@
+import { version } from '@/pkg';
 import { channel } from 'node:diagnostics_channel';
 import {
   Agent,
@@ -54,6 +55,22 @@ export interface CliHttpTransportOptions {
 let singletonTransport: CliHttpTransport | null = null;
 let singletonConfigKey: string | null = null;
 let undiciDiagnosticsInstalled = false;
+
+const identifiedFetches = new WeakSet<CliFetch>();
+
+function withCliUserAgent(fetchImpl: CliFetch): CliFetch {
+  if (identifiedFetches.has(fetchImpl)) return fetchImpl;
+  const identified: CliFetch = (input, init) => {
+    const headers = new Headers(
+      init?.headers ?? (input instanceof Request ? input.headers : undefined)
+    );
+    const mode = process.argv[2] === 'start' ? 'daemon' : 'oneshot';
+    headers.set('user-agent', `lody-cli/${version} (${mode})`);
+    return fetchImpl(input, { ...init, headers });
+  };
+  identifiedFetches.add(identified);
+  return identified;
+}
 
 export function resolveCliHttpTransportConfig(
   env: NodeJS.ProcessEnv = process.env
@@ -142,7 +159,7 @@ export function createCliHttpTransport(
 
   return {
     dispatcher,
-    fetch: fetchImpl,
+    fetch: withCliUserAgent(fetchImpl),
     diagnostics: () => ({ ...config }),
     close: async () => {
       await dispatcher.close();
@@ -153,6 +170,7 @@ export function createCliHttpTransport(
 export function installCliHttpGlobalDispatcher(
   options: CliHttpTransportOptions = {}
 ): CliHttpTransport | null {
+  globalThis.fetch = withCliUserAgent(globalThis.fetch);
   const logger = options.logger ?? getLogger('http-transport');
   const transport = getOrCreateCliHttpTransport(options);
   const config = resolveCliHttpTransportConfig(options.env);
@@ -176,7 +194,7 @@ export function installCliHttpGlobalDispatcher(
 
 export function getCliHttpFetch(options: CliHttpTransportOptions = {}): CliFetch {
   const transport = getOrCreateCliHttpTransport(options);
-  return transport?.fetch ?? globalThis.fetch.bind(globalThis);
+  return transport?.fetch ?? withCliUserAgent(globalThis.fetch.bind(globalThis));
 }
 
 export async function resetCliHttpTransportForTests(): Promise<void> {

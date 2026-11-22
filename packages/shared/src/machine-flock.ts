@@ -1847,6 +1847,27 @@ const normalizeLocalProjectMeta = (value: unknown): LocalProjectMeta | undefined
   ) {
     project.githubRepoFullName = value.githubRepoFullName;
   }
+  if (typeof value.git === 'boolean') {
+    project.git = value.git;
+  }
+  if (value.defaultBranch === null) {
+    project.defaultBranch = null;
+  } else if (
+    typeof value.defaultBranch === 'string' &&
+    value.defaultBranch.trim().length > 0 &&
+    value.defaultBranch.length <= 1024
+  ) {
+    project.defaultBranch = value.defaultBranch.trim();
+  }
+  if (value.currentBranch === null) {
+    project.currentBranch = null;
+  } else if (
+    typeof value.currentBranch === 'string' &&
+    value.currentBranch.trim().length > 0 &&
+    value.currentBranch.length <= 1024
+  ) {
+    project.currentBranch = value.currentBranch.trim();
+  }
   return project;
 };
 

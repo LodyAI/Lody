@@ -36,6 +36,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
+  localProjectBranchListing: 'localProjectBranchListing',
   providerSetup: 'providerSetup',
   schedules: 'schedules',
   sessionAutomations: 'sessionAutomations',
@@ -78,6 +79,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   machineDiskStatus: 'machineDiskStatus',
   managedDaemonUpdates: 'managedDaemonUpdates',
   sessionInputWithdraw: 'sessionInputWithdraw',
+  localProjectFileSearch: 'localProjectFileSearch',
+  localProjectSkillsFingerprint: 'localProjectSkillsFingerprint',
 } as const;
 
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
@@ -115,6 +118,7 @@ export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION = 1;
+export const LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 // v2 preserves ACP string/boolean values and reads legacy stringified booleans.
 const SCHEDULES_PROMPT_PROTOCOL_VERSION = 2;
@@ -147,6 +151,13 @@ export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 /** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
 export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
+/**
+ * `local-project/search-files` exists. An older daemon's strict request schema
+ * drops the unknown type without replying, so a caller must check before sending.
+ */
+export const LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION = 1;
+/** `local-project/list-skills` / `list-global-skills` accept `knownFingerprint`. */
+export const LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -246,6 +257,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection]: PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
     LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing]:
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
@@ -287,7 +300,47 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectFileSearch]:
+    LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectSkillsFingerprint]:
+    LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION,
 };
+
+/**
+ * Fits a local-project control request to what the target daemon understands:
+ * `knownFingerprint` is dropped for a daemon without it (the request still
+ * works, it just returns everything), and a file search the daemon cannot
+ * answer returns `null` so the caller never sends it.
+ */
+export function adaptLocalProjectControlRequestToMachine<
+  TRequest extends { type: string; knownFingerprint?: string },
+>(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  request: TRequest
+): TRequest | null {
+  if (
+    request.type === 'local-project/search-files' &&
+    !machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.localProjectFileSearch,
+      LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION
+    )
+  ) {
+    return null;
+  }
+  if (
+    request.knownFingerprint !== undefined &&
+    !machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.localProjectSkillsFingerprint,
+      LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION
+    )
+  ) {
+    const { knownFingerprint: _dropped, ...rest } = request;
+    return rest as TRequest;
+  }
+  return request;
+}
 
 /**
  * Whether `machine/bug-report` may carry `clientLog`. Its request schema is
@@ -428,6 +481,16 @@ export function machineSupportsLocalProjectRemovalProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval,
     LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsLocalProjectBranchListing(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing,
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION
   );
 }
 

@@ -148,6 +148,47 @@ describe('DesktopRunConfigMenu role face', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
+  it('shows speed tiers on the face as glyphs only and keeps their names in the menu', async () => {
+    const speedSelector = {
+      configId: 'fast-mode',
+      category: 'other',
+      label: 'Speed',
+      type: 'select' as const,
+      currentValue: 'off',
+      options: [
+        { value: 'off', label: 'Standard' },
+        { value: 'fast', label: 'Fast' },
+        { value: 'ultrafast', label: 'Ultrafast' },
+      ],
+    };
+    const speedGlyph = async (value: string) => {
+      const view = await render({
+        configOptionSelectors: [speedSelector],
+        configOptionValues: { 'fast-mode': value },
+      });
+      const trigger = view.querySelector<HTMLButtonElement>('[data-run-config-trigger]')!;
+      return { trigger, glyph: trigger.querySelector('[role="img"]') };
+    };
+
+    const fast = await speedGlyph('fast');
+    expect(fast.glyph?.getAttribute('aria-label')).toBe('Fast');
+    expect(fast.trigger.textContent).not.toContain('Fast');
+    const fastMarkup = fast.glyph?.outerHTML;
+
+    const ultra = await speedGlyph('ultrafast');
+    expect(ultra.glyph?.getAttribute('aria-label')).toBe('Ultrafast');
+    expect(ultra.trigger.textContent).not.toContain('Ultrafast');
+    expect(ultra.glyph?.outerHTML).not.toBe(fastMarkup);
+
+    expect((await speedGlyph('off')).glyph).toBeNull();
+
+    await speedGlyph('ultrafast');
+    await act(async () => {
+      ultra.trigger.click();
+    });
+    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Ultrafast');
+  });
+
   it('keeps Role identity and pinned values on the locked face', async () => {
     const props = {
       agentRoles: { items: [roleItem], selectedRoleId: role.id, onSelect: () => undefined },

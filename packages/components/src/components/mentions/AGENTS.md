@@ -45,6 +45,11 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   An unasked source reports `loading`, never `ready` with zero rows.
 
+- The file index loads only once asked for: the menu reaching Files or a draft
+  carrying an `@`. A project on another machine is searched there with
+  `local-project/search-files`; only a daemon without `localProjectFileSearch`
+  gets the full-list fallback. Send that request only after the capability check: an
+  older daemon drops it unanswered.
 - File fetch accounting follows [its contract](../../../../../specs/mention-file-fetch.md).
 
 ## Hydration and drafts
