@@ -95,6 +95,11 @@ Behind `LODY_NATIVE_E2EE=1`, native IPC admits a request only while the sending
 window holds that workspace's E2EE reader lease for the signed-in account; the
 first admitted request attaches the namespace. Every Session document request is
 checked with the shared `@lody/shared/session-visibility` rules, whose inputs come
-from native Meta and the host's verified sharing view; never copy the rules here.
-Access loss closes the workspace's views and discards replies started before it.
+from native Meta and the host's verified ledger and sharing view; never copy the rules
+here. Reads need a visible Session and writes an editable one; a Preview comment
+document follows its Session. Machine ownership is the verified owner membership,
+never a Meta field. Renderers commit raw Loro updates only to replica documents
+(Schedule, Preview comment); a Session is written only through checked patches.
+Every request runs under the workspace's access fence: a view is registered only if
+access survived its establishment, and replies started before a loss are discarded.
 Design: [encrypted workspaces](../../../../../.agents/docs/native-workspace-meta.md#encrypted-workspaces).

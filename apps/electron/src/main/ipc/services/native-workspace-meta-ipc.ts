@@ -51,7 +51,8 @@ import {
   removeNativeEncryptedWorkspace,
   type NativeEncryptedAccess
 } from '../../services/native-encrypted-access'
-import { authorizeNativeSessionRead } from '../../services/native-session-read'
+import { authorizeNativeSessionAccess } from '../../services/native-session-read'
+import { createNativeViews } from '../../services/native-views'
 import { onNativeAccessLost } from '../../services/native-encrypted-workspaces'
 
 class NotCommitted extends Error {}
@@ -83,11 +84,17 @@ async function admit(
   return undefined
 }
 
-/** Admission plus, in an encrypted workspace, the session read rules for `docId`. */
-async function admitDoc(workspaceId: string, docId: string) {
+/** Admission plus, in an encrypted workspace, the session read or edit rules for `docId`. */
+async function admitDoc(workspaceId: string, docId: string, mode: 'read' | 'write' = 'read') {
   const access = await admit(workspaceId)
   if (access)
-    await authorizeNativeSessionRead(access, await workspaceMeta(workspaceId), workspaceId, docId)
+    await authorizeNativeSessionAccess(
+      access,
+      await workspaceMeta(workspaceId),
+      workspaceId,
+      docId,
+      mode
+    )
   return access
 }
 
@@ -134,14 +141,10 @@ function workspaceMeta(workspaceId: string) {
   return meta
 }
 
-/** Window-owned view registrations; a closed or navigated window drops its own. */
-const views = new Map<WebContents, Map<string, () => void>>()
-/** Each view's workspace, so access loss closes exactly that workspace's views. */
-const viewWorkspaces = new WeakMap<() => void, string>()
-/** Bumped on access loss: a reply started before it is discarded. */
-const accessGeneration = new Map<string, number>()
+/** Window-owned views and the access fence. */
+const views = createNativeViews<WebContents>()
 onNativeAccessLost((workspaceId) => {
-  accessGeneration.set(workspaceId, (accessGeneration.get(workspaceId) ?? 0) + 1)
+  views.loseAccess(workspaceId)
   metas
     .get(workspaceId)
     ?.then((meta) => meta.close())
@@ -149,55 +152,21 @@ onNativeAccessLost((workspaceId) => {
   metas.delete(workspaceId)
   for (const key of remoteDocs.keys())
     if (key.startsWith(`${workspaceId}\0`)) remoteDocs.delete(key)
-  for (const owned of views.values())
-    for (const [observationId, release] of owned)
-      if (viewWorkspaces.get(release) === workspaceId) {
-        owned.delete(observationId)
-        release()
-      }
 })
-/** Runs one reply for `workspaceId`; an access loss meanwhile discards it. */
-async function fenced<A>(workspaceId: string, work: () => Promise<A>): Promise<A> {
-  const generation = accessGeneration.get(workspaceId) ?? 0
-  const result = await work()
-  if ((accessGeneration.get(workspaceId) ?? 0) !== generation) throw new Error('native_access_lost')
-  return result
-}
-/** Registers a view of `workspaceId`. */
-function own(
-  owned: Map<string, () => void>,
-  workspaceId: string,
-  observationId: string,
-  release: () => void
-) {
-  viewWorkspaces.set(release, workspaceId)
-  owned.set(observationId, release)
-}
 const watchedSenders = new WeakSet<WebContents>()
 
-/** Releases a window's views when its document goes away. */
-function dropViews(sender: WebContents) {
-  const owned = views.get(sender)
-  if (!owned) return
-  views.delete(sender)
-  for (const unsubscribe of owned.values()) unsubscribe()
-  owned.clear()
-}
-
-function windowViews(sender: WebContents) {
-  let owned = views.get(sender)
-  if (owned) return owned
-  owned = new Map<string, () => void>()
-  views.set(sender, owned)
+/** The sending window; its views are released when its document goes away. */
+function viewOwner() {
+  const sender = getIpcContext().event.sender
   if (!watchedSenders.has(sender)) {
     watchedSenders.add(sender)
-    sender.once('destroyed', () => dropViews(sender))
+    sender.once('destroyed', () => views.drop(sender))
     sender.on('did-start-navigation', (event, _url, inPlace, isMainFrame) => {
       const sameDocument = (event as { isSameDocument?: boolean }).isSameDocument ?? inPlace
-      if (isMainFrame && !sameDocument) dropViews(sender)
+      if (isMainFrame && !sameDocument) views.drop(sender)
     })
   }
-  return owned
+  return sender
 }
 
 /** Finite domain IPC: approved views and Meta commands only. */
@@ -225,43 +194,47 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async open(input: unknown) {
     const { workspaceId, observationId } = NativeMetaOpenSchema.parse(input)
+    const generation = views.generation(workspaceId)
     await admit(workspaceId)
-    const sender = getIpcContext().event.sender
-    const owned = windowViews(sender)
-    if (owned.has(observationId) || owned.size >= 16) throw new Error('native_meta_view_denied')
-    const meta = await workspaceMeta(workspaceId)
-    const opened = await meta.open((update) => {
-      if (!sender.isDestroyed()) sender.send(NATIVE_META_CHANNEL, { observationId, update })
+    const sender = viewOwner()
+    return views.establish({
+      owner: sender,
+      workspaceId,
+      generation,
+      observationId,
+      limit: 16,
+      start: async () => {
+        const meta = await workspaceMeta(workspaceId)
+        const opened = await meta.open((update) => {
+          if (!sender.isDestroyed()) sender.send(NATIVE_META_CHANNEL, { observationId, update })
+        })
+        return { release: opened.unsubscribe, value: opened.snapshot }
+      }
     })
-    if (views.get(sender) !== owned) {
-      opened.unsubscribe()
-      throw new Error('native_meta_view_closed')
-    }
-    own(owned, workspaceId, observationId, opened.unsubscribe)
-    return opened.snapshot
   }
 
   @IpcMethod()
   async release(input: unknown) {
     const { observationId } = NativeMetaReleaseSchema.parse(input)
-    const owned = views.get(getIpcContext().event.sender)
-    owned?.get(observationId)?.()
-    owned?.delete(observationId)
+    views.release(getIpcContext().event.sender, observationId)
   }
 
   /** `notCommitted` is a proven pre-write refusal; any rejection is an unknown outcome. */
   @IpcMethod()
   async commit(input: unknown) {
     const { workspaceId, command } = NativeMetaCommitSchema.parse(input)
-    await admit(workspaceId)
-    const meta = await workspaceMeta(workspaceId)
-    try {
-      return await meta.commit(command as NativeMetaCommand)
-    } catch (error) {
-      if (error instanceof NotCommitted)
-        return { outcome: 'not-committed' as const, reason: error.message }
-      throw error
-    }
+    return views.fenced(workspaceId, async (check) => {
+      await admit(workspaceId)
+      const meta = await workspaceMeta(workspaceId)
+      check()
+      try {
+        return await meta.commit(command as NativeMetaCommand)
+      } catch (error) {
+        if (error instanceof NotCommitted)
+          return { outcome: 'not-committed' as const, reason: error.message }
+        throw error
+      }
+    })
   }
 
   @IpcMethod()
@@ -281,96 +254,109 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async openFlockDoc(input: unknown) {
     const { workspaceId, flockDocId, observationId } = NativeFlockOpenSchema.parse(input)
+    const generation = views.generation(workspaceId)
     await admit(workspaceId, flockDocId)
-    const sender = getIpcContext().event.sender
-    const owned = windowViews(sender)
-    if (owned.has(observationId) || owned.size >= 16) throw new Error('native_meta_view_denied')
-    const { client } = await connect()
-    const observation = await observeNativeFlockDoc(client, workspaceId, flockDocId, (event) => {
-      if (sender.isDestroyed()) return
-      sender.send(NATIVE_FLOCK_CHANNEL, {
-        observationId,
-        event:
-          event.kind === 'snapshot'
-            ? { kind: 'snapshot', file: event.file }
-            : event.kind === 'changes'
-              ? { kind: 'changes', registers: event.registers }
-              : event
-      })
+    const sender = viewOwner()
+    await views.establish({
+      owner: sender,
+      workspaceId,
+      generation,
+      observationId,
+      limit: 16,
+      start: async () => {
+        const { client } = await connect()
+        const observation = await observeNativeFlockDoc(
+          client,
+          workspaceId,
+          flockDocId,
+          (event) => {
+            if (sender.isDestroyed()) return
+            sender.send(NATIVE_FLOCK_CHANNEL, {
+              observationId,
+              event:
+                event.kind === 'snapshot'
+                  ? { kind: 'snapshot', file: event.file }
+                  : event.kind === 'changes'
+                    ? { kind: 'changes', registers: event.registers }
+                    : event
+            })
+          }
+        )
+        return {
+          release: () => void observation.release().catch(() => {}),
+          ready: observation.ready,
+          value: undefined
+        }
+      }
     })
-    const release = () => void observation.release().catch(() => {})
-    if (views.get(sender) !== owned) {
-      release()
-      throw new Error('native_meta_view_closed')
-    }
-    own(owned, workspaceId, observationId, release)
-    try {
-      await observation.ready
-    } catch (error) {
-      owned.delete(observationId)
-      release()
-      throw error
-    }
   }
 
   /** Resolves only after the payloads are durably committed. */
   @IpcMethod()
   async commitFlockDoc(input: unknown) {
     const { workspaceId, flockDocId, payloads } = NativeFlockCommitSchema.parse(input)
-    await admit(workspaceId, flockDocId)
-    const { client } = await connect()
-    await commitFlockPayloads(client, workspaceId, flockDocId, payloads)
+    await views.fenced(workspaceId, async (check) => {
+      await admit(workspaceId, flockDocId)
+      const { client } = await connect()
+      check()
+      await commitFlockPayloads(client, workspaceId, flockDocId, payloads)
+    })
   }
 
-  /** A window's update view of one owned Loro document (Session). */
+  /** A window's update view of one replica document (Schedule or Preview comment). */
   @IpcMethod()
   async openDoc(input: unknown) {
     const { workspaceId, docId, observationId, since } = NativeDocOpenSchema.parse(input)
+    const generation = views.generation(workspaceId)
     await admitDoc(workspaceId, docId)
-    const sender = getIpcContext().event.sender
-    const owned = windowViews(sender)
-    if (owned.has(observationId) || owned.size >= 64) throw new Error('native_meta_view_denied')
-    const { client } = await connect()
-    const observation = await observeNativeDoc(
-      client,
+    const sender = viewOwner()
+    await views.establish({
+      owner: sender,
       workspaceId,
-      docId,
-      (event) => {
-        if (!sender.isDestroyed()) sender.send(NATIVE_DOC_CHANNEL, { observationId, event })
-      },
-      since
-    )
-    const release = () => void observation.release().catch(() => {})
-    if (views.get(sender) !== owned) {
-      release()
-      throw new Error('native_meta_view_closed')
-    }
-    own(owned, workspaceId, observationId, release)
-    try {
-      await observation.ready
-    } catch (error) {
-      owned.delete(observationId)
-      release()
-      throw error
-    }
+      generation,
+      observationId,
+      limit: 64,
+      start: async () => {
+        const { client } = await connect()
+        const observation = await observeNativeDoc(
+          client,
+          workspaceId,
+          docId,
+          (event) => {
+            if (!sender.isDestroyed()) sender.send(NATIVE_DOC_CHANNEL, { observationId, event })
+          },
+          since
+        )
+        return {
+          release: () => void observation.release().catch(() => {}),
+          ready: observation.ready,
+          value: undefined
+        }
+      }
+    })
   }
 
   /** Resolves only after the updates are durably committed. */
   @IpcMethod()
   async commitDoc(input: unknown) {
     const { workspaceId, docId, updates } = NativeDocCommitSchema.parse(input)
-    await admitDoc(workspaceId, docId)
-    const { client } = await connect()
-    await commitDocUpdates(client, workspaceId, docId, updates)
+    await views.fenced(workspaceId, async (check) => {
+      await admitDoc(workspaceId, docId, 'write')
+      const { client } = await connect()
+      check()
+      await commitDocUpdates(client, workspaceId, docId, updates)
+    })
   }
 
   /** Whether this window's legacy replica of a document still needs importing. */
   @IpcMethod()
   async needsLegacyDoc(input: unknown) {
     const { workspaceId, docId, source } = NativeDocLegacyCheckSchema.parse(input)
-    if (await admit(workspaceId)) return false
-    const { client } = await connect()
-    return !(await isLegacyDocPublished(client, workspaceId, docId, source))
+    return views.fenced(workspaceId, async () => {
+      if (await admit(workspaceId)) return false
+      const { client } = await connect()
+      return !(await isLegacyDocPublished(client, workspaceId, docId, source))
+    })
   }
 
   @IpcMethod()
@@ -389,7 +375,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async readDocPath(input: unknown) {
     const { workspaceId, docId, path } = NativeDocReadSchema.parse(input)
-    return fenced(workspaceId, async () => {
+    return views.fenced(workspaceId, async () => {
       await admitDoc(workspaceId, docId)
       return (await remoteDoc(workspaceId, docId)).readPathAt(path)
     })
@@ -399,7 +385,7 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async readDocListFields(input: unknown) {
     const { workspaceId, docId, start, end, fields } = NativeDocListFieldsSchema.parse(input)
-    return fenced(workspaceId, async () => {
+    return views.fenced(workspaceId, async () => {
       await admitDoc(workspaceId, docId)
       return (await remoteDoc(workspaceId, docId)).readListFields(start, end, fields)
     })
@@ -409,25 +395,22 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async observeDocPaths(input: unknown) {
     const { workspaceId, docId, observationId } = NativeDocObservePathsSchema.parse(input)
+    const generation = views.generation(workspaceId)
     await admitDoc(workspaceId, docId)
-    const sender = getIpcContext().event.sender
-    const owned = windowViews(sender)
-    if (owned.has(observationId) || owned.size >= 64) throw new Error('native_meta_view_denied')
-    const observation = (await remoteDoc(workspaceId, docId)).observePaths((event) => {
-      if (!sender.isDestroyed()) sender.send(NATIVE_DOC_PATHS_CHANNEL, { observationId, event })
+    const sender = viewOwner()
+    await views.establish({
+      owner: sender,
+      workspaceId,
+      generation,
+      observationId,
+      limit: 64,
+      start: async () => {
+        const observation = (await remoteDoc(workspaceId, docId)).observePaths((event) => {
+          if (!sender.isDestroyed()) sender.send(NATIVE_DOC_PATHS_CHANNEL, { observationId, event })
+        })
+        return { release: () => observation.close(), ready: observation.ready, value: undefined }
+      }
     })
-    if (views.get(sender) !== owned) {
-      observation.close()
-      throw new Error('native_meta_view_closed')
-    }
-    own(owned, workspaceId, observationId, () => observation.close())
-    try {
-      await observation.ready
-    } catch (error) {
-      owned.delete(observationId)
-      observation.close()
-      throw error
-    }
   }
 
   /**
@@ -437,19 +420,23 @@ export class NativeWorkspaceMetaIpc extends ProductWindowIpcService {
   @IpcMethod()
   async applyDocPatch(input: unknown) {
     const { workspaceId, docId, ops, precondition } = NativeDocPatchSchema.parse(input)
-    const access = await admitDoc(workspaceId, docId)
-    const userId = access?.accountId ?? (await readLocalPlatformSnapshot())?.userId
-    if (!userId) throw new Error('native_meta_scope_denied')
-    authorizeSessionPatch(ops, userId)
-    try {
-      return await (await remoteDoc(workspaceId, docId)).applyPatch(ops, precondition)
-    } catch (error) {
-      const name = (error as { name?: unknown } | null)?.name
-      if (name === 'RemoteWriteConflictError') throw new Error('native_doc_write_conflict')
-      if (name === 'RemoteWriteIndeterminateError')
-        throw new Error('native_doc_write_indeterminate')
-      throw error
-    }
+    return views.fenced(workspaceId, async (check) => {
+      const access = await admitDoc(workspaceId, docId, 'write')
+      const userId = access?.accountId ?? (await readLocalPlatformSnapshot())?.userId
+      if (!userId) throw new Error('native_meta_scope_denied')
+      authorizeSessionPatch(ops, userId)
+      const port = await remoteDoc(workspaceId, docId)
+      check()
+      try {
+        return await port.applyPatch(ops, precondition)
+      } catch (error) {
+        const name = (error as { name?: unknown } | null)?.name
+        if (name === 'RemoteWriteConflictError') throw new Error('native_doc_write_conflict')
+        if (name === 'RemoteWriteIndeterminateError')
+          throw new Error('native_doc_write_indeterminate')
+        throw error
+      }
+    })
   }
 }
 

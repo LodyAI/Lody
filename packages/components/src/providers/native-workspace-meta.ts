@@ -159,12 +159,8 @@ export function createRendererNativeFlockDocs(workspaceId: string): ExternalFloc
 }
 
 /**
- * Owned Loro documents (Sessions) for this renderer, through main. This
- * window's own IndexedDB replica of a document is imported once, on first open.
- */
-/**
- * Imports this window's own IndexedDB replica of one document, once. The legacy
- * replica is read only for this and never kept.
+ * Imports this window's own IndexedDB replica of one replica document (Schedule or
+ * Preview comment), once. The legacy replica is read only for this and never kept.
  */
 export async function migrateRendererLegacyDoc(
   workspaceId: string,
@@ -186,6 +182,11 @@ export async function migrateRendererLegacyDoc(
   });
 }
 
+/**
+ * Owned Loro documents for this renderer, through main. Sessions are owned too, so
+ * they never fall back to legacy storage, but main serves them only as remote
+ * documents: opening one here is refused.
+ */
 export function createRendererNativeDocs(
   workspaceId: string,
   legacyStorage: StorageAdapter,

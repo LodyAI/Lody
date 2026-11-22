@@ -5075,8 +5075,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         sessionId,
         roomId,
         workspaceId: deps.workspaceId,
-        legacyStorage: repoStorage,
-        replicaName: cacheIdentity.repoDbName,
       });
     // Backend selection is part of the persisted session identity, so resolve it
     // before composing the reader even when this runtime has no injected factory.

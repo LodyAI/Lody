@@ -41,6 +41,12 @@ export const isNativePreviewCommentDocId = (docId: string): boolean =>
 /** Loro documents the native mode owns. */
 export const isNativeDocId = (docId: string): boolean =>
   isNativeSessionDocId(docId) || isNativeScheduleDocId(docId) || isNativePreviewCommentDocId(docId);
+/**
+ * Owned documents a renderer may hold as a replica and commit raw Loro updates to.
+ * Sessions are never among them: their only renderer write is a checked patch.
+ */
+export const isNativeReplicaDocId = (docId: string): boolean =>
+  isNativeScheduleDocId(docId) || isNativePreviewCommentDocId(docId);
 
 /** Owned ids among a legacy replica's documents, plus the fixed ones. */
 export const ownedLegacyFlockDocIds = (workspaceId: string, stored: readonly string[]) => [
@@ -103,7 +109,9 @@ export const NativeFlockCommitSchema = Workspace.extend({
 }).strict();
 
 const MAX_DOC_COMMIT_BYTES = 64 * 1024 * 1024;
-const DocTarget = Workspace.extend({ docId: Id.refine(isNativeDocId, 'not an owned document') });
+const DocTarget = Workspace.extend({
+  docId: Id.refine(isNativeReplicaDocId, 'not a replica document'),
+});
 /** Remote reads and patches serve only Session documents. */
 const SessionDocTarget = Workspace.extend({
   docId: Id.refine(isNativeSessionDocId, 'not a Session document'),

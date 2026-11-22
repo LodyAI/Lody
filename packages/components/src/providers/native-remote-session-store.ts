@@ -1,4 +1,3 @@
-import type { StorageAdapter } from 'loro-repo';
 import type { SessionId } from '@lody/shared';
 import {
   createRemoteControlState,
@@ -11,7 +10,7 @@ import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import type { SessionDocState, SessionDocStore } from '@/atoms/runtime';
 import { createConversationViewFromReader } from '@/lib/conversation-view/create-conversation-view-from-reader';
 import type { CreateConversationViewFromReaderOptions } from '@/lib/conversation-view/create-conversation-view-from-reader';
-import { createRendererRemoteSessionPort, migrateRendererLegacyDoc } from './native-workspace-meta';
+import { createRendererRemoteSessionPort } from './native-workspace-meta';
 
 /** Every root but `history`: small, read whole, refreshed when a path below changes. */
 const CONTROL_ROOTS = Object.keys(sessionDocSchema.definition).filter((root) => root !== 'history');
@@ -30,13 +29,9 @@ export async function createNativeRemoteSessionStore(options: {
   readonly sessionId: SessionId;
   readonly roomId: string;
   readonly workspaceId: string;
-  /** This window's IndexedDB replica, imported once and never kept. */
-  readonly legacyStorage: StorageAdapter;
-  readonly replicaName: string;
   readonly view?: Omit<CreateConversationViewFromReaderOptions, 'sessionId'>;
 }): Promise<SessionDocStore> {
   const { sessionId, roomId, workspaceId } = options;
-  await migrateRendererLegacyDoc(workspaceId, options.legacyStorage, options.replicaName, roomId);
   const port = shareObservation(createRendererRemoteSessionPort(workspaceId, roomId));
   const control = createRemoteControlState<SessionDocState & Record<string, unknown>>(
     port,
