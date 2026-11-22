@@ -784,6 +784,46 @@ export const CategoryError: Story = {
   },
 };
 
+/** `@op` with a full list while Issues and PRs fail: each wrapped error keeps its own height. */
+export const AggregateSearchSourceError: Story = {
+  args: {
+    search: 'op',
+    narrow: true,
+    categories: [
+      category(
+        'file',
+        'file',
+        'Files',
+        'file',
+        Array.from({ length: 4 }, (_, index) =>
+          toFileCandidate({
+            kind: 'file',
+            path: `apps/desktop-setup-notes-${index}/op.ts`,
+            token: `apps/desktop-setup-notes-${index}/op.ts`,
+          })
+        )
+      ),
+      category(
+        'command',
+        'cmd',
+        'Commands',
+        'command',
+        ['output-style', 'computer-use', 'compact-op', 'open-pr'].map((name) =>
+          toCommandCandidate({ name, description: `Run ${name}` })
+        ),
+        { directTrigger: '/' }
+      ),
+      ...(['issue', 'pr'] as const).map((type) =>
+        category(type, type, type === 'issue' ? 'Issues' : 'Pull Requests', type, [], {
+          status: 'error' as const,
+          message:
+            'Repository "example/example-repository" is not linked to your workspace. Add it in Settings → Integrations',
+        })
+      ),
+    ],
+  },
+};
+
 /** A very large repo: the file list is truncated and says so. */
 export const FileCategoryTruncated: Story = {
   args: {
