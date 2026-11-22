@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +12,10 @@ import { createSessionBackend } from '@/session/session-backend';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
 import {
   remoteAutomationSecretEnvelopeSchema,
+  type AutomationInvocation,
+  type AutomationRuleDraft,
   type RemoteAutomationIntent,
+  type RemoteAutomationOperation,
 } from '@lody/shared/automations';
 import type { AutomationSessionAdmission } from '@/session/session-automation-authority';
 import type { SessionTurnInputConfig } from '@lody/shared';
@@ -26,6 +29,10 @@ import {
 
 const roots: string[] = [];
 const owners: AutomationWorkspaceHandle[] = [];
+function required<A>(value: A | undefined): A {
+  if (value === undefined) throw new Error('Required value missing');
+  return value;
+}
 afterEach(async () => {
   for (const owner of owners.splice(0)) await owner.dispose();
   vi.useRealTimers();
@@ -38,6 +45,7 @@ async function workspaceFixture(
     machineId: string;
     userId: string;
     collaborationStopped: boolean;
+    isArchived?: boolean;
     cliType?: string;
     agentType?: string;
     latestUserMsgId?: string;
@@ -70,8 +78,12 @@ async function workspaceFixture(
     close: async () => {},
   };
   let admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined;
+  const editors = new Set(['user']);
+  const authors = new Map([['session-a', 'user']]);
   const authority = {
-    author: (sessionId: string) => (sessionId === 'session-a' ? 'user' : undefined),
+    author: (sessionId: string) => authors.get(sessionId),
+    canEdit: async (_sessionId: string, userId: string) =>
+      editors.has(userId) ? ('yes' as const) : ('no' as const),
     setPendingWork: noop,
     setObservations: noop,
     setAdmission: (check: typeof admit) => {
@@ -87,6 +99,12 @@ async function workspaceFixture(
       return origin && admit ? admit({ ...args, origin }) : Promise.resolve(false);
     },
     inputDisposition: () => 'unsubmitted',
+    cancelInput: async (_sessionId: SessionId, turnId: string) => {
+      const backend = await createSessionBackend(doc);
+      for (const item of await backend.getMessageQueue())
+        if (item.userTurnId === turnId) await backend.removeMessageQueueItem(item.$cid);
+      return true;
+    },
     refreshCapacity: () => quota?.refresh(),
   };
   const repo = {
@@ -126,7 +144,13 @@ async function workspaceFixture(
     logger,
   });
   owners.push(handle);
-  return Object.assign(handle, { testRoot: root, testDocument: doc });
+  return Object.assign(handle, {
+    testRoot: root,
+    testDocument: doc,
+    testEditors: editors,
+    testAuthors: authors,
+    testAdmission: (args: AutomationSessionAdmission) => admit?.(args),
+  });
 }
 describe('Automation control authority', () => {
   it('executes a registered condition in the Session workspace', async () => {
@@ -175,16 +199,19 @@ describe('Automation control authority', () => {
       },
     });
     const fingerprint = providerBindingFingerprint(config);
-    host.ledger.recordCapacity({
-      bindingId: 'binding',
-      fingerprint,
-      observedAt: 90_000,
-      validUntil: 200_000,
-      source: 'query',
-      authentication: 'valid',
-      billing: 'valid',
-      windows: [{ id: 'quota', usedPercent: 100, resetsAt: 100_000 }],
-    });
+    host.ledger.recordCapacity(
+      {
+        bindingId: 'binding',
+        fingerprint,
+        observedAt: 90_000,
+        validUntil: 200_000,
+        source: 'query',
+        authentication: 'valid',
+        billing: 'valid',
+        windows: [{ id: 'quota', usedPercent: 100, resetsAt: 100_000 }],
+      },
+      90_000
+    );
     await host.command({
       type: 'configure',
       sessionId: 'session-a',
@@ -227,6 +254,22 @@ describe('Automation control authority', () => {
     await vi.advanceTimersByTimeAsync(1);
     await refreshed.promise;
     expect(host.ledger.receipt(receipt.id)?.state).not.toBe('settled');
+  });
+  it('clears a finished Auto delivery status when it is dismissed after the merge', async () => {
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      autoDelivery: { state: 'merged', updatedAt: 1 } as Record<string, unknown> | null,
+    };
+    const host = await workspaceFixture(meta);
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: false },
+    });
+    expect(meta.autoDelivery).toBeNull();
   });
   it('enables recovery for the current confirmed failure without replaying a later input', async () => {
     const meta = {
@@ -410,7 +453,76 @@ describe('Automation control authority', () => {
       })
     ).rejects.toThrow('AUTOMATION_REMOTE_AUTH_UNAVAILABLE');
   });
-  it('rechecks Session ownership after verification and admits a proof at most once', async () => {
+  it('lets a teammate who can edit the Session manage its automations remotely as the author', async () => {
+    const host = await workspaceFixture(
+      { id: 'session-a', machineId: 'machine', userId: 'teammate', collaborationStopped: false },
+      undefined,
+      async () => ({ requesterUserId: 'teammate', expiresAt: Date.now() + 60_000 })
+    );
+    host.testEditors.add('teammate');
+    const nonce = host.remoteControlNonce;
+    if (!nonce) throw new Error('missing remote nonce');
+    const responseKey = (await createRpcSecretRecipient()).publicKey;
+    const remote = (operation: RemoteAutomationOperation) =>
+      host.remoteControl({
+        sessionId: 'session-a',
+        requesterUserId: 'teammate',
+        responseKey,
+        operation,
+        proof: { runtimeNonce: nonce, requestId: crypto.randomUUID(), requestToken: 'valid' },
+      });
+    const ownerWait = host.ledger.registerWait(
+      { program: '() => false', intervalMs: 30_000 },
+      'session-a',
+      'user',
+      1
+    );
+    expect(await remote({ type: 'configure', settings: { recoverCapacity: true } })).toMatchObject({
+      type: 'settings',
+      settings: { recoverCapacity: true },
+    });
+    expect(host.ledger.rules().find((rule) => rule.name === 'recover-capacity')).toMatchObject({
+      ownerUserId: 'teammate',
+    });
+    expect(await remote({ type: 'list' })).toMatchObject({
+      waits: [expect.objectContaining({ id: ownerWait.id })],
+    });
+    expect(await remote({ type: 'cancel', id: ownerWait.id })).toEqual({ type: 'cancel' });
+    expect(host.ledger.wait(ownerWait.id)?.state).toBe('cancelled');
+  });
+  it('keeps a workspace member without edit access out of the Session automations', async () => {
+    const host = await workspaceFixture(undefined, undefined, async () => ({
+      requesterUserId: 'reader',
+      expiresAt: Date.now() + 60_000,
+    }));
+    const nonce = host.remoteControlNonce;
+    if (!nonce) throw new Error('missing remote nonce');
+    const responseKey = (await createRpcSecretRecipient()).publicKey;
+    const wait = host.ledger.registerWait(
+      { program: '() => false', intervalMs: 30_000 },
+      'session-a',
+      'user',
+      1
+    );
+    for (const operation of [
+      { type: 'list' },
+      { type: 'configure', settings: { recoverCapacity: true } },
+      { type: 'cancel', id: wait.id },
+    ] satisfies RemoteAutomationOperation[]) {
+      await expect(
+        host.remoteControl({
+          sessionId: 'session-a',
+          requesterUserId: 'reader',
+          responseKey,
+          operation,
+          proof: { runtimeNonce: nonce, requestId: crypto.randomUUID(), requestToken: 'valid' },
+        })
+      ).rejects.toThrow('AUTOMATION_PERMISSION_DENIED');
+    }
+    expect(host.ledger.rules().filter((rule) => rule.name === 'recover-capacity')).toEqual([]);
+    expect(host.ledger.wait(wait.id)?.state).toBe('waiting');
+  });
+  it('rechecks the requester’s edit access after verification and admits a proof at most once', async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const meta = {
@@ -422,12 +534,13 @@ describe('Automation control authority', () => {
     const host = await workspaceFixture(meta, undefined, async () => {
       entered.resolve();
       await release.promise;
-      return { requesterUserId: 'user', expiresAt: Date.now() + 60_000 };
+      return { requesterUserId: 'teammate', expiresAt: Date.now() + 60_000 };
     });
+    host.testEditors.add('teammate');
     if (!host.remoteControlNonce) throw new Error('missing remote nonce');
     const input = {
       sessionId: 'session-a',
-      requesterUserId: 'user',
+      requesterUserId: 'teammate',
       responseKey: (await createRpcSecretRecipient()).publicKey,
       operation: { type: 'configure' as const, settings: { recoverCapacity: true } },
       proof: {
@@ -439,7 +552,7 @@ describe('Automation control authority', () => {
     const first = host.remoteControl(input);
     const duplicate = host.remoteControl(input);
     await entered.promise;
-    meta.userId = 'other';
+    host.testEditors.delete('teammate');
     release.resolve();
     const results = await Promise.allSettled([first, duplicate]);
     expect(results.every((item) => item.status === 'rejected')).toBe(true);
@@ -645,6 +758,179 @@ describe('Automation control authority', () => {
     expect(host.ledger.wait(ready.id)?.state).toBe('cancelled');
     expect(host.ledger.wait(wait.id)?.consecutiveErrors).toBe(0);
   });
+  it('cancels a queued continuation whose authorization is durably revoked', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    };
+    const host = await workspaceFixture(meta);
+    const invocation: AutomationInvocation = {
+      target: { kind: 'existing', sessionId: 'session-a', onUnavailable: 'blocked' },
+      input: { kind: 'external_event', ref: 'event' },
+      ifBusy: 'enqueue',
+    };
+    const draft: AutomationRuleDraft = {
+      id: 'rule',
+      name: 'resume',
+      scope: { workspaceId: 'workspace' },
+      selector: { types: ['test.event'] },
+      enabled: true,
+      handler: { kind: 'agent', invocation },
+      grants: {
+        actions: ['agent.invoke'],
+        sessionIds: ['session-a'],
+        agentRoleIds: [],
+        bindingIds: [],
+        allowLinkedSession: false,
+        allowCapacityAttempt: false,
+      },
+      budget: { maxActionsPerEvent: 10, maxInvocationsPerCorrelation: 2, maxDepth: 4 },
+    };
+    const rule = host.ledger.upsert(draft, 'user', Date.now());
+    host.ledger.publish({
+      id: 'e1',
+      source: 'test',
+      type: 'test.event',
+      version: 1,
+      subject: 'subject',
+      observedAt: Date.now(),
+      scope: { workspaceId: 'workspace', sessionId: 'session-a' },
+      data: {},
+      provenance: 'poll',
+      completeness: 'observed',
+      depth: 0,
+    });
+    const receipt = host.ledger.accept(
+      required(host.ledger.deliveries()[0]),
+      { key: 'step', action: { kind: 'agent.invoke', parameters: invocation } },
+      Date.now()
+    );
+    host.ledger.update(receipt.id, 'accepted', { state: 'queued' }, Date.now());
+    await host.testDocument.pushMessageQueue({
+      task: 'resume',
+      userId: 'user',
+      userTurnId: receipt.turnId,
+      operationId: receipt.id,
+      timestamp: new Date().toISOString(),
+      isEditing: false,
+      editingStartedAt: undefined,
+      project: undefined,
+    });
+    meta.collaborationStopped = true;
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(host.ledger.receipt(receipt.id)).toMatchObject({ state: 'queued' });
+    host.ledger.upsert({ ...draft, enabled: false }, 'user', Date.now(), rule.revision);
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(host.ledger.receipt(receipt.id)).toMatchObject({
+      state: 'cancelled',
+      reason: 'authorization_revoked',
+    });
+    const queue = await (await createSessionBackend(host.testDocument)).getMessageQueue();
+    expect(queue).toHaveLength(0);
+  });
+  it('supersedes a queued continuation whose admission guard went stale', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const host = await workspaceFixture({
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    });
+    const invocation: AutomationInvocation = {
+      target: { kind: 'existing', sessionId: 'session-a', onUnavailable: 'blocked' },
+      input: { kind: 'external_event', ref: 'event' },
+      ifBusy: 'enqueue',
+    };
+    const draft: AutomationRuleDraft = {
+      id: 'rule',
+      name: 'deliver',
+      scope: { workspaceId: 'workspace' },
+      selector: { types: ['test.event'] },
+      enabled: true,
+      handler: { kind: 'agent', invocation },
+      grants: {
+        actions: ['agent.invoke'],
+        sessionIds: ['session-a'],
+        agentRoleIds: [],
+        bindingIds: [],
+        allowLinkedSession: false,
+        allowCapacityAttempt: false,
+      },
+      budget: { maxActionsPerEvent: 10, maxInvocationsPerCorrelation: 2, maxDepth: 4 },
+    };
+    const rule = host.ledger.upsert(draft, 'user', Date.now());
+    host.ledger.publish({
+      id: 'e1',
+      source: 'test',
+      type: 'test.event',
+      version: 1,
+      subject: 'subject',
+      observedAt: Date.now(),
+      scope: { workspaceId: 'workspace', sessionId: 'session-a' },
+      data: {},
+      provenance: 'poll',
+      completeness: 'observed',
+      depth: 0,
+    });
+    const receipt = host.ledger.accept(
+      required(host.ledger.deliveries()[0]),
+      {
+        key: 'step',
+        guard: {
+          kind: 'session.delivery.current',
+          parameters: { sessionId: 'session-a', eventId: 'ev-stale' },
+        },
+        action: { kind: 'agent.invoke', parameters: invocation },
+      },
+      Date.now()
+    );
+    const origin = {
+      invocationId: receipt.id,
+      ruleId: rule.id,
+      ruleRevision: rule.revision,
+      eventRef: receipt.event.id,
+      authorizationUserId: 'user',
+    };
+    host.ledger.update(
+      receipt.id,
+      'accepted',
+      { state: 'queued', prepared: { kind: 'queue', config: { _lodyAutomation: origin } } },
+      Date.now()
+    );
+    await host.testDocument.pushMessageQueue({
+      task: 'deliver',
+      userId: 'user',
+      userTurnId: receipt.turnId,
+      operationId: receipt.id,
+      timestamp: new Date().toISOString(),
+      isEditing: false,
+      editingStartedAt: undefined,
+      project: undefined,
+    });
+    expect(
+      await host.testAdmission({
+        sessionId: 'session-a' as SessionId,
+        turnId: receipt.turnId,
+        userId: 'user',
+        origin,
+      })
+    ).toBe(false);
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(host.ledger.receipt(receipt.id)).toMatchObject({
+      state: 'superseded',
+      reason: 'guard:delivery_step_replaced',
+    });
+    const queue = await (await createSessionBackend(host.testDocument)).getMessageQueue();
+    expect(queue).toHaveLength(0);
+  });
   it('manages an owned Session’s automations from another active Session', async () => {
     const host = await workspaceFixture({
       id: 'session-b',
@@ -678,6 +964,28 @@ describe('Automation control authority', () => {
     await expect(host.command({ type: 'list' }, 'inactive-session')).rejects.toThrow(
       'AUTOMATION_ACTIVE_AUTHOR_REQUIRED'
     );
+  });
+  it('lets an Agent working for a teammate manage automations in a Session the teammate can edit', async () => {
+    const host = await workspaceFixture({
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'teammate',
+      collaborationStopped: false,
+    });
+    host.testEditors.add('teammate');
+    host.testAuthors.set('session-a', 'teammate');
+    const wait = (await host.command(
+      { type: 'register', program: '() => false', intervalMs: 30_000 },
+      'session-a'
+    )) as { id: string };
+    expect(host.ledger.wait(wait.id)?.ownerUserId).toBe('teammate');
+    expect(await host.command({ type: 'list', sessionId: 'session-a' }, 'session-a')).toEqual([
+      expect.objectContaining({ id: wait.id }),
+    ]);
+    host.testEditors.delete('teammate');
+    await expect(
+      host.command({ type: 'list', sessionId: 'session-a' }, 'session-a')
+    ).rejects.toThrow('AUTOMATION_PERMISSION_DENIED');
   });
   it('joins a failed command during shutdown without blocking unrelated resource cleanup', async () => {
     const host = await workspaceFixture();
@@ -714,4 +1022,128 @@ it('registers a condition with implicit Session identity and rejects invalid pro
     )
   ).toMatchObject({ id: host.ledger.waits('user')[0]?.id });
   expect(host.ledger.waits('user')).toHaveLength(1);
+});
+
+describe('Managed runs', () => {
+  const gated = (release: string, exitCode: number) => ({
+    command: process.execPath,
+    args: [
+      '-e',
+      `const fs = require('node:fs'); process.stdout.write('started\\n'); const timer = setInterval(() => { if (fs.existsSync(process.argv[1])) { clearInterval(timer); process.stdout.write('finished\\n'); process.exit(${exitCode}); } }, 10);`,
+      release,
+    ],
+  });
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it('keeps the Session unsettled while the command runs and resumes it with the exit facts', async () => {
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      cliType: 'builtin',
+      agentType: 'synthetic',
+    };
+    const host = await workspaceFixture(meta);
+    const release = path.join(host.testRoot, 'release');
+    const run = (await host.command(
+      { type: 'run', ...gated(release, 3), reason: 'Run the slow suite' },
+      'session-a'
+    )) as { id: string; run: { logPath: string } };
+    expect(await host.command({ type: 'run', ...gated(release, 3) }, 'session-a')).toMatchObject({
+      id: run.id,
+    });
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.run?.pid).toBeTypeOf('number'));
+    expect(host.ledger.wait(run.id)?.state).toMatch(/waiting|checking/);
+    expect(host.ledger.hasSessionWork('session-a')).toBe(true);
+
+    writeFileSync(release, '');
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.state).toBe('matched'));
+    const matched = host.ledger.wait(run.id);
+    expect(matched?.result?.resumeText).toContain('exited with code 3');
+    expect(matched?.result?.resumeText).toContain(run.run.logPath);
+    expect(matched?.result?.payload).toMatchObject({
+      outcome: 'exited',
+      exitCode: 3,
+      signal: null,
+      logPath: run.run.logPath,
+      logTruncated: false,
+      outputTail: 'started\nfinished\n',
+    });
+    expect(readFileSync(run.run.logPath, 'utf8')).toBe('started\nfinished\n');
+    const invocationId = matched?.invocationId;
+    if (!invocationId) throw new Error('missing continuation');
+    await vi.waitFor(() =>
+      expect(host.ledger.receipt(invocationId)?.state).toMatch(/queued|running|settled/)
+    );
+    const queue = await (await createSessionBackend(host.testDocument)).getMessageQueue();
+    expect(queue[0]?.task).toContain('exited with code 3');
+  });
+
+  it('terminates the command on cancel', async () => {
+    const host = await workspaceFixture();
+    const run = (await host.command(
+      { type: 'run', ...gated(path.join(host.testRoot, 'never'), 0) },
+      'session-a'
+    )) as { id: string };
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.run?.pid).toBeTypeOf('number'));
+    const pid = host.ledger.wait(run.id)?.run?.pid ?? 0;
+    expect(alive(pid)).toBe(true);
+    await host.command({ type: 'cancel', id: run.id }, 'session-a');
+    expect(host.ledger.wait(run.id)?.state).toBe('cancelled');
+    expect(alive(pid)).toBe(false);
+    expect(host.ledger.hasSessionWork('session-a')).toBe(false);
+  });
+
+  it('reports a run whose owner stopped as interrupted and never starts it again', async () => {
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    };
+    const host = await workspaceFixture(meta);
+    const run = (await host.command(
+      { type: 'run', ...gated(path.join(host.testRoot, 'never'), 0) },
+      'session-a'
+    )) as { id: string; run: { logPath: string } };
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.run?.pid).toBeTypeOf('number'));
+    await vi.waitFor(() => expect(readFileSync(run.run.logPath, 'utf8')).toBe('started\n'));
+    const pid = host.ledger.wait(run.id)?.run?.pid ?? 0;
+    await host.dispose();
+    owners.splice(owners.indexOf(host), 1);
+    expect(alive(pid)).toBe(false);
+
+    const restarted = await workspaceFixture(meta, host.testRoot);
+    await restarted.wake();
+    await vi.waitFor(() => expect(restarted.ledger.wait(run.id)?.state).toBe('matched'));
+    const matched = restarted.ledger.wait(run.id);
+    expect(matched?.result?.resumeText).toContain('Lody did not run it again');
+    expect(matched?.result?.payload).toMatchObject({ outcome: 'interrupted' });
+    expect(readFileSync(run.run.logPath, 'utf8')).toBe('started\n');
+  });
+
+  it('reports a command that cannot start and rejects a working directory outside the Session', async () => {
+    const host = await workspaceFixture();
+    await expect(
+      host.command({ type: 'run', command: process.execPath, cwd: '..' }, 'session-a')
+    ).rejects.toThrow('AUTOMATION_EXEC_INVALID_CWD');
+    const run = (await host.command(
+      { type: 'run', command: path.join(host.testRoot, 'missing-binary') },
+      'session-a'
+    )) as { id: string };
+    await vi.waitFor(() => expect(host.ledger.wait(run.id)?.state).toBe('matched'));
+    expect(host.ledger.wait(run.id)?.result?.payload).toMatchObject({
+      outcome: 'spawn_failed',
+      exitCode: null,
+    });
+    expect(host.ledger.wait(run.id)?.result?.resumeText).toContain('could not start');
+  });
 });

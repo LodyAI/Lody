@@ -1,15 +1,15 @@
+import { previewVisualCommentDocSchema } from '@lody/shared/preview-comment-schema';
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import type {
   CodeCollabOpenDiffManifestRequest,
   CodeCollabOpenDiffManifestResponse,
   CodeCollabReadBlobRequest,
-  CodeCollabReadBlobResponse,
-} from '@lody/shared';
+  CodeCollabReadBlobResponse} from '@lody/shared';
 import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
   MemoryProviderRequest,
   MemoryProviderResponse,
-  ProjectProbeLocalMemberResult,
-} from '@lody/shared';
+  ProjectProbeLocalMemberResult} from '@lody/shared';
 import type { PendingSessionSends } from '../lib/session-pending-sends';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -62,8 +62,6 @@ import type {
   PreviewTargetApproval,
   WorkspaceId,
   LocalProjectId,
-  previewVisualCommentDocSchema,
-  sessionDocSchema,
   CodeCollabV2Error,
   CodeCollabV2FileIndexRequest,
   CodeCollabV2FileIndexSnapshot,
@@ -83,8 +81,7 @@ import type {
   CodeCollabV2SaveTextRequest,
   CodeCollabV2SaveTextResponse,
   FilePreviewV3Request,
-  FilePreviewV3Response,
-} from '@lody/shared';
+  FilePreviewV3Response} from '@lody/shared';
 import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
 import type { CodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
@@ -162,6 +159,9 @@ export type SessionSyncInspection = {
    * applies are flowing; `timeout` means local changes stayed unsent.
    */
   readonly pendingUploadProbe: string | null;
+  readonly leaseCount: number;
+  readonly joinInFlight: boolean;
+  readonly roomSubPresent: boolean;
 };
 
 export type PreviewVisualCommentDocUpdater =
@@ -211,6 +211,8 @@ export type WorkspaceRuntime = {
     options?: { create?: boolean }
   ) => Promise<T>;
   acquireScheduleStore: (scheduleId: string) => Promise<ScheduleDocStore>;
+  /** Today outline pages and member date indexes (specs/today-outline.md). */
+  todayPages: import('../providers/today-page-store-cache').TodayPageStoreCache;
   releaseScheduleStoreRef: (scheduleId: string) => void;
   /**
    * The workspace id used for IndexedDB/WebSocket connections.
@@ -226,6 +228,11 @@ export type WorkspaceRuntime = {
     subscribe(listener: () => void): () => void;
   };
   readonly attachmentToken?: () => Promise<string>;
+  readonly cloudStreamsEnabled?: boolean;
+  readonly getWorkspaceStreamsGrant?: (options?: {
+    forceRefresh?: boolean;
+    signal?: AbortSignal;
+  }) => Promise<{ token: string; gatewayBaseUrl: string }>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
@@ -586,7 +593,7 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     sessionId: SessionId,
     requestedByUserId: string,
-    options?: { reason?: string; timeoutMs?: number }
+    options?: { reason?: string; stopProcess?: boolean; timeoutMs?: number }
   ) => Promise<SessionPreviewRevokeResponse | null>;
   requestLocalProjectGitState: (
     machineId: MachineId,
@@ -650,6 +657,17 @@ export type WorkspaceRuntime = {
             import('@lody/shared').LocalMachineRpcRequest,
             { method: 'sorbet/providers-delete' }
           >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/providers-refresh' }
+          >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<import('@lody/shared').LocalMachineRpcRequest, { method: 'sorbet/models-list' }>,
           'method' | 'params'
         >
   ) => Promise<import('@lody/shared/local-machine-rpc').SorbetProvidersResult>;

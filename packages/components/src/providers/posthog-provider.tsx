@@ -4,8 +4,7 @@ import { isElectronRenderer } from '@/lib/electron';
 import { isNativeAppShell, isIOSRuntimeEnvironment } from '@/lib/native-platform';
 import { readNativeAppInfo } from '@/lib/native-app-info';
 import { useEffect, type ReactNode } from 'react';
-import posthog from 'posthog-js';
-import { PostHogProvider, usePostHog } from '@posthog/react';
+import { PostHogContext, usePostHog } from '@/lib/posthog-context';
 import { useAtomValue } from 'jotai';
 import { userAtom } from '@/atoms';
 import {
@@ -26,12 +25,12 @@ function getPostHogClient(enabled: boolean) {
   }
 
   if (!enabled) {
-    return posthog;
+    return deferredPostHog;
   }
 
   const postHogKey = import.meta.env.VITE_PUBLIC_POSTHOG_KEY;
   if (!postHogKey || !POSTHOG_HOST) {
-    return posthog;
+    return deferredPostHog;
   }
   scheduleDeferredPostHogInitialization(postHogKey, POSTHOG_OPTIONS);
 
@@ -42,7 +41,7 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
   const enabled = usePlatformCapability('telemetry');
   const client = getPostHogClient(enabled);
   return (
-    <PostHogProvider client={client}>
+    <PostHogContext.Provider value={{ client }}>
       {enabled && <IrohDailyReporting />}
       {enabled && <PostHogIdentitySync />}
       {enabled && <PostHogInitialPageView />}
@@ -50,7 +49,7 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
         <ReferralLandingAnalytics />
       )}
       {children}
-    </PostHogProvider>
+    </PostHogContext.Provider>
   );
 }
 
@@ -109,10 +108,12 @@ function IrohDailyReporting() {
       },
       random: () => crypto.randomUUID(),
       online: () => navigator.onLine,
-      // Use the initialized SDK, rather than its evictable deferred queue. Undefined
-      // means disabled/not initialized, so retain the counters for a later check.
+      // Use the real client through the deferred proxy: `capture` returns
+      // undefined until the SDK resolves, so `enqueue` stays falsy and
+      // `state.pending` is retained for the next check instead of being
+      // committed into the evictable deferred queue.
       enqueue: (properties, uuid) =>
-        active && !!capturePostHogEvent(posthog, 'e2ee/iroh_daily', properties, { uuid }),
+        active && !!capturePostHogEvent(deferredPostHog, 'e2ee/iroh_daily', properties, { uuid }),
       platform: isElectronRenderer() ? 'desktop' : isIOSRuntimeEnvironment() ? 'ios' : 'android',
       version: () =>
         readNativeAppInfo().app_version ??

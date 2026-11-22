@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { runCommand } from '../src/node/process';
 import { signalChildTreeNowLegacy } from '../src/node/process';
 import { spawnProcess as acquireProcess, type SpawnSpec } from '../src/node/process';
-import { processLayer, isPidAliveSyncLegacy } from '../src/node/process';
+import { processLayer, isPidAliveSyncLegacy, terminatePidLegacy } from '../src/node/process';
 import { resolveWindowsCommand } from '../src/node/process';
 import { FakeProcessTable } from '../src/node/process-testing';
 
@@ -24,6 +24,27 @@ const agentSpec: SpawnSpec = {
 
 const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
+
+describe('owner-confirmed pid termination', () => {
+  // The installer ends a Host the owner agreed to stop; it must reach exactly that
+  // process and never init, its own process group or every process (pid <= 1).
+  it('signals only the named process and refuses pids that address groups or init', async () => {
+    const table = new FakeProcessTable();
+    const host = table.api.spawn('host', [], {}).pid ?? -1;
+    const sibling = table.api.spawn('sibling', [], {}).pid ?? -1;
+    await terminatePidLegacy(host, GRACEFUL, { nodeProcess: table.api });
+    expect(table.isAlive(host)).toBe(false);
+    expect(table.isAlive(sibling)).toBe(true);
+    expect(table.delivered).toEqual([{ target: host, signal: 'SIGTERM' }]);
+    for (const pid of [1, 0, -1, -sibling]) {
+      await expect(terminatePidLegacy(pid, FORCED, { nodeProcess: table.api })).rejects.toThrow(
+        /Refusing/
+      );
+    }
+    expect(table.delivered).toHaveLength(1);
+    expect(table.isAlive(sibling)).toBe(true);
+  });
+});
 
 describe('process tree termination (Windows)', () => {
   // Windows reuses pids quickly; an exit handler must not taskkill whatever

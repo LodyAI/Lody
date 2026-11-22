@@ -27,7 +27,7 @@ encrypted starts that run only signed input; the default ceiling had no room for
 ## Dispatch
 
 - Metadata reconciliation keeps four global slots and fills each free slot without waiting for siblings.
-- Queue promotion preserves frozen fields; remove only after history+activation succeed.
+- [Queue promotion](README.md#queue-promotion) preserves frozen fields; remove only after history+activation succeed.
 - Queue dispatch uses the same normalized input config as history dispatch. JavaScript-only
   undefined fields must not make an unchanged encrypted original fail equality.
 - Encrypted promotion marks the row `queuedInput` and copies the queue item's signed
@@ -73,7 +73,7 @@ encrypted starts that run only signed input; the default ceiling had no room for
 - Turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
 - Never steer after cancellation or infer delivery from it. Stop uses
-  preserve/discard and cancels pre-Stop queued eligibility; Edit & Resend uses preserve/keep,
+  preserve/discard; paused drafts require explicit resends; Edit & Resend uses preserve/keep,
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Encrypted recovery preserves terminal

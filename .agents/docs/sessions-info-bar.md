@@ -43,6 +43,9 @@ additions/deletions remain the visible summary for text-only and mixed compariso
 zero-line comparisons show the localized file count. Older daemons without `files`
 retain their positive-line-count behavior. Counts come from the complete comparison,
 not the bounded shared index; per-turn edited-file cards keep their independent scope.
+After a live Changes list completes, its totals supply the bar's workspace summary.
+If that list has unknown line counts, the bar shows its file count. Initial rendering
+uses durable session statistics. Project Member selection retains its Member scope.
 
 Scheduled-message drafts must not add an info-bar item. Their state is the
 composer's secondary action beside Send; the bar only carries machine, status,
@@ -131,13 +134,15 @@ labelClassName`) so the stage diffstat never clips. Wired from
   the PR marker opens the PR tab, branch copies the current branch, and ±diff
   opens the existing fixed All Changes side-panel tab; file-row and comment-reference
   actions may still create a diff viewer because they carry a precise file/comment focus.
-  A conversation can create several PRs over its life. Associations are
-  append-only (the reconciler only reorders `pullRequests` so the current PR is
-  last), and `resolveSessionPullRequestHistory` lists every PR in the scope the
-  stage describes, the primary PR first and older ones newest first. With more
-  than one, the PR marker keeps showing the primary PR, gains a chevron, and
-  opens that list instead: the current row opens the PR tab as before, while an
-  older row opens on GitHub because the PR tab is bound to the current PR.
+  A conversation can hold several PRs, including ones in other repositories and
+  ones its agent created on another branch. When the Session's links are manageable,
+  the PR marker keeps showing the primary PR and opens the linked-PR list
+  (`resolveSessionPullRequestLinkList`): the primary first, other associations newest
+  first, then links GitHub has not confirmed with their reason. The primary row opens
+  the PR tab; other rows open on GitHub because the PR tab is bound to the primary PR.
+  Each row's menu opens it on GitHub, copies its link, or unlinks it; the renderer
+  writes only unlink `prLink:*` records. Links come from the `gh` shim and agents,
+  not from a UI entry ([decision](../notes/implemented/feature/2026-11-21-session-explicit-pr-links.md)).
   The context stage is also the single owner of agent-driven GitHub/worktree actions:
   a changed GitHub-capable workspace without a PR shows `Create PR` + `Commit & Push`,
   including a direct Local Project with a resolved GitHub repository. For an open

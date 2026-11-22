@@ -75,6 +75,7 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
         </DialogBackdrop>
         <BaseAlertDialog.Popup
           ref={panelRef}
+          data-text-selectable=""
           {...rest}
           style={mergePanelLayout(style, { width, centre })}
           className={(state) =>

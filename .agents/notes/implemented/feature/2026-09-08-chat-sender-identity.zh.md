@@ -14,10 +14,13 @@ Translation: current
 
 ## 决策
 
-生产环境的会话界面只在当前工作区拥有多个成员时才启用这两项身份能力。用户消息行除了需要从每条
-历史条目的 `userId` 解析出发送者之外，还必须通过这一显式闸门。只有在解析提供了名称时才渲染名称；
-单人工作区与未解析的条目保留原有的头像与时间戳行为，而不是凭空编造身份。元数据行保持既有的反向
-布局，因此把名称放在首位会使它成为紧邻头像的最右元素，并把时间戳置于其左侧。
+生产环境的会话界面与只读的 `SessionHistoryReader` 只在当前工作区拥有多个成员时才启用这两项
+身份能力。`PendingMessageRow`（附件准备与本地发送确认阶段）与 `UserMessageRowView` 共用同一
+显式闸门、`conversationSurface` 行布局，以及 `useWorkspaceSenderProfile`（优先使用实时
+`auth:getUserById`，并由同账户／工作区成员目录与当前用户身份兜底）。只有在解析提供了名称
+（账户未设置名称时回退至邮箱）时才渲染名称；单人工作区与未解析的条目保留原有的头像与时间戳
+行为，而不是凭空编造身份。元数据行保持既有的反向布局，因此把名称放在首位会使它成为紧邻头像
+的最右元素，并把时间戳置于其左侧。
 
 在桌面端，拥有已解析名称或邮箱的发送者会在头像外获得一个真正的按钮。其浮层向左展开，展示放大的
 既有头像、发送者名称，以及可用时的邮箱。触发器支持键盘聚焦与激活。移动端刻意继续渲染普通头像，
@@ -25,8 +28,8 @@ Translation: current
 
 ## 证据与限制
 
-`user-message-sender-identity.test.tsx` 验证了多成员下的元数据顺序、点击打开的名称/邮箱卡片，
-以及闸门关闭时两项能力都不出现。`SessionConversationPage.stories.tsx` 新增了一个含两位具名发送者
-的合成会话，以及第二个 story，其 play 函数会打开 Maya Chen 的卡片。组件包类型检查通过，两个
-story 都在 Chromium 的 1400 x 900 视口下渲染过。fixture 使用头像首字母，因此图片加载不在本次验证
-范围内；卡片把真实图片委托给既有的 `UserAvatar` 路径。
+`user-message-sender-identity.test.tsx` 与 `session-pending-message-row.test.tsx`
+验证了多成员下的元数据顺序、邮箱回退、跨重挂载与冷重载的目录／资料保留、待发送至
+历史消息的连续交接、点击打开的名称／邮箱卡片，以及闸门关闭时两项能力都不出现。
+`SessionConversationPage.stories.tsx` 包含两位具名发送者的合成会话，以及打开 Maya Chen
+卡片的交互 story。fixture 使用头像首字母，真实图片加载由[头像连续性决策](../bug-fix/2026-10-20-message-avatar-switch-continuity.md)单独覆盖。

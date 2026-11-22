@@ -21,6 +21,27 @@ and durable state/cursor retention. This [P10 preparation](../notes/implemented/
 does not supply historical-author authorization, a production signer, host snapshot
 admission or client recovery from an unusable remote snapshot.
 
+## Cloud room recovery
+
+The dual-plane renderer enumerates every `cloud` binding, including rooms whose
+readiness comes from cloud. `cloud-room-recovery.ts` selects room-local repairs
+when errors exist: even an SDK reconnect with `resetBackoff: false` revives every
+failed adapter session, bypassing a backed-off room's deadline. Each continuously
+errored `kind:id` waits 30s, 60s, 120s, 240s, then at most five minutes between
+attempts. Leaving error or losing the room clears its record. Disconnected and
+newly failing rooms remain eligible independently; untouched sweep leftovers
+retain eligibility. Batch width and total sweep time stay bounded.
+
+The existing Effect-based reconnect loop waits until the earliest room deadline
+when all problem rooms are backing off. Status updates can shorten that wait for
+a new problem; visibility, online and token edges force immediate recovery while
+preserving retry history. Periodic reconnects in both cloud-only and dual-plane
+runtimes pass `resetBackoff: false`. The workspace runtime retains raw SDK rejoin
+promises after waiter timeouts and joins them before Repo destruction. This fix
+keeps the published Promise Repo boundary described in the
+[Effect selection guide](cli-effect-ts.md#small-migrations-during-feature-and-fix-work);
+it changes retry selection rather than migrating the Repo owner.
+
 ## Encrypted-workspace feature availability
 
 `workspaceSupports` owns ordinary-channel capability verdicts. UI reads the existing admission-mode
@@ -397,6 +418,36 @@ the field and page colors, which keeps a dark theme's raised fill and lifts a li
 theme's field onto the page. Keeping gray exclusively for `disabled:bg-muted` is what
 makes disabled state legible at all.
 
+## Text selection
+
+Every host (Electron, browser and the native mobile shells) renders text as
+unselectable by default, so dragging or double-clicking across navigation,
+toolbars, menus, tabs and titles never paints a highlight. The base rule in
+`src/tailwind/index.css` re-enables selection inside text fields, editable
+`contenteditable` regions and any subtree marked `data-text-selectable`.
+Buttons and `[role='button']` elements inside a marked subtree stay
+unselectable so a drag across prose does not pick up control labels.
+
+The marker belongs on the container whose text a reader copies. Current owners:
+conversation message bodies and attachments (`ai-gui/view.tsx`, including notice
+detail), every `MarkdownRenderer` (so PR descriptions, review comments, skills
+and changelogs inherit it), `@lody/ui` Dialog and AlertDialog panels (and so the
+desktop Settings modal), the Pierre diff host, file viewers (Shiki source, paged
+text, rendered Markdown, DOCX, document capture), `StatusPage` descriptions and
+code blocks, and the Usage and Billing settings views. Session and page titles,
+the sidebar, chips and popovers are deliberately not marked.
+
+A `select-text` utility or StyleX `userSelect: 'text'` only reaches the element
+it is on: its descendants still match the base rule, so use the attribute for
+any subtree. Spreadsheet viewers (CSV, XLSX) keep their own cell selection and
+copy, and toasts stay unmarked because their swipe-to-dismiss gesture competes
+with a text drag. Monaco, xterm and the PDF.js text layer manage selection
+themselves. The Pierre diff renders in a shadow root that the base selector
+cannot reach, so its content follows the marked host.
+
+On native mobile shells, the same marked subtrees also restore the long-press
+callout, except on links ([iOS link preview note](../notes/implemented/bug-fix/2026-10-14-ios-link-preview-sticky-open.md)).
+
 ## Emoji picker dataset
 
 `frimousse` fetches its dataset from a public CDN by default, which leaves the picker
@@ -454,6 +505,7 @@ Foreground workspace runtimes default to HTTP. An explicit
 opts in only with `true` or `1`. Durable and ephemeral transports then forward
 `webSocket: { enabled: true, url: streamsBaseUrl, authPoolKey: workspaceId }`.
 Presence retains its sharded HTTP URL for fallback. Disposable eager-sync workers
-receive no WS option. Structural option spreads compile with the pinned SDKs;
-WS activation additionally requires released SDKs that implement URL override and
-Repo forwarding. Physical connection reuse is not proven by HTTP compatibility tests.
+receive no WS option. The pinned `loro-repo` 0.26.0, `@loro-dev/streams-crdt` 0.22.1,
+and `@loro-dev/streams-client` 0.14.0 packages implement URL override and Repo
+forwarding while keeping WS default off. Physical connection reuse is not proven by
+HTTP compatibility tests.

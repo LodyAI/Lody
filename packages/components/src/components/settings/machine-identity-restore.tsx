@@ -34,7 +34,7 @@ export function MachineIdentityRestore({
       <CompactRow
         inset={false}
         label={t('settings.identityRestore.title', 'Restore old machine identity')}
-        helper={t(
+        info={t(
           'settings.identityRestore.help',
           'Reconnect this daemon to its old conversations after losing local configuration. Deleted files and agent state are not restored.'
         )}

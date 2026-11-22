@@ -43,6 +43,18 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
 - The Changes sidebar's Types view keeps the filename prominent and shows its
   parent workspace path beneath it, so similarly named files remain identifiable
   without relying on a hover-only title.
+  Opening the desktop list or mobile files-level changes sheet requests the complete
+  Branch manifest through the existing paged transport. This also applies to visible
+  split panels and reopening a list. Loading and failed/incomplete comparisons remain
+  explicit; the bounded file index only seeds the provider. File bodies stay deferred
+  until opened. The existing supported-file limit bounds manifest collection, and
+  older daemons retain their inline transport, whose `truncated` flag describes
+  deferred file bodies while its file list remains complete.
+  The legacy client combines the main and additional roots into one displayed
+  path set. Non-Git additional roots are omitted from the uncommitted scope.
+  A completed list supplies its text totals and file count to the composer. Unknown
+  line counts show a file count there. Shared session metadata retains its existing
+  publication path.
   Mobile change-stat presses open this same Types/Files list in
   `SessionMobileDiffDrawer`; selecting a canonical path enters the All Changes diff
   with the full path set and a fresh focus request. First-level browsing does not
@@ -221,14 +233,15 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
 - Markdown file viewers copy the latest complete source text (including unsaved
   editor changes) from the top toolbar. On mobile, source mode uses the native
   text surface instead of Monaco so long-press keeps the OS selection menu;
-  rendered Markdown must opt into native selection through
-  `data-native-selection-allow`.
+  rendered Markdown is selectable through `MarkdownRenderer`'s
+  `data-text-selectable` marker.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
   turn diff RPC: `packages/shared/src/code-collab.ts`.
 - Content-addressed diff transport is capability-gated by `codeCollabDiffBlobs` v1: paged manifests
   identify immutable Git/store/disk bytes and leave All Changes bodies deferred
   until visible. Reads assemble raw byte ranges, verify the full hash, then decode.
-  Remote large files start with bounded partial patches; Pierre's expand action
+  Whole-list manifests omit patches. Opening a large remote file requests its
+  single-file manifest and bounded partial patch; Pierre's expand action
   hydrates full files through the same verified cache. Ordinary remote blobs use
   bounded IndexedDB; protected/local blobs stay in memory. Opaque file generations
   invalidate individual entries even if line counts stay equal; comparison-base

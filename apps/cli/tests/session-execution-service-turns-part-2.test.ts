@@ -1,3 +1,4 @@
+import { nativeSessionCredentials } from '@/session/session-credentials';
 import { createSessionBackend } from '@/session/session-backend';
 import { RequestError, type ContentBlock } from '@agentclientprotocol/sdk';
 import {
@@ -1980,6 +1981,7 @@ describe('SessionExecutionService initialization deadline', () => {
                 agentClient,
                 terminalManager: {} as unknown,
                 getWorkdir: () => '/tmp',
+                getGitHubCredentials: () => nativeSessionCredentials,
                 getHostWorkdir: () => '/tmp',
                 getParentSessionId: () => undefined,
                 exec: vi.fn(async () => ''),
@@ -3105,6 +3107,66 @@ describe('Operation Inbox execution boundary', () => {
       } finally {
         db.close();
       }
+      expect(received).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it('continues a Turn a process end interrupted on this Machine once with `continue`, never replaying it', async () => {
+    const received: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      received.push(blocks);
+      return { stopReason: 'end_turn' };
+    });
+    const repo = f.deps.workspaceDocument.repo as unknown as {
+      upsertDocMeta: (id: string, patch: Partial<SessionMeta>) => Promise<void>;
+    };
+    try {
+      const old = {
+        workspaceId: 'workspace-1',
+        sessionId: f.message.sessionId,
+        userId: 'user-1',
+        inputId: f.message.userTurnId,
+        kind: 'task' as const,
+        config: f.message.acpSessionConfig,
+      };
+      expect(f.store.inbox.accept(old)).toBe(true);
+      expect(f.store.inbox.begin(old, 'assistant:human-input')).toBe(true);
+      // The interrupted run left its dispatch claim in metadata and its entry open.
+      await repo.upsertDocMeta('', {
+        latestUserMsgId: 'human-input',
+        processingUserMsgId: 'human-input',
+      });
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: 'assistant:human-input',
+          role: 'assistant',
+          userTurnId: 'human-input',
+          timestamp: '2026-10-12T00:00:01Z',
+          items: [{ type: 'text', text: 'partial answer' }],
+          fileDiff: [],
+        },
+      });
+      f.store.inbox.activate('workspace-1', 'owner');
+      await f.service.continueSession(f.message);
+      const backend = await createSessionBackend(f.doc);
+      // Settled like Stop, not as a send-again failure.
+      expect((await backend.readTurn('human-input')).turn).toMatchObject({ status: 'canceled' });
+      expect((await backend.readTurn('assistant:human-input')).turn).toMatchObject({
+        finished: true,
+      });
+      expect((await backend.readTurn('lody-continue-human-input')).turn).toMatchObject({
+        role: 'user',
+        author: { v: 1, kind: 'system' },
+        items: [{ type: 'text', text: 'continue' }],
+      });
+      // A second dispatch of the stale input adds no further continuation.
+      await repo.upsertDocMeta('', { processingUserMsgId: 'human-input' });
+      await f.service.continueSession(f.message);
+      const history = await backend.readHistory();
+      expect(history.filter((turn) => turn.id.startsWith('lody-continue-'))).toHaveLength(1);
       expect(received).toEqual([]);
     } finally {
       await f.close();

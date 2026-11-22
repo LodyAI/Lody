@@ -3,6 +3,7 @@ import * as stylex from '@stylexjs/stylex';
 import { Accordion } from '@lody/ui/accordion';
 import { Alert } from '@lody/ui/alert';
 import { Avatar } from '@lody/ui/avatar';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { Button } from '@lody/ui/button';
 import { Collapsible } from '@lody/ui/collapsible';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
@@ -40,6 +41,7 @@ import {
   E2eeConsoleSection,
   type E2eeConsoleTab,
 } from '@/components/pages/e2ee-console-section';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
@@ -482,7 +484,7 @@ function FailurePanel(props: {
     const text = props.diagnostics();
     setReport(text);
     try {
-      await navigator.clipboard.writeText(text);
+      await copyTextToClipboard(text);
       setCopied('copied');
     } catch {
       // Clipboard access can be denied; the report stays selectable below.
@@ -680,9 +682,7 @@ function MembersSection(props: {
               {...stylex.props(styles.memberRow)}
             >
               <Avatar.Root size="medium">
-                {profile?.image != null && profile.image !== '' ? (
-                  <Avatar.Image src={profile.image} alt="" />
-                ) : null}
+                <CachedAvatarImage src={profile?.image} alt="" />
                 <Avatar.Fallback>
                   {profile ? name.slice(0, 1).toUpperCase() : (member.ordinal ?? '?')}
                 </Avatar.Fallback>

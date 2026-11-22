@@ -454,7 +454,7 @@ export function DocumentSelectionSurface({
           <div
             ref={viewport}
             {...stylex.props(styles.viewport)}
-            data-native-selection-allow
+            data-text-selectable
             onPointerUp={(event) => {
               if (
                 event.target instanceof Node &&

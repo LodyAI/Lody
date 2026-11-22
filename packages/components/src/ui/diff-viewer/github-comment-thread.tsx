@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Avatar } from '@lody/ui/avatar';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
@@ -274,7 +275,7 @@ export function GitHubCommentItem({ comment }: GitHubCommentItemProps) {
   return (
     <div {...stylex.props(stylex.defaultMarker(), styles.comment)}>
       <Avatar.Root size="small" {...stylex.props(styles.commentAvatar)}>
-        {avatarUrl && <Avatar.Image src={avatarUrl} alt={login} />}
+        <CachedAvatarImage src={avatarUrl} alt={login} />
         <Avatar.Fallback>{login.slice(0, 2).toUpperCase()}</Avatar.Fallback>
       </Avatar.Root>
       <div {...stylex.props(styles.commentBody)}>

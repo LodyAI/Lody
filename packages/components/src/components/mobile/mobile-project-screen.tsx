@@ -1,3 +1,6 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -22,7 +25,6 @@ import { FaRegFileCode } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
 import type { SessionPullRequestCiState, SessionPullRequestReadiness } from '@lody/shared';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { cn } from '@/lib/utils';
 import { useLongPress } from '@/hooks/use-long-press';
 import { Checkbox } from '@lody/ui/checkbox';
@@ -35,6 +37,7 @@ import {
   type SessionRowOpenedByTreeSlot,
 } from '@/components/sidebar-row-shared';
 import { MobileEdgeBackSwipeZone } from './mobile-edge-back-swipe';
+import { useMobileBackRevealClass, useMobileDrillExit } from './mobile-drill-page-layout';
 import { MobileFilterPillBar, type FilterPill } from './mobile-filter-pill-bar';
 import {
   MobileChatList,
@@ -129,6 +132,18 @@ export type MobileConversationItem = {
   isOffline?: boolean;
   hasUnreadMessages?: boolean;
   isPinned?: boolean;
+  /** Pin section and manual order of a pinned conversation (see specs/pinned-session-sections.md). */
+  pinSectionId?: string | null;
+  orderKey?: string | null;
+  /** The conversation's own message and read times; the Status view derives unread from them. */
+  lastMessageAt?: number | null;
+  lastReadAt?: number | null;
+  /** Status view state (specs/sidebar-status-view.md). */
+  snoozedUntil?: number | null;
+  settledAt?: number | null;
+  focusRestoredAt?: number | null;
+  /** Later rows: how long until the conversation returns to Focus (`3h`). */
+  snoozeCountdown?: string | null;
   readOnly?: boolean;
   /** Machine id the conversation lives on. Powers the machine filter. */
   machineId?: string | null;
@@ -606,6 +621,11 @@ export function ConversationRow({
           />
         ) : null}
       </div>
+      {conversation.snoozeCountdown ? (
+        <span data-snooze-countdown="" {...stylex.props(rowStyles.countdown)}>
+          {conversation.snoozeCountdown}
+        </span>
+      ) : null}
       {showMergeablePill ? (
         <SessionMergeablePill />
       ) : hasChanges && !isMergeable ? (
@@ -758,24 +778,27 @@ export function MobileProjectScreen({
     return false;
   }, [filterPills]);
 
-  /* If we're being mounted because the user just *backed out of* a
-     session-detail page, the chat already played its slide-off to the
-     right — replaying our forward push-enter on top of that would look
-     like an iOS push on a pop. `useState` initializer + flag consume
-     keeps the value stable across re-renders and self-clears so a real
-     forward navigation to this page still gets its enter slide. */
-  const [skipEnterAnimation] = useState(() => consumeMobileBackNavigation());
+  /* Mounted as the destination of a Back (e.g. leaving Settings opened from
+     this project): skip the forward push and play the parallax reveal. */
+  const backRevealClass = useMobileBackRevealClass();
+
+  /* Leaving the project pops it like every other drill page: the page
+     slides off to the right over home instead of unmounting and letting
+     home pop into view. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const animatedBack = useMobileDrillExit(rootRef, onBack) ?? onBack;
 
   return (
-    <div className="mobile-home-app safe-areas relative h-full min-h-0 w-full overflow-hidden text-foreground">
+    <div
+      ref={rootRef}
+      className="mobile-home-app safe-areas relative h-full min-h-0 w-full overflow-hidden text-foreground"
+    >
       {/* iOS-style push enter: slide in from the right on mount, unless
-         we're a back-navigation destination (see `skipEnterAnimation`
-         above). The back navigation has no exit animation — see
-         `mobile-settings-layout.tsx` for the rationale (the brief
-         frame between exit-animation end and route unmount flashes the
-         html bg). */}
+         we're a back-navigation destination (see `backRevealClass`
+         above). Back slides this panel off via `animatedBack`. */}
       <motion.div
-        initial={skipEnterAnimation ? false : { x: '100%' }}
+        data-mobile-drill-panel=""
+        initial={backRevealClass ? false : { x: '100%' }}
         animate={{ x: 0 }}
         transition={PROJECT_TRANSITION}
         /* Column flex: header + (search) + (pills) all sit ABOVE the
@@ -784,17 +807,24 @@ export function MobileProjectScreen({
            conversation list, not running through the header + pills.
            See the user-reported bug "scrollbar should be above the
            pills". */
-        className="mobile-home-shell relative flex h-full w-full flex-col bg-background"
+        className={cn(
+          'mobile-home-shell relative flex h-full w-full flex-col bg-background',
+          backRevealClass
+        )}
       >
         {filesTabNested ? null : (
-          <MobileEdgeBackSwipeZone isNativeApp={isNativeAppShell()} onBack={onBack} zIndex={20} />
+          <MobileEdgeBackSwipeZone
+            isNativeApp={isNativeAppShell()}
+            onBack={animatedBack}
+            zIndex={20}
+          />
         )}
         {selectedProjectTab === 'chat' ? (
           <ProjectChatTopBar
             project={project}
             displayName={displayName}
             labels={labels}
-            onBack={onBack}
+            onBack={animatedBack}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             showArchived={showArchived}
@@ -811,7 +841,7 @@ export function MobileProjectScreen({
             onBack={
               selectedProjectTab === 'files' && (fileNavSegments?.length ?? 0) > 0 && onFileNavBack
                 ? onFileNavBack
-                : onBack
+                : animatedBack
             }
           />
         )}
@@ -1259,3 +1289,13 @@ function ProjectEmptyState({ label }: { label: string }) {
     </div>
   );
 }
+
+const rowStyles = stylex.create({
+  countdown: {
+    flexShrink: 0,
+    fontSize: textScale.captionSize,
+    lineHeight: 1,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+});

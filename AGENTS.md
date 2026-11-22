@@ -85,7 +85,7 @@ when migration facts change.
   shared product code uses `packages/platform` capabilities and ports.
 - Native mobile clients keep independent builds and public cloud protocol clients;
   they must not import private backend code.
-- The OSS desktop is local-only; authenticated product-cloud requests are forbidden.
+- Default desktop builds are local-only; product-cloud requests require explicit cloud composition.
   Public managed-runtime downloads are the exception. Shared packages stay
   platform-neutral; local telemetry is hard-disabled.
 - `packages/acp-extension-kimi` and `packages/acp-extension-pi` stay outside the root
@@ -138,7 +138,8 @@ when migration facts change.
   receipts, MCP descriptions and replies, skills, examples) carries the user's request
   and facts the agent cannot discover. Never add workflow steps or review, verify,
   re-check or commit instructions, or their negations, that the user did not ask for:
-  each delivery would steer or repeat agent work.
+  each delivery would steer or repeat agent work. Standing guidance the product owner
+  explicitly approves is the only exception, recorded in a note, one sentence per surface.
 
 ## Code Review Rules
 

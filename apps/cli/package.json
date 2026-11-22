@@ -1,6 +1,6 @@
 {
   "name": "lody",
-  "version": "0.104.0",
+  "version": "0.113.1",
   "description": "Lody Agent CLI tool for managing remote command execution",
   "type": "module",
   "main": "dist/index.js",
@@ -12,7 +12,7 @@
     "dev:build": "node scripts/dev-build.mjs",
     "build": "pnpm run clean && pnpm run prepare:acp-adapters && pnpm run typecheck && pnpm run build:bundle && pnpm run copy:dsh-presets && pnpm run check:published-bundle-imports && pnpm run copy:wasm",
     "build:watch": "pnpm run prepare:review-assets && vite build --watch",
-    "build:bundle": "pnpm run prepare:review-assets && vite build --mode cli-runtime && vite build --mode acp-adapters",
+    "build:bundle": "pnpm run prepare:review-assets && node --max-old-space-size=4096 node_modules/vite/bin/vite.js build --mode cli-runtime && node --max-old-space-size=4096 node_modules/vite/bin/vite.js build --mode acp-adapters",
     "prepare:acp-adapters": "node ../../scripts/prepare-acp-adapters.mjs",
     "prepare:review-assets": "pnpm --dir ../.. --filter lody-code-review-viewer build",
     "check:published-bundle-imports": "node scripts/check-published-bundle-imports.js",
@@ -29,7 +29,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:sea": "node --test scripts/sea/sea.test.mjs",
-    "test:sea:native": "node scripts/sea/native-acceptance.mjs"
+    "test:sea:native": "node scripts/sea/native-acceptance.mjs",
+    "prepare:publish": "node prepare-publish.js",
+    "test:release": "node --test *.test.mjs"
   },
   "keywords": [
     "cli",
@@ -143,10 +145,16 @@
     "@loro-dev/roost-node": "0.3.1",
     "@lydell/node-pty": "1.2.0-beta.14",
     "@napi-rs/keyring": "2.1.0",
+    "@sorbetai/control": "alpha",
     "better-sqlite3": "catalog:",
     "ignore": "7.0.5",
     "loro-crdt": "1.17.0",
     "tinypool": "^1.0.0",
     "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LodyAI/Lody.git",
+    "directory": "apps/cli"
   }
 }

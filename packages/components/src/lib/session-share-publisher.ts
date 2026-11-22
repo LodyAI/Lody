@@ -13,7 +13,6 @@ import {
   ShareResourceId,
   mapShareConcurrent,
 } from '@lody/shared/session-sharing';
-import { compress } from '@loro-dev/streams-crdt/zstd';
 import type { WorkspaceRuntime, SessionDocStore } from '@/atoms/runtime';
 import { API_BASE_URL } from '@/lib';
 
@@ -90,7 +89,7 @@ export async function captureSessionShare(options: {
         };
       }),
       signal: options.signal,
-      compressHistory: compress,
+      compressHistory: await import('@loro-dev/streams-crdt/zstd').then((m) => m.compress),
       readAttachment: async ({ conversationSourceId, kind, reference }, signal) => {
         if (kind === 'file' && reference.transport !== 'r2')
           throw new Error('Upload local attachments before sharing');

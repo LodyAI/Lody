@@ -36,8 +36,8 @@ export const loadProjectSettingsComponent = settingsCodeLoader(() =>
 export const loadMachineAgentSettings = settingsCodeLoader(() =>
   import('./machine-agent-settings').then((module) => ({ default: module.MachineAgentSettings }))
 );
-export const loadLodyAgentSetting = settingsCodeLoader(() =>
-  import('./lody-agent-setting').then((module) => ({ default: module.LodyAgentSetting }))
+export const loadHarness = settingsCodeLoader(() =>
+  import('@/components/harness').then((module) => ({ default: module.Harness }))
 );
 export const loadIntegrationsSettingsComponent = settingsCodeLoader(() =>
   import('./integrations-setting').then((module) => ({
@@ -63,6 +63,11 @@ export const loadPromptShortcutsSetting = settingsCodeLoader(() =>
 export const loadMcpSetting = settingsCodeLoader(() =>
   import('./mcp-setting').then((module) => ({ default: module.McpSetting }))
 );
+export const loadWorkspaceDataSetting = settingsCodeLoader(() =>
+  import('./workspace-data-setting').then((module) => ({
+    default: module.WorkspaceDataSetting,
+  }))
+);
 export const loadShareManagementSetting = settingsCodeLoader(() =>
   import('./share-management-setting').then((module) => ({
     default: module.ShareManagementSetting,
@@ -80,7 +85,7 @@ const panels = {
   projects: loadProjectSettingsComponent,
   agents: loadMachineAgentSettings,
   machines: loadMachineAgentSettings,
-  'lody-agent': loadLodyAgentSetting,
+  'lody-agent': loadHarness,
   memory: loadMemorySetting,
   'agent-roles': loadAgentRolesSetting,
   'prompt-shortcuts': loadPromptShortcutsSetting,
@@ -88,6 +93,7 @@ const panels = {
   shares: loadShareManagementSetting,
   github: loadIntegrationsSettingsComponent,
   'keyboard-shortcuts': loadKeyboardShortcutsSetting,
+  data: loadWorkspaceDataSetting,
   about: loadAboutSettingsComponent,
 } satisfies Record<SettingsTabId, () => Promise<unknown>>;
 export const loadSettingsModal = settingsCodeLoader(() =>

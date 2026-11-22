@@ -8,6 +8,7 @@ import { Collapsible } from '@lody/ui/collapsible';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Check, ChevronDown, Copy, Server } from 'lucide-react';
+import { copyTextToClipboard } from '@/lib/clipboard';
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
   | 'beginRemoteMachinePairing'
@@ -139,7 +140,7 @@ export function E2eeRemoteMachinePairing({
                 icon
                 aria-label={t(copied ? 'e2ee.verify.copied' : 'e2ee.remoteMachine.copyCommand')}
                 onClick={() => {
-                  void navigator.clipboard.writeText(session.command).then(
+                  void copyTextToClipboard(session.command).then(
                     () => {
                       if (active.current) setCopied(true);
                     },

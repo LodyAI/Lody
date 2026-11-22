@@ -1,6 +1,7 @@
 import lodyLogo from '@/assets/lody-icon.png';
 import * as stylex from '@stylexjs/stylex';
 import { Avatar } from '@lody/ui/avatar';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
@@ -115,7 +116,7 @@ export function ShareViewerIdentity({ viewer }: { viewer: ShareViewer }) {
       <div {...stylex.props(styles.identity)}>
         <span {...stylex.props(styles.name)}>{viewer.name}</span>
         <Avatar.Root size="medium">
-          {viewer.imageUrl ? <Avatar.Image src={viewer.imageUrl} alt="" /> : null}
+          <CachedAvatarImage src={viewer.imageUrl} alt="" />
           <Avatar.Fallback>{initialsOf(viewer.name)}</Avatar.Fallback>
         </Avatar.Root>
       </div>

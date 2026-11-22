@@ -1,10 +1,14 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 // @vitest-environment jsdom
-import { createHistoryWriter } from '@lody/shared';
+;
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { renderToString } from 'katex';
-import { selectedMessageMarkdown } from '../src/components/ai-gui/message-quote-markdown';
+import {
+  formatMessageQuoteExcerpt,
+  selectedMessageMarkdown,
+} from '../src/components/ai-gui/message-quote-markdown';
 import 'katex/contrib/copy-tex';
 import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
 import type { ConversationView } from '../src/lib/conversation-view';
@@ -358,4 +362,28 @@ it('preserves numbered list positions and expands a partial formula selection', 
   const mathText = area.querySelector('.katex-html .mord')!.firstChild!;
   range.selectNodeContents(mathText);
   expect(selectedMessageMarkdown(range, area)).toBe('$\\frac{x}{2}$');
+});
+
+it('strips markdown boundaries from quote excerpts and truncates at word boundaries', () => {
+  expect(formatMessageQuoteExcerpt('| cell |\n| ---- |')).toBe('cell');
+  expect(formatMessageQuoteExcerpt('| Name | Value |\n| --- | --- |\n| Alpha | Beta |')).toBe(
+    'Name Value Alpha Beta'
+  );
+  expect(formatMessageQuoteExcerpt('2. Second item')).toBe('Second item');
+  expect(formatMessageQuoteExcerpt('- First\n- Second')).toBe('First Second');
+  expect(formatMessageQuoteExcerpt('## Heading\n\n> **Bold** [guide](https://example.com)')).toBe(
+    'Heading Bold guide'
+  );
+  expect(formatMessageQuoteExcerpt('```ts\nconst stable = true;\n```')).toBe(
+    'const stable = true;'
+  );
+  expect(formatMessageQuoteExcerpt('Selecting text and scrolling')).toBe(
+    'Selecting text and scrolling'
+  );
+  expect(
+    formatMessageQuoteExcerpt('Keep the reading position stable while selecting text.')
+  ).toBe('Keep the reading position...');
+  expect(
+    formatMessageQuoteExcerpt('supercalifragilisticexpialidociouslongunbreakabletoken')
+  ).toBe('supercalifragilisticexpialido...');
 });

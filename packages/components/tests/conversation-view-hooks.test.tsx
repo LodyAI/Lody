@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 // @vitest-environment jsdom
 import { TestCloudPlatformProvider } from './test-platform';
 import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
@@ -7,10 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import {
-  createHistoryWriter,
   resolveSessionAcpRuntimeConfig,
-  resolveSessionConversationConfig,
-} from '@lody/shared';
+  resolveSessionConversationConfig} from '@lody/shared';
 import {
   useConversationVersion,
   useConversationTail,

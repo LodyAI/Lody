@@ -30,7 +30,7 @@ import {
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { useTranslation } from 'react-i18next';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { CreateWorkspacePage } from '@/components/pages/create-workspace-page';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';

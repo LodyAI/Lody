@@ -160,6 +160,8 @@ Lody 仍在走向完整的 local-first 支持。
 
 - `apps/cli` — 连接机器并运行 Coding Agents
 - `apps/electron` — Lody 桌面应用
+- [`apps/mobile-capacitor`](apps/mobile-capacitor/README.md) — iOS 与 Android 的 Capacitor 云端客户端
+- `packages/client-e2ee` — 浏览器与移动端共享的云端 E2EE 组合层
 - `packages/components` — 工作空间共享 UI
 - `packages/ui` — Base UI 基础组件与 StyleX 设计令牌
 - `packages/platform` — 平台能力与集成
@@ -169,6 +171,7 @@ Lody 仍在走向完整的 local-first 支持。
 - `packages/e2ee-machine-sharing` — 机器服务共享策略
 - `packages/turn-diff-store` — 本地按内容寻址的回合快照
 - `site-docs` — 官网、文档与博客
+- [`skills`](skills/lody-cli/SKILL.md) — 面向 Lody 用户的 Agent 技能，例如 `lody-cli`
 
 如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)（含社区 PR 规模限制）。
 

@@ -106,6 +106,10 @@ export interface SessionBackend {
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
   ): Promise<boolean>;
+  /** Patches the current snapshot only while it belongs to `patch.acpSessionId`. */
+  applyAcpRuntimeConfigPatchToCurrentSnapshot(
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean>;
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult>;
   openAssistantTurn(input: OpenAssistantTurnInput): Promise<void>;
   respondPermission(
@@ -389,6 +393,12 @@ class LoroSessionBackend implements SessionBackend {
     return this.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, patch);
   }
 
+  applyAcpRuntimeConfigPatchToCurrentSnapshot(
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
+    return this.sessionDoc.applyAcpRuntimeConfigPatchToCurrentSnapshot(patch);
+  }
+
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult> {
     return this.sessionDoc.sessionData.commands.replaceEditableTail(input);
   }
@@ -520,7 +530,9 @@ class LoroSessionBackend implements SessionBackend {
   peekReadyMessageQueue(): Promise<MessageQueueItem | null> {
     if (this.queuePort.peekReadyMessageQueue) return this.queuePort.peekReadyMessageQueue();
     return (
-      this.queuePort.getMessageQueue?.().then((queue) => queue[0] ?? null) ?? Promise.resolve(null)
+      this.queuePort
+        .getMessageQueue?.()
+        .then((queue) => queue.find((item) => !item.paused) ?? null) ?? Promise.resolve(null)
     );
   }
 

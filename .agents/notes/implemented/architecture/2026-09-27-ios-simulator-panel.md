@@ -122,7 +122,7 @@ A lazily started Baguette process captures and injects input on the Mac. Each ac
 
 ## RPC and authorization
 
-`lody_ios_simulator_preview` exposes list/start/status/stop separately from web
+`lody_simulator_preview` (`platform: "ios"`, formerly `lody_ios_simulator_preview`) exposes list/start/status/stop separately from web
 preview. Its strict input has no identity selectors. The local-only
 `ios-simulator/agent-control` route derives the active invocation user and reuses
 service authorization. Results exclude viewer URLs and free-form preview diagnostics.

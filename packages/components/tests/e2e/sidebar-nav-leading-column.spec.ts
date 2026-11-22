@@ -232,6 +232,27 @@ test('nav icons sit on the sidebar leading column', async ({ page }) => {
   }
 });
 
+/* ⇧'s lucide artwork fills ~55% of its grid where ⌘'s fills 75%; the pill
+   grows the artwork (the 11px box and 18px cap are unchanged), not the layout. */
+test('binding pill draws ⇧ at the same ink as ⌘', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as { __LODY_PLATFORM__?: { os?: string } }).__LODY_PLATFORM__ = { os: 'darwin' };
+  });
+  await page.goto('/iframe.html?id=sidebar-shortcut-pills--pill-gallery&viewMode=story');
+  const pill = page.locator('[data-sidebar-binding-pill="Mod+Shift+D"]');
+  await expect(pill).toBeVisible({ timeout: 30_000 });
+  await expect(pill.locator('svg')).toHaveCount(2);
+  await expect(pill).toHaveText('D');
+  const pillBox = await pill.boundingBox();
+  const commandBox = await pill.locator('svg').nth(0).boundingBox();
+  const shiftBox = await pill.locator('svg').nth(1).boundingBox();
+  expect(pillBox?.height).toBe(18);
+  expect(commandBox?.height).toBe(11);
+  expect(shiftBox?.height).toBeCloseTo(14.85, 1);
+  await expect(pill.locator('svg').nth(1)).toHaveAttribute('stroke-width', '1.5');
+  await expect(pill.locator('svg').nth(0)).toHaveAttribute('stroke-width', '2');
+});
+
 const narrowWorkspaceStory =
   '/iframe.html?id=components-lodysidebar--narrow-three-column&viewMode=story';
 

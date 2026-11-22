@@ -33,8 +33,10 @@ The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
 
-Header controls use the local `CuidaSidebarExpandOutline` SVG for the sidebar toggle
-and Lucide `ChevronLeft` / `ChevronRight` for history navigation, in 16px boxes.
+Header controls (`sidebar-history-controls.tsx`) use the local `CuidaSidebarExpandOutline`
+SVG for the sidebar toggle and Lucide `ChevronLeft` / `ChevronRight` for history
+navigation, in 16px boxes. Every page header that offers to show a hidden sidebar
+(conversation, new chat, Today, Archive, Schedules) renders these same controls.
 Cuida's source and Apache-2.0 license are retained beside the icon component.
 
 The Add folder and view controls use Lucide `FolderPlus` and `SlidersHorizontal`
@@ -83,18 +85,19 @@ selection lives in `selectVisibleLocalProjectSections`
 sit with the GitHub repositories and stay listed only while they have
 conversations, whatever the switch says.
 
-Status organize mode lists the same rows as Updated, split into the native mobile
-Home's status groups in its order: Needs you, Just finished, Open pull requests,
-Running, Idle. `lib/sidebar-status-group.ts` classifies each row through the new-chat
-page's `homeNowReason` (`lib/home-now.ts`), so a session reads the same reason on
-both surfaces; rows that page leaves out (quiet for days, merged or closed PR) are
-Idle here. A conversation whose latest turn failed is under Needs you unless it is
-working again: the CLI writes the failed user turn into `SessionMeta.lastFailedUserMsgId`
-together with `lastHandledUserMsgId`, and `hasFailedLatestTurn` reads it only while the
-two match, so a later handled or canceled turn retires it without another write. Child
-Tabs roll their failure into the row. `buildSidebarUpdatedBuckets` feeds both the renderer and keyboard
-navigation, empty groups are skipped, and only Idle folds behind Show all. Group
-collapse and Show all share Updated's persisted per-bucket maps, keyed by group.
+Status organize mode lists the same rows as Updated below the Pinned area, in the
+Focus, Later and Settled tiers of the [Status view Spec](../../../../specs/sidebar-status-view.md).
+The shared Status view in `packages/shared/src/status-view/` decides each row's tier,
+order and opened-by nesting and plans every Status and pin-section write;
+`buildSidebarUpdatedBuckets` adapts its tiers for both the renderer and keyboard
+navigation, and `hooks/use-session-actions.ts` performs the planned writes. Focus stays
+mounted while empty as a drop target, only Settled folds behind Show all, and tier
+collapse and Show all share Updated's persisted per-bucket maps. Members who cannot
+write shared state (an encrypted workspace's Guest, a read-only membership) are not
+offered Status actions or section management (`hooks/use-status-view-writable.ts`). A
+drop the planner refuses because it would reorder conversations the member cannot manage
+snaps back with a notice rather than silently. `lib/status-view-state.ts` turns a drop slot
+into the neighbor the planner takes, for the sidebar and the Storybook playgrounds alike.
 
 ## Entry points and layout
 
@@ -257,8 +260,14 @@ companion `useSessionShareStatus` answering the header's "already shared?".
 and the "…" menu open. Rationale:
 [header share control](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
 
-## Terminal colors
+## Terminal
 
 `terminal/terminal-theme.ts` resolves CSS colors synchronously through a disposable
 probe with transitions disabled, so the global reduced-motion rule cannot blank a
 terminal. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-terminal-reduced-motion-colors.md).
+
+In the bottom terminal panel, hold Cmd on macOS or Ctrl on Windows/Linux and
+left-click an HTTP(S) URL to open it. A text selection prevents the click from
+opening a URL. Plain-text links show a pointer and underline while the modifier
+is held. OSC 8 links keep the default xterm decoration and use the same click rule.
+Plain-text detection accepts ASCII URLs and joins wrapped rows.

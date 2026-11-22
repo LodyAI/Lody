@@ -22,6 +22,7 @@ const isolatedFiles = new Set([
   'tests/loro-doc-unload-data-plane-integration.test.ts',
   // Draining all fake timers must not execute another suite's retained background timers.
   'tests/session-dispatch-watcher.test.ts',
+  'tests/local-loro-data-plane-bug-repro.test.ts',
 ]);
 // Global timer-count assertions need their own native timer context.
 const isolatedState =

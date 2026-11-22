@@ -1,18 +1,24 @@
 import { parseGitHubPullRequestUrl } from './github-url';
 import { resolveProjectGitHubRepo } from './project';
+import { isPullRequestUnlinked, readSessionPullRequestLinks } from './session-pull-request-links';
+import { parsePullRequestUrl } from './pull-request-url';
+// The PR field types/helpers live in a loro-free module so boot-path consumers
+// of this file (session list atoms, notifications) do not pull the
+// loro-mirror/loro-crdt graph through `./schema`.
 import {
   deriveSessionPullRequestReadiness,
   getSessionPullRequestLegacyFields,
   type PrStatus,
-  type SessionMeta,
   type SessionPullRequestCiState,
   type SessionPullRequestLifecycle,
   type SessionPullRequestLifecycleFields,
+  type SessionPullRequestLinkFields,
   type SessionPullRequestMergeState,
   type SessionPullRequestMeta,
   type SessionPullRequestReadiness,
   type SessionPullRequestStateMeta,
-} from './schema';
+} from './session-pull-request-meta';
+import type { SessionMeta } from './schema';
 
 // GitHub revisions have second precision. Conflicting observations of the same
 // revision converge deterministically. Live machine reads win equal-revision
@@ -22,7 +28,8 @@ const STATUS_ORDER: Record<PrStatus, number> = { draft: 0, open: 1, closed: 2, m
 
 export type PullRequestLifecycleObservation = { url: string; status: PrStatus; updatedAt: string };
 export type SessionPullRequestSource = Pick<SessionMeta, 'pullRequests'> &
-  SessionPullRequestLifecycleFields;
+  SessionPullRequestLifecycleFields &
+  Partial<SessionPullRequestLinkFields>;
 
 export function pullRequestLifecycleField(
   url: string,
@@ -91,14 +98,20 @@ export function planPullRequestLifecycle(
   return { field, value, peerId: `github-pr-lifecycle-v1-${STATUS_ORDER[value.s]}` };
 }
 
-/** Membership/order come ONLY from the association list. Orphan observations cannot resurrect it. */
+/**
+ * Membership/order come ONLY from the association list. Orphan observations
+ * cannot resurrect it, and an unlinked URL is hidden here (for every reader)
+ * before the reconciler removes it from the list.
+ */
 export function resolveSessionPullRequests(
   meta: SessionPullRequestSource | null | undefined
 ): SessionPullRequestMeta[] {
-  return (meta?.pullRequests ?? []).map((pr) => {
-    const lifecycle = readPullRequestLifecycle(meta ?? undefined, pr.url);
-    return lifecycle && lifecycle.s !== pr.status ? { ...pr, status: lifecycle.s } : pr;
-  });
+  return (meta?.pullRequests ?? [])
+    .flatMap((pr) => (isPullRequestUnlinked(meta, pr.url) ? [] : [pr]))
+    .map((pr) => {
+      const lifecycle = readPullRequestLifecycle(meta ?? undefined, pr.url);
+      return lifecycle && lifecycle.s !== pr.status ? { ...pr, status: lifecycle.s } : pr;
+    });
 }
 
 /** Summary of one associated PR. Identity comes from its URL; deprecated legacy
@@ -195,20 +208,29 @@ export function resolveSessionPrimaryPullRequest(
   meta: SessionPullRequestViewSource | null | undefined,
   activeRepository?: string | null
 ): SessionPullRequestView | null {
+  const views = resolveSessionPullRequestViews(meta);
   return selectPrimarySessionPullRequest(
-    resolveSessionPullRequestViews(meta),
-    resolveDescribedRepository(meta, activeRepository)
+    views,
+    resolveDescribedRepository(meta, activeRepository, views)
   );
 }
 
-/** The repository a single-PR surface describes; see `selectPrimarySessionPullRequest`. */
+/**
+ * The repository a single-PR surface describes; see `selectPrimarySessionPullRequest`.
+ * A single-project Session describes its project repository whenever it holds a
+ * PR there, so a PR linked in another repository never takes the primary slot.
+ */
 function resolveDescribedRepository(
   meta: SessionPullRequestViewSource | null | undefined,
-  activeRepository: string | null | undefined
+  activeRepository: string | null | undefined,
+  views: readonly SessionPullRequestView[]
 ): string | null | undefined {
   if (activeRepository !== undefined) return activeRepository?.trim() || null;
-  if (!meta?.projectRun) return undefined;
-  return (resolveProjectGitHubRepo(meta.project) ?? meta.repoFullName)?.trim() || null;
+  const project = (resolveProjectGitHubRepo(meta?.project) ?? meta?.repoFullName)?.trim() || null;
+  if (meta?.projectRun) return project;
+  return project && views.some((view) => view.repoFullName?.toLowerCase() === project.toLowerCase())
+    ? project
+    : undefined;
 }
 
 /**
@@ -221,12 +243,70 @@ export function resolveSessionPullRequestHistory(
   meta: SessionPullRequestViewSource | null | undefined,
   activeRepository?: string | null
 ): SessionPullRequestView[] {
-  const repository = resolveDescribedRepository(meta, activeRepository);
+  const all = resolveSessionPullRequestViews(meta);
+  const repository = resolveDescribedRepository(meta, activeRepository, all);
   if (repository === null) return [];
   const target = repository?.toLowerCase();
-  const views = resolveSessionPullRequestViews(meta).filter(
-    (view) => !target || view.repoFullName?.toLowerCase() === target
-  );
+  const views = all.filter((view) => !target || view.repoFullName?.toLowerCase() === target);
   const primary = selectPrimarySessionPullRequest(views);
   return primary ? [primary, ...views.filter((view) => view !== primary).reverse()] : [];
+}
+
+export type SessionPullRequestLinkListItem =
+  | {
+      kind: 'associated';
+      url: string;
+      view: SessionPullRequestView;
+      /** The PR single-PR surfaces show (`resolveSessionPrimaryPullRequest`). */
+      primary: boolean;
+    }
+  | {
+      kind: 'pending';
+      url: string;
+      repoFullName: string | null;
+      number: number | null;
+      /**
+       * `checking`: linked, not yet confirmed by the provider; `unreadable`: the
+       * machine's provider account could not read it; `unsupported`: no provider
+       * Lody supports accepts this URL yet.
+       */
+      reason: 'checking' | 'unreadable' | 'unsupported';
+    };
+
+/**
+ * Every pull request a Session holds, across repositories, for the linked-PR
+ * list: the primary PR first, other associations newest first, then linked
+ * records the reconciler has not associated (oldest first) with a reason.
+ */
+export function resolveSessionPullRequestLinkList(
+  meta: (SessionPullRequestViewSource & Partial<SessionPullRequestLinkFields>) | null | undefined,
+  activeRepository?: string | null
+): SessionPullRequestLinkListItem[] {
+  const views = resolveSessionPullRequestViews(meta);
+  const primary = resolveSessionPrimaryPullRequest(meta, activeRepository);
+  const ordered = [
+    ...(primary ? [primary] : []),
+    ...views.filter((view) => view.url !== primary?.url).reverse(),
+  ];
+  const associatedKeys = new Set(
+    views.map((view) => parsePullRequestUrl(view.url)?.key ?? view.url.toLowerCase())
+  );
+  const items: SessionPullRequestLinkListItem[] = ordered.map((view) => ({
+    kind: 'associated',
+    url: view.url,
+    view,
+    primary: view.url === primary?.url,
+  }));
+  for (const record of readSessionPullRequestLinks(meta)) {
+    if (record.state !== 'linked' || associatedKeys.has(record.key)) continue;
+    const parts = parsePullRequestUrl(record.url);
+    items.push({
+      kind: 'pending',
+      url: record.url,
+      repoFullName: parts?.repoFullName ?? null,
+      number: parts?.number ?? null,
+      reason: !record.supported ? 'unsupported' : record.unreadableAt ? 'unreadable' : 'checking',
+    });
+  }
+  return items;
 }

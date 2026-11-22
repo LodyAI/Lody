@@ -8,7 +8,7 @@ import {
   loadStatsSettingsComponent,
   loadProjectSettingsComponent,
   loadMachineAgentSettings,
-  loadLodyAgentSetting,
+  loadHarness,
   loadIntegrationsSettingsComponent,
   loadKeyboardShortcutsSetting,
   loadAboutSettingsComponent,
@@ -16,11 +16,10 @@ import {
   loadPromptShortcutsSetting,
   loadMcpSetting,
   loadShareManagementSetting,
+  loadWorkspaceDataSetting,
   preloadSettingsPanel,
 } from './settings-code';
-const WorkspaceSettings = lazy(loadWorkspaceSettings);
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
-const MemorySetting = lazy(loadMemorySetting);
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import {
   lazy,
@@ -61,6 +60,8 @@ import {
   type SettingsTabId,
 } from './settings-tabs';
 import { SettingsAccountEntry } from './settings-account-entry';
+const WorkspaceSettings = lazy(loadWorkspaceSettings);
+const MemorySetting = lazy(loadMemorySetting);
 const GeneralSettingsComponent = lazy(loadGeneralSettingsComponent);
 const AppearanceSettingsComponent = lazy(loadAppearanceSettingsComponent);
 const AccountSettingsComponent = lazy(loadAccountSettingsComponent);
@@ -68,7 +69,7 @@ const BillingSettingsComponent = lazy(loadBillingSettingsComponent);
 const StatsSettingsComponent = lazy(loadStatsSettingsComponent);
 const ProjectSettingsComponent = lazy(loadProjectSettingsComponent);
 const MachineAgentSettings = lazy(loadMachineAgentSettings);
-const LodyAgentSetting = lazy(loadLodyAgentSetting);
+const Harness = lazy(loadHarness);
 const IntegrationsSettingsComponent = lazy(loadIntegrationsSettingsComponent);
 const KeyboardShortcutsSetting = lazy(loadKeyboardShortcutsSetting);
 const AboutSettingsComponent = lazy(loadAboutSettingsComponent);
@@ -76,6 +77,7 @@ const AgentRolesSetting = lazy(loadAgentRolesSetting);
 const PromptShortcutsSetting = lazy(loadPromptShortcutsSetting);
 const McpSetting = lazy(loadMcpSetting);
 const ShareManagementSetting = lazy(loadShareManagementSetting);
+const WorkspaceDataSetting = lazy(loadWorkspaceDataSetting);
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
 import { useResolvedTheme } from '@/theme-provider';
@@ -619,7 +621,7 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
         />
       );
     case 'lody-agent':
-      return <LodyAgentSetting />;
+      return <Harness />;
     case 'memory':
       return <MemorySetting />;
     case 'agent-roles':
@@ -630,6 +632,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
       return <McpSetting />;
     case 'shares':
       return <ShareManagementSetting />;
+    case 'data':
+      return <WorkspaceDataSetting />;
     case 'machines':
       return (
         <MachineAgentSettings

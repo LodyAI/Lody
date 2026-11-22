@@ -26,6 +26,8 @@ type WorktreeScriptHistoryStep = {
   status: 'in_progress' | 'completed' | 'failed';
   output: string;
   truncated?: boolean;
+  persistedOutput: string;
+  persistedTruncated?: boolean;
   exitStatus?: TerminalExitStatus;
   startedAt?: number;
   endedAt?: number;
@@ -61,6 +63,7 @@ class WorktreeScriptHistoryRecorder implements WorktreeScriptEvents {
       command: event.displayCommand,
       status: 'in_progress',
       output: '',
+      persistedOutput: '',
       startedAt: getServerNow(),
     };
     await this.enqueueWrite({ status: 'in_progress' });
@@ -75,9 +78,17 @@ class WorktreeScriptHistoryRecorder implements WorktreeScriptEvents {
     if (next.length > WORKTREE_SCRIPT_HISTORY_OUTPUT_MAX_CHARS) {
       step.output = next.slice(next.length - WORKTREE_SCRIPT_HISTORY_OUTPUT_MAX_CHARS);
       step.truncated = true;
-    } else {
-      step.output = next;
+      // Stop rewriting the sliding 128k LoroText window on every 250ms tick once truncated;
+      // buffer the tail in memory and persist the final tail when the step or script ends.
+      if (!step.persistedTruncated) {
+        step.persistedOutput = step.output;
+        step.persistedTruncated = true;
+        this.scheduleFlush();
+      }
+      return;
     }
+    step.output = next;
+    step.persistedOutput = next;
     this.scheduleFlush();
   }
 
@@ -86,9 +97,15 @@ class WorktreeScriptHistoryRecorder implements WorktreeScriptEvents {
     if (!step) {
       throw new Error(`Unknown worktree script step: ${event.stepIndex}`);
     }
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
     step.status = event.status === 'completed' ? 'completed' : 'failed';
     step.exitStatus = event.exitStatus;
     step.endedAt = getServerNow();
+    step.persistedOutput = step.output;
+    step.persistedTruncated = step.truncated;
     await this.enqueueWrite({ status: 'in_progress' });
   }
 
@@ -96,6 +113,11 @@ class WorktreeScriptHistoryRecorder implements WorktreeScriptEvents {
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
+    }
+    for (const step of this.steps) {
+      if (!step) continue;
+      step.persistedOutput = step.output;
+      step.persistedTruncated = step.truncated;
     }
     await this.writes;
     await this.enqueueWrite({
@@ -152,7 +174,15 @@ class WorktreeScriptHistoryRecorder implements WorktreeScriptEvents {
         type: 'worktree_script',
         phase: this.args.phase,
         status: options.status,
-        steps: this.steps.map((step) => ({ ...step })),
+        steps: this.steps.map((step) => ({
+          command: step.command,
+          status: step.status,
+          output: step.persistedOutput,
+          ...(step.persistedTruncated !== undefined ? { truncated: step.persistedTruncated } : {}),
+          ...(step.exitStatus !== undefined ? { exitStatus: step.exitStatus } : {}),
+          ...(step.startedAt !== undefined ? { startedAt: step.startedAt } : {}),
+          ...(step.endedAt !== undefined ? { endedAt: step.endedAt } : {}),
+        })),
         startedAt: this.startedAt,
         endedAt,
       },

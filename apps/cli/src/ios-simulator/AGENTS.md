@@ -27,7 +27,7 @@
   iPhone/iPad preparation disables device-local `AutomaticMinimizationEnabled` and
   notifies keyboard preferences so the guest software keyboard remains available.
   Never rewrite host-global Simulator preferences or reboot to change keyboards.
-  Negotiate `iosSimulatorControls: 1`.
+  Controls v1 supports the original actions; v2 adds the iPhone/iPad software keyboard toggle.
 - `exterior.ts` reads only the bound device's fixed definition/bezel routes, strips all
   upstream URLs, and validates geometry plus bounded PNG dimensions. The gateway serves
   these behind the same private capability; resource reads never renew the lease.
@@ -76,7 +76,7 @@
 - Use `@lody/shared/node/process`; keep EOF release and join bounded tree cleanup.
 - `baguette-worker.ts` owns the native process through an IPC lease. Owner loss must
   reap it and join pending host controls; never terminate the worker as normal cleanup. All build compositions emit
-  the same sibling worker entry. No user simulator is shut down during cleanup.
+  the same sibling worker entry. Normal stop/cleanup never shuts down a simulator; explicit user `shutdownDevice: true` runs `simctl shutdown` before lease release (denied to agents).
 - Keep Baguette version, artifact digest and executable digest pinned in the manifest;
   no PATH/Homebrew/upstream fallback. Use the runtime artifact channel with license
   notices; see [README](README.md).

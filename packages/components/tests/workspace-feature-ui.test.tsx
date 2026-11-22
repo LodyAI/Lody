@@ -1,3 +1,4 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 // @vitest-environment jsdom
 import { scheduleDeclarationSigner } from './helpers/encrypted-dispatch-signer';
 import { act, StrictMode } from 'react';
@@ -11,7 +12,7 @@ import {
   MachineProvidersSection,
 } from '../src/components/settings/machine-detail-pane';
 import { LoroRepo } from 'loro-repo';
-import { ScheduleRepository, type WorkspaceId } from '@lody/shared';
+import { type WorkspaceId } from '@lody/shared';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { initI18n } from '../src/i18n';

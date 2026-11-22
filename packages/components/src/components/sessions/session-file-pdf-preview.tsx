@@ -692,6 +692,7 @@ export function SessionFilePdfPreview({ bytes, url, fileActions }: SessionFilePd
             <div
               ref={viewerElementRef}
               {...withClassName(stylex.props(styles.viewer), 'pdfViewer')}
+              data-text-selectable
             />
           </div>
           {loading ? (

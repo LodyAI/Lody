@@ -7,9 +7,11 @@ import {
 } from '@/lib/workspace-mcp-store';
 import {
   getDaemonWorkspace,
-  readBoundDaemonOwnerAccess,
   readEncryptedMachineAccess,
+  resolveDaemonTarget,
+  type DaemonTargetResolution,
 } from '@/lib/session-command-environment';
+import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
 import type { SessionSteerResponse } from '@lody/shared';
 import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
 import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
@@ -42,6 +44,7 @@ import {
   getDeclaredModelControls,
   getAcpModelEffortChoices,
   getAcpModelFastSupport,
+  getAcpModelSpeedTiers,
   withAcpConfigOptionsForModel,
   machineSupportsPreparedSessionInputProtocol,
   machineSupportsMemoryProviders,
@@ -98,6 +101,8 @@ import {
   hasAgentRunConfigSelection,
   ACP_CONFIG_OPTION_OFF_VALUE,
   ACP_CONFIG_OPTION_ON_VALUE,
+  ACP_FAST_MODE_VALUE_FAST,
+  ACP_FAST_MODE_VALUE_ULTRAFAST,
   isAcpFastModeConfigId,
   isAcpThoughtLevelConfigOption,
   resolveAgentRunConfigSelection,
@@ -1164,7 +1169,7 @@ export async function assertSessionManagementAccess(args: {
   delegatedRequester?: DelegatedSessionRequester;
 }): Promise<SessionMeta> {
   const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
-  const nativeOwner = await readBoundDaemonOwnerAccess({
+  const { nativeOwnerAccess: nativeOwner } = await resolveDaemonTarget({
     auth: args.auth,
     manager: args.manager,
     workspaceId: args.workspace.id as WorkspaceId,
@@ -1236,6 +1241,16 @@ async function syncMachineFlockDocsForRead(
   const logger = getLogger('session');
   const results = await Promise.all(
     Array.from(new Set(machineIds)).map(async (machineId): Promise<MachineFlockFreshness> => {
+      const daemonTarget = await resolveDaemonTarget({ manager, workspaceId, machineId });
+      if (!daemonTarget.isLocalEnvironment && daemonTarget.sameReplica) {
+        return {
+          confirmed: false,
+          error: new FlockSyncUnavailableError({
+            message: `Machine Flock read used the local daemon replica without remote confirmation (${reason}:${machineId})`,
+            reason: 'local-replica-unconfirmed',
+          }),
+        };
+      }
       try {
         await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
           reason: `${reason}:${machineId}`,
@@ -2014,6 +2029,7 @@ function validateModelDependentTurnConfigOptionValues(
     ])
   );
   const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const declaredSpeedTiers = getAcpModelSpeedTiers(capability, targetModelId);
   const declaredFast = getAcpModelFastSupport(capability, targetModelId);
   for (const [id, value] of Object.entries(values)) {
     if (isTurnEffortEntry(optionsById, id)) {
@@ -2037,12 +2053,48 @@ function validateModelDependentTurnConfigOptionValues(
       }
     } else if (isAcpFastModeConfigId(id)) {
       const option = optionsById.get(id);
+      const isNamedSpeedTier =
+        value === ACP_FAST_MODE_VALUE_FAST || value === ACP_FAST_MODE_VALUE_ULTRAFAST;
+      if (isNamedSpeedTier) {
+        if (declaredSpeedTiers !== undefined) {
+          if (!declaredSpeedTiers.includes(value)) {
+            assertMachineFlockCacheSufficient(
+              freshness,
+              `Speed tier ${value} is unavailable in the local replica for model ${targetModelId}.`,
+              { kind: 'ACP option', id }
+            );
+            throw new Error(
+              declaredSpeedTiers.length === 0
+                ? `Model ${targetModelId} does not offer fast mode.`
+                : `Invalid speed tier for model ${targetModelId}: ${value}. Allowed values: ${[ACP_CONFIG_OPTION_OFF_VALUE, ...declaredSpeedTiers].join(', ')}.`
+            );
+          }
+          validatedIds.add(id);
+          continue;
+        }
+        if (targetModelId !== probedModelId) {
+          validatedIds.add(id);
+          continue;
+        }
+      }
       if (option?.type === 'boolean' && typeof value !== 'boolean') {
         throw new Error(`Config option "${id}" expects a boolean value.`);
       }
       if (option?.type === 'select') {
-        if (typeof value !== 'string') {
+        if (typeof value !== 'string' && typeof value !== 'boolean') {
           throw new Error(`Config option "${id}" expects a select value.`);
+        }
+        if (typeof value === 'boolean') {
+          if (declaredFast === false && value === true) {
+            assertMachineFlockCacheSufficient(
+              freshness,
+              `Fast mode is unavailable in the local replica for model ${targetModelId}.`,
+              { kind: 'ACP option', id }
+            );
+            throw new Error(`Model ${targetModelId} does not offer fast mode.`);
+          }
+          validatedIds.add(id);
+          continue;
         }
         // A custom raw select value has no model-independent toggle meaning.
         // Leave its membership validation to the ordinary catalog validator.
@@ -2098,6 +2150,7 @@ export function filterCompatibleTurnConfigOptionValues(
   );
   const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
   const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const speedTiers = getAcpModelSpeedTiers(capability, targetModelId);
   const fastSupport = getAcpModelFastSupport(capability, targetModelId);
   // A different (or unknown) probe model cannot invalidate the target's
   // recorded controls. Without per-model data, preserve them for runtime.
@@ -2111,13 +2164,24 @@ export function filterCompatibleTurnConfigOptionValues(
           if (efforts !== undefined) return typeof value === 'string' && efforts.includes(value);
           if (keepUnverified) return typeof value === 'string';
         } else if (isAcpFastModeConfigId(id)) {
+          if (speedTiers !== undefined) {
+            if (speedTiers.length === 0) return false;
+            if (value === ACP_FAST_MODE_VALUE_ULTRAFAST) {
+              return speedTiers.includes(ACP_FAST_MODE_VALUE_ULTRAFAST);
+            }
+            if (value === ACP_FAST_MODE_VALUE_FAST) {
+              return speedTiers.includes(ACP_FAST_MODE_VALUE_FAST);
+            }
+          }
           // A model known without Fast has nothing to carry a Fast value to.
           if (fastSupport === false) return false;
           if (keepUnverified) {
             return (
               typeof value === 'boolean' ||
               value === ACP_CONFIG_OPTION_ON_VALUE ||
-              value === ACP_CONFIG_OPTION_OFF_VALUE
+              value === ACP_CONFIG_OPTION_OFF_VALUE ||
+              value === ACP_FAST_MODE_VALUE_FAST ||
+              value === ACP_FAST_MODE_VALUE_ULTRAFAST
             );
           }
         }
@@ -2587,16 +2651,22 @@ export async function ensureTargetMachineNotOffline(args: {
   machineId: MachineId;
   manager: Pick<LoroDocumentManager, 'getMachinePresenceView'>;
 }): Promise<MachinePresence> {
-  const environment = getSessionCommandEnvironment();
-  if (environment) {
-    if (
-      args.workspaceId !== environment.workspace.id ||
-      args.machineId !== environment.auth.machineId
-    )
+  const target = await resolveDaemonTarget({
+    auth: args.auth,
+    manager: args.manager,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+  });
+  if (target.isLocalEnvironment) {
+    if (!target.sameReplica) {
       throw new Error('Target machine is unavailable in this workspace');
+    }
     return 'online';
   }
   if (args.machineId === args.auth.machineId) {
+    if (target.sameReplica) {
+      return 'online';
+    }
     await ensureLocalRuntimeAvailable(args.machineId, args.workspaceId);
     return 'online';
   }
@@ -2684,6 +2754,7 @@ async function readResolvedSessionMachineAccess(args: {
   machineId: MachineId;
   requester: ResolvedSessionRequester;
   localProjectId?: string;
+  manager?: LoroDocumentManager;
 }): Promise<MachineAccessCheckResult> {
   const encrypted = await readEncryptedMachineAccess({
     machineId: args.machineId,
@@ -2700,6 +2771,19 @@ async function readResolvedSessionMachineAccess(args: {
       requesterUserId: args.requester.userId,
       localProjectId: args.localProjectId,
     });
+  }
+  const daemonManager = args.manager ?? getDaemonWorkspace()?.manager;
+  if (daemonManager) {
+    const { nativeOwnerAccess: nativeOwner } = await resolveDaemonTarget({
+      auth: args.auth,
+      manager: daemonManager,
+      workspaceId: args.workspaceId,
+      machineId: args.machineId,
+      requesterUserId: args.requester.userId,
+    });
+    if (nativeOwner !== undefined) {
+      return nativeOwner ? { allowed: true } : { allowed: false, reason: 'requester_not_member' };
+    }
   }
   const target = {
     token: args.auth.token,
@@ -2728,6 +2812,7 @@ async function assertMachineAccess(args: {
   machineId: MachineId;
   requester: ResolvedSessionRequester;
   localProjectId?: string;
+  manager?: LoroDocumentManager;
 }): Promise<void> {
   const access = await readResolvedSessionMachineAccess(args);
   if (!access.allowed) {
@@ -2737,6 +2822,7 @@ async function assertMachineAccess(args: {
 
 async function dispatchTurnFastPath(args: {
   auth: AuthContext;
+  manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   sessionId: SessionId;
@@ -2746,9 +2832,14 @@ async function dispatchTurnFastPath(args: {
   inputOrigin: 'human' | 'agent';
   inputConfig: SessionTurnInputConfig | undefined;
 }): Promise<void> {
-  const environment = getSessionCommandEnvironment();
-  if (environment) {
-    await environment.host.dispatchSession(
+  const { localHost } = await resolveDaemonTarget({
+    auth: args.auth,
+    manager: args.manager,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+  });
+  if (localHost) {
+    await localHost.dispatchSession(
       args.sessionId,
       args.inputConfig
         ? {
@@ -2798,6 +2889,23 @@ async function writeDispatchPointer(args: {
   await args.manager.repo.upsertDocMeta(getSessionRoomId(args.sessionId), {
     latestUserMsgId: args.userTurnId,
   } satisfies Partial<SessionMeta>);
+}
+
+async function persistDispatchedSessionWrite(args: {
+  sameReplica: boolean;
+  manager: LoroDocumentManager;
+  sessionDoc: SessionDocument;
+  reason: string;
+}): Promise<void> {
+  if (args.sameReplica) {
+    if (typeof args.manager.repo.flush === 'function') await args.manager.repo.flush();
+    return;
+  }
+  await confirmDispatchSyncedBestEffort({
+    manager: args.manager,
+    sessionDoc: args.sessionDoc,
+    reason: args.reason,
+  });
 }
 
 /**
@@ -4121,13 +4229,21 @@ export async function createSessionResult(
       sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await commitPreparedSessionDispatch(manager, prepared);
     dispatched = true;
-    await confirmDispatchSyncedBestEffort({
+    const daemonTarget = await resolveDaemonTarget({
+      auth,
+      manager,
+      workspaceId: workspace.id as WorkspaceId,
+      machineId: targetMachine.id,
+    });
+    await persistDispatchedSessionWrite({
+      sameReplica: daemonTarget.sameReplica,
       manager,
       sessionDoc,
       reason: `session.create:${sessionId}`,
     });
     await dispatchTurnFastPath({
       auth,
+      manager,
       workspaceId: workspace.id as WorkspaceId,
       machineId: targetMachine.id,
       sessionId,
@@ -4171,6 +4287,7 @@ export async function validateSessionChatTarget(args: {
   sessionId: SessionId;
   requesterUserIdOverride?: string;
   delegatedRequester?: DelegatedSessionRequester;
+  workspaceMetaPrewriteSatisfied?: boolean;
 }): Promise<SessionMeta> {
   const requester = resolveSessionRequester(
     args.auth,
@@ -4183,6 +4300,7 @@ export async function validateSessionChatTarget(args: {
     manager: args.manager,
     sessionId: args.sessionId,
     requester,
+    workspaceMetaPrewriteSatisfied: args.workspaceMetaPrewriteSatisfied,
   });
 }
 
@@ -4192,8 +4310,28 @@ async function validateSessionChatTargetForRequester(args: {
   manager: LoroDocumentManager;
   sessionId: SessionId;
   requester: ResolvedSessionRequester;
+  workspaceMetaPrewriteSatisfied?: boolean;
 }): Promise<SessionMeta> {
-  await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
+  let needsMetaSync = args.workspaceMetaPrewriteSatisfied !== true;
+  if (needsMetaSync) {
+    const localRecord = await args.manager.repo.getDocMeta(getSessionRoomId(args.sessionId));
+    if (localRecord?.meta && !isLoroRepoDocDeleted(localRecord)) {
+      const localMeta = localRecord.meta as SessionMeta;
+      const { authority } = await resolveDaemonTargetOrThrow({
+        auth: args.auth,
+        manager: args.manager,
+        workspaceId: args.workspace.id as WorkspaceId,
+        machineId: localMeta.machineId,
+        requesterUserId: args.requester.userId,
+      });
+      if (authority === 'local-daemon') {
+        needsMetaSync = false;
+      }
+    }
+  }
+  if (needsMetaSync) {
+    await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
+  }
   const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
   if (session.isArchived) {
     throw new Error(`Session ${args.sessionId} is archived. Restore it before chatting.`);
@@ -4204,6 +4342,7 @@ async function validateSessionChatTargetForRequester(args: {
     machineId: session.machineId,
     requester: args.requester,
     localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+    manager: args.manager,
   });
   await ensureTargetMachineNotOffline({
     auth: args.auth,
@@ -4264,6 +4403,8 @@ export async function sendSessionChatResult(
     bypassSessionQuota?: boolean;
     /** Agent chat: steer a running turn instead of queueing behind it. */
     steerActiveTurn?: boolean;
+    workspaceMetaPrewriteSatisfied?: boolean;
+    prevalidatedTarget?: SessionMeta;
   },
   delegatedRequester?: DelegatedSessionRequester,
   input?: { paths?: string[]; attachments?: SessionInputAttachment[] }
@@ -4278,19 +4419,28 @@ export async function sendSessionChatResult(
   const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
   const requesterUserId = requester.userId;
   const author = resolveSessionInputAuthor(requesterUserId, delegatedRequester);
-  const session = await validateSessionChatTargetForRequester({
-    auth,
-    workspace,
+  const session =
+    orchestration?.prevalidatedTarget ??
+    (await validateSessionChatTargetForRequester({
+      auth,
+      workspace,
+      manager,
+      sessionId,
+      requester,
+      workspaceMetaPrewriteSatisfied: orchestration?.workspaceMetaPrewriteSatisfied,
+    }));
+
+  const daemonTarget = await syncSessionDocUnlessLocalDaemon({
     manager,
     sessionId,
-    requester,
+    reason: `session.chat:${sessionId}:prewrite:doc`,
+    authorityContext: {
+      auth,
+      workspaceId: workspace.id as WorkspaceId,
+      machineId: session.machineId,
+      requesterUserId,
+    },
   });
-
-  await syncDocForRead(
-    manager,
-    getSessionRoomId(sessionId),
-    `session.chat:${sessionId}:prewrite:doc`
-  );
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   const quotaHistory = orchestration?.bypassSessionQuota
@@ -4369,7 +4519,7 @@ export async function sendSessionChatResult(
         : {}),
     }));
   const inputBlocks = buildCommandInputBlocks(prompt, attachments);
-  const environment = getSessionCommandEnvironment();
+  const localHost = daemonTarget.localHost;
   const derivedInputId = orchestration?.userTurnId ?? uuidV4();
   const derivation = await classifyDelegatedEncryptedInput(
     manager,
@@ -4385,7 +4535,7 @@ export async function sendSessionChatResult(
     orchestration?.steerActiveTurn && maySteer
       ? remoteMachine
         ? resolveActiveAssistantTurnId(historyForDefaults)
-        : environment?.host.readActiveTurnId(sessionId)
+        : localHost?.readActiveTurnId(sessionId)
       : undefined;
   const userTurn = await appendUserPromptHistory({
     steer: steerTurnId !== undefined,
@@ -4514,12 +4664,12 @@ export async function sendSessionChatResult(
     steerTurnId !== undefined &&
     userTurn.existingStatus === undefined &&
     !remoteMachine &&
-    environment &&
+    localHost &&
     userTurn.inputConfig
   ) {
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
-    const response = await environment.host.steerSession({
+    const response = await localHost.steerSession({
       sessionId,
       expectedTurnId: steerTurnId,
       userTurnId,
@@ -4558,13 +4708,15 @@ export async function sendSessionChatResult(
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await writeDispatchPointer({ manager, sessionId, userTurnId });
     dispatched = true;
-    await confirmDispatchSyncedBestEffort({
+    await persistDispatchedSessionWrite({
+      sameReplica: daemonTarget.sameReplica,
       manager,
       sessionDoc,
       reason: `session.chat:${sessionId}:${userTurnId}`,
     });
     await dispatchTurnFastPath({
       auth,
+      manager,
       workspaceId: workspace.id as WorkspaceId,
       machineId: session.machineId,
       sessionId,
@@ -6108,13 +6260,68 @@ export const sessionCommand = new Command('session')
   .addCommand(sessionRestoreCommand)
   .addCommand(sessionDeleteCommand);
 
+export type SessionDocReadAuthorityContext = {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+};
+
+async function resolveDaemonTargetOrThrow(args: {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  manager: LoroDocumentManager;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+}): Promise<DaemonTargetResolution> {
+  const resolved = await resolveDaemonTarget(args);
+  if (resolved.authority === 'denied') {
+    throw new Error(`Machine access denied for ${args.machineId}: workspace_access_revoked`);
+  }
+  return resolved;
+}
+
+async function syncSessionDocUnlessLocalDaemon(args: {
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  reason: string;
+  authorityContext?: SessionDocReadAuthorityContext;
+}): Promise<DaemonTargetResolution> {
+  if (!args.authorityContext) {
+    await syncDocForRead(args.manager, getSessionRoomId(args.sessionId), args.reason);
+    return {
+      sameReplica: false,
+      isLocalEnvironment: false,
+      authority: 'remote-or-unverified',
+      nativeOwnerAccess: undefined,
+    };
+  }
+  const resolved = await resolveDaemonTargetOrThrow({
+    auth: args.authorityContext.auth,
+    manager: args.manager,
+    workspaceId: args.authorityContext.workspaceId,
+    machineId: args.authorityContext.machineId,
+    requesterUserId: args.authorityContext.requesterUserId,
+  });
+  if (resolved.authority !== 'local-daemon') {
+    await syncDocForRead(args.manager, getSessionRoomId(args.sessionId), args.reason);
+  }
+  return resolved;
+}
+
 export async function readSessionMcpIdsForAuthoring(
   manager: LoroDocumentManager,
   sessionId: SessionId,
-  explicitIds?: readonly string[]
+  explicitIds?: readonly string[],
+  authorityContext?: SessionDocReadAuthorityContext
 ): Promise<string[]> {
   if (explicitIds !== undefined) return [...explicitIds];
-  await syncDocForRead(manager, getSessionRoomId(sessionId), 'session-mcp-selection');
+  await syncSessionDocUnlessLocalDaemon({
+    manager,
+    sessionId,
+    reason: 'session-mcp-selection',
+    authorityContext,
+  });
   const doc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(doc, await doc.getMetaState());
   return (

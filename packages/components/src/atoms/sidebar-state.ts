@@ -33,10 +33,6 @@ export const sidebarScrollTopByWorkspaceAtom = atom<Record<string, number>>({});
  * - Chats section collapsed state
  */
 
-// ============================================================================
-// Chat Scope (My Tasks / Team Tasks)
-// ============================================================================
-
 export type SidebarChatScope = 'my' | 'team';
 
 /**
@@ -48,10 +44,6 @@ export type SidebarChatScope = 'my' | 'team';
  * the complete workspace. An explicit choice remains persisted below.
  */
 export const chatScopeAtom = atomWithStorage<SidebarChatScope>('lody-sidebar-chat-scope', 'team');
-
-// ============================================================================
-// Repo State (Collapse + Ordering)
-// ============================================================================
 
 export type RepoCollapseState = Record<string, boolean>;
 
@@ -141,10 +133,6 @@ export const setRepoOrderAtom = atom(null, (_get, set, order: string[]) => {
   set(repoOrderAtom, order);
 });
 
-// ============================================================================
-// Chats Section Collapsed
-// ============================================================================
-
 /**
  * Chats section collapsed state - persisted to localStorage
  */
@@ -165,9 +153,14 @@ export const pinnedSectionCollapsedAtom = atomWithStorage<boolean>(
   false
 );
 
-// ============================================================================
-// Local Project Collapse State (folders under Local Projects / <Machine> project)
-// ============================================================================
+/**
+ * Folded user pin sections on this device, by section id (ids are unique
+ * across workspaces). The default section keeps `pinnedSectionCollapsedAtom`.
+ */
+export const pinSectionsCollapsedAtom = atomWithStorage<Record<string, boolean>>(
+  'lody-sidebar-pin-sections-collapsed',
+  {}
+);
 
 export type LocalProjectCollapseState = Record<string, boolean>;
 
@@ -257,10 +250,6 @@ export function moveLocalProjectOrder(
   return [...nextVisibleOrder, ...persistedOrder.filter((key) => !visibleSet.has(key))];
 }
 
-// ============================================================================
-// Section Collapsed (Local Projects + GitHub Worktrees headers)
-// ============================================================================
-
 /**
  * Local Projects section header collapsed state (per machine section) - persisted.
  * Key: section.machineId ?? section.kind, Value: collapsed (true/false)
@@ -278,10 +267,6 @@ export const githubWorktreesSectionCollapsedAtom = atomWithStorage<boolean>(
   false
 );
 
-// ============================================================================
-// Sidebar Collapsed (Desktop)
-// ============================================================================
-
 /**
  * Whether the desktop left sidebar is collapsed (fully hidden). Persisted.
  * Mobile uses `mobileDrawerOpenAtom` and ignores this.
@@ -293,6 +278,43 @@ export const sidebarCollapsedAtom: ReturnType<typeof atomWithStorage<boolean>> =
     createJSONStorage<boolean>(windowStorage),
     { getOnInit: true }
   );
+
+/** Today pinned as a column next to the sidebar (specs/today-outline.md); per window. */
+export const todayPinnedAtom: ReturnType<typeof atomWithStorage<boolean>> =
+  atomWithStorage<boolean>('lody-today-pinned', false, createJSONStorage<boolean>(windowStorage), {
+    getOnInit: true,
+  });
+
+/**
+ * A day opened while pinned (a Today link, or the sidebar entry with `{}` for
+ * today): the column shows this member/date and clears it (in memory only).
+ */
+export const todayPinnedTargetAtom = atom<{ member?: string; date?: string } | null>(null);
+
+/**
+ * Today page spans the whole main area instead of the readable column
+ * (specs/today-outline.md); a preference stored on this device.
+ */
+export const todayFullWidthAtom = atomWithStorage<boolean>(
+  'lody-today-full-width',
+  false,
+  undefined,
+  {
+    getOnInit: true,
+  }
+);
+
+export const TODAY_COLUMN_DEFAULT_WIDTH = 360;
+export const TODAY_COLUMN_MIN_WIDTH = 280;
+export const TODAY_COLUMN_MAX_WIDTH = 560;
+
+/** Width of the pinned Today column in px; stored on this device. */
+export const todayColumnWidthAtom = atomWithStorage<number>(
+  'lody-today-column-width',
+  TODAY_COLUMN_DEFAULT_WIDTH,
+  undefined,
+  { getOnInit: true }
+);
 
 /**
  * Last expanded width in px. Restored when the user re-opens the sidebar so
@@ -306,18 +328,14 @@ export const sidebarLastWidthAtom = atomWithStorage<number>(
   { getOnInit: true }
 );
 
-// ============================================================================
-// Sidebar Organize Mode (Workspace vs Updated)
-// ============================================================================
-
 export type SidebarOrganizeMode = 'workspace' | 'updated' | 'status';
 
 /**
  * How the sidebar groups items.
  * - 'workspace' = group by Chats / Local Projects / GitHub Worktrees (default)
  * - 'updated'   = single flat list sorted by latest-update recency
- * - 'status'    = the Updated rows split into status groups (needs you, just
- *                 finished, open pull requests, running, idle), as on mobile Home
+ * - 'status'    = the Status view: Pinned, then Focus / Later / Settled
+ *                 (`specs/sidebar-status-view.md`)
  */
 export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
   'lody-sidebar-organize-mode',
@@ -382,10 +400,6 @@ export const sidebarUpdatedBucketShowFullStateAtom = atomWithStorage<Record<stri
   'lody-sidebar-updated-bucket-show-full',
   {}
 );
-
-// ============================================================================
-// Archive Scope (My Tasks / All Tasks for archive view)
-// ============================================================================
 
 export type ArchiveScopeValue = 'my' | 'team';
 

@@ -3,6 +3,11 @@
 - New quote spans require `messageQuotes` v1 on the target machine. Execution
   includes the full snapshot as ordinary ACP text, independently of Agent identity.
 
+- The package barrel (`index.ts`) only re-exports and declares types. Put runtime code in a
+  module it re-exports, as `loro-streams-routing.ts` does: a bundle that imports a binding the
+  barrel defines reaches every module the barrel re-exports, and each daemon process then
+  evaluates their Zod schemas ([decision](../../../.agents/notes/implemented/architecture/2026-11-21-daemon-memory-footprint.md)).
+
 Parent contracts apply. Before changing MCP catalog serialization, also read
 [the authorization decision](../../../.agents/notes/implemented/architecture/2026-10-26-mcp-oauth-local-credentials.md).
 
@@ -60,3 +65,27 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   [memory contract](../../../specs/agent-role-memory.md).
 - Keep `author`, human `userId`, and recipient execution config separate.
   [Contract](../../../specs/message-author-identity.md).
+## Message schemas (message-schemas.ts)
+
+- Wire schemas are strict: unknown fields fail validation, never pass through.
+  `.brand()` marks branded id types; transport-local DTOs stay separate from
+  durable history shapes.
+- ACP extension dictionaries retain declared `_meta`/extension keys; closed
+  execution configuration still selects declared fields.
+
+## ACP history application (acp/history-apply.ts)
+
+- Apply tool updates as sparse per-toolCallId patches; present content/locations
+  lists replace the previous list. ACP content lists are replacements, never
+  appends; dedupe replayed notifications.
+- Terminal output arrives both in notification streams and tool results: keep
+  one canonical combined output block, merge snapshot-style updates by overlap,
+  never concatenate. In-place replacement avoids delete+reinsert CRDT churn.
+- Plan/tool status only advances monotonically; `null` means "no information",
+  never a cleared value. Keep `recordedAtMs` from the first persisted sighting.
+- Parse `<thinking>`/`<proposed_plan>` only when a tag occupies its own line;
+  inline mentions stay text. The content match must not pair a first opening
+  tag with a later closing tag.
+- rawOutput shapes are per-provider payload quirks (Codex aggregated output,
+  Claude Code string output for search tools, Pi truncated flag); treat shape
+  detection as best-effort and prefer explicit fields over guesses.

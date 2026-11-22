@@ -7,6 +7,7 @@ import type { LodyAppStoreReviewBridge } from './hooks/use-app-store-review-prom
 import type { AppIconBridge } from './components/mobile/mobile-app-icon-settings';
 import type { LodyStartupThemeBridge } from './theme-provider';
 import type { LodyNativeResetBridge } from './lib/clear-local-cache';
+import type { LodyClipboardBridge } from './lib/clipboard';
 
 /**
  * Boot guard installed by the inline script in a shell's index.html (currently
@@ -47,6 +48,7 @@ declare global {
     __LODY_APP_ICON__?: AppIconBridge;
     __LODY_STARTUP_THEME__?: LodyStartupThemeBridge;
     __LODY_NATIVE_RESET__?: LodyNativeResetBridge;
+    __LODY_CLIPBOARD__?: LodyClipboardBridge;
     __LODY_APP_INFO__?: {
       version?: string;
       build?: string;

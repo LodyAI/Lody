@@ -169,6 +169,8 @@ import {
 import { findProgressMessageId } from '@lody/shared/session-data';
 import { Cause, Clock, Data, Effect, Exit, Fiber, Random, Scope } from 'effect';
 import { createHash, randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { join as joinPath } from 'node:path';
 import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
 import {
   getACPErrorUserMessage,
@@ -181,6 +183,11 @@ import {
 } from './acp-error-classification';
 import type { MachineAccessVerification } from './session-access-retry';
 import { createSessionBackend, getSteerOperationId, type SessionBackend } from './session-backend';
+import {
+  interruptedTurnContinuationId,
+  isTurnInterruptedByProcessEnd,
+  planInterruptedTurnContinuation,
+} from './interrupted-turn-continuation';
 import {
   findLastHistoryEntry,
   isActivationAwaitingHistory,
@@ -390,6 +397,12 @@ type TurnRuntimeState = {
   /** Start step in progress; cleared once a Session is bound, so later failures name none. */
   startStage?: SessionStartStage;
   cancelRequested: boolean;
+  /**
+   * Shutdown interrupted this input's running prompt; the user did not stop it. Its
+   * cancellation keeps the dispatch claim in Session metadata, exactly as a crash
+   * leaves it, so the next start continues the Turn once.
+   */
+  interruptedByProcessEnd?: boolean;
   pendingInputOnCancel: PendingInputCancellationPolicy;
   releaseFailure?: unknown;
   releaseParentAdmission?: () => void;
@@ -1275,6 +1288,9 @@ export class SessionExecutionService {
   quiesceInboxExecutions(): void {
     this.shutdownAbort.abort();
     for (const runtime of this.turnRuntimeBySession.values()) {
+      // A Turn whose prompt already ended is only finishing bookkeeping: not continued.
+      if (runtime.inboxOwner?.input && runtime.promptInFlight && !runtime.cancelRequested)
+        runtime.interruptedByProcessEnd = true;
       runtime.cancelRequested = true;
       runtime.pendingInputOnCancel = 'preserve';
       runtime.terminateSessionOnCancel = true;
@@ -1821,8 +1837,6 @@ export class SessionExecutionService {
           ...this.baseSessionAnalyticsProps(sessionId),
           turn_id: turnId,
           ...(typeof totalTurnMs === 'number' ? { total_turn_ms: totalTurnMs } : {}),
-          // TODO(analytics): permission_wait_ms is accumulated in MessageHandler's
-          // SessionTransientStore (state.permissionWaitMs); plumb it here to populate it.
           pr_detected: prDetected,
           diff_file_count: diffFileCount,
           ...(analytics?.dispatchMode ? { dispatch_mode: analytics.dispatchMode } : {}),
@@ -3843,13 +3857,16 @@ export class SessionExecutionService {
       // assistant as success unless the user turn already carries a stronger
       // failed/cancelled outcome, so reversing these writes creates a window
       // where a cancelled turn can be durably folded as succeeded.
-      yield* self.ignoreWithWarning(
-        options.sessionId,
-        'Failed to mark dispatch cancelled',
-        self.tryPromise(() =>
-          self.markDispatchCancelled(options.sessionId, options.sessionDoc, options.userTurnId)
-        )
-      );
+      // A shutdown interruption leaves the same trace as a crash: the input stays
+      // `processing` and claimed in metadata until the next start continues it.
+      if (!runtime?.interruptedByProcessEnd)
+        yield* self.ignoreWithWarning(
+          options.sessionId,
+          'Failed to mark dispatch cancelled',
+          self.tryPromise(() =>
+            self.markDispatchCancelled(options.sessionId, options.sessionDoc, options.userTurnId)
+          )
+        );
 
       if (options.reportTurnError) {
         yield* self.ignoreWithWarning(
@@ -4143,6 +4160,49 @@ export class SessionExecutionService {
     }
     await options.sessionDoc.setStatus(SessionStatusFactory.idle());
     this.captureStatusChanged(options.sessionId, 'idle', undefined, 'turn_failed');
+  }
+
+  /**
+   * Restart dispatch of an input a process end interrupted (its metadata claim survived
+   * on this Machine). The input itself is never replayed: it settles as stopped, and
+   * one new Lody-authored `continue` input follows unless the user already moved on.
+   * Returns false when the input was not interrupted, so the caller fails it as before.
+   * Spec: `specs/interrupted-turn-continuation.md`.
+   */
+  private async continueInterruptedTurn(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<boolean> {
+    // Encrypted starts run only signed input; Lody cannot sign for the requester.
+    if (this.deps.encryptedExecution) return false;
+    const raw = await this.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    const meta = raw?.meta as SessionMeta | undefined;
+    if (!isTurnInterruptedByProcessEnd(meta, this.deps.machineId, userTurnId)) return false;
+    const backend = await createSessionBackend(sessionDoc);
+    const [interrupted, existing, queue] = await Promise.all([
+      backend.readTurn(userTurnId),
+      backend.readTurn(interruptedTurnContinuationId(userTurnId)),
+      backend.getMessageQueue(),
+    ]);
+    const plan = planInterruptedTurnContinuation({
+      interruptedTurnId: userTurnId,
+      interruptedTurn: interrupted.state === 'ready' ? interrupted.turn : undefined,
+      meta: raw && !isLoroRepoDocDeleted(raw) ? meta : undefined,
+      queuedInputCount: queue.length,
+      continuationExists: existing.state !== 'missing',
+      timestamp: new Date(getServerNow()).toISOString(),
+    });
+    await this.markDispatchCancelled(sessionId, sessionDoc, userTurnId);
+    await sessionDoc.setStatus(SessionStatusFactory.idle());
+    this.deps.logger.info(
+      `[${sessionId}] Interrupted Turn ${userTurnId}: ${plan.kind === 'continue' ? 'continuing' : `not continued (${plan.reason})`}`
+    );
+    if (plan.kind === 'continue') {
+      await backend.appendUserTurn(plan.entry);
+      this.onInboxReleased?.(sessionId);
+    }
+    return true;
   }
 
   /**
@@ -5093,6 +5153,22 @@ export class SessionExecutionService {
         !options.inboxBatch &&
         inbox!.inputEnded(this.deps.workspaceId, sessionId, inboxInput.inputId)
       ) {
+        // A process end interrupted this input: settle it like Stop and continue once.
+        const continued = await this.continueInterruptedTurn(
+          sessionId,
+          sessionDoc,
+          userTurnId
+        ).catch((continueCause: unknown) => {
+          this.deps.logger.warn(
+            `[${sessionId}] Cannot continue interrupted input ${userTurnId}: ${formatErrorMessage(continueCause)}`
+          );
+          return false;
+        });
+        if (continued) {
+          await closeLeftoverEntry();
+          span.end({ outcome: 'inbox-input-interrupted' });
+          return 'inbox-input-ended';
+        }
         // An ended input is never admitted again (no replay), so leaving its user
         // turn pending would make dispatch select it ahead of every later message.
         await this.retireEndedInboxInputTurn(sessionId, sessionDoc, userTurnId).catch(
@@ -8343,6 +8419,14 @@ export class SessionExecutionService {
                   (id) => self.deps.sessionManager.resolveLocalProjectRootPath(id)
                 )
               : undefined;
+            // A file stat, not a git process: `.git` is a directory in a clone and a file in
+            // a worktree. Failure only omits the PR-link sentence.
+            const gitRepository =
+              project?.kind === 'github' ||
+              (await stat(joinPath(session.getWorkdir(), '.git')).then(
+                () => true,
+                () => false
+              ));
             const sessionInputBlocks = resolveSessionExecutionInputBlocks({
               ...agentConfig,
               prompt: buildPrompt(
@@ -8354,6 +8438,9 @@ export class SessionExecutionService {
                   branchToRename,
                   projectRun,
                   projectFileRoots,
+                  gitRepository,
+                  // The same fact that puts the shim on PATH: managed broker credentials.
+                  managedGhShim: session.getGitHubCredentials().mode === 'managed',
                 }
               ),
             });
@@ -8678,6 +8765,35 @@ export class SessionExecutionService {
     ];
   }
 
+  private async pauseQueuedDrafts(sessionId: SessionId): Promise<void> {
+    // Stop must not wait for a document join or a stalled preparation read.
+    // The renderer also pauses its drafts before publishing the durable Stop marker.
+    const doc = this.deps.workspaceDocument.sessions?.get(sessionId);
+    if (!doc) return;
+    const queue = await doc.getMessageQueue();
+    const cids = queue.filter((item) => !item.paused).map((item) => item.$cid);
+    if (cids.length) await doc.pauseMessageQueueItems(cids);
+  }
+
+  private async retainStoppedQueue(sessionId: SessionId): Promise<void> {
+    try {
+      const doc = this.deps.workspaceDocument.sessions?.get(sessionId);
+      if (!doc) return;
+      const queue = await doc.getMessageQueue();
+      const stopped = queue.filter(
+        (item) =>
+          !item.paused &&
+          this.isInboxInputCanceled(sessionId, item.userTurnId?.trim() || `queued-${item.$cid}`)
+      );
+      if (stopped.length) await doc.pauseMessageQueueItems(stopped.map((item) => item.$cid));
+    } catch (error) {
+      // SQLite already prevents dispatch; the watcher repairs the display marker.
+      this.deps.logger.warn(
+        `[${sessionId}] Could not retain stopped queue: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
   private liveTurnId(sessionId: SessionId): string | undefined {
     return (
       this.deps.getActiveTurnId(sessionId) ??
@@ -8805,6 +8921,7 @@ export class SessionExecutionService {
           message.cancelId
         );
         if (paused) {
+          await this.retainStoppedQueue(sessionId);
           const successor = this.turnRuntimeBySession.get(sessionId);
           if (successor?.inboxOwner?.input?.inputId === `inbox:${target.executionId}`)
             return this.cancelSession({ ...message, turnId: successor.turnId }, options);
@@ -8814,6 +8931,8 @@ export class SessionExecutionService {
       // Stop always ends the turn the user sees: with no execution here, the
       // unfinished entry is closed instead of ignored.
       if (await this.closeDeadAssistantTurn(sessionId, { turnId, requireSettledUserTurn: false })) {
+        if (options.pauseInbox !== false && message.pauseInbox !== false)
+          await this.pauseQueuedDrafts(sessionId);
         this.refreshCodeCollabSharedStateAfterTurn(sessionId);
       } else {
         this.deps.logger.debug(
@@ -8826,6 +8945,15 @@ export class SessionExecutionService {
     }
 
     const stoppedRuntime = this.turnRuntimeBySession.get(sessionId);
+    // Legacy and degraded hosts still retain ordinary queued drafts on Stop.
+    // Interrupt-and-send and Edit & Resend opt out explicitly.
+    if (
+      (!this.operationInbox || !pauseInbox) &&
+      options.pauseInbox !== false &&
+      message.pauseInbox !== false
+    ) {
+      await this.pauseQueuedDrafts(sessionId);
+    }
     if (this.operationInbox && stoppedRuntime?.invocation?.requesterUserId && pauseInbox) {
       const scope = {
         workspaceId: this.deps.workspaceId,
@@ -8841,6 +8969,7 @@ export class SessionExecutionService {
           message.cancelId
         );
         if (!paused) return { success: false, error: 'Execution changed before Stop.' };
+        await this.retainStoppedQueue(sessionId);
         const successor = this.turnRuntimeBySession.get(sessionId);
         if (
           successor &&

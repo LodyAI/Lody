@@ -1026,8 +1026,8 @@ pre,
        too, with wide hyphens in file and repo names. */
     --font-sans-default:
       'SF Pro Display', 'Inter Variable', 'PingFang SC', -apple-system, BlinkMacSystemFont,
-      'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, 'Apple Color Emoji',
-      'Segoe UI Emoji', sans-serif;
+      'Hiragino Sans GB', 'Segoe UI', 'Microsoft YaHei', 'Helvetica Neue', Arial,
+      'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
     --font-wordmark:
@@ -1243,29 +1243,46 @@ pre,
     -webkit-touch-callout: none;
   }
 
-  body.native-mobile-shell * {
+  body * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  body textarea,
+  body [contenteditable]:not([contenteditable='false']),
+  body [contenteditable]:not([contenteditable='false']) *,
+  body [data-text-selectable],
+  body [data-text-selectable] *,
+  body
+    input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
+      [type='radio']
+    ):not([type='range']):not([type='file']):not([type='color']) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  body [data-text-selectable] :is(button, [role='button']),
+  body [data-text-selectable] :is(button, [role='button']) * {
     -webkit-user-select: none;
     user-select: none;
   }
 
   body.native-mobile-shell textarea,
-  body.native-mobile-shell [contenteditable='true'],
-  body.native-mobile-shell [contenteditable='true'] *,
-  body.native-mobile-shell [data-native-selection-allow],
-  body.native-mobile-shell [data-native-selection-allow] *,
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']),
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']) *,
+  body.native-mobile-shell [data-text-selectable],
+  body.native-mobile-shell [data-text-selectable] *,
   body.native-mobile-shell
     input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
       [type='radio']
     ):not([type='range']):not([type='file']):not([type='color']) {
     -webkit-touch-callout: default;
-    -webkit-user-select: text;
-    user-select: text;
   }
 
   /* No WKWebView link preview inside selectable text: after its "Open Link",
      every later tap in the app reopened that link. Links open with a tap. */
-  body.native-mobile-shell [data-native-selection-allow] a[href],
-  body.native-mobile-shell [data-native-selection-allow] a[href] * {
+  body.native-mobile-shell [data-text-selectable] a[href],
+  body.native-mobile-shell [data-text-selectable] a[href] * {
     -webkit-touch-callout: none;
   }
 
@@ -1974,9 +1991,23 @@ pre,
   will-change: transform;
 }
 
+/* Back destination under the sliding-off page (`useMobileBackRevealClass`):
+   iOS-style parallax in from a dimmed, left-shifted position. */
+@keyframes mobile-drill-reveal {
+  from {
+    transform: translate3d(-28%, 0, 0);
+    opacity: 0.72;
+  }
+}
+
+.mobile-drill-reveal {
+  animation: mobile-drill-reveal 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mobile-drill-in,
-  .mobile-drill-out {
+  .mobile-drill-out,
+  .mobile-drill-reveal {
     animation: none;
   }
 }
@@ -2365,4 +2396,16 @@ html:active-view-transition-type(home-board-fold)::view-transition-old(home-boar
     transform: none;
     opacity: 1;
   }
+}
+
+/* Pinned sidebar drags (`lib/pinned-drop-settle.ts`): while a pin row or section is
+   held the cursor is grabbing everywhere; from the drop until the pointer next moves,
+   pin sections take no hover, so a landed row does not light up under a still pointer. */
+body[data-pin-dragging],
+body[data-pin-dragging] * {
+  cursor: grabbing !important;
+}
+
+body[data-pin-hover-suppressed] [data-pin-section] {
+  pointer-events: none;
 }

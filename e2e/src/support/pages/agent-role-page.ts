@@ -292,7 +292,7 @@ export class AgentRolePage {
     const settings = await this.openSettings();
     await settings.locator('[data-settings-tab-id="agent-roles"]').click();
     await expect(
-      settings.getByText(/^(An Agent Role saves|Agent 角色保存了)/u).first()
+      settings.getByRole('button', { name: /^(Add role|添加角色)$/u }).first()
     ).toBeVisible();
     return settings;
   }

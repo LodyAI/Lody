@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { describe, expect, it } from 'vitest';
 import {
   SessionStatusFactory,
@@ -10,11 +11,11 @@ import {
 import {
   findNextDispatchableUserTurn,
   resolveSessionDispatchAction,
+  isImportFencedQueueItem,
   shouldWatchSession,
 } from './session-dispatch-logic';
 import { SessionExecutionService } from './session-execution-service';
 import { LoroDoc } from 'loro-crdt';
-import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import { readDispatchHistory, readDispatchSelection } from './session-dispatch-history';
 import { isActivationAwaitingHistory } from './session-dispatch-logic';
@@ -490,5 +491,69 @@ describe('scalar dispatch observations', () => {
         }
         data.dispose();
       }
+  });
+});
+
+describe('workspace import fences', () => {
+  const machineId = 'machine-1' as MachineId;
+  const meta = {
+    id: 'session-imported' as SessionId,
+    machineId,
+    createdAt: '2026-11-19T00:00:00.000Z',
+    userId: 'user-1',
+    cliType: 'builtin',
+    agentType: 'codex',
+    status: SessionStatusFactory.idle(),
+    latestUserMsgId: 'u-imported',
+    importFence: { workspaceId: 'ws_b', turnIds: ['u-imported'], queueItemIds: [] },
+  } satisfies SessionMeta;
+  const turn = (id: string) => ({
+    id,
+    role: 'user' as const,
+    timestamp: '2026-11-19T00:00:00.000Z',
+    items: [{ type: 'text' as const, text: id }],
+    status: 'pending' as const,
+  });
+  const snapshot = (history: ReturnType<typeof turn>[]) => ({
+    meta,
+    history,
+    hasActiveTurn: false,
+    hasBlockingPendingCreate: false,
+    hasReusableSession: false,
+    hasRewriteBarrier: false,
+  });
+
+  it('never runs input that arrived through an import into this workspace', () => {
+    expect(resolveSessionDispatchAction(snapshot([turn('u-imported')]), machineId, 'ws_b')).toEqual(
+      {
+        type: 'no-dispatchable-turn',
+      }
+    );
+  });
+
+  it('runs new input in the importing workspace and anything in other workspaces', () => {
+    expect(
+      resolveSessionDispatchAction(snapshot([turn('u-imported'), turn('u-new')]), machineId, 'ws_b')
+    ).toMatchObject({ type: 'dispatch', turn: { id: 'u-new' } });
+    expect(
+      resolveSessionDispatchAction(snapshot([turn('u-imported')]), machineId, 'ws_a')
+    ).toMatchObject({
+      type: 'dispatch',
+      turn: { id: 'u-imported' },
+    });
+  });
+});
+
+describe('isImportFencedQueueItem', () => {
+  const meta = {
+    importFence: { workspaceId: 'ws_b', turnIds: ['u-queued'], queueItemIds: ['cid:1@2:Map'] },
+  } as Pick<SessionMeta, 'importFence'>;
+  it('holds queued items and promotions that came from an import into this workspace', () => {
+    expect(isImportFencedQueueItem(meta, 'ws_b', { $cid: 'cid:1@2:Map' })).toBe(true);
+    expect(isImportFencedQueueItem(meta, 'ws_b', { $cid: 'other', userTurnId: 'u-queued' })).toBe(
+      true
+    );
+    expect(isImportFencedQueueItem(meta, 'ws_b', { $cid: 'new' })).toBe(false);
+    expect(isImportFencedQueueItem(meta, 'ws_a', { $cid: 'cid:1@2:Map' })).toBe(false);
   });
 });

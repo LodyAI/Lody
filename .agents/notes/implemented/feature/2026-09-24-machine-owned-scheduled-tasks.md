@@ -49,7 +49,7 @@ read-only with Replace and re-emitted verbatim. Considered and removed: a
 five-field custom editor, which people found unreadable and which kept
 producing lossy round trips.
 
-**Agents propose, people create.** `lody_schedule_propose` takes a named rule and
+**Agents propose, people create.** `lody_schedule` action `propose` takes a named rule and
 writes an idempotent `schedule_proposal` notice; pressing Create on the card is
 the creation, with the proposal id as the schedule id. The target defaults to the
 proposing conversation's Agent, effective mode, machine and project; a named Role,

@@ -231,7 +231,7 @@ export const buildUnavailableAttachmentPromptText = (args: {
  * intermediate directories cannot escape the root (the final component is
  * separately protected by the caller's O_NOFOLLOW open).
  *
- * This is the security boundary for the agent-facing `lody_upload_files`
+ * This is the security boundary for the agent-facing `lody_upload` (`kind: "files"`)
  * channel: the agent's own filesystem tools gate out-of-workspace reads behind
  * user approval, and an upload tool that accepted arbitrary host paths would
  * silently bypass that gate (e.g. exfiltrate `~/.ssh`). The desktop

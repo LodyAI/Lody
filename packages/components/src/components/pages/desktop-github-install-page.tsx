@@ -5,6 +5,7 @@ import { Github } from 'lucide-react';
 
 import { Button } from '@lody/ui/button';
 import { SecondaryPage } from '@/components/pages/secondary-page';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** How long the deep link gets to open the app before the page offers the fallback. */
 const FALLBACK_DELAY_MS = 3000;
@@ -31,9 +32,9 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
   }, [deepLink]);
 
   const copyLink = async () => {
-    if (!deepLink || !navigator.clipboard?.writeText) return;
+    if (!deepLink) return;
     try {
-      await navigator.clipboard.writeText(deepLink);
+      await copyTextToClipboard(deepLink);
       setCopied(true);
     } catch {
       setCopied(false);

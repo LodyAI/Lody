@@ -8,7 +8,7 @@ import {
   useNavigate,
   useRouter,
 } from '@tanstack/react-router';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import AppInitializer from '@/components/AppInitializer';
 import { ThemeProvider } from '../theme-provider';
 import { LanguageProvider } from '../i18n';
@@ -33,7 +33,13 @@ import { persistAuthToken, signOutWithoutRedirect } from '../lib/auth';
 import { setLoginHintCookie } from '../lib/login-hint-cookie';
 import i18next from 'i18next';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
-import { buildSessionLink, parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import {
+  buildSessionLink,
+  parseSessionLink,
+  parseTodayLink,
+  type SessionLink,
+  type TodayLink,
+} from '@lody/shared/session-link';
 import {
   SESSION_DEEP_LINK_EVENT,
   pendingSessionLinkAtom,
@@ -82,6 +88,7 @@ import { isLocalAppPlatform, useAppCapability } from '@/lib/app-platform';
 import { getLocalPlatformProvider } from '../providers/local-platform-provider';
 import { LocalPlatformAuthProvider } from '../providers/local-platform-auth-provider';
 import { CloudPlatformProvider } from '../providers/cloud-platform-provider';
+import { useOpenToday } from '@/components/today/use-open-today';
 
 const PENDING_MACHINE_PAIRING_KEY = 'lody:pending-machine-pairing-request';
 
@@ -89,7 +96,6 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
   notFoundComponent: NotFound,
   head: () => ({
-    // TODO: head meta
     meta: [
       {
         charSet: 'utf-8',
@@ -457,6 +463,11 @@ function SessionDeepLinkRouter() {
   useEffect(() => {
     const receive = (raw: unknown) => {
       if (typeof raw !== 'string') return;
+      const today = parseTodayLink(raw);
+      if (today) {
+        setPendingToday(today);
+        return;
+      }
       const link = parseSessionLink(raw);
       if (link) {
         setNavigationTarget(null);
@@ -469,6 +480,35 @@ function SessionDeepLinkRouter() {
       window.removeEventListener(SESSION_DEEP_LINK_EVENT, onOpen);
     };
   }, [setNavigationTarget]);
+  const [pendingToday, setPendingToday] = useState<TodayLink | null>(null);
+  const openToday = useOpenToday();
+  useEffect(() => {
+    // A Today page link (specs/today-outline.md): open that member's day in its workspace.
+    if (!pendingToday) return;
+    const resolution = resolveSessionLinkWorkspace(
+      { sessionId: '' as SessionLink['sessionId'], workspaceId: pendingToday.workspaceId },
+      workspaces,
+      currentWorkspaceId
+    );
+    if (resolution.kind === 'wait') return;
+    setPendingToday(null);
+    if (resolution.kind === 'unavailable') {
+      toast.error(
+        i18next.t(
+          'deepLink.workspaceUnavailable',
+          'This workspace is unavailable in this version of Lody. Open the link in the installation that owns it.'
+        )
+      );
+      return;
+    }
+    // Pinned beside this workspace's sidebar, the column opens the day in place.
+    openToday({
+      workspaceSlug: resolution.slug,
+      sameWorkspace: resolution.workspaceId === currentWorkspaceId,
+      member: pendingToday.userId,
+      date: pendingToday.date,
+    });
+  }, [currentWorkspaceId, openToday, pendingToday, workspaces]);
   useEffect(() => {
     // Let auth/provisioning and the default landing settle before applying the explicit target.
     if (!pending) return;

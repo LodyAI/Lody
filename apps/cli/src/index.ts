@@ -3,6 +3,13 @@
 // the SQLite binding cannot load — Node-API < 10 segfaults rather than throwing, and
 // 32-bit ARM has no prebuild. See utils/sqlite-runtime-support.ts.
 import './utils/sqlite-runtime-support';
+import { releaseScopedMallocArenaLimit } from './utils/malloc-arena';
+
+releaseScopedMallocArenaLimit();
+
+const { forwardToSelectedManagedInstallation } = await import('./lib/managed-daemon-forwarding');
+if (await forwardToSelectedManagedInstallation()) process.exit(process.exitCode ?? 0);
+
 import './instrument';
 import {
   configureManagedProcessObservation,
@@ -15,19 +22,13 @@ import {
   LoginShellCacheLive,
   LoginShellCacheReporter,
   loginShellEnvLayer,
+  recoverLoginShellCacheShutdown,
 } from '@lody/shared/node/login-shell-env';
 import {
   bindLoginShellCacheLegacy,
   closeLoginShellApplicationLegacy,
 } from './agent/login-shell-env';
 import { toShared } from './platform/process-options';
-import { presencePlatformLayer } from './platform/presence';
-import { WorkspacePresenceOwnersLive } from './lib/loro/workspace-presence';
-import {
-  bindWorkspacePresenceApplicationLegacy,
-  recoverCliPresenceApplicationShutdown,
-  WorkspacePresenceLegacyFailure,
-} from './lib/loro/presence-legacy';
 import { version } from '@/pkg';
 import { loadEnv } from './utils/const';
 import { getLogger } from './utils/logger';
@@ -67,18 +68,17 @@ const shellCache = LoginShellCacheLive.pipe(
     )
   )
 );
-const application = makeApplicationRuntime(
-  Layer.merge(
-    shellCache,
-    WorkspacePresenceOwnersLive.pipe(Layer.provide(presencePlatformLayer(cliLogger)))
-  ),
-  {
-    recover: recoverCliPresenceApplicationShutdown,
-    project: (cause) => new WorkspacePresenceLegacyFailure(cause),
-  }
-);
+const application =
+  process.argv[2] === 'daemon-runner'
+    ? makeApplicationRuntime(shellCache, {
+        recover: recoverLoginShellCacheShutdown,
+        project: (cause) => Cause.squash(cause),
+      })
+    : (await import('./cli-presence-application')).makeCliPresenceApplication(
+        shellCache,
+        cliLogger
+      );
 bindLoginShellCacheLegacy(application);
-bindWorkspacePresenceApplicationLegacy(application);
 
 const program = new Command();
 

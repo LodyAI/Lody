@@ -221,8 +221,8 @@ Role details include the prompt prefix; lists retain readable unavailable Roles 
 Operation listing reads this machine's store, scoped to the requester Session and authenticated
 user, with `--state`, `--limit` and `--cursor`. It does not aggregate other machines' stores.
 The Session Role filter matches creation provenance. Lody MCP exposes corresponding
-`lody_machine_list`, `lody_project_list`, `lody_agent_config_list/get`,
-`lody_agent_role_list/get`, `lody_mcp_list` and `lody_operation_list` tools.
+read-only `lody_catalog` actions (`machines`, `projects`, `agent_configs`,
+`agent_roles`, `mcp_servers`) and the `lody_operation` tool.
 
 For the exact current flags, always check the built-in help:
 
@@ -311,8 +311,8 @@ mention-compatible and at most 60 characters after trimming; descriptions allow 
 Machine/config IDs must be nonempty and at most 128 characters after trimming.
 Unsupported fields are rejected.
 
-MCP exposes the same confirmation flow through `lody_agent_role_create` and
-`lody_agent_role_update`. Create takes `requestId` plus the create fields above; update
+MCP exposes the same confirmation flow through `lody_agent_role` actions `create` and
+`update`. Create takes `requestId` plus the create fields above; update
 takes `requestId`, `roleId`, and a `patch` containing the changed text fields.
 See [Agent Roles](/docs/agent-roles) for how saved Roles are used.
 

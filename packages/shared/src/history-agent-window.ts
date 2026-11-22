@@ -8,7 +8,7 @@ import {
 } from 'loro-crdt';
 import type { SchemaType } from 'loro-mirror';
 import type { SessionHistoryInput } from './schema';
-import { sessionHistorySchema } from './schema';
+import { sessionHistorySchema } from './session-doc-schemas';
 import { HistoryWriteError } from './history-write-schema';
 import {
   diffHistoryContainer,

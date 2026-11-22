@@ -78,6 +78,9 @@ the reasoning behind those rules.
   `session-link-context.tsx`'s explicit-target deep-link dispatch for both same-
   and cross-workspace links. Ordinary related-session navigation remains separate
   so its last-active-tab restoration cannot override a resource destination.
+  Trusted HTTP(S) session URLs for the current workspace also dispatch their exact
+  conversation in-app on an ordinary click, including a selected child tab. Other
+  workspaces, external origins and modified clicks retain external navigation.
   Without live navigation, or on a read-only share, the chip is inert.
   Message/plan copy and UI/CLI Markdown exports normalize prose references using
   shared `session-link-export`, preserving code examples and stored history.
@@ -445,7 +448,7 @@ records lifecycle, alternatives, and platform verification limits.
 
 `message-author-identity.tsx` renders frozen Agent/Role identity in input avatars.
 Assistant replies do not show an author identity entry or its popover. It reads no catalogs or source documents. When session navigation is available, `view.tsx` also renders an inline source-conversation return link in the user message metadata row using the cached session title (or the generic source label). Human profiles remain
-in `view.tsx`; execution controls continue to describe the receiving turn. The
+in `view.tsx`, shared by `PendingMessageRow` and `UserMessageRowView` across local send, attachment preparation and hydrated history, and gated on multi-member workspaces ([human sender identity](../../../../../.agents/notes/implemented/feature/2026-09-08-chat-sender-identity.md)); execution controls continue to describe the receiving turn. The
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.
 

@@ -12,6 +12,9 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 
 Organization queries require matching authenticated sessions.
 
+Plain-text copy/paste uses `clipboard.ts`, never `navigator.clipboard`: native
+shells supply `window.__LODY_CLIPBOARD__` (Android WebView denies the web API).
+
 ## Electron IPC types
 
 - `electron-ipc-client.ts` may import `ElectronIpcServices` from main-process

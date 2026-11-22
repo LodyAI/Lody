@@ -43,6 +43,7 @@ export const ELECTRON_TEST_GROUPS = [
       'src/main/services/app-updater-service.test.mjs',
       'src/main/services/loro-data-plane-relay.test.mjs',
       'src/main/services/storage-guard.test.mjs',
+      'src/main/services/workspace-bundle-service.test.mjs',
       'src/renderer/renderer-csp.test.mjs',
       'src/renderer/src/auth-callback-transaction.test.mjs',
       'src/renderer/src/renderer-error-reporting.test.mjs'

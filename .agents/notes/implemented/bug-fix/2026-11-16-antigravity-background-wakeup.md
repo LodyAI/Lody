@@ -7,94 +7,67 @@ Translation: current
 
 ## Abstract
 
-`agy acp` ends `session/prompt` with `end_turn` while its background work is still
-running, then stops writing to stdout, so Lody's idle GC killed processes that were
-still working. Lody now ends the turn normally and synthesizes Core `sessionActivity`
-until that work has woken the model and gone quiet, using only side-effect-free
-`session/list` polling. Output agy produces in those wakeups is not replayed into Lody:
-the only API that returns it, `session/load`, restarts the session's MCP servers and
-interrupted a tool call in a real run.
+`agy acp` (`Antigravity ACP Server`, ACP v1) ends `session/prompt` with `end_turn` while
+background work is still running, stops writing to stdout, and does not advertise Core
+`sessionActivity`. Lody previously synthesized `sessionActivity` from stdout tool
+heuristics and `session/list` `updatedAt` polling, then removed that heuristic because
+over-counted tasks locked sessions in `running` presence, suppressed unread/completion
+notifications, and polled `session/list` every 2 seconds for up to 24 hours. Lody now
+keeps only deterministic Antigravity compatibility (`isAntigravityServer`, `realpath`
+`cwd` negotiation) and consumes Core `sessionActivity` only when an agent authoritatively
+advertises it.
 
 ## Problem
 
-`agy acp` (`Antigravity ACP Server`, ACP v1) resolves `session/prompt` with
-`end_turn` as soon as the model yields, even while background work it started is
-still running: `run_command` past its async threshold, `schedule` timers and crons,
-`invoke_subagent` / `send_message`, `swarm` and async `run_workflow`. When that work
-finishes, agy wakes the model inside its own session, but it no longer writes
-`session/update` or `session/request_permission` to stdout. agy does not advertise
-the Core `sessionActivity` extension, so Lody saw an idle session and
-`SessionGCManager` killed the process after the idle timeout while the work was still
-running.
+`agy acp` does not advertise Core `sessionActivity` (`_lody/session/activity_update`).
+When `run_command` exceeds `WaitMsBeforeAsync`, `agy` emits a placeholder output
+(`Tool is running as a background task with task id: ...`) and delivers completion via an
+internal `<SYSTEM_MESSAGE>` without updating the original `tool_call`. Guessing a pending
+count from stdout notifications and decrementing on `session/list` `updatedAt` bursts
+failed in production:
+
+- Background commands that completed inside the same turn (including plain-text wakeups
+  with no `agent_thought_chunk`) stayed counted as pending at `end_turn`.
+- Multiple background tasks finishing in one `updatedAt` burst decremented `pending` by
+  only 1, leaving the remainder stuck until the 24-hour cap.
+- Feeding an unreliable heuristic into `AgentClient.reportsSessionActivity()` /
+  `getNativeWork()` caused `SessionActivePresence` to broadcast `running` ("working"),
+  `SessionExecutionService` to suppress completion notifications and later emit false
+  `nativeWorkInterrupted` notices, and `runAntigravityPollLoop` to poll `session/list`
+  every 2 seconds for 24 hours.
 
 ## Decision
 
-The fix stays inside `apps/cli/src/agent/` (`antigravity-background.ts` and
-`AgentClient`). It reuses the native-work contract from
-[Session GC respects native agent work](2026-10-18-gc-respects-native-agent-work.md):
-the turn ends at `end_turn`, and `sessionActivity` keeps the process alive.
-
-- **Pending work at `end_turn`.** From the tool notifications streamed live during the
-  turn, Lody counts one pending item for each tool that is still `pending` or
-  `in_progress`, whose output is agy's "running as a background task" placeholder, or
-  that dispatches work reporting only by waking the model (`invoke_subagent`,
-  `send_message`, `swarm`, a `run_workflow` with no output). agy keeps a `schedule`
-  `in_progress` until it fires, so timers need no special case. `IsDaemon: true` and
-  failed tools are not counted. No agy tool arguments are parsed.
-- **Release by activity.** While items are pending, Lody polls `session/list` every
-  2 seconds and reports `background`, or `running` while `updatedAt` is moving. A
-  burst of `updatedAt` changes followed by 30 seconds of stillness counts as one item
-  finished. Lody reports idle when no item remains, and after 24 hours at most,
-  matching the Core `background` cap. If `session/list` is missing or keeps failing,
-  the monitor keeps protecting until the cap.
-- **Across turns.** Items still pending when the user sends another message carry
-  into that turn, so earlier background work stays protected.
-- **`cwd`.** Lody negotiates the `realpath` of the workdir as the Antigravity ACP
-  `cwd`; agy compares edit targets by realpath, so a symlinked workdir otherwise made
-  in-workspace edits ask for permission.
+- **No heuristic `sessionActivity` synthesis.** `AgentClient.reportsSessionActivity()`
+  returns `true` only when the agent advertises Core `sessionActivity` v1. Without an
+  authoritative signal from `agy`, turns finish immediately at `end_turn` and normal idle
+  GC applies, matching [Session GC respects native agent work](2026-10-18-gc-respects-native-agent-work.md).
+  If a future `agy` release advertises Core `sessionActivity` v1, `AgentClient` will
+  consume it directly without heuristics.
+- **Keep deterministic Antigravity compatibility.** `antigravity-background.ts` retains
+  `isAntigravityServer` (builtin `antigravity` and custom `Antigravity ACP Server` parity,
+  excluding legacy `antigravity-acp`), and `AgentClient` keeps negotiating the `realpath`
+  of the workdir as the Antigravity ACP `cwd` so symlinked workdirs do not trigger
+  out-of-workspace edit prompts.
 
 ## Rejected alternatives
 
-- **Replaying wakeup output from `session/load` snapshots.** Implemented and tested
-  on a real agy 1.5.7 with `gemini-4-hydrogen-medium`; replay itself worked. Every
-  load stopped and restarted the session's MCP servers: 19 loads and 20 server starts
-  in 125 seconds at a 6-second rhythm. With loads throttled to one a minute and only
-  after `updatedAt` had been still for 10 seconds, a 30-second MCP tool call was still
-  cut off about 10.7 seconds in and returned `failed` with EOF, because `updatedAt`
-  does not move while a tool runs. No timing rule can tell "done" from "waiting on a
-  slow tool" from outside.
-- **Loading with an empty `mcpServers` list.** Unverified; agy may detach the
-  session's MCP servers for the rest of its life.
-- **Reading agy's on-disk transcript.** Side-effect free, but an undocumented format
-  that can change with any agy release.
-- **Holding `session/prompt` open until background work finishes.** Locks the
-  composer for up to 30 minutes and needs a second state machine; the native-work
-  contract already covers background work after a turn.
-- **Counting tasks from agy tool arguments** (`DurationSeconds`, `CronExpression`,
-  `MaxIterations`, swarm `tasks`/`n`, `manage_*` kills). The count drifts as soon as
-  agy changes an argument.
-- **Synthetic prompts or steers after `end_turn`.** Root `AGENTS.md` forbids text
-  that steers the agent.
-- **Antigravity cases in `SessionGCManager` or `MessageHandler`.** Those consumers
-  stay provider-neutral.
+- **Synthesizing `sessionActivity` from stdout tool notifications + `session/list` polling.**
+  Implemented on 2026-11-16 and removed on 2026-11-22: without an authoritative task-count
+  signal from `agy`, false positives permanently stuck sessions in `running` presence for
+  up to 24 hours.
+- **Replaying wakeup output from `session/load` snapshots.** Tested on real `agy` 1.5.7;
+  every `session/load` stopped and restarted the session's MCP servers, interrupting
+  in-progress tool calls.
+- **Reading `agy`'s on-disk transcript.** Undocumented internal format that can change with
+  any `agy` release.
+- **Holding `session/prompt` open or sending synthetic steers after `end_turn`.** Locks
+  the composer or violates root `AGENTS.md`.
 
 ## Verification
 
-`apps/cli/src/agent/antigravity-background.test.ts` drives the real `AgentClient`
-against a fake `session/list`. It pins turn completion at `end_turn`, protection of
-silent work beyond the idle timeout, one wakeup per pending item, the 24-hour cap,
-continued protection when `session/list` fails, daemon and failed-tool exclusion,
-carry-over across a new message, `realpath` negotiation, and that `session/load` is
-never called. Real-machine runs covered the replay design that this note rejects; the
-activity-only release rule has not been run against a real agy.
-
-## Limits
-
-- Output agy writes after `end_turn` does not appear in Lody. A side-effect-free read
-  from agy would allow replay without the MCP restarts.
-- Several items that wake agy in a single burst release only one item, so the
-  session stays protected until the next burst or the 24-hour cap. Work the model
-  starts during a wakeup is not counted.
-- A post-`end_turn` tool waiting for a permission request agy does not forward still
-  wedges that agy session until the user cancels; `realpath` negotiation removes the
-  most common trigger.
+`apps/cli/src/agent/antigravity-background.test.ts` drives the real `AgentClient` and
+pins: builtin/custom `Antigravity ACP Server` parity vs legacy `antigravity-acp`, that no
+synthetic `nativeWork` or `session/list` / `session/load` polling occurs after `end_turn`
+when Core `sessionActivity` is absent, that authoritative Core `sessionActivity` v1 is
+honored if advertised, and `realpath` `cwd` negotiation.

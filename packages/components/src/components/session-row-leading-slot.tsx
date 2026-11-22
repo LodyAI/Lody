@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next';
-import { ChevronDown, MoreHorizontal } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { text } from '@lody/ui/tokens/scales.stylex';
 import { cn } from '@/lib/utils';
@@ -94,29 +94,12 @@ export function buildSessionRowOpenedByTreeSlot(
 }
 
 export function SessionRowLeadingSlot({
-  showMenuButton,
-  menuLabel,
   openedByTree,
-  /** Fade the rest state while hovering (e.g. 'group-hover/row:opacity-0' for named groups). */
-  fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
-  /** Disable an opener disclosure while its ⋯ replacement is active. */
-  restPointerClassName = 'group-hover:pointer-events-none group-data-[menu-open]:pointer-events-none',
-  /** Reveal the ⋯ button while hovering. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
 }: {
-  showMenuButton?: boolean;
-  menuLabel: string;
   openedByTree?: SessionRowOpenedByTreeSlot;
-  fadeClassName?: string;
-  restPointerClassName?: string;
-  revealClassName?: string;
 }) {
   const childTree = openedByTree?.kind === 'child' ? openedByTree : null;
   const openerTree = openedByTree?.kind === 'opener' ? openedByTree : null;
-  const restClassName = showMenuButton
-    ? cn('transition-opacity duration-100', fadeClassName)
-    : undefined;
-  const controlLeftClassName = childTree ? TREE_CONTROL_LEFT_CLASS : 'left-1/2';
 
   return (
     <div
@@ -140,9 +123,8 @@ export function SessionRowLeadingSlot({
           }}
           className={cn(
             'relative z-20 flex h-3.5 w-3.5 items-center justify-center rounded-sm',
-            'text-sidebar-foreground-muted transition-[opacity,color] duration-100',
-            'hover:text-sidebar-foreground focus-visible:outline-hidden',
-            showMenuButton && cn(restClassName, restPointerClassName)
+            'text-sidebar-foreground-muted transition-colors duration-100',
+            'hover:text-sidebar-foreground focus-visible:outline-hidden'
           )}
         >
           <ChevronDown
@@ -154,7 +136,7 @@ export function SessionRowLeadingSlot({
           />
         </button>
       ) : childTree ? (
-        <div className={cn('absolute inset-0', restClassName)}>
+        <div className="absolute inset-0">
           <span
             aria-hidden="true"
             data-session-tree-connector="trunk"
@@ -181,41 +163,6 @@ export function SessionRowLeadingSlot({
             )}
           />
         </div>
-      ) : null}
-      {showMenuButton ? (
-        <button
-          type="button"
-          aria-label={menuLabel}
-          onClick={(event) => {
-            // Open the row's existing right-click menu from a left click on ⋯.
-            event.preventDefault();
-            event.stopPropagation();
-            const rect = event.currentTarget.getBoundingClientRect();
-            event.currentTarget.dispatchEvent(
-              new MouseEvent('contextmenu', {
-                bubbles: true,
-                cancelable: true,
-                clientX: Math.round(rect.left),
-                clientY: Math.round(rect.bottom),
-              })
-            );
-          }}
-          className={cn(
-            // Overlay a 20px hit target centered on the 14px leading slot so the ⋯
-            // gets a visible rounded hover chip (it reads as clickable) without
-            // the tiny slot footprint clipping the background.
-            'absolute top-1/2 z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md opacity-0 pointer-events-none',
-            controlLeftClassName,
-            'text-sidebar-foreground-muted transition-[opacity,color,background-color] duration-100',
-            'hover:bg-sidebar-foreground/15 hover:text-sidebar-foreground',
-            // The trigger itself stays pressed-looking while its menu is open,
-            // not just the row around it.
-            'group-data-[menu-open]:bg-sidebar-foreground/15 group-data-[menu-open]:text-sidebar-foreground',
-            revealClassName
-          )}
-        >
-          <MoreHorizontal className="h-3.5 w-3.5" />
-        </button>
       ) : null}
     </div>
   );

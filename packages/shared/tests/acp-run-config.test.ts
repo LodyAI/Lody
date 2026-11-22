@@ -658,3 +658,61 @@ describe('builtin agent static contracts', () => {
     ).toBeUndefined();
   });
 });
+
+describe('multi-tier speed options', () => {
+  const capability = {
+    cliType: 'builtin' as const,
+    agentType: 'codex',
+    modes: [{ id: 'agent', name: 'Agent' }],
+    models: [
+      { modelId: 'gpt-6.2-sol', name: '6.2 Sol' },
+      { modelId: 'gpt-6.2-astra', name: '6.2 Astra' },
+      { modelId: 'slow-model', name: 'Slow' },
+    ],
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select' as const,
+        currentValue: 'gpt-6.2-sol',
+        options: [
+          { value: 'gpt-6.2-sol', name: '6.2 Sol' },
+          { value: 'gpt-6.2-astra', name: '6.2 Astra' },
+          { value: 'slow-model', name: 'Slow' },
+        ],
+      },
+      {
+        id: 'fast-mode',
+        name: 'Speed',
+        category: 'model_config',
+        type: 'select' as const,
+        currentValue: 'off',
+        options: [
+          { value: 'off', name: 'Standard' },
+          { value: 'fast', name: 'Fast' },
+          { value: 'ultrafast', name: 'Ultrafast' },
+        ],
+      },
+    ],
+    declaredModelControls: {
+      'gpt-6.2-sol': { fastMode: true, speedTiers: ['fast', 'ultrafast'] },
+      'gpt-6.2-astra': { fastMode: true },
+      'slow-model': { fastMode: false },
+    },
+  };
+
+  it('maps semantic fastMode boolean onto a multi-tier speed select', () => {
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', fastMode: true }, capability)
+        .configOptionValues
+    ).toEqual({ 'fast-mode': 'fast' });
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', fastMode: false }, capability)
+        .configOptionValues
+    ).toEqual({ 'fast-mode': 'off' });
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'slow-model', fastMode: true }, capability)
+    ).toThrow('Model slow-model does not offer fast mode.');
+  });
+});

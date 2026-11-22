@@ -85,6 +85,23 @@ export const FewItems: Story = {
   },
 };
 
+export const StoppedQueue: Story = {
+  args: {
+    ...commonArgs,
+    items: makeItems(5).map((item) => ({ ...item, paused: true })),
+    sendWhileIdle: true,
+  },
+  parameters: { containerWidth: 'w-[600px]' },
+};
+
+export const StoppedQueueMobileWidth: Story = {
+  args: {
+    ...StoppedQueue.args,
+    roomy: true,
+  },
+  parameters: { containerWidth: 'w-[320px]' },
+};
+
 export const ManyItems: Story = {
   args: {
     ...commonArgs,

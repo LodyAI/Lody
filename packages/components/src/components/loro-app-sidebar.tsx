@@ -1,3 +1,4 @@
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
@@ -8,7 +9,7 @@ import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { jsonValueEqual } from '@/lib/json-value-equal';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import { SIDEBAR_ROW_LINE_CLASS } from './sidebar-surface';
@@ -33,6 +34,9 @@ import { CSS } from '@dnd-kit/utilities';
 import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
 import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { todayFeatureEnabledAtom } from '@/atoms/settings';
+import { useOpenToday } from '@/components/today/use-open-today';
+import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import {
   findFreshSessionPresenceState,
   machineSupportsLocalProjectRemovalProtocol,
@@ -45,7 +49,23 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
+  buildStatusViewLayout,
+  flattenStatusViewRows,
+  getServerNow,
+  statusViewActivityAt,
+  statusViewPinnedIds,
+  type StatusViewCommand,
+  type StatusViewLayoutInput,
+  type StatusViewSession,
 } from '@lody/shared';
+import { useWorkspaceCatalog } from '@/hooks/use-workspace-catalog';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
+import {
+  focusDropBeforeId,
+  pinnedDropBeforeId,
+  sectionDropBeforeId,
+} from '@/lib/status-view-state';
+import type { SidebarPinSectionActions, SidebarPinnedSection } from './sidebar-pinned-sections';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAppCapability } from '@/lib/app-platform';
@@ -91,6 +111,7 @@ import {
   setWorkspaceContextAtom,
 } from '@/atoms';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
@@ -101,7 +122,12 @@ import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index'
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { importSidebarLocalProject } from '@/components/sidebar-local-project-import';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
-import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-archive-confirmation';
+import {
+  useArchiveSessionWithConfirmation,
+  useMoveToFocusWithConfirmation,
+  useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
+} from '@/components/sessions/session-sub-conversation-confirmation';
 import {
   chatScopeAtom,
   chatsCollapsedAtom,
@@ -112,6 +138,7 @@ import {
   moveLocalProjectOrder,
   localProjectsSectionCollapseStateAtom,
   pinnedSectionCollapsedAtom,
+  pinSectionsCollapsedAtom,
   repoCollapseStateAtom,
   repoOrderAtom,
   sidebarCollapsedAtom,
@@ -126,7 +153,7 @@ import {
 } from '@/atoms/sidebar-state';
 import {
   sortUpdatedItems,
-  SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
+  toStatusViewSession,
   type SidebarUpdatedBucketKey,
   type SidebarUpdatedItem,
 } from '@/components/sidebar-updated-session-list';
@@ -195,7 +222,7 @@ import {
   FolderPlus,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   FolderOpen,
   GripVertical,
   MoreHorizontal,
@@ -218,6 +245,7 @@ import {
   SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SessionRowWorktreeIndicator,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
@@ -246,6 +274,7 @@ import {
   hasOpenedByTreeNesting,
   normalizeSessionRowId,
 } from '@/lib/session-opened-by-tree';
+import { pinSectionKey } from '@/components/pinned-rows-dnd';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import { SessionShareDialog } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -259,6 +288,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** A machine's sidebar label: its name without the mDNS `.local` suffix. */
 const sidebarMachineLabel = (name: string): string => name.trim().replace(/\.local$/i, '');
@@ -371,10 +401,6 @@ const isElectronMacOS =
   window.__LODY_PLATFORM__?.os === 'darwin';
 
 const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
-
-// ---------------------------------------------------------------------------
-// Extracted memoized sub-components for local project sidebar sections
-// ---------------------------------------------------------------------------
 
 type LocalProjectSessionItemProps = {
   session: SessionMeta;
@@ -598,11 +624,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         {/* On a two-line row the leading and end slots sit in a box one title line
             tall, so they stay on the title line; otherwise the box disappears. */}
         <div className={lineBoxClassName}>
-          <SessionRowLeadingSlot
-            showMenuButton={hasContextMenuActions}
-            menuLabel={moreActionsLabel}
-            openedByTree={openedByTree}
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTree} />
         </div>
         <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
           <div
@@ -648,11 +670,12 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           </span>
         ) : null}
         {/* ④ Fixed end slot: the PR status sits here at rest when the session
-            has one, with a faint worktree glyph just to its left; the Archive
-            button replaces it on desktop hover. */}
+            has one, with a faint worktree glyph just to its left; the ⋯ menu and
+            Archive buttons replace it on desktop hover. */}
         <div className={lineBoxClassName}>
           <SidebarRowEndSlot
             sessionId={session.id}
+            selected={showSelectedState}
             isWaitingPermission={isWaitingPermission}
             isWorking={isWorking}
             hasUnreadMessages={hasUnreadMessages}
@@ -665,6 +688,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
                   ) : null}
                 </span>
               ) : undefined
+            }
+            menu={
+              hasContextMenuActions ? <SessionRowMenuButton label={moreActionsLabel} /> : undefined
             }
             archive={
               showInlineArchive ? (
@@ -701,7 +727,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkUnread?.(session.id);
             }}
@@ -1622,7 +1648,12 @@ export function LoroAppSidebar({
     [updaterState, resolvedLanguage]
   );
 
-  const { organizations, activeOrganization, switchOrganization } = useOrganization();
+  const {
+    organizations,
+    activeOrganization,
+    switchOrganization,
+    role: workspaceRole,
+  } = useOrganization();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const navigateWorkspace = useCallback(
     (slug: string) => {
@@ -1739,10 +1770,29 @@ export function LoroAppSidebar({
     return null;
   }, [location.pathname, location.search, selectedSessionId, workspaceSlug]);
 
+  const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
+  const openToday = useOpenToday();
+  // Open Today from anywhere; rebindable in Settings > Keyboard shortcuts.
+  // Registered only while the experiment is on, over `TodayCommandPlaceholder`.
+  useCommand(
+    {
+      id: 'today.open',
+      title: t('commands.today.open', 'Open Today'),
+      titleKey: 'commands.today.open',
+      category: 'Navigation',
+      keybindings: getCommandKeybindings('today.open'),
+      when: () => Boolean(workspaceSlug),
+      run: () => {
+        if (workspaceSlug) openToday({ workspaceSlug, sameWorkspace: true });
+      },
+    },
+    todayEnabled
+  );
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
     if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/schedules`))
       return 'schedules';
+    if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/today`)) return 'today';
     if (
       isHomeRoute(location.pathname, workspaceSlug) &&
       !selectedSessionId &&
@@ -1758,13 +1808,26 @@ export function LoroAppSidebar({
   // Local-project sessions bypass buildSessionListRows, so resolve their author
   // (creator) here from org members — only in team scope, mirroring the mapping's own
   // gate so a solo / My-Tasks view never shows a redundant "always you" author.
+  const sidebarMembers = useMemo(
+    () =>
+      sharingMembers.length > 0
+        ? sharingMembers.map((member) => ({
+            userId: member.userId,
+            user: {
+              name: member.displayName ?? member.name,
+              image: member.image ?? null,
+            },
+          }))
+        : activeOrganization?.members,
+    [activeOrganization?.members, sharingMembers]
+  );
   const membersByUserId = useMemo(() => {
     const map = new Map<string, { name?: string | null; image?: string | null }>();
-    for (const member of activeOrganization?.members ?? []) {
+    for (const member of sidebarMembers ?? []) {
       if (member.user) map.set(member.userId, { name: member.user.name, image: member.user.image });
     }
     return map;
-  }, [activeOrganization?.members]);
+  }, [sidebarMembers]);
   // Only attribute an owner on a multi-member workspace: a solo workspace's tasks
   // are "always you", so an author avatar there would be redundant. Mirrors the
   // same gate in `buildSessionListRows` so both row paths agree.
@@ -1828,13 +1891,30 @@ export function LoroAppSidebar({
     [postHog, setHideEmptyProjects]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
-  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
-    useSessionActions();
+  const {
+    archiveSession,
+    markSessionUnread,
+    runStatusViewCommand,
+    snoozeSession,
+    settleSession,
+    moveSessionToFocus,
+    updateSessionTitle,
+  } = useSessionActions();
+  const {
+    pinSections,
+    loaded: pinSectionsRead,
+    failed: pinSectionsUnreadable,
+  } = useWorkspaceCatalog();
+  // A failed read cannot hold rows back forever: they fall back to the default section.
+  const pinSectionsLoaded = pinSectionsRead || pinSectionsUnreadable;
   const { removeLocalProject } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
+  const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
+  const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
+  const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
       if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
@@ -1863,11 +1943,14 @@ export function LoroAppSidebar({
 
   const handleTogglePinSession = useCallback(
     (sessionId: string, nextPinned: boolean) => {
-      void setSessionPinned(sessionId as SessionId, nextPinned).catch((error: unknown) =>
+      void runStatusViewCommand(
+        { type: 'setPinned', sessionId, pinned: nextPinned },
+        statusViewInputRef.current
+      ).catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : String(error))
       );
     },
-    [setSessionPinned]
+    [runStatusViewCommand]
   );
 
   const handleMarkSessionUnread = useCallback(
@@ -1900,7 +1983,7 @@ export function LoroAppSidebar({
       if (!workspaceId) return;
       if (typeof window === 'undefined') return;
       const url = buildSessionLink({ sessionId, workspaceId });
-      await navigator.clipboard.writeText(url);
+      await copyTextToClipboard(url);
       toast.success(successMessage);
     },
     [workspaceId]
@@ -2041,7 +2124,7 @@ export function LoroAppSidebar({
           currentUserId: myAccountId,
           defaultTitle: defaultSessionTitle,
           onlineMachineIds,
-          members: activeOrganization?.members,
+          members: sidebarMembers,
           lineChangeScope: sessionSidebarCodeChangesOnly ? 'code' : 'all',
           liveSessionStatuses,
           resolveOpenerRowId,
@@ -2055,7 +2138,7 @@ export function LoroAppSidebar({
         sharing: sessionSharingById.get(task.sessionId),
       })),
     [
-      activeOrganization?.members,
+      sidebarMembers,
       myAccountId,
       allActiveSessions,
       onlineMachineIds,
@@ -2525,6 +2608,7 @@ export function LoroAppSidebar({
   // Rows are memoized, so an unchanged item keeps its previous object and only
   // the rows whose data changed re-render.
   const previousSidebarItemsRef = useRef<readonly SidebarUpdatedItem[]>([]);
+  const statusTick = useStableNow(SIDEBAR_RELATIVE_TIME_REFRESH_MS);
   const allSidebarItems = useMemo<SidebarUpdatedItem[]>(() => {
     if (sessionsListLoading) return [];
 
@@ -2549,6 +2633,7 @@ export function LoroAppSidebar({
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
         hasFailedTurn: task.hasFailedTurn,
+        deliveryStalled: task.deliveryStalled,
         externalHistoryProvider: task.externalHistoryProvider ?? null,
         owner: task.owner ?? null,
         openedBySessionId: task.openedBySessionId ?? null,
@@ -2577,6 +2662,7 @@ export function LoroAppSidebar({
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
         hasFailedTurn: task.hasFailedTurn,
+        deliveryStalled: task.deliveryStalled,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -2616,6 +2702,7 @@ export function LoroAppSidebar({
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
         hasFailedTurn: task.hasFailedTurn,
+        deliveryStalled: task.deliveryStalled,
         prStatus: task.prStatus,
         prCiState: task.prCiState,
         prReadiness: task.prReadiness,
@@ -2670,6 +2757,7 @@ export function LoroAppSidebar({
             isOffline,
             isWaitingPermission: activity.isWaitingPermission,
             hasFailedTurn: activity.hasFailedTurn,
+            deliveryStalled: session.autoDelivery?.state === 'stalled',
             prStatus: prInfo.status,
             prCiState: prInfo.ciState,
             prReadiness: prInfo.readiness,
@@ -2684,10 +2772,35 @@ export function LoroAppSidebar({
       }
     }
 
+    void statusTick;
+    const nowMs = getServerNow();
     const previousById = new Map(previousSidebarItemsRef.current.map((item) => [item.id, item]));
     return items.map((item) => {
-      const previous = previousById.get(item.id);
-      return previous && jsonValueEqual(previous, item) ? previous : item;
+      const meta = sessionById.get(item.id);
+      if (!meta) {
+        const previous = previousById.get(item.id);
+        return previous && jsonValueEqual(previous, item) ? previous : item;
+      }
+      const baseLatestMs =
+        typeof item.latestMessageAt === 'number'
+          ? item.latestMessageAt
+          : item.latestMessageAt instanceof Date
+            ? item.latestMessageAt.getTime()
+            : Date.parse(item.latestMessageAt) || 0;
+      // A woken snooze reads as activity, the same as the shared Status view.
+      const activityAt = statusViewActivityAt(baseLatestMs, meta.snoozedUntil, nowMs);
+      const latestMessageAt = activityAt > baseLatestMs ? activityAt : item.latestMessageAt;
+      const enriched: SidebarUpdatedItem = {
+        ...item,
+        latestMessageAt,
+        hasUnreadMessages: sessionHasUnreadMessages(meta, nowMs),
+        orderKey: meta.orderKey ?? null,
+        snoozedUntil: typeof meta.snoozedUntil === 'number' ? meta.snoozedUntil : null,
+        settledAt: typeof meta.settledAt === 'number' ? meta.settledAt : null,
+        focusRestoredAt: typeof meta.focusRestoredAt === 'number' ? meta.focusRestoredAt : null,
+      };
+      const previous = previousById.get(enriched.id);
+      return previous && jsonValueEqual(previous, enriched) ? previous : enriched;
     });
   }, [
     chatSessions,
@@ -2702,22 +2815,248 @@ export function LoroAppSidebar({
     resolveOpenerRowId,
     resolveSessionAuthor,
     sessionsListLoading,
+    sessionById,
     sessionSharingById,
+    statusTick,
     t,
   ]);
   previousSidebarItemsRef.current = allSidebarItems;
-  const pinnedSessionIds = useMemo(
+  const statusViewWritable = useStatusViewWritable(workspaceRole);
+  // The shared Status view's input: presence, permissions and activity come from
+  // the sidebar's rows, placement from each conversation's own metadata.
+  const statusViewSessions = useMemo<StatusViewSession[]>(
     () =>
-      getPinnedSessionTreeIds(allSidebarItems, {
-        ...SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
-        isPinned: (item) => Boolean(item.isPinned),
+      allSidebarItems.map((item) => {
+        const meta = sessionById.get(item.id);
+        return {
+          ...toStatusViewSession(item),
+          lastMessageAt: typeof meta?.lastMessageAt === 'number' ? meta.lastMessageAt : null,
+          lastReadAt: typeof meta?.lastReadAt === 'number' ? meta.lastReadAt : null,
+          isPinned: Boolean(item.isPinned),
+          pinSectionId: meta?.pinSectionId ?? null,
+          orderKey: meta?.orderKey ?? null,
+          canManage: statusViewWritable && !historyOnlySessionIds.has(item.id),
+          canPrefer: true,
+        };
       }),
-    [allSidebarItems]
+    [allSidebarItems, sessionById, statusViewWritable, historyOnlySessionIds]
+  );
+  const pinnedSessionIds = useMemo(
+    () => statusViewPinnedIds(statusViewSessions),
+    [statusViewSessions]
   );
   const pinnedItems = useMemo(
     () => sortUpdatedItems(allSidebarItems.filter((item) => pinnedSessionIds.has(item.id))),
     [allSidebarItems, pinnedSessionIds]
   );
+  // The My-Tasks scope drops teammates' conversations before the pinned area
+  // is built, so a section holding only them would render as a bare header.
+  // Count what the scope hides by the section their pinned root names.
+  const scopeHiddenCounts = useMemo(() => {
+    if (scope !== 'my' || sessionsListLoading) return undefined;
+    const listed = new Map<string, SessionMeta>();
+    for (const session of selectSidebarTaskSessions(
+      sessions,
+      visibleLocalProjectMap,
+      workspaceHistoryReadable
+    )) {
+      listed.set(session.id, session);
+    }
+    for (const session of sessions) {
+      const project = session.project;
+      if (project?.kind !== 'local' || session.projectRun) continue;
+      if (!visibleLocalProjectMap.has(`${session.machineId}:${project.localProjectId}`)) continue;
+      listed.set(session.id, session);
+    }
+    const getOpenedBySessionId = (session: SessionMeta) =>
+      session.openedByRootSessionId ??
+      resolveOpenerRowId(session.openedBySessionId) ??
+      session.openedBySessionId;
+    const unscopedPinnedIds = getPinnedSessionTreeIds([...listed.values()], {
+      getId: (session) => session.id,
+      getOpenedBySessionId,
+      isPinned: (session) => Boolean(session.isPinned),
+    });
+    const counts: Record<string, number> = {};
+    for (const id of unscopedPinnedIds) {
+      if (pinnedSessionIds.has(id)) continue;
+      // A hidden row counts under its pinned root's section, matching where
+      // the unscoped tree would place it.
+      let root = listed.get(id);
+      const seen = new Set<string>();
+      while (root && !root.isPinned) {
+        const opener = getOpenedBySessionId(root);
+        if (!opener || seen.has(opener)) {
+          root = undefined;
+          break;
+        }
+        seen.add(opener);
+        root = listed.get(opener);
+      }
+      const key = root?.pinSectionId ?? '';
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return Object.keys(counts).length > 0 ? counts : undefined;
+  }, [
+    scope,
+    sessionsListLoading,
+    sessions,
+    visibleLocalProjectMap,
+    workspaceHistoryReadable,
+    resolveOpenerRowId,
+    pinnedSessionIds,
+  ]);
+  // Re-laid out at the layout's own next change, not only on the relative-time tick.
+  const [statusWake, setStatusWake] = useState(0);
+  const statusViewInput = useMemo<StatusViewLayoutInput>(() => {
+    void statusTick;
+    void statusWake;
+    return {
+      sessions: statusViewSessions,
+      sections: pinSections,
+      sectionsLoaded: pinSectionsLoaded,
+      canManageSections: statusViewWritable,
+      ...(scopeHiddenCounts ? { scopeHiddenCounts } : {}),
+      nowMs: getServerNow(),
+    };
+  }, [
+    statusViewSessions,
+    pinSections,
+    pinSectionsLoaded,
+    statusViewWritable,
+    scopeHiddenCounts,
+    statusTick,
+    statusWake,
+  ]);
+  const statusLayout = useMemo(() => buildStatusViewLayout(statusViewInput), [statusViewInput]);
+  const statusNextChangeAt = statusLayout.nextChangeAt;
+  useEffect(() => {
+    if (statusNextChangeAt === null) return undefined;
+    const wait = Math.min(2_147_483_647, Math.max(0, statusNextChangeAt - getServerNow()));
+    const timer = setTimeout(() => setStatusWake((count) => count + 1), wait);
+    return () => clearTimeout(timer);
+  }, [statusNextChangeAt]);
+  const statusNow = useMemo(() => new Date(statusViewInput.nowMs), [statusViewInput.nowMs]);
+  const sidebarItemById = useMemo(
+    () => new Map(allSidebarItems.map((item) => [item.id, item])),
+    [allSidebarItems]
+  );
+  const pinnedSections = useMemo<SidebarPinnedSection[]>(
+    () =>
+      statusLayout.pinned.map((entry) => ({
+        id: entry.sectionId,
+        name: entry.name ?? '',
+        items: flattenStatusViewRows(entry.rows).flatMap((row) => {
+          const item = sidebarItemById.get(row.id);
+          return item ? [item] : [];
+        }),
+      })),
+    [statusLayout, sidebarItemById]
+  );
+  const previousPinnedHiddenCountsRef = useRef<Record<string, number> | undefined>(undefined);
+  const pinnedHiddenCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const entry of statusLayout.pinned) {
+      if (entry.hiddenCount > 0) counts[pinSectionKey(entry.sectionId)] = entry.hiddenCount;
+    }
+    const next = Object.keys(counts).length > 0 ? counts : undefined;
+    const previous = previousPinnedHiddenCountsRef.current;
+    return previous && next && jsonValueEqual(previous, next) ? previous : next;
+  }, [statusLayout]);
+  previousPinnedHiddenCountsRef.current = pinnedHiddenCounts;
+  const statusViewInputRef = useRef(statusViewInput);
+  statusViewInputRef.current = statusViewInput;
+  const statusLayoutRef = useRef(statusLayout);
+  statusLayoutRef.current = statusLayout;
+  const reportStatusViewError = useCallback((error: unknown) => {
+    toast.error(error instanceof Error ? error.message : String(error));
+  }, []);
+  /**
+   * Plans against what the sidebar shows. A drop the planner refuses (it would
+   * reorder conversations this member cannot manage) says so instead of
+   * snapping back silently.
+   */
+  const runSidebarStatusViewCommand = useCallback(
+    async (command: StatusViewCommand) => {
+      const writes = await runStatusViewCommand(command, statusViewInputRef.current);
+      if (command.type === 'move' && writes.length === 0) {
+        throw new Error(t('sidebar.status.moveRefused'));
+      }
+      return writes;
+    },
+    [runStatusViewCommand, t]
+  );
+  const pinSectionActions = useMemo<SidebarPinSectionActions | undefined>(() => {
+    if (!runtime || !statusViewWritable) return undefined;
+    return {
+      onDropItem: (itemId, sectionId, toIndex) => {
+        void runSidebarStatusViewCommand({
+          type: 'move',
+          sessionId: itemId,
+          to: { area: 'pinned', sectionId },
+          beforeId: pinnedDropBeforeId(
+            statusLayoutRef.current,
+            statusViewInputRef.current.sessions,
+            sectionId,
+            itemId,
+            toIndex
+          ),
+        }).catch(reportStatusViewError);
+      },
+      onMoveSection: (sectionId, toIndex) => {
+        void runSidebarStatusViewCommand({
+          type: 'moveSection',
+          sectionId,
+          beforeId: sectionDropBeforeId(statusLayoutRef.current, sectionId, toIndex),
+        }).catch(reportStatusViewError);
+      },
+      onCreateSection: async (name, moveItemId) => {
+        const writes = await runSidebarStatusViewCommand({
+          type: 'createSection',
+          sectionId: crypto.randomUUID(),
+          name,
+        });
+        const created = writes.find((write) => write.type === 'putSection')?.section;
+        if (!moveItemId || !created) return;
+        // The written row may not have been read back yet.
+        const base = statusViewInputRef.current;
+        await runStatusViewCommand(
+          {
+            type: 'move',
+            sessionId: moveItemId,
+            to: { area: 'pinned', sectionId: created.id },
+            beforeId: null,
+          },
+          {
+            ...base,
+            sections: [...base.sections.filter((section) => section.id !== created.id), created],
+          }
+        );
+      },
+      onRenameSection: async (sectionId, name) => {
+        await runSidebarStatusViewCommand({ type: 'renameSection', sectionId, name });
+      },
+      onDeleteSection: (sectionId) => {
+        void runSidebarStatusViewCommand({ type: 'deleteSection', sectionId }).catch(
+          reportStatusViewError
+        );
+      },
+    };
+  }, [
+    reportStatusViewError,
+    runSidebarStatusViewCommand,
+    runStatusViewCommand,
+    runtime,
+    statusViewWritable,
+  ]);
+  const [pinSectionsCollapsed, setPinSectionsCollapsed] = useAtom(pinSectionsCollapsedAtom);
+  const handleTogglePinSection = useCallback(
+    (sectionId: string) => {
+      setPinSectionsCollapsed((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
+    },
+    [setPinSectionsCollapsed]
+  );
+
   const updatedItems = useMemo(
     () => allSidebarItems.filter((item) => !pinnedSessionIds.has(item.id)),
     [allSidebarItems, pinnedSessionIds]
@@ -3068,7 +3407,10 @@ export function LoroAppSidebar({
         getSessionHref={getSessionHref}
       />
     ) : null;
-  const firstSectionFilterAction = pinnedItems.length === 0 ? sidebarFilterPopover : null;
+  // The pinned area takes the filter whenever it renders, including when it only
+  // holds empty pin sections.
+  const firstSectionFilterAction =
+    pinnedItems.length === 0 && pinSections.length === 0 ? sidebarFilterPopover : null;
   const localProjectsTopContent =
     localProjectSections.length === 0 ? null : (
       // Sections carry their own bottom margin (see sidebarTopContent): 12px
@@ -3726,9 +4068,51 @@ export function LoroAppSidebar({
   );
   const handleToggleUpdatedBucket = useCallback(
     (key: SidebarUpdatedBucketKey) => {
-      setUpdatedBucketCollapseState((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }));
+      setUpdatedBucketCollapseState((prev) => ({
+        ...prev,
+        [key]: !isSidebarBucketCollapsed(key, prev),
+      }));
     },
     [setUpdatedBucketCollapseState]
+  );
+
+  const handleSnoozeSession = useCallback(
+    (sessionId: string, snoozedUntil: number) => {
+      void snoozeSessionWithConfirmation(sessionId as SessionId, snoozedUntil).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [snoozeSessionWithConfirmation]
+  );
+
+  const handleSettleSession = useCallback(
+    (sessionId: string) => {
+      void settleSessionWithConfirmation(sessionId as SessionId).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [settleSessionWithConfirmation]
+  );
+
+  const handleMoveSessionToFocus = useCallback(
+    (sessionId: string) => {
+      void moveToFocusWithConfirmation(sessionId as SessionId).catch((error) => {
+        toast.error(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [moveToFocusWithConfirmation]
+  );
+
+  const handleDropFocusItem = useCallback(
+    (sessionId: string, toIndex: number) => {
+      void runSidebarStatusViewCommand({
+        type: 'move',
+        sessionId,
+        to: { area: 'focus' },
+        beforeId: focusDropBeforeId(statusLayoutRef.current, sessionId, toIndex),
+      }).catch(reportStatusViewError);
+    },
+    [reportStatusViewError, runSidebarStatusViewCommand]
   );
   const [updatedBucketShowFullState, setUpdatedBucketShowFullState] = useAtom(
     sidebarUpdatedBucketShowFullStateAtom
@@ -3883,8 +4267,14 @@ export function LoroAppSidebar({
         organizeMode,
         showFullSessionGroups,
         collapsedOpenedBySessions: collapsedOpenedBySessionIds,
-        pinnedItems,
-        pinnedSectionCollapsed,
+        pinnedSections: pinnedSections.map((section) => ({
+          id: section.id,
+          items: section.items,
+          collapsed:
+            section.id === null
+              ? pinnedSectionCollapsed
+              : pinSectionsCollapsed[section.id] === true,
+        })),
         workspace: {
           localSections: keyboardNavLocalSections,
           githubSectionCollapsed: githubWorktreesSectionCollapsed,
@@ -3907,8 +4297,9 @@ export function LoroAppSidebar({
       projectGroupPlacement,
       keyboardNavLocalSections,
       organizeMode,
-      pinnedItems,
+      pinnedSections,
       pinnedSectionCollapsed,
+      pinSectionsCollapsed,
       repos,
       showFullSessionGroups,
       updatedBucketCollapseState,
@@ -3995,6 +4386,11 @@ export function LoroAppSidebar({
         chatScope={chatScope}
         pinnedItems={pinnedItems}
         pinnedSectionCollapsed={pinnedSectionCollapsed}
+        pinnedSections={pinnedSections}
+        collapsedPinSectionIds={pinSectionsCollapsed}
+        pinnedHiddenCounts={pinnedHiddenCounts}
+        onTogglePinSection={handleTogglePinSection}
+        pinSectionActions={pinSectionActions}
         updatedItems={updatedItems}
         updatedSelectedItemId={updatedSelectedItemId}
         updatedBucketsCollapsed={updatedBucketCollapseState}
@@ -4016,6 +4412,11 @@ export function LoroAppSidebar({
         onMarkUpdatedItemUnread={handleMarkSessionUnread}
         onRenameUpdatedItem={handleRenameSession}
         onToggleUpdatedItemPinned={handleTogglePinSession}
+        onSnoozeUpdatedItem={statusViewWritable ? handleSnoozeSession : undefined}
+        onSettleUpdatedItem={statusViewWritable ? handleSettleSession : undefined}
+        onMoveUpdatedItemToFocus={statusViewWritable ? handleMoveSessionToFocus : undefined}
+        onDropFocusItem={statusViewWritable ? handleDropFocusItem : undefined}
+        statusNow={organizeMode === 'status' ? statusNow : undefined}
         onCopyUpdatedItemUrl={handleCopySessionUrl}
         onShareUpdatedItemWithTeam={handleRequestShareSession}
         onOpenUpdatedItemPullRequest={handleOpenUpdatedItemPullRequest}
@@ -4036,6 +4437,13 @@ export function LoroAppSidebar({
             });
           }
         }}
+        onTodayClicked={
+          todayEnabled
+            ? () => {
+                if (workspaceSlug) openToday({ workspaceSlug, sameWorkspace: true });
+              }
+            : undefined
+        }
         onDocsClicked={handleDocsClicked}
         onGithubClicked={handleGithubClicked}
         onJoinCommunityClicked={handleJoinCommunityClicked}

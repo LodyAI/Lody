@@ -30,7 +30,7 @@ import {
   GripVertical,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   Pencil,
   Pin,
   PinOff,
@@ -89,6 +89,7 @@ import {
   SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SessionMergeablePill,
@@ -118,6 +119,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type { PrStatus };
 
@@ -169,6 +171,8 @@ export type SessionListRow = {
   isWaitingPermission: boolean;
   /** The latest turn ended in failure (`hasFailedLatestTurn`), child Tabs rolled in. */
   hasFailedTurn?: boolean;
+  /** Auto delivery stopped for this conversation's PR and needs the person. */
+  deliveryStalled?: boolean;
   isPinned?: boolean;
   isWorktree?: boolean;
   externalHistoryProvider?: LocalProjectHistoryProvider | null;
@@ -857,7 +861,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
     : undefined;
   // Mobile keeps swipe-to-archive as the only row gesture; the context
   // menu (and its ⋯ button) is desktop-only. Computed before the row so
-  // the leading slot can show the ⋯ affordance.
+  // the end slot can reveal the ⋯ affordance.
   const canGoToOpener = Boolean(openerSessionId && isSelectable);
   const baseOpenedByTreeSlot = buildSessionRowOpenedByTreeSlot(
     node,
@@ -1134,11 +1138,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         {/* On a two-line row the leading and end slots sit in a box one title line
             tall, so they stay on the title line; otherwise the box disappears. */}
         <div className={showMetaLine ? lineBoxClassName : 'contents'}>
-          <SessionRowLeadingSlot
-            showMenuButton={hasMenuActions}
-            menuLabel={moreActionsLabel}
-            openedByTree={openedByTreeSlot}
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTreeSlot} />
         </div>
         <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
           <div
@@ -1178,6 +1178,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         <div className={showMetaLine ? lineBoxClassName : 'contents'}>
           <SidebarRowEndSlot
             sessionId={session.sessionId}
+            selected={showSelectedState}
             isWaitingPermission={session.isWaitingPermission}
             isWorking={session.isWorking}
             hasUnreadMessages={session.hasUnreadMessages}
@@ -1210,6 +1211,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                 </span>
               ) : undefined
             }
+            menu={hasMenuActions ? <SessionRowMenuButton label={moreActionsLabel} /> : undefined}
             archive={
               showInlineArchive ? (
                 <SidebarRowArchiveButton
@@ -1246,7 +1248,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkSessionUnread?.(session.sessionId);
             }}
@@ -1282,7 +1284,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(session.branchName).catch(() => {});
+              void copyTextToClipboard(session.branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

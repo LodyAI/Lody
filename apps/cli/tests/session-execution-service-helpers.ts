@@ -1,3 +1,4 @@
+import { nativeSessionCredentials } from '@/session/session-credentials';
 import { EventEmitter } from 'node:events';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { bindTestPresenceApplication } from './presence-application-fixture';
@@ -438,6 +439,7 @@ const runSilentPromptTurn = async (options: {
     agentClient,
     terminalManager: {} as unknown,
     getWorkdir: () => '/tmp',
+    getGitHubCredentials: () => nativeSessionCredentials,
     getHostWorkdir: () => '/tmp',
     getParentSessionId: () => options.liveConfig?.parentSessionId,
     getExecutionScope: () => options.liveConfig ?? {},
@@ -1322,6 +1324,7 @@ const createGoalService = ({
     agentClient,
     acpSessionId: 'acp-goal',
     getWorkdir: () => '/tmp',
+    getGitHubCredentials: () => nativeSessionCredentials,
     getHostWorkdir: () => '/tmp',
     getParentSessionId: () => undefined,
     exec: async () => '',
@@ -1597,6 +1600,7 @@ function inboxExecutionFixture(
     agentClient: client,
     terminalManager: {},
     getWorkdir: () => '/tmp',
+    getGitHubCredentials: () => nativeSessionCredentials,
     getHostWorkdir: () => '/tmp',
     getParentSessionId: () => undefined,
     getProviderBinding: () => ({ bindingId: capabilityConfigId, fingerprint: 'frozen-launch' }),
@@ -1664,6 +1668,7 @@ function inboxExecutionFixture(
       });
     },
   });
+  deps.workspaceDocument.sessions = new Map([[sessionId, doc]]);
   const service = new SessionExecutionService(deps);
   store.inbox.activate('workspace-1', 'owner');
   const bridge = operationInboxLegacy({

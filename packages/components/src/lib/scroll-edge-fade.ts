@@ -47,13 +47,22 @@ export function scrollEdgeOverflowEquals(a: ScrollEdgeOverflow, b: ScrollEdgeOve
  *
  * `fadeLengthPx` is per-surface: it should cover enough rows for the taper to
  * be visible, which depends on how tall and how contrasty those rows are.
+ *
+ * An edge that does not overflow is omitted, not drawn as a zero-length stop.
+ * `transparent 0, #000 0` is what WKWebView gets for a list parked at the top
+ * with more below, and it paints that masked layer solid black.
  */
 export function buildScrollEdgeFadeMask(
   overflow: ScrollEdgeOverflow,
   fadeLengthPx: number
 ): string | undefined {
   if (!overflow.top && !overflow.bottom) return undefined;
-  const topStop = overflow.top ? `${fadeLengthPx}px` : '0';
-  const bottomStop = overflow.bottom ? `calc(100% - ${fadeLengthPx}px)` : '100%';
-  return `linear-gradient(to bottom, transparent 0, #000 ${topStop}, #000 ${bottomStop}, transparent 100%)`;
+  const fade = `${fadeLengthPx}px`;
+  if (overflow.top && overflow.bottom) {
+    return `linear-gradient(to bottom, transparent 0, #000 ${fade}, #000 calc(100% - ${fade}), transparent 100%)`;
+  }
+  if (overflow.bottom) {
+    return `linear-gradient(to bottom, #000 0, #000 calc(100% - ${fade}), transparent 100%)`;
+  }
+  return `linear-gradient(to bottom, transparent 0, #000 ${fade}, #000 100%)`;
 }

@@ -22,3 +22,12 @@ on PRs or main pushes and are not dependencies of the required `Tests` check.
 The [PR validation decision](../../.agents/notes/implemented/testing/2026-11-05-pr-ci-specialist-acceptance.md)
 explains why specialist acceptance is opt-in while ordinary affected tests remain
 automatic.
+
+## Cloud client releases
+
+[`nightly-cloud.yml`](nightly-cloud.yml) and
+[`release-clients.yml`](release-clients.yml) stage the public cloud client migration.
+The five `publish-*.yml` workflows provide commit-pinned single-platform recovery.
+They remain disabled until `CLIENT_RELEASES_ENABLED=true`. See the
+[integration and cutover guide](../client-releases.md) for A/B dependencies,
+environments, npm OIDC, version reservation and rollback.

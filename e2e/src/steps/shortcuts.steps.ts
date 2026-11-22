@@ -38,12 +38,16 @@ When('用户用新建标签页快捷键新建两个草稿标签页', async funct
   await this.shortcutPage!.openDraftSessionTabsWithShortcut(2);
 });
 
-When('用户按下切换到第 {int} 个标签页的快捷键', async function (this: LodyWorld, position: number) {
-  await this.shortcutPage!.pressSessionTabDigit(position);
+When('用户按下跳到侧栏第 {int} 个会话的快捷键', async function (this: LodyWorld, position: number) {
+  await this.shortcutPage!.pressSidebarSessionDigit(position);
 });
 
-When('用户按下切换到最后一个标签页的快捷键', async function (this: LodyWorld) {
-  await this.shortcutPage!.pressSessionTabDigit(9);
+When('用户按下切换到上一个标签页的快捷键', async function (this: LodyWorld) {
+  await this.shortcutPage!.switchSessionTab('previous');
+});
+
+When('用户按下切换到下一个标签页的快捷键', async function (this: LodyWorld) {
+  await this.shortcutPage!.switchSessionTab('next');
 });
 
 Then(

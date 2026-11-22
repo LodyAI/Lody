@@ -1,7 +1,14 @@
-import { useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { usePlatform } from '@lody/platform/react';
 import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
+import { preloadAvatarBlobUrl, resolveAvatarBlobUrl } from '@/lib/avatar-cache';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import {
+  buildWorkspaceSenderScopeKey,
+  readRetainedWorkspaceMembers,
+  subscribeRetainedWorkspaceMembers,
+  writeRetainedWorkspaceMembers,
+} from '@/lib/workspace-sender-identity';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 import { useTranslation } from 'react-i18next';
 import { useAuthClient } from '../providers/convex-provider';
@@ -10,6 +17,7 @@ export type WorkspaceMember = {
   userId: string;
   /** Display name, falling back to the email when the account has no name. */
   name: string;
+  displayName?: string | null;
   email?: string | null;
   image?: string | null;
 };
@@ -28,26 +36,42 @@ export function useWorkspaceMembers() {
     cloudOperations.workspaceMembers.list,
     enabled ? { workspaceId: scope.workspaceId!, accountId: accountId! } : 'skip'
   );
-  const key = JSON.stringify([accountId, scope.workspaceId]);
-  const retained = useRef<{
-    key: string;
-    api: typeof platform.cloudApi;
-    rows: NonNullable<typeof query>['data'];
-  } | null>(null);
-  if (retained.current?.key !== key || retained.current?.api !== platform.cloudApi || !enabled)
-    retained.current = null;
-  if (enabled && query?.data !== undefined)
-    retained.current = { key, api: platform.cloudApi, rows: query.data };
-  const rows = query ? (enabled ? (query.data ?? retained.current?.rows) : undefined) : undefined;
+  const scopeKey = useMemo(
+    () => (enabled ? buildWorkspaceSenderScopeKey(accountId, scope.workspaceId) : null),
+    [accountId, enabled, scope.workspaceId]
+  );
+  useEffect(() => {
+    if (!scopeKey || query?.data === undefined) return;
+    writeRetainedWorkspaceMembers(platform.cloudApi, scopeKey, query.data);
+  }, [platform.cloudApi, query?.data, scopeKey]);
+  const subscribeRetained = useCallback(
+    (onChange: () => void) =>
+      subscribeRetainedWorkspaceMembers(platform.cloudApi, scopeKey, onChange),
+    [platform.cloudApi, scopeKey]
+  );
+  const getRetainedSnapshot = useCallback(
+    () => readRetainedWorkspaceMembers(platform.cloudApi, scopeKey),
+    [platform.cloudApi, scopeKey]
+  );
+  const retainedRows = useSyncExternalStore(
+    subscribeRetained,
+    getRetainedSnapshot,
+    getRetainedSnapshot
+  );
+  const rows = query ? (enabled ? (query.data ?? retainedRows) : undefined) : undefined;
   const live = query !== undefined;
   const error = query?.error;
   const retry = query?.retry;
-  return useMemo(() => {
+  const result = useMemo(() => {
     const members: WorkspaceMember[] = live
-      ? (rows ?? []).map((row) => ({
-          ...row,
-          name: row.name?.trim() || t('sessions.access.unknownMember'),
-        }))
+      ? (rows ?? []).map((row) => {
+          const displayName = row.name?.trim() || null;
+          return {
+            ...row,
+            displayName,
+            name: displayName ?? t('sessions.access.unknownMember'),
+          };
+        })
       : (activeOrganization?.members ?? []).flatMap((member) => {
           const name = member.user?.name?.trim() || member.user?.email?.trim() || '';
           return name
@@ -55,6 +79,7 @@ export function useWorkspaceMembers() {
                 {
                   userId: member.userId,
                   name,
+                  displayName: name,
                   email: member.user?.email,
                   image: member.user?.image,
                 },
@@ -72,4 +97,15 @@ export function useWorkspaceMembers() {
       retry,
     };
   }, [rows, live, error, retry, enabled, activeOrganization, isPending, t]);
+
+  useEffect(() => {
+    for (const member of result.members) {
+      if (!member.image) continue;
+      void resolveAvatarBlobUrl(member.image)
+        .then(() => preloadAvatarBlobUrl(member.image))
+        .catch(() => {});
+    }
+  }, [result.members]);
+
+  return result;
 }

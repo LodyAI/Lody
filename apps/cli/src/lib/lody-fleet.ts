@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { LodyPresenceStateMap, ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { isCloudE2eeDeviceRevoked, isCloudE2eeMemberRemoved } from './cloud-e2ee-errors';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
@@ -426,6 +428,19 @@ export class LodyFleet {
       },
       dispatchMachineRpc: async (message, signal) =>
         await this.dispatchLocalMachineRpc(message, signal),
+      dispatchWorkspaceBundle: async (message) => {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId as WorkspaceId);
+        const { handleWorkspaceBundleControl } = await import('./workspace-bundle/control');
+        const { daemonBundleWorkspace } = await import('./workspace-bundle/daemon');
+        return await handleWorkspaceBundleControl(message, {
+          workspace: daemonBundleWorkspace(runtime.workspace.id, runtime.lody.documentManager, {
+            sync: !this.localPlatform,
+          }),
+          role: runtime.workspace.role,
+          actor: { userId: this.userId, machineId: this.machineId, lodyVersion: pkg.version },
+          journalDir: path.join(getLodyDataDir(), 'workspace-imports'),
+        });
+      },
     };
     await traceAsync(this.logger, 'startup.local_ipc', undefined, async () => {
       await startLocalIpcSocketServers({
@@ -1341,10 +1356,9 @@ export class LodyFleet {
                 githubTokens: this.cloudPort.githubTokens,
                 prAssociation: this.cloudPort.prAssociation,
                 logger: workspaceLogger,
-                wantsWorkflowObservations: (sessionId) =>
-                  this.runtimes
-                    .get(workspace.id)
-                    ?.automations?.wantsWorkflowObservations(sessionId) ?? false,
+                workflowObservationOwners: () =>
+                  this.runtimes.get(workspace.id)?.automations?.workflowObservationOwners() ??
+                  new Set(),
                 recordWorkflowObservations: async (...args) => {
                   await this.runtimes
                     .get(workspace.id)

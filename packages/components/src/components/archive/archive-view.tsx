@@ -49,6 +49,7 @@ import {
 } from '@/hooks/use-session-actions';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrganization } from '@/hooks/useOrganization';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { useVisibleArchivedSessionMetas } from '@/hooks/use-visible-session-metas';
 import { availableLocalHistoryMachineIds } from '@/lib/session-visibility';
 import { AgentIcon } from '@/components/icons/agent-icon';
@@ -1728,8 +1729,9 @@ export function ArchiveView() {
   const [archiveScope, setArchiveScope] = useAtom(archiveScopeAtom);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<ArchiveSortMode>('newest');
-  const [groupMode, setGroupMode] = useState<ArchiveGroupMode>('project');
+  const [groupMode, setGroupMode] = useState<ArchiveGroupMode>('flat');
   const { activeOrganization } = useOrganization();
+  const { members: directoryMembers } = useWorkspaceMembers();
   const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
   const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
   const localMachineId = useAtomValue(localMachineIdAtom);
@@ -1763,9 +1765,17 @@ export function ArchiveView() {
     'Re-add this local project to restore its conversations.'
   );
 
-  // Build member lookup map for creator avatars
   const membersByUserId = useMemo(() => {
     const map = new Map<string, { name?: string | null; image?: string | null }>();
+    if (directoryMembers.length > 0) {
+      for (const member of directoryMembers) {
+        map.set(member.userId, {
+          name: member.displayName ?? member.name,
+          image: member.image,
+        });
+      }
+      return map;
+    }
     const members = activeOrganization?.members;
     if (members) {
       for (const member of members) {
@@ -1778,7 +1788,7 @@ export function ArchiveView() {
       }
     }
     return map;
-  }, [activeOrganization?.members]);
+  }, [activeOrganization?.members, directoryMembers]);
 
   // Filter archived sessions based on scope (my/team + local privacy).
   const scopedArchivedSessions = useMemo(() => {
