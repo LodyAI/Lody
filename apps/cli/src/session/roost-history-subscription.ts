@@ -29,8 +29,6 @@ export async function publishRoostHistorySubscription(options: {
             checkpoint,
             includeBodiesFrom: subscription.includeBodiesFrom,
             withPatches: subscription.withPatches,
-            // The subscription can send a small delta or a checkpoint. The
-            // follow-up read owns any retained pages needed to repair that gap.
             inlineOnly: true,
           }
         : { kind: 'count', withCheckpoint: true }

@@ -373,8 +373,6 @@ const createRoostSessionDataFactoryFromTransport =
         ) {
           throw new Error('Roost history read has no durable observation');
         }
-        // These bodies belong to the repair's checkpoint. The repair checks
-        // their revision and count and commits against its original cache head.
         if ((query.kind === 'readTurn' || query.kind === 'readRange') && query.atCheckpoint)
           return response;
         if (!coherentProgress && ownerRevision !== undefined && revision < ownerRevision) {
@@ -564,7 +562,9 @@ const createRoostSessionDataFactoryFromTransport =
     const adoptCachedHead = (head: RoostCachedHead) => {
       if (!head.checkpoint || head.checkpoint === appliedCheckpoint) return;
       const previousCount = observedHistoryCount ?? 0;
-      const changes = appliedCheckpoint ? roostCachedChangesSince(head, appliedCheckpoint) : undefined;
+      const changes = appliedCheckpoint
+        ? roostCachedChangesSince(head, appliedCheckpoint)
+        : undefined;
       appliedCheckpoint = head.checkpoint;
       // A different reader committed this projection. Fence reads and cursors
       // from the previous local view, including a retired owner generation.
@@ -853,8 +853,6 @@ const createRoostSessionDataFactoryFromTransport =
               try {
                 return await read();
               } catch (error) {
-                // Keep verified pages while retrying a timed-out body at the
-                // same checkpoint. A second failure returns to normal recovery.
                 if (!isHistoryReadTimeout(error)) throw error;
                 return read();
               }
@@ -1218,8 +1216,6 @@ const createRoostSessionDataFactoryFromTransport =
     const unsubscribeWake = options.subscribeWake?.(() => {
       if (!active() || !subscriptionEnabled()) stopSubscription();
       startSubscription();
-      // Control hints remain useful for an explicit history read when the
-      // owner has no live subscription.
       if (!transport.subscribeHistory || !subscriptionEnabled()) scheduleRefresh();
     });
 
