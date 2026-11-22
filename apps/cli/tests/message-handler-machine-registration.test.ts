@@ -278,6 +278,8 @@ describe('MessageHandler machine registration', () => {
         sessionDirectoryListing: 1,
         bugReportClientLog: 1,
         sessionLiveActivity: 1,
+        localProjectFileSearch: 1,
+        localProjectSkillsFingerprint: 1,
       });
 
       await handler.cleanup();

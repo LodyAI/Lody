@@ -104,9 +104,7 @@ export function resolveLocalProjectBranchSelection(
 ): string | null {
   if (!state.git) return null;
   const pinned =
-    'pinnedBranches' in state
-      ? state.pinnedBranches
-      : [state.defaultBranch, state.currentBranch];
+    'pinnedBranches' in state ? state.pinnedBranches : [state.defaultBranch, state.currentBranch];
   const available = normalizeOrderedLocalProjectBranches({
     pinnedBranches: pinned,
     branches: state.branches,

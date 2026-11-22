@@ -42,6 +42,11 @@ place them in named pin sections, such as "Maintenance".
   again places it at the top of the default section with a fresh `orderKey`.
 - Each section can be collapsed. The collapsed state is stored only on this
   device.
+- The Pinned header's "Visible Sections" menu lists every section, including the
+  default one. Checked sections are shown. Toggling any checkbox keeps the menu
+  open. If the default section is hidden, its list disappears and the Pinned
+  header keeps the menu available. Visibility is stored on this device. Moving
+  a conversation to a hidden section with "Move to section" shows that section.
 - A view scope that hides a section's conversations leaves the section in
   place; while expanded, it names the hidden row count under its rows.
 - Opener child conversations stay under their root conversation and move with

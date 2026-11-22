@@ -1108,10 +1108,13 @@ describe('local-project helpers', () => {
         totalCount: 2,
       });
 
-      const mainFiltered = await localProjectsLegacy.listLocalProjectBranchesAtRootPath(projectDir, {
-        query: 'main',
-        limit: 10,
-      });
+      const mainFiltered = await localProjectsLegacy.listLocalProjectBranchesAtRootPath(
+        projectDir,
+        {
+          query: 'main',
+          limit: 10,
+        }
+      );
       expect(mainFiltered).toMatchObject({
         git: true,
         branches: ['lody:branch:local:main', 'origin/main'],

@@ -128,6 +128,8 @@ import {
   sessionEditAndResendFailure,
 } from '@lody/shared';
 import { createAsyncConcurrencyGate } from '@/lib/async-concurrency-gate';
+import { adaptLocalProjectControlRequestToMachine } from '@lody/shared';
+import { unsupportedLocalProjectControlResponse } from '@/lib/local-project-rpc-file-provider';
 import {
   protectedFileWriteDeniedMessage,
   protectedPreviewControlDeniedMessage,
@@ -1878,9 +1880,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       : ordered;
     const limit = Math.min(200, Math.max(1, Math.trunc(options?.limit ?? 50)));
     const offset =
-      options?.cursor && /^[0-9]+$/.test(options.cursor)
-        ? Number.parseInt(options.cursor, 10)
-        : 0;
+      options?.cursor && /^[0-9]+$/.test(options.cursor) ? Number.parseInt(options.cursor, 10) : 0;
     const branches = filtered.slice(offset, offset + limit);
     const nextOffset = offset + branches.length;
     const truncated = nextOffset < filtered.length;
@@ -2052,6 +2052,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   ): Promise<LocalProjectControlResponse | null> => {
     try {
       await waitForMachineRoute(request.machineId);
+      const adapted = adaptLocalProjectControlRequestToMachine(
+        { protocolCapabilities: await deps.getMachineProtocolCapabilities(request.machineId) },
+        request
+      );
+      if (!adapted) return unsupportedLocalProjectControlResponse(request.type);
+      request = adapted;
       if (
         window.__LODY_ELECTRON__ &&
         getIpcServices() &&

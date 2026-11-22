@@ -670,7 +670,11 @@ function readCommittedHeadBranchNameImpl(
 function resolveRemoteDefaultBranchesImpl(
   rootPath: string,
   remotes: string[]
-): Effect.Effect<{ branchName: string; remoteName: string } | null, LocalProjectError, NativeServices> {
+): Effect.Effect<
+  { branchName: string; remoteName: string } | null,
+  LocalProjectError,
+  NativeServices
+> {
   return Effect.gen(function* () {
     if (remotes.length === 0) return null;
     const results = yield* Effect.all(
@@ -795,10 +799,7 @@ function probeGitHubRemoteAtRootPathImpl(rootPath: string): Effect.Effect<
       return null;
     }
     const [remotes, currentBranch] = yield* Effect.all(
-      [
-        listGitRemotesImpl(normalizedRootPath),
-        readCommittedHeadBranchNameImpl(normalizedRootPath),
-      ],
+      [listGitRemotesImpl(normalizedRootPath), readCommittedHeadBranchNameImpl(normalizedRootPath)],
       { concurrency: 'unbounded' }
     );
     return yield* probeGitHubRemoteNormalizedImpl(normalizedRootPath, remotes, currentBranch);
@@ -1048,10 +1049,7 @@ function listLocalProjectBranchesPageAtRootPathImpl(
       return { git: false };
     }
     const [remotes, currentBranchName] = yield* Effect.all(
-      [
-        listGitRemotesImpl(normalizedRootPath),
-        readCommittedHeadBranchNameImpl(normalizedRootPath),
-      ],
+      [listGitRemotesImpl(normalizedRootPath), readCommittedHeadBranchNameImpl(normalizedRootPath)],
       { concurrency: 'unbounded' }
     );
     const inspected = yield* inspectLocalProjectBranchesNormalizedImpl(
@@ -1117,10 +1115,7 @@ function getLocalProjectGitSummaryAtRootPathImpl(
       return { git: false };
     }
     const [remotes, currentBranchName] = yield* Effect.all(
-      [
-        listGitRemotesImpl(normalizedRootPath),
-        readCommittedHeadBranchNameImpl(normalizedRootPath),
-      ],
+      [listGitRemotesImpl(normalizedRootPath), readCommittedHeadBranchNameImpl(normalizedRootPath)],
       { concurrency: 'unbounded' }
     );
     const [githubRemote, defaultBranchFromRemote] = yield* Effect.all(
@@ -1172,7 +1167,10 @@ function getLocalProjectGitSummaryAtRootPathImpl(
         ? createLocalProjectBranchSelector({ kind: 'local', branchName })
         : branchName;
     };
-    const resolveSummaryRemoteSelector = (remoteName: string, branchName: string): string | null => {
+    const resolveSummaryRemoteSelector = (
+      remoteName: string,
+      branchName: string
+    ): string | null => {
       if (!existingRefs.has(`refs/remotes/${remoteName}/${branchName}`)) return null;
       if (existingRefs.has(`refs/heads/${branchName}`)) return null;
       const matchingRemotes = remotes.filter((remote) =>
@@ -1184,9 +1182,7 @@ function getLocalProjectGitSummaryAtRootPathImpl(
         ? createLocalProjectBranchSelector({ kind: 'remote', remoteName, branchName })
         : `${remoteName}/${branchName}`;
     };
-    const currentBranch = currentBranchName
-      ? resolveSummaryLocalSelector(currentBranchName)
-      : null;
+    const currentBranch = currentBranchName ? resolveSummaryLocalSelector(currentBranchName) : null;
     let defaultBranch =
       (defaultBranchFromRemote
         ? (resolveSummaryLocalSelector(defaultBranchFromRemote.branchName) ??
@@ -1275,19 +1271,12 @@ function getLocalProjectGitStateAtRootPathImpl(
       return { git: false };
     }
     const [remotes, currentBranchName] = yield* Effect.all(
-      [
-        listGitRemotesImpl(normalizedRootPath),
-        readCommittedHeadBranchNameImpl(normalizedRootPath),
-      ],
+      [listGitRemotesImpl(normalizedRootPath), readCommittedHeadBranchNameImpl(normalizedRootPath)],
       { concurrency: 'unbounded' }
     );
     const [inspected, githubRemote] = yield* Effect.all(
       [
-        inspectLocalProjectBranchesNormalizedImpl(
-          normalizedRootPath,
-          remotes,
-          currentBranchName
-        ),
+        inspectLocalProjectBranchesNormalizedImpl(normalizedRootPath, remotes, currentBranchName),
         probeGitHubRemoteNormalizedImpl(normalizedRootPath, remotes, currentBranchName),
       ],
       { concurrency: 'unbounded' }
@@ -1656,9 +1645,7 @@ export const getLocalProjectGitSummaryAtRootPath = (
 export const listLocalProjectBranchesAtRootPath = (
   ...args: Parameters<typeof listLocalProjectBranchesPageAtRootPathImpl>
 ) =>
-  Effect.flatMap(LocalProjects, (projects) =>
-    projects.listLocalProjectBranchesAtRootPath(...args)
-  );
+  Effect.flatMap(LocalProjects, (projects) => projects.listLocalProjectBranchesAtRootPath(...args));
 export const getLocalProjectWorkingTreeAtRootPath = (
   ...args: Parameters<typeof getLocalProjectWorkingTreeAtRootPathImpl>
 ) =>
