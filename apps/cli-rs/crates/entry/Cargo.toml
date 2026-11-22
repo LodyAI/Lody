@@ -7,6 +7,9 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+axum.workspace = true
+clap.workspace = true
 lody-app.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true

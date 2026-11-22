@@ -1,0 +1,767 @@
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use lody_app::{
+    AppCommand, AppQuery, AppResponse, ApplicationService, CustomCommandSpec, HistoryBlock,
+    HistoryTurnRecord, LocalProjectId, PermissionDecision, PortResult, SessionId, TurnId,
+    TurnTerminalOutcome, UserId, VerifiedPrincipal, WorkspaceId,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::collections::hash_map::DefaultHasher;
+use std::fs;
+use std::hash::{Hash, Hasher};
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::Notify;
+
+pub const IPC_TOKEN_HEADER: &str = "x-lody-ipc-token";
+pub const LOCAL_CONTROL_HEADER: &str = "x-lody-local-control";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonRunMetadata {
+    pub pid: u32,
+    pub socket_path: String,
+    pub control_socket_path: String,
+    pub version: String,
+    pub started_at: String,
+    pub token: Option<String>,
+}
+
+impl DaemonRunMetadata {
+    pub fn file_path(data_dir: &Path) -> PathBuf {
+        data_dir.join("run").join("daemon.json")
+    }
+
+    pub fn read(data_dir: &Path) -> Option<Self> {
+        let raw = fs::read_to_string(Self::file_path(data_dir)).ok()?;
+        serde_json::from_str(&raw).ok()
+    }
+}
+
+pub fn ensure_bootstrap_files(data_dir: &Path) -> io::Result<String> {
+    fs::create_dir_all(data_dir)?;
+    let machine_id_path = data_dir.join("machine-id");
+    let machine_id = match fs::read_to_string(&machine_id_path) {
+        Ok(existing) if !existing.trim().is_empty() => existing.trim().to_string(),
+        _ => {
+            let generated = format!("machine-{:x}", hash_path(data_dir));
+            fs::write(&machine_id_path, &generated)?;
+            generated
+        }
+    };
+
+    let catalog_path = data_dir.join("workspace-catalog.json");
+    if !catalog_path.exists() {
+        let catalog = json!({
+            "workspaces": [
+                { "id": "local", "name": "Local Workspace" }
+            ]
+        });
+        fs::write(&catalog_path, serde_json::to_vec_pretty(&catalog)?)?;
+    }
+    Ok(machine_id)
+}
+
+fn hash_path(path: &Path) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn resolve_socket_paths(data_dir: &Path) -> io::Result<(PathBuf, PathBuf)> {
+    let run_dir = data_dir.join("run");
+    fs::create_dir_all(&run_dir)?;
+    let probe = run_dir.join("p.sock");
+    let control = run_dir.join("c.sock");
+    if probe.to_string_lossy().len() <= 96 && control.to_string_lossy().len() <= 96 {
+        return Ok((probe, control));
+    }
+    let short_hash = hash_path(data_dir);
+    let tmp = std::env::temp_dir();
+    Ok((
+        tmp.join(format!("lody-{short_hash:x}-p.sock")),
+        tmp.join(format!("lody-{short_hash:x}-c.sock")),
+    ))
+}
+
+fn generate_ipc_token() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("tok-{:x}-{nanos:x}", std::process::id())
+}
+
+struct ServerState {
+    service: Arc<dyn ApplicationService>,
+    machine_id: String,
+    version: String,
+    token: String,
+    shutdown: Arc<Notify>,
+}
+
+fn check_token(headers: &HeaderMap, expected: &str) -> Result<(), (StatusCode, String)> {
+    let supplied = headers
+        .get(IPC_TOKEN_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if supplied != expected {
+        return Err((StatusCode::UNAUTHORIZED, "invalid ipc token".to_string()));
+    }
+    Ok(())
+}
+
+pub fn format_history_json(session_id: &str, turns: &[HistoryTurnRecord]) -> Value {
+    let mut entries = Vec::with_capacity(turns.len() * 2);
+    for turn in turns {
+        let user_status = match turn.outcome {
+            None => "pending",
+            Some(TurnTerminalOutcome::Finished) => "handled",
+            Some(TurnTerminalOutcome::Canceled) => "canceled",
+            Some(TurnTerminalOutcome::Failed) => "failed",
+        };
+        entries.push(json!({
+            "id": turn.turn_id.0,
+            "role": "user",
+            "status": user_status,
+            "items": [
+                { "type": "text", "text": turn.user_prompt }
+            ]
+        }));
+
+        if !turn.assistant_blocks.is_empty()
+            || matches!(turn.outcome, Some(TurnTerminalOutcome::Finished))
+        {
+            let items: Vec<Value> = turn
+                .assistant_blocks
+                .iter()
+                .map(|block| match block {
+                    HistoryBlock::Text { text } => json!({
+                        "type": "text",
+                        "text": text,
+                    }),
+                    HistoryBlock::ToolCall {
+                        tool_call_id,
+                        title,
+                        status,
+                    } => json!({
+                        "type": "tool_call",
+                        "toolCallId": tool_call_id,
+                        "title": title,
+                        "status": status,
+                    }),
+                    HistoryBlock::PermissionRequest {
+                        request_id,
+                        tool_call_id,
+                        resolved_option_id,
+                    } => json!({
+                        "type": "permission_request",
+                        "permissionRequestId": request_id,
+                        "toolCallId": tool_call_id,
+                        "resolvedOptionId": resolved_option_id,
+                    }),
+                })
+                .collect();
+            entries.push(json!({
+                "id": format!("assistant:{}", turn.turn_id.0),
+                "role": "assistant",
+                "finished": matches!(turn.outcome, Some(TurnTerminalOutcome::Finished)),
+                "items": items,
+            }));
+        }
+    }
+    json!({
+        "sessionId": session_id,
+        "items": entries,
+    })
+}
+
+fn parse_custom_acp(cfg: Option<&Value>) -> Option<CustomCommandSpec> {
+    let custom = cfg?.get("customAcp")?;
+    let command = PathBuf::from(custom.get("command")?.as_str()?);
+    let args = custom
+        .get("args")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(CustomCommandSpec { command, args })
+}
+
+fn ndjson_frames(responses: &[Value]) -> impl IntoResponse {
+    let mut body = String::new();
+    for resp in responses {
+        if let Ok(line) = serde_json::to_string(&json!({
+            "kind": "response",
+            "response": resp,
+        })) {
+            body.push_str(&line);
+            body.push('\n');
+        }
+    }
+    body.push_str("{\"kind\":\"complete\"}\n");
+    ([(header::CONTENT_TYPE, "application/x-ndjson")], body)
+}
+
+fn ndjson_error(msg: &str) -> impl IntoResponse {
+    let line = serde_json::to_string(&json!({
+        "kind": "error",
+        "error": msg,
+    }))
+    .unwrap_or_else(|_| "{\"kind\":\"error\",\"error\":\"internal\"}".to_string());
+    (
+        StatusCode::BAD_REQUEST,
+        [(header::CONTENT_TYPE, "application/x-ndjson")],
+        format!("{line}\n"),
+    )
+}
+
+async fn handle_healthz(State(st): State<Arc<ServerState>>) -> Json<Value> {
+    Json(json!({
+        "ok": true,
+        "machineId": st.machine_id,
+        "pid": std::process::id(),
+        "cliVersion": st.version,
+    }))
+}
+
+async fn handle_probe_state(State(st): State<Arc<ServerState>>) -> Json<Value> {
+    Json(json!({
+        "phase": "running",
+        "startupStage": "ready",
+        "machineId": st.machine_id,
+        "pid": std::process::id(),
+    }))
+}
+
+async fn handle_daemon_shutdown(
+    State(st): State<Arc<ServerState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    check_token(&headers, &st.token)?;
+    st.shutdown.notify_waiters();
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn handle_project_control(
+    State(st): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    check_token(&headers, &st.token)?;
+    let caller = VerifiedPrincipal::LocalHost {
+        caller_pid: None,
+        account_id: None,
+    };
+    let kind = payload.get("type").and_then(Value::as_str).unwrap_or("");
+    let service = Arc::clone(&st.service);
+    match kind {
+        "project/add" => {
+            let root_str = payload
+                .get("rootPath")
+                .and_then(Value::as_str)
+                .ok_or_else(|| (StatusCode::BAD_REQUEST, "missing rootPath".to_string()))?
+                .to_string();
+            let root_path = PathBuf::from(&root_str);
+            let name = root_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "project".to_string());
+            let resp = tokio::task::spawn_blocking(move || {
+                service.execute(&caller, AppCommand::RegisterProject { name, root_path })
+            })
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+            if let AppResponse::ProjectRegistered(rec) = resp {
+                Ok(Json(json!({
+                    "result": {
+                        "localProjectId": rec.project_id.0,
+                        "name": rec.name,
+                        "rootPath": rec.root_path,
+                    }
+                })))
+            } else {
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                ))
+            }
+        }
+        _ => {
+            let resp =
+                tokio::task::spawn_blocking(move || service.query(&caller, AppQuery::ListProjects))
+                    .await
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+                    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+            Ok(Json(json!({ "result": resp })))
+        }
+    }
+}
+
+async fn handle_session_control(
+    State(st): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    if let Err((code, msg)) = check_token(&headers, &st.token) {
+        return (
+            code,
+            [(header::CONTENT_TYPE, "application/json")],
+            json!({ "error": msg }).to_string(),
+        )
+            .into_response();
+    }
+
+    let req_type = payload
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let workspace_id = WorkspaceId(
+        payload
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .unwrap_or("local")
+            .to_string(),
+    );
+    let session_id_str = payload
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let session_id = SessionId(session_id_str.clone());
+    let user_id = payload
+        .get("userId")
+        .and_then(Value::as_str)
+        .map(|s| UserId(s.to_string()));
+    let caller = VerifiedPrincipal::LocalHost {
+        caller_pid: None,
+        account_id: user_id,
+    };
+    let service = Arc::clone(&st.service);
+
+    match req_type.as_str() {
+        "session/create" => {
+            let turn_id = TurnId(
+                payload
+                    .get("userTurnId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("turn-1")
+                    .to_string(),
+            );
+            let acp_cfg = payload.get("acpSessionConfig");
+            let prompt = acp_cfg
+                .and_then(|c| c.get("prompt"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let adapter_id = acp_cfg
+                .and_then(|c| c.get("cliType"))
+                .and_then(Value::as_str)
+                .unwrap_or("custom")
+                .to_string();
+            let custom_acp = parse_custom_acp(acp_cfg);
+            let local_project_id = payload
+                .get("project")
+                .and_then(|p| p.get("localProjectId"))
+                .and_then(Value::as_str)
+                .map(|s| LocalProjectId(s.to_string()));
+            let use_worktree = payload
+                .get("project")
+                .and_then(|p| p.get("useWorktree"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
+            let cmd = AppCommand::CreateSession {
+                workspace_id,
+                session_id,
+                turn_id,
+                local_project_id,
+                use_worktree,
+                adapter_id,
+                custom_acp,
+                prompt,
+            };
+            let res = tokio::task::spawn_blocking(move || service.execute(&caller, cmd)).await;
+            match res {
+                Ok(Ok(_)) => ndjson_frames(&[
+                    json!({ "type": "session/create_ack", "sessionId": session_id_str }),
+                    json!({ "type": "session/create_response", "sessionId": session_id_str, "success": true }),
+                ])
+                .into_response(),
+                Ok(Err(e)) => ndjson_error(&e.to_string()).into_response(),
+                Err(e) => ndjson_error(&e.to_string()).into_response(),
+            }
+        }
+        "session/chat" => {
+            let turn_id = TurnId(
+                payload
+                    .get("userTurnId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("turn-chat")
+                    .to_string(),
+            );
+            let acp_cfg = payload.get("acpSessionConfig");
+            let prompt = acp_cfg
+                .and_then(|c| c.get("prompt"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let custom_acp = parse_custom_acp(acp_cfg);
+            let cmd = AppCommand::SendChat {
+                workspace_id,
+                session_id,
+                turn_id,
+                custom_acp,
+                prompt,
+            };
+            let res = tokio::task::spawn_blocking(move || service.execute(&caller, cmd)).await;
+            match res {
+                Ok(Ok(_)) => ndjson_frames(&[
+                    json!({ "type": "session/chat_ack", "sessionId": session_id_str }),
+                    json!({ "type": "session/chat_response", "sessionId": session_id_str, "success": true }),
+                ])
+                .into_response(),
+                Ok(Err(e)) => ndjson_error(&e.to_string()).into_response(),
+                Err(e) => ndjson_error(&e.to_string()).into_response(),
+            }
+        }
+        "session/cancel" => {
+            let pause_inbox = payload
+                .get("pauseInbox")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let cmd = AppCommand::CancelSession {
+                workspace_id,
+                session_id,
+                pause_inbox,
+            };
+            let res = tokio::task::spawn_blocking(move || service.execute(&caller, cmd)).await;
+            match res {
+                Ok(Ok(_)) => ndjson_frames(&[json!({
+                    "type": "session/cancel_response",
+                    "sessionId": session_id_str,
+                    "success": true
+                })])
+                .into_response(),
+                Ok(Err(e)) => ndjson_error(&e.to_string()).into_response(),
+                Err(e) => ndjson_error(&e.to_string()).into_response(),
+            }
+        }
+        "session/permission_response" => {
+            let request_id = payload
+                .get("requestId")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let outcome_obj = payload.get("outcome");
+            let cancelled = outcome_obj
+                .and_then(|o| o.get("outcome"))
+                .and_then(Value::as_str)
+                == Some("cancelled");
+            let selected_option_id = outcome_obj
+                .and_then(|o| o.get("optionId"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            let cmd = AppCommand::ReplyPermission {
+                workspace_id,
+                session_id,
+                decision: PermissionDecision {
+                    request_id,
+                    selected_option_id,
+                    cancelled,
+                    notes: None,
+                },
+            };
+            let res = tokio::task::spawn_blocking(move || service.execute(&caller, cmd)).await;
+            match res {
+                Ok(Ok(_)) => ndjson_frames(&[json!({
+                    "type": "session/permission_ack",
+                    "sessionId": session_id_str,
+                    "success": true
+                })])
+                .into_response(),
+                Ok(Err(e)) => ndjson_error(&e.to_string()).into_response(),
+                Err(e) => ndjson_error(&e.to_string()).into_response(),
+            }
+        }
+        "session/archive" => {
+            let cmd = AppCommand::ArchiveSession {
+                workspace_id,
+                session_id,
+            };
+            let res = tokio::task::spawn_blocking(move || service.execute(&caller, cmd)).await;
+            match res {
+                Ok(Ok(_)) => ndjson_frames(&[json!({
+                    "type": "session/archive_response",
+                    "sessionId": session_id_str,
+                    "success": true
+                })])
+                .into_response(),
+                Ok(Err(e)) => ndjson_error(&e.to_string()).into_response(),
+                Err(e) => ndjson_error(&e.to_string()).into_response(),
+            }
+        }
+        "session/history" => {
+            let q = AppQuery::GetSessionHistory {
+                workspace_id: WorkspaceId("*".to_string()),
+                session_id,
+            };
+            let res = tokio::task::spawn_blocking(move || service.query(&caller, q)).await;
+            match res {
+                Ok(Ok(AppResponse::SessionHistory { turns })) => {
+                    let hist = format_history_json(&session_id_str, &turns);
+                    ndjson_frames(&[hist]).into_response()
+                }
+                Ok(Ok(_)) => ndjson_error("unexpected query response").into_response(),
+                Ok(Err(e)) => ndjson_error(&e.to_string()).into_response(),
+                Err(e) => ndjson_error(&e.to_string()).into_response(),
+            }
+        }
+        other => {
+            ndjson_error(&format!("unsupported session control type '{other}'")).into_response()
+        }
+    }
+}
+
+#[cfg(unix)]
+pub async fn serve_local_daemon(
+    data_dir: &Path,
+    version: &str,
+    service: Arc<dyn ApplicationService>,
+) -> PortResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+    use tokio::net::UnixListener;
+
+    let machine_id = ensure_bootstrap_files(data_dir).map_err(|e| {
+        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
+    })?;
+    let (probe_path, control_path) = resolve_socket_paths(data_dir).map_err(|e| {
+        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
+    })?;
+    let _ = fs::remove_file(&probe_path);
+    let _ = fs::remove_file(&control_path);
+
+    let probe_listener = UnixListener::bind(&probe_path).map_err(|e| {
+        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
+    })?;
+    let control_listener = UnixListener::bind(&control_path).map_err(|e| {
+        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
+    })?;
+    let _ = fs::set_permissions(&probe_path, fs::Permissions::from_mode(0o600));
+    let _ = fs::set_permissions(&control_path, fs::Permissions::from_mode(0o600));
+
+    let token = generate_ipc_token();
+    let meta = DaemonRunMetadata {
+        pid: std::process::id(),
+        socket_path: probe_path.to_string_lossy().into_owned(),
+        control_socket_path: control_path.to_string_lossy().into_owned(),
+        version: version.to_string(),
+        started_at: "2026-11-22T00:00:00Z".to_string(),
+        token: Some(token.clone()),
+    };
+    let run_file = DaemonRunMetadata::file_path(data_dir);
+    let tmp_file = run_file.with_extension("json.tmp");
+    let raw_meta = serde_json::to_vec_pretty(&meta)
+        .map_err(|e| lody_app::PortError::new(lody_app::PortErrorKind::Internal, e.to_string()))?;
+    fs::write(&tmp_file, raw_meta).map_err(|e| {
+        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
+    })?;
+    let _ = fs::set_permissions(&tmp_file, fs::Permissions::from_mode(0o600));
+    fs::rename(&tmp_file, &run_file).map_err(|e| {
+        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
+    })?;
+
+    let shutdown = Arc::new(Notify::new());
+    let shared = Arc::new(ServerState {
+        service,
+        machine_id,
+        version: version.to_string(),
+        token,
+        shutdown: Arc::clone(&shutdown),
+    });
+
+    let probe_app = Router::new()
+        .route("/healthz", get(handle_healthz))
+        .route("/state", get(handle_probe_state))
+        .with_state(Arc::clone(&shared));
+
+    let control_app = Router::new()
+        .route("/daemon-shutdown", post(handle_daemon_shutdown))
+        .route("/project-control", post(handle_project_control))
+        .route("/session-control", post(handle_session_control))
+        .with_state(Arc::clone(&shared));
+
+    let probe_shutdown = Arc::clone(&shutdown);
+    let control_shutdown = Arc::clone(&shutdown);
+    let ctrl_c_shutdown = Arc::clone(&shutdown);
+
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            ctrl_c_shutdown.notify_waiters();
+        }
+    });
+
+    let probe_srv = axum::serve(probe_listener, probe_app).with_graceful_shutdown(async move {
+        probe_shutdown.notified().await;
+    });
+    let control_srv =
+        axum::serve(control_listener, control_app).with_graceful_shutdown(async move {
+            control_shutdown.notified().await;
+        });
+
+    let _ = tokio::join!(probe_srv, control_srv);
+
+    let _ = fs::remove_file(&run_file);
+    let _ = fs::remove_file(&probe_path);
+    let _ = fs::remove_file(&control_path);
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub async fn serve_local_daemon(
+    _data_dir: &Path,
+    _version: &str,
+    _service: Arc<dyn ApplicationService>,
+) -> PortResult<()> {
+    Err(lody_app::PortError::new(
+        lody_app::PortErrorKind::Unavailable,
+        "local daemon server currently requires Unix domain sockets",
+    ))
+}
+
+#[cfg(unix)]
+pub fn send_unix_http(
+    socket_path: &Path,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Option<&Value>,
+) -> io::Result<(u16, String)> {
+    use std::os::unix::net::UnixStream;
+
+    let mut stream = UnixStream::connect(socket_path)?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+
+    let payload = match body {
+        Some(v) => serde_json::to_vec(v)?,
+        None => Vec::new(),
+    };
+
+    let mut req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{LOCAL_CONTROL_HEADER}: 1\r\n"
+    );
+    if let Some(tok) = token {
+        req.push_str(&format!("{IPC_TOKEN_HEADER}: {tok}\r\n"));
+    }
+    if body.is_some() {
+        req.push_str(&format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            payload.len()
+        ));
+    }
+    req.push_str("\r\n");
+
+    stream.write_all(req.as_bytes())?;
+    if !payload.is_empty() {
+        stream.write_all(&payload)?;
+    }
+    stream.flush()?;
+
+    let mut reader = BufReader::new(stream);
+    let mut status_line = String::new();
+    reader.read_line(&mut status_line)?;
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(500);
+
+    let mut chunked = false;
+    let mut content_len: Option<usize> = None;
+    loop {
+        let mut h = String::new();
+        reader.read_line(&mut h)?;
+        let trimmed = h.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((k, v)) = trimmed.split_once(':') {
+            if k.trim().eq_ignore_ascii_case("transfer-encoding")
+                && v.to_ascii_lowercase().contains("chunked")
+            {
+                chunked = true;
+            } else if k.trim().eq_ignore_ascii_case("content-length") {
+                content_len = v.trim().parse::<usize>().ok();
+            }
+        }
+    }
+
+    let bytes = if chunked {
+        let mut acc = Vec::new();
+        loop {
+            let mut sz_line = String::new();
+            reader.read_line(&mut sz_line)?;
+            let hex = sz_line.trim().split(';').next().unwrap_or("0");
+            let n = usize::from_str_radix(hex, 16).unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            let mut buf = vec![0u8; n];
+            reader.read_exact(&mut buf)?;
+            acc.extend_from_slice(&buf);
+            let mut crlf = [0u8; 2];
+            let _ = reader.read_exact(&mut crlf);
+        }
+        acc
+    } else if let Some(n) = content_len {
+        let mut buf = vec![0u8; n];
+        reader.read_exact(&mut buf)?;
+        buf
+    } else {
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf)?;
+        buf
+    };
+
+    Ok((status, String::from_utf8_lossy(&bytes).into_owned()))
+}
+
+#[cfg(not(unix))]
+pub fn send_unix_http(
+    _socket_path: &Path,
+    _method: &str,
+    _path: &str,
+    _token: Option<&str>,
+    _body: Option<&Value>,
+) -> io::Result<(u16, String)> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "unix sockets unavailable",
+    ))
+}
+
+pub fn probe_live_daemon(data_dir: &Path) -> Option<DaemonRunMetadata> {
+    let meta = DaemonRunMetadata::read(data_dir)?;
+    let (status, _) = send_unix_http(
+        Path::new(&meta.socket_path),
+        "GET",
+        "/state",
+        meta.token.as_deref(),
+        None,
+    )
+    .ok()?;
+    (status == 200).then_some(meta)
+}

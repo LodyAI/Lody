@@ -1,10 +1,11 @@
 #![forbid(unsafe_code)]
 
 pub use lody_ports::{
-    BackendProfile, CapabilitySet, CustomCommandSpec, EntitlementStatus, HistoryTurnRecord,
-    LocalProjectId, LocalProjectRecord, MachineId, PermissionDecision, PlatformCapability,
-    PortError, PortErrorKind, PortResult, ProfileId, SessionId, SessionMetaSnapshot, SteerVerdict,
-    StorageLeaseMode, TurnDiffSummary, TurnId, UserId, VerifiedPrincipal, WorkspaceId,
+    BackendProfile, CapabilitySet, CustomCommandSpec, EntitlementStatus, HistoryBlock,
+    HistoryTurnRecord, LocalProjectId, LocalProjectRecord, MachineId, PermissionDecision,
+    PlatformCapability, PortError, PortErrorKind, PortResult, ProfileId, SessionId,
+    SessionMetaSnapshot, SteerVerdict, StorageLeaseMode, TurnDiffSummary, TurnId,
+    TurnTerminalOutcome, UserId, VerifiedPrincipal, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

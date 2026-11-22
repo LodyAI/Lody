@@ -4,10 +4,27 @@ use lody_ports::{
     DiffStorePort, LocalProjectId, PortError, PortErrorKind, PortResult, SessionId,
     TurnDiffSummary, TurnId, WorktreeLease, WorktreePort,
 };
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
-#[derive(Default)]
-pub struct GitWorktreeManager;
+pub struct GitWorktreeManager {
+    worktrees_root: PathBuf,
+}
+
+impl GitWorktreeManager {
+    pub fn new(worktrees_root: impl Into<PathBuf>) -> Self {
+        Self {
+            worktrees_root: worktrees_root.into(),
+        }
+    }
+}
+
+impl Default for GitWorktreeManager {
+    fn default() -> Self {
+        Self::new(".lody-oss/worktrees")
+    }
+}
 
 impl WorktreePort for GitWorktreeManager {
     fn supports_git_worktree(&self) -> bool {
@@ -16,18 +33,73 @@ impl WorktreePort for GitWorktreeManager {
 
     fn acquire_worktree(
         &self,
-        _project_id: &LocalProjectId,
-        _project_root: &Path,
-        _session_id: &SessionId,
-        _base_branch: Option<&str>,
+        project_id: &LocalProjectId,
+        project_root: &Path,
+        session_id: &SessionId,
+        base_branch: Option<&str>,
     ) -> PortResult<WorktreeLease> {
-        Err(PortError::new(
-            PortErrorKind::Unavailable,
-            "git worktree manager not yet wired",
-        ))
+        let sanitized_sid: String = session_id
+            .0
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
+        let branch_name = format!("lody/session-{sanitized_sid}");
+        let worktree_path = self.worktrees_root.join(&project_id.0).join(&sanitized_sid);
+
+        if let Some(parent) = worktree_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+        }
+        if worktree_path.exists() {
+            let _ = fs::remove_dir_all(&worktree_path);
+        }
+
+        let wt_str = worktree_path.to_string_lossy();
+        let mut cmd = Command::new("git");
+        cmd.arg("worktree")
+            .arg("add")
+            .arg("-B")
+            .arg(&branch_name)
+            .arg(wt_str.as_ref());
+        if let Some(base) = base_branch {
+            cmd.arg(base);
+        }
+        let out = cmd
+            .current_dir(project_root)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+
+        if !out.status.success() {
+            return Err(PortError::new(
+                PortErrorKind::Internal,
+                format!(
+                    "git worktree add failed: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ),
+            ));
+        }
+
+        Ok(WorktreeLease {
+            session_id: session_id.clone(),
+            project_id: project_id.clone(),
+            branch_name,
+            worktree_path,
+        })
     }
 
-    fn release_worktree(&self, _lease: &WorktreeLease) -> PortResult<()> {
+    fn release_worktree(&self, lease: &WorktreeLease) -> PortResult<()> {
+        if lease.worktree_path.exists() {
+            let wt_str = lease.worktree_path.to_string_lossy();
+            let _ = Command::new("git")
+                .args(["worktree", "remove", "--force", wt_str.as_ref()])
+                .current_dir(&lease.worktree_path)
+                .stdin(Stdio::null())
+                .output();
+            if lease.worktree_path.exists() {
+                let _ = fs::remove_dir_all(&lease.worktree_path);
+            }
+        }
         Ok(())
     }
 }

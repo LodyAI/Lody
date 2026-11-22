@@ -114,9 +114,25 @@ fn normalize_turn_entry(entry: &Value) -> Option<TurnBusinessSummary> {
         role,
         status,
         finished,
-        visible_text: text_parts.join("\n"),
+        visible_text: scrub_volatile_directive_paths(&text_parts.join("\n")),
         tool_statuses,
     })
+}
+
+fn scrub_volatile_directive_paths(input: &str) -> String {
+    let prefix = "[SCRIPTED:HOLD:";
+    let Some(start) = input.find(prefix) else {
+        return input.to_string();
+    };
+    let after = &input[start + prefix.len()..];
+    let Some(end) = after.find(']') else {
+        return input.to_string();
+    };
+    let mut out = String::with_capacity(input.len());
+    out.push_str(&input[..start]);
+    out.push_str("[SCRIPTED:HOLD:<BARRIER>]");
+    out.push_str(&after[end + 1..]);
+    out
 }
 
 #[cfg(test)]
