@@ -24,8 +24,7 @@ function ChatRoute() {
   const setMobileBaseContext = useSetAtom(mobileWorkspaceBaseContextAtom);
 
   // Selection steering is an in-place correction of the current address, not
-  // a visit to a new page, so the mirror always replaces. The pin section is
-  // not part of the selection and survives the correction.
+  // a visit to a new page, so the mirror always replaces.
   const handleSelectionUrlSync = useCallback(
     (selectionSearch: ChatLandingSearch) => {
       void navigate({

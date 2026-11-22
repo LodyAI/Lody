@@ -39,11 +39,6 @@ const styles = stylex.create({
   },
 });
 
-/**
- * The pin section a conversation started from that section's "New Chat"
- * button lands in. The catalog subscription lives here, not in the landing, so
- * catalog updates re-render only this pill.
- */
 export function PinSectionTarget({
   sectionId,
   onClear,
@@ -54,13 +49,11 @@ export function PinSectionTarget({
   const { t } = useTranslation();
   const { pinSections, loaded, failed } = useWorkspaceCatalog();
   const section = pinSections.find((candidate) => candidate.id === sectionId);
-  // A section deleted meanwhile leaves the conversation in the default section.
   const name = section?.name ?? (loaded || failed ? t('sidebar.pinned', 'Pinned') : null);
   if (name === null) return null;
   return <PinSectionTargetPill sectionId={sectionId} name={name} onClear={onClear} />;
 }
 
-/** Unchecking it starts an unpinned conversation instead. */
 export function PinSectionTargetPill({
   sectionId,
   name,

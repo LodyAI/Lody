@@ -478,12 +478,7 @@ interface ChatLandingProps {
   preSelectedRepo?: string;
   /** Project group id, with `preSelectedContext: 'group'`. */
   preSelectedGroup?: string;
-  /**
-   * Pin section the started conversation is pinned into, from a pin section's
-   * "New Chat" button. Desktop page only.
-   */
   pinSectionId?: string;
-  /** Drops `pinSectionId`, so the next conversation starts unpinned. */
   onClearPinSection?: () => void;
   /**
    * Mirrors the composer's effective selection back into the chat-route URL

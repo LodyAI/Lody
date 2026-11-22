@@ -93,7 +93,6 @@ export type SidebarPinSectionActions = {
   onCreateSection: (name: string, moveItemId?: string) => void | Promise<void>;
   onRenameSection: (sectionId: string, name: string) => void | Promise<void>;
   onDeleteSection: (sectionId: string) => void;
-  /** Opens the new-chat page; the conversation started there is pinned into this user section. */
   onNewChat?: (sectionId: string) => void;
 };
 
@@ -861,7 +860,6 @@ function PinSectionHeaderMenu({
   label: string;
   /** Pointer surfaces show the ⋯ only while its header row is hovered, focused or open. */
   revealOnHover: boolean;
-  /** Opens the new-chat page pinned into this user section; absent for the default section. */
   onNewChat?: () => void;
   /** Absent for viewers who cannot manage sections. */
   onNewSection?: () => void;

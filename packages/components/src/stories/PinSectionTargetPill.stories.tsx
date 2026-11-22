@@ -3,11 +3,6 @@ import { useState } from 'react';
 import { Button } from '@lody/ui/button';
 import { PinSectionTargetPill } from '@/components/chat/pin-section-target-pill';
 
-/**
- * The new-chat page opened from a pin section's "New Chat" button names the
- * section the conversation will be pinned into, beside the project pills.
- * Unchecking it starts an unpinned conversation.
- */
 function PinSectionTargetDemo({ name }: { name: string }) {
   const [pinned, setPinned] = useState(true);
   return (

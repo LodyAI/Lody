@@ -3044,8 +3044,6 @@ export function LoroAppSidebar({
       },
       onNewChat: (sectionId) => {
         if (!workspaceSlug) return;
-        // From the new-chat page, keep the project it names; elsewhere the
-        // composer restores its usual default.
         const { pathname, search } = router.state.location;
         const { context, machine, project, repo, group } =
           pathname === `/${workspaceSlug}/chat` ? parseChatLandingSearch(search) : {};

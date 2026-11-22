@@ -688,7 +688,6 @@ export type ChatLandingSearch = {
   repo?: string;
   /** Project group id, with `context: 'group'`. */
   group?: string;
-  /** Pin section id: the conversation started here is pinned into that section. */
   pinSection?: string;
 };
 

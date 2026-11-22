@@ -269,7 +269,6 @@ interface DemoLandingProps {
   initialPastedTextDrafts?: PastedTextDraft[];
   /** Mount the desktop keyboard-nav controller (arrows/Esc over the config controls). */
   enableKeyboardNav?: boolean;
-  /** Opened from a pin section's "New Chat": the section the conversation is pinned into. */
   pinSectionName?: string;
 }
 
@@ -530,7 +529,6 @@ export const DesktopLight: Story = {
   render: () => <DemoLanding tone="light" />,
 };
 
-/** Opened from a pin section's "New Chat": the section sits beside the project picker. */
 export const DesktopLightPinSection: Story = {
   render: () => <DemoLanding tone="light" pinSectionName="Maintenance" />,
 };
