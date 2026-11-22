@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   GitHubFileTooLargeError,
   githubCreatePRReviewComment,
+  githubFetchBranches,
+  githubFetchBranchesFirstPage,
+  githubFetchBranchesPage,
   githubFetchCheckRuns,
   githubFetchFileAtCommit,
   githubFetchFileBytesAtCommit,
@@ -12,6 +15,7 @@ import {
   githubFetchProjectSkillsAtCommit,
   githubFetchPullRequestDetails,
   githubFetchPullRequestReviews,
+  githubSearchBranches,
   normalizeCheckRunsSummary,
 } from '../src/github-api';
 
@@ -534,5 +538,114 @@ describe('githubFetchIssuesAndPRs', () => {
       expect.objectContaining({ number: 7, title: 'Fresh copy', type: 'issue' }),
       expect.objectContaining({ number: 8, type: 'pr' }),
     ]);
+  });
+});
+
+describe('GitHub branch listing', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // A synthetic repository whose default branch sorts after the first page.
+  const branchNames = [
+    ...Array.from({ length: 250 }, (_, i) => `feature/${String(i).padStart(3, '0')}`),
+    'trunk',
+  ];
+
+  function installFakeGitHub() {
+    const requested: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      requested.push(url.toString());
+      if (url.pathname === '/repos/owner/repo') {
+        return new Response(JSON.stringify({ default_branch: 'trunk' }));
+      }
+      // GitHub's `next` links use the repository id path after the first page.
+      if (
+        url.pathname === '/repos/owner/repo/branches' ||
+        url.pathname === '/repositories/42/branches'
+      ) {
+        const page = Number(url.searchParams.get('page') ?? '1');
+        const start = (page - 1) * 100;
+        const items = branchNames.slice(start, start + 100).map((name) => ({ name }));
+        const headers = new Headers();
+        if (start + 100 < branchNames.length) {
+          headers.set(
+            'link',
+            `<https://api.github.com/repositories/42/branches?per_page=100&page=${page + 1}>; rel="next"`
+          );
+        }
+        return new Response(JSON.stringify(items), { headers });
+      }
+      const refsPrefix = '/repos/owner/repo/git/matching-refs/heads/';
+      if (url.pathname.startsWith(refsPrefix)) {
+        const prefix = decodeURIComponent(url.pathname.slice(refsPrefix.length));
+        return new Response(
+          JSON.stringify(
+            branchNames
+              .filter((name) => name.startsWith(prefix))
+              .map((name) => ({ ref: `refs/heads/${name}` }))
+          )
+        );
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return requested;
+  }
+
+  it('returns the default branch with only the first page and a cursor for the rest', async () => {
+    const requested = installFakeGitHub();
+
+    const first = await githubFetchBranchesFirstPage('token', 'owner/repo');
+
+    expect(first.defaultBranch).toBe('trunk');
+    expect(first.branches).toHaveLength(101);
+    expect(first.branches).toContain('trunk');
+    expect(first.branches).not.toContain('feature/100');
+    expect(first.nextPageUrl).toBe(
+      'https://api.github.com/repositories/42/branches?per_page=100&page=2'
+    );
+    expect(requested.map((url) => new URL(url).pathname).sort()).toEqual([
+      '/repos/owner/repo',
+      '/repos/owner/repo/branches',
+    ]);
+
+    const second = await githubFetchBranchesPage('token', 'owner/repo', first.nextPageUrl!);
+    expect(second.branches[0]).toBe('feature/100');
+    expect(second.nextPageUrl).toContain('page=3');
+  });
+
+  it('never sends the token to a page cursor outside this repository listing', async () => {
+    const requested = installFakeGitHub();
+
+    for (const cursor of [
+      'https://evil.example/repos/owner/repo/branches?page=2',
+      'https://api.github.com/repos/other/repo/branches?page=2',
+      'https://api.github.com/repos/owner/repo/pulls?page=2',
+    ]) {
+      await expect(githubFetchBranchesPage('token', 'owner/repo', cursor)).rejects.toThrow(
+        /Unexpected GitHub branches page URL/
+      );
+    }
+    expect(requested).toEqual([]);
+  });
+
+  it('finds branches beyond the loaded pages by name prefix', async () => {
+    installFakeGitHub();
+
+    await expect(githubSearchBranches('token', 'owner/repo', 'feature/24')).resolves.toEqual(
+      Array.from({ length: 10 }, (_, i) => `feature/24${i}`)
+    );
+    await expect(githubSearchBranches('token', 'owner/repo', '  ')).resolves.toEqual([]);
+  });
+
+  it('still lists every branch for callers that need the complete set', async () => {
+    installFakeGitHub();
+
+    const all = await githubFetchBranches('token', 'owner/repo');
+
+    expect(all.defaultBranch).toBe('trunk');
+    expect(all.branches).toEqual([...branchNames].sort((a, b) => a.localeCompare(b)));
   });
 });

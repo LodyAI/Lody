@@ -80,7 +80,17 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
   showChevron?: boolean;
   /** When false, the search input won't auto-focus when the popover opens. */
   autoFocusSearch?: boolean;
+  /** Reports each search edit, e.g. to look up options the list has not loaded. */
+  onQueryChange?: (query: string) => void;
+  /** Called when the list is scrolled to (near) its end, to load further options. */
+  onReachEnd?: () => void;
+  /** A status row under the options, such as "Loading more...". */
+  footer?: ReactNode;
 }
+
+// Rows from the end at which `onReachEnd` fires, so the next page lands before the
+// user hits the bottom.
+const OPTION_SELECTOR_REACH_END_ROWS = 5;
 
 const styles = stylex.create({
   // The list scrolls under the search field; the cap keeps it clear of the
@@ -129,6 +139,9 @@ export function OptionSelector<TValue extends string | number = string>({
   renderOption,
   showChevron = true,
   autoFocusSearch = true,
+  onQueryChange,
+  onReachEnd,
+  footer,
 }: OptionSelectorProps<TValue>) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = open !== undefined;
@@ -239,6 +252,7 @@ export function OptionSelector<TValue extends string | number = string>({
       didSelectItemRef.current = false;
     } else {
       setQuery(''); // reopen starts unfiltered
+      onQueryChange?.('');
     }
     if (!isControlled) {
       setInternalOpen(next);
@@ -382,12 +396,28 @@ export function OptionSelector<TValue extends string | number = string>({
               onValueChange={(nextQuery: string) => {
                 setQuery(nextQuery);
                 setSearchToken((n) => n + 1);
+                onQueryChange?.(nextQuery);
               }}
               {...stylex.props(surface.search)}
             />
           )}
           <CommandPrimitive.List
             ref={listViewportRef}
+            onScroll={
+              onReachEnd
+                ? (event) => {
+                    const viewport = event.currentTarget;
+                    const remaining =
+                      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+                    if (
+                      remaining <=
+                      OPTION_SELECTOR_REACH_END_ROWS * OPTION_SELECTOR_ROW_ESTIMATE_PX
+                    ) {
+                      onReachEnd();
+                    }
+                  }
+                : undefined
+            }
             {...stylex.props(surface.popupScroll, styles.scroll)}
           >
             <CommandPrimitive.Empty {...stylex.props(surface.empty)}>
@@ -411,6 +441,7 @@ export function OptionSelector<TValue extends string | number = string>({
             ) : (
               options.map((option) => renderOptionItem(option))
             )}
+            {footer ? <div {...stylex.props(surface.empty)}>{footer}</div> : null}
           </CommandPrimitive.List>
         </CommandPrimitive>
       </Popover.Content>
