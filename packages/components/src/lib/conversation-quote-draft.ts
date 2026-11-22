@@ -49,7 +49,7 @@ function projectMentionRanges(
   );
 }
 
-/** Store readable text, never just an opaque chip label or source pointer. */
+/** Store readable composer text alongside inline quote/paste spans and mention identities. */
 export function saveConversationQuoteDraft(
   storage: Pick<Storage, 'setItem' | 'removeItem'>,
   key: string,
@@ -58,7 +58,7 @@ export function saveConversationQuoteDraft(
   ranges: readonly PersistedMentionRange[] = []
 ): boolean {
   try {
-    if (!text || !drafts.some((draft) => draft.kind === 'message_quote')) storage.removeItem(key);
+    if (!text) storage.removeItem(key);
     else {
       const rewrites = buildPastedTextRewrites(drafts, text);
       const mentions = projectMentionRanges(text, ranges, rewrites);

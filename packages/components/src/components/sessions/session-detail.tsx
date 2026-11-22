@@ -284,6 +284,10 @@ import {
   type PersistedSidePanelTab,
 } from '@/lib/session-draft-tabs';
 import {
+  readCoordinatorReplyDraft,
+  writeCoordinatorReplyDraft,
+} from '@/components/project-mode/coordinator-composer-draft';
+import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
   getSessionGitHubState,
@@ -1556,8 +1560,14 @@ const SessionDetail = ({
   // and stays mounted afterwards, so switching panels never tears down its state.
   /** Project mode: independent conversations opened from the board into the right panel. */
   const [panelSessionIds, setPanelSessionIds] = useState<SessionId[]>([]);
+  const coordinatorReplyStorageScope = currentWorkspaceId
+    ? `${currentWorkspaceId}:${sessionId}`
+    : null;
   const [coordinatorReplyDraft, setCoordinatorReplyDraft] = useState<CoordinatorReplyRef | null>(
-    null
+    () => readCoordinatorReplyDraft(currentWorkspaceId, sessionId)
+  );
+  const [hydratedCoordinatorReplyScope, setHydratedCoordinatorReplyScope] = useState<string | null>(
+    coordinatorReplyStorageScope
   );
   const [coordinatorThreadHostState, setCoordinatorThreadHostState] =
     useState<CoordinatorThreadHostState | null>(null);
@@ -1607,7 +1617,8 @@ const SessionDetail = ({
     setClosingSideSessionIds(new Set());
     setMountedSideSessionIds(new Set());
     setPanelSessionIds([]);
-    setCoordinatorReplyDraft(null);
+    setHydratedCoordinatorReplyScope(coordinatorReplyStorageScope);
+    setCoordinatorReplyDraft(readCoordinatorReplyDraft(currentWorkspaceId, sessionId));
     setCoordinatorThreadHostState(null);
     setOpenedThreadTabs([]);
     pendingChatPrefillRef.current.clear();
@@ -1619,6 +1630,17 @@ const SessionDetail = ({
     setMobileDiffState(null);
     setMobileFilesBrowserOpen(false);
     setFileProviderRequestedByInteraction(false);
+  } else if (
+    coordinatorReplyStorageScope &&
+    hydratedCoordinatorReplyScope !== coordinatorReplyStorageScope
+  ) {
+    setHydratedCoordinatorReplyScope(coordinatorReplyStorageScope);
+    if (!coordinatorReplyDraft) {
+      const restoredReply = readCoordinatorReplyDraft(currentWorkspaceId, sessionId);
+      if (restoredReply) {
+        setCoordinatorReplyDraft(restoredReply);
+      }
+    }
   }
 
   const setDraftTabs = useCallback(
@@ -5524,6 +5546,7 @@ const SessionDetail = ({
 
   const handleReplyToCoordinatorBubble = useCallback(
     (reply: CoordinatorReplyRef) => {
+      writeCoordinatorReplyDraft(currentWorkspaceId, sessionId, reply);
       setCoordinatorReplyDraft(reply);
       requestAnimationFrame(() => {
         const handle = chatRefsMap.current.get(sessionId);
@@ -5532,12 +5555,13 @@ const SessionDetail = ({
         }
       });
     },
-    [sessionId]
+    [currentWorkspaceId, sessionId]
   );
 
   const handleClearCoordinatorReplyDraft = useCallback(() => {
+    writeCoordinatorReplyDraft(currentWorkspaceId, sessionId, null);
     setCoordinatorReplyDraft(null);
-  }, []);
+  }, [currentWorkspaceId, sessionId]);
 
   const handleOpenCoordinatorThread = useCallback(
     (threadRootId: string, previewHint?: string) => {
@@ -5573,6 +5597,7 @@ const SessionDetail = ({
 
   const handlePrefillCoordinatorPrompt = useCallback(
     (prompt: string, replyTo: CoordinatorReplyRef) => {
+      writeCoordinatorReplyDraft(currentWorkspaceId, sessionId, replyTo);
       setCoordinatorReplyDraft(replyTo);
       requestAnimationFrame(() => {
         const handle = chatRefsMap.current.get(sessionId);
@@ -5581,7 +5606,7 @@ const SessionDetail = ({
         }
       });
     },
-    [sessionId]
+    [currentWorkspaceId, sessionId]
   );
 
   const handlePrefillChildSession = useCallback(

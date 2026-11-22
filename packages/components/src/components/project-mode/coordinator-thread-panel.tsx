@@ -28,6 +28,11 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
+import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
+import {
+  readCoordinatorThreadDraft,
+  writeCoordinatorThreadDraft,
+} from './coordinator-composer-draft';
 import {
   conversationFontSizeAtom,
   DEFAULT_CONVERSATION_FONT_SIZE,
@@ -427,15 +432,63 @@ export function CoordinatorThreadPanel({
     });
   }, [canonicalRootId, previewHint, rootAnchor, threadMessages]);
 
-  const [subReplyTarget, setSubReplyTarget] = useState<CoordinatorReplyRef | null>(null);
-  const [promptValue, setPromptValue] = useState('');
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const threadMemoryScope = `${coordinatorSessionId}:${canonicalRootId}`;
+  const threadStorageScope = workspaceId ? `${workspaceId}:${threadMemoryScope}` : null;
+  const [subReplyTarget, setSubReplyTargetState] = useState<CoordinatorReplyRef | null>(
+    () => readCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId).subReplyTarget
+  );
+  const [promptValue, setPromptValueState] = useState(
+    () => readCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId).prompt
+  );
+  const [activeThreadScope, setActiveThreadScope] = useState(threadMemoryScope);
+  const [hydratedThreadStorageScope, setHydratedThreadStorageScope] = useState<string | null>(
+    threadStorageScope
+  );
+  if (activeThreadScope !== threadMemoryScope) {
+    const nextDraft = readCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId);
+    setActiveThreadScope(threadMemoryScope);
+    setHydratedThreadStorageScope(threadStorageScope);
+    setSubReplyTargetState(nextDraft.subReplyTarget);
+    setPromptValueState(nextDraft.prompt);
+  } else if (threadStorageScope && hydratedThreadStorageScope !== threadStorageScope) {
+    setHydratedThreadStorageScope(threadStorageScope);
+    if (!promptValue && !subReplyTarget) {
+      const restoredDraft = readCoordinatorThreadDraft(
+        workspaceId,
+        coordinatorSessionId,
+        canonicalRootId
+      );
+      if (restoredDraft.prompt || restoredDraft.subReplyTarget) {
+        setSubReplyTargetState(restoredDraft.subReplyTarget);
+        setPromptValueState(restoredDraft.prompt);
+      }
+    }
+  }
   const [submitting, setSubmitting] = useState(false);
   const promptRef = useRef<ComposerInputElement | null>(null);
 
-  useEffect(() => {
-    setSubReplyTarget(null);
-    setPromptValue('');
-  }, [canonicalRootId]);
+  const setPromptValue = useCallback(
+    (nextPrompt: string) => {
+      setPromptValueState(nextPrompt);
+      writeCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId, {
+        prompt: nextPrompt,
+        subReplyTarget,
+      });
+    },
+    [canonicalRootId, coordinatorSessionId, subReplyTarget, workspaceId]
+  );
+
+  const setSubReplyTarget = useCallback(
+    (nextTarget: CoordinatorReplyRef | null) => {
+      setSubReplyTargetState(nextTarget);
+      writeCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId, {
+        prompt: promptValue,
+        subReplyTarget: nextTarget,
+      });
+    },
+    [canonicalRootId, coordinatorSessionId, promptValue, workspaceId]
+  );
 
   const handleReplyInsideThread = useCallback(
     (reply: CoordinatorReplyRef) => {
@@ -447,17 +500,22 @@ export function CoordinatorThreadPanel({
         promptRef.current?.focus();
       });
     },
-    [canonicalRootId]
+    [canonicalRootId, setSubReplyTarget]
   );
 
   useEffect(() => {
     if (!prefillBridgeRef) return undefined;
     prefillBridgeRef.current = (prompt: string, reply: CoordinatorReplyRef) => {
-      setSubReplyTarget({
+      const nextTarget: CoordinatorReplyRef = {
         ...reply,
         threadRootId: canonicalRootId,
+      };
+      setSubReplyTargetState(nextTarget);
+      setPromptValueState(prompt);
+      writeCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId, {
+        prompt,
+        subReplyTarget: nextTarget,
       });
-      setPromptValue(prompt);
       requestAnimationFrame(() => {
         promptRef.current?.focus();
       });
@@ -465,7 +523,7 @@ export function CoordinatorThreadPanel({
     return () => {
       prefillBridgeRef.current = null;
     };
-  }, [canonicalRootId, prefillBridgeRef]);
+  }, [canonicalRootId, coordinatorSessionId, prefillBridgeRef, workspaceId]);
 
   const effectiveReplyRef = subReplyTarget ?? defaultRootReplyRef;
   const canSend = Boolean(onSendReply && effectiveReplyRef && promptValue.trim().length > 0 && !submitting);
@@ -477,13 +535,25 @@ export function CoordinatorThreadPanel({
     try {
       const ok = await onSendReply(trimmed, effectiveReplyRef);
       if (ok !== false) {
-        setPromptValue('');
-        setSubReplyTarget(null);
+        setPromptValueState('');
+        setSubReplyTargetState(null);
+        writeCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId, {
+          prompt: '',
+          subReplyTarget: null,
+        });
       }
     } finally {
       setSubmitting(false);
     }
-  }, [effectiveReplyRef, onSendReply, promptValue, submitting]);
+  }, [
+    canonicalRootId,
+    coordinatorSessionId,
+    effectiveReplyRef,
+    onSendReply,
+    promptValue,
+    submitting,
+    workspaceId,
+  ]);
 
   const handleComposerKeyDown = useCallback(
     (event: KeyboardEvent<ComposerInputElement>) => {
