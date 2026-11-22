@@ -5,6 +5,7 @@ import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Kbd } from '@lody/ui/kbd';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
@@ -178,49 +179,57 @@ export function AttachmentAddMenu({
         if (!nextOpen) setView('root');
       }}
     >
-      <Menu.Trigger
-        ref={triggerRef}
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            icon
-            disabled={disabled}
-            aria-label={triggerLabel}
-            title={
-              openAddMenuKey ? `${triggerLabel} (${formatKeyBinding(openAddMenuKey)})` : undefined
-            }
-            className={cn(
-              triggerSize,
-              isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
-              // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-              // `bg-accent`/`bg-muted`) because those equal the background in the
-              // dark theme and paint nothing.
-              'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-            )}
-          >
-            <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
-          </Button>
-        }
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          icon
-          disabled={disabled}
-          aria-label={triggerLabel}
-          className={cn(
-            triggerSize,
-            isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
-            // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-            // `bg-accent`/`bg-muted`) because those equal the background in the
-            // dark theme and paint nothing.
-            'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-          )}
-        >
-          <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
-        </Button>
-      </Menu.Trigger>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          delay={500}
+          render={
+            <Menu.Trigger
+              ref={triggerRef}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon
+                  disabled={disabled}
+                  aria-label={triggerLabel}
+                  className={cn(
+                    triggerSize,
+                    isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
+                    // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+                    // `bg-accent`/`bg-muted`) because those equal the background in the
+                    // dark theme and paint nothing.
+                    'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+                  )}
+                >
+                  <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+                </Button>
+              }
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                icon
+                disabled={disabled}
+                aria-label={triggerLabel}
+                className={cn(
+                  triggerSize,
+                  isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
+                  // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+                  // `bg-accent`/`bg-muted`) because those equal the background in the
+                  // dark theme and paint nothing.
+                  'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+                )}
+              >
+                <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+              </Button>
+            </Menu.Trigger>
+          }
+        />
+        <Tooltip.Content side="top">
+          {triggerLabel}
+          {openAddMenuKey ? <> <Kbd>{formatKeyBinding(openAddMenuKey)}</Kbd></> : null}
+        </Tooltip.Content>
+      </Tooltip.Root>
       <Menu.Content
         align="start"
         side="top"

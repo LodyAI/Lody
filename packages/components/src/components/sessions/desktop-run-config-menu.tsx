@@ -57,6 +57,7 @@ import {
 } from '@/lib/commands';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
+import { Kbd } from '@lody/ui/kbd';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { control, space } from '@lody/ui/tokens/scales.stylex';
@@ -737,9 +738,6 @@ export function DesktopRunConfigMenu({
   if (!hasAnyRow) return null;
 
   const runConfigButtonAriaLabel = t('chat.runConfig.buttonAriaLabel', 'Run configuration');
-  const runConfigTriggerTitle = openRunConfigKey
-    ? `${runConfigButtonAriaLabel} (${formatKeyBinding(openRunConfigKey)})`
-    : runConfigButtonAriaLabel;
   /* The face, shared by the menu trigger and the inert (tooltip-only) button. */
   const triggerFace = (
     <>
@@ -813,18 +811,28 @@ export function DesktopRunConfigMenu({
           <Tooltip.Content side="top">{disabledReason}</Tooltip.Content>
         </Tooltip.Root>
       ) : (
-        <Menu.Trigger
-          ref={triggerRef}
-          aria-label={runConfigButtonAriaLabel}
-          title={runConfigTriggerTitle}
-          data-run-config-trigger=""
-          data-agent-config-id={selectedAgentConfig?.id}
-          data-machine-id={selectedAgentConfig?.machineId}
-          className={triggerClassName}
-          render={<button type="button" />}
-        >
-          {triggerFace}
-        </Menu.Trigger>
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            delay={500}
+            render={
+              <Menu.Trigger
+                ref={triggerRef}
+                aria-label={runConfigButtonAriaLabel}
+                data-run-config-trigger=""
+                data-agent-config-id={selectedAgentConfig?.id}
+                data-machine-id={selectedAgentConfig?.machineId}
+                className={triggerClassName}
+                render={<button type="button" />}
+              >
+                {triggerFace}
+              </Menu.Trigger>
+            }
+          />
+          <Tooltip.Content side="top">
+            {runConfigButtonAriaLabel}
+            {openRunConfigKey ? <> <Kbd>{formatKeyBinding(openRunConfigKey)}</Kbd></> : null}
+          </Tooltip.Content>
+        </Tooltip.Root>
       )}
       <Menu.Content align="start" className="min-w-60" {...menuSideProps(menuSide)}>
         <div {...stylex.props(surface.menuList)}>
@@ -1249,6 +1257,10 @@ export function DesktopPermissionModeButton({
   );
   const { options, value, label, source } = face;
   const controlLabel = permissionModeControlLabel(face, t);
+  const ariaLabel = label ? `${controlLabel}: ${label}` : controlLabel;
+
+  useCommands();
+  const cycleModeKey = commands.getKeybindingsFor('session.cycleMode')[0];
 
   if (options.length === 0) return null;
 
@@ -1265,15 +1277,25 @@ export function DesktopPermissionModeButton({
       {/* Icon only: every mode has an icon (warning modes the amber shield),
           and a label such as "Bypass permissions" took most of the control
           row. The mode's name is the tooltip and the accessible name. */}
-      <Menu.Trigger
-        disabled={disabled}
-        aria-label={label ? `${controlLabel}: ${label}` : controlLabel}
-        title={label ? `${controlLabel}: ${label}` : controlLabel}
-        className={iconOnlyTriggerClassName}
-        render={<button type="button" />}
-      >
-        <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
-      </Menu.Trigger>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          delay={500}
+          render={
+            <Menu.Trigger
+              disabled={disabled}
+              aria-label={ariaLabel}
+              className={iconOnlyTriggerClassName}
+              render={<button type="button" />}
+            >
+              <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
+            </Menu.Trigger>
+          }
+        />
+        <Tooltip.Content side="top">
+          {ariaLabel}
+          {cycleModeKey ? <> <Kbd>{formatKeyBinding(cycleModeKey)}</Kbd></> : null}
+        </Tooltip.Content>
+      </Tooltip.Root>
       <Menu.Content align="start" className="w-max min-w-44 max-w-64" {...menuSideProps(menuSide)}>
         <div {...stylex.props(surface.menuList)}>
           {options.map((opt) => (

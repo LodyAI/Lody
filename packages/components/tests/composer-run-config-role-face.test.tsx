@@ -22,7 +22,7 @@ import {
 import { MobileSessionRunConfig } from '../src/components/mobile/mobile-session-run-config';
 import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { initI18n } from '../src/i18n';
-import { commands } from '../src/lib/commands';
+import { commands, formatKeyBinding } from '../src/lib/commands';
 import { CommandShortcutHost } from '../src/lib/commands/shortcut-host';
 import { Tooltip } from '@lody/ui/tooltip';
 
@@ -110,7 +110,7 @@ describe('DesktopRunConfigMenu role face', () => {
       root?.render(
         createElement(
           Tooltip.Provider,
-          { delayDuration: 0 },
+          { delay: 0 },
           createElement(DesktopRunConfigMenu, { ...baseProps, ...props })
         )
       );
@@ -430,7 +430,7 @@ describe('DesktopRunConfigMenu ⌘/ chord', () => {
       root?.render(
         createElement(
           Tooltip.Provider,
-          { delayDuration: 0 },
+          { delay: 0 },
           createElement(
             'div',
             null,
@@ -509,6 +509,22 @@ describe('DesktopRunConfigMenu ⌘/ chord', () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
     });
     expect(document.body.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('shows the active ⌘/ binding in the trigger tooltip', async () => {
+    const view = await renderComposerBox({ modelOptions: manyModels });
+    const trigger = view.querySelector('[data-run-config-trigger]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('mouseenter'));
+      trigger.dispatchEvent(new MouseEvent('mousemove'));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    const expected = commands
+      .getKeybindingsFor('session.openRunConfig')
+      .map((binding) => formatKeyBinding(binding))[0];
+    expect(expected).toBeTruthy();
+    expect(document.body.textContent).toContain(`Run configuration`);
+    expect(document.body.textContent).toContain(expected);
   });
 });
 
