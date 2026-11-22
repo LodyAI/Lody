@@ -1850,6 +1850,23 @@ const normalizeLocalProjectMeta = (value: unknown): LocalProjectMeta | undefined
   return project;
 };
 
+const normalizeAgentSessionDefaults = (
+  value: unknown
+): AgentConfigMeta['sessionDefaults'] | undefined => {
+  if (!isRecord(value)) return undefined;
+  const configOptionValues: Record<string, string | boolean> = {};
+  if (isRecord(value.configOptionValues)) {
+    for (const [configId, optionValue] of Object.entries(value.configOptionValues)) {
+      if (!configId) continue;
+      if (typeof optionValue === 'string' || typeof optionValue === 'boolean')
+        configOptionValues[configId] = optionValue;
+    }
+  }
+  const modelId = isNonEmptyString(value.modelId) ? value.modelId : undefined;
+  if (!modelId && !Object.keys(configOptionValues).length) return undefined;
+  return { ...(modelId ? { modelId } : {}), configOptionValues };
+};
+
 const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined => {
   if (
     !isRecord(value) ||
@@ -1909,6 +1926,10 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
   if (!isMissing(value.brandId)) {
     if (typeof value.brandId !== 'string') return undefined;
     config.brandId = value.brandId as AgentConfigMeta['brandId'];
+  }
+  if (!isMissing(value.sessionDefaults)) {
+    const sessionDefaults = normalizeAgentSessionDefaults(value.sessionDefaults);
+    if (sessionDefaults) config.sessionDefaults = sessionDefaults;
   }
 
   if (!isMissing(value.codexAuth)) {

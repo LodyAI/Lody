@@ -157,7 +157,7 @@ import {
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
 import {
-  agentDefaultsCache,
+  readAgentStartDefaults,
   githubBranchesCache,
   persistAgentSessionDefaults,
 } from '@/lib/local-storage-cache';
@@ -1913,8 +1913,8 @@ function WorkspaceChatLanding({
         configOptionValues: roleRunConfig.configOptionValues,
       };
     }
-    return selectedAgent ? (agentDefaultsCache.get(selectedAgent.agentId) ?? {}) : {};
-  }, [activeAgentRolePreference, selectedAgent]);
+    return selectedAgent ? (readAgentStartDefaults(selectedConfig) ?? {}) : {};
+  }, [activeAgentRolePreference, selectedAgent, selectedConfig]);
   /* No effects: user edits are the only stored selection state; the effective
      values derive per render. Candidates feed the capability lookup so the
      catalog can depend on the selection without feeding back into it. */

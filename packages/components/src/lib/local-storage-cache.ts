@@ -3,6 +3,7 @@ import {
   WorktreeSetupScriptConfigSchema,
   type AcpConfigOptionValue,
   type AgentConfigId,
+  type AgentConfigMeta,
   type WorktreeSetupScriptConfig,
 } from '@lody/shared';
 
@@ -96,6 +97,27 @@ export const agentDefaultsCache = createLocalStorageCache<AgentSessionDefaults>(
   'lody:agentSessionDefaults',
   agentSessionDefaultsSchema
 );
+
+/**
+ * What a new conversation with a Provider starts from: the combination the
+ * person last ran with it on this device, under the Provider's own session
+ * defaults (Settings > Lody Agent). Those are an explicit setting, so for the
+ * values they name they win over what was merely used last.
+ */
+export function readAgentStartDefaults(
+  config: Pick<AgentConfigMeta, 'id' | 'sessionDefaults'> | undefined
+): AgentSessionDefaults | null {
+  if (!config) return null;
+  const cached = agentDefaultsCache.get(config.id) ?? null;
+  const provider = config.sessionDefaults;
+  if (!provider) return cached;
+  const configOptionValues = { ...cached?.configOptionValues, ...provider.configOptionValues };
+  return {
+    modeId: cached?.modeId ?? null,
+    modelId: provider.modelId ?? cached?.modelId ?? null,
+    ...(Object.keys(configOptionValues).length ? { configOptionValues } : {}),
+  };
+}
 
 // GitHub repos cache
 export const cachedGitHubRepoSchema = z.object({

@@ -9,22 +9,35 @@
 import { useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Globe, HardDrive, Lock, LogOut, Plus, Search, Trash2 } from 'lucide-react';
+import { useAtomValue } from 'jotai';
+import {
+  Globe,
+  HardDrive,
+  Lock,
+  LogOut,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+} from 'lucide-react';
 import { Input, Select } from '@lody/ui';
 
+import { getServerNow, type WorkspaceMcpServerMeta } from '@lody/shared';
+
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import {
+  useWorkspaceMcpCatalog,
+  useWorkspaceMcpCatalogActions,
+} from '@/hooks/use-workspace-mcp-catalog';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 
 import {
   AUTONOMY,
-  CONTEXT_BUDGET,
   GUARDED_ACTIONS,
   MODELS,
-  PLUGIN_GROUPS,
-  PLUGIN_PRESETS,
-  PLUGINS,
   PROVIDERS,
   type Autonomy,
-  type PluginPreset,
   type Provider,
   type ProviderKind,
 } from './catalog';
@@ -36,65 +49,20 @@ import {
   Segmented,
   Spinner,
   Switch,
-  soft,
   spring,
 } from './primitives';
 import { useDeviceCapabilities, type HarnessModel } from './device-capabilities';
+import {
+  useSessionDefaults,
+  type SessionDefaultKey,
+  type SessionDefaults,
+} from './session-defaults';
 import { parts } from './parts';
 import { panelStyles as ps } from './panels.styles';
 import { settingsStyles as page } from './settings.styles';
-import { sorbet, useSorbetTarget } from './sorbet';
-import {
-  effectiveConfig,
-  harness,
-  overriddenKeys,
-  useHarness,
-  type ConfigKey,
-  type HarnessConfig,
-  type Scope,
-  type CustomProvider,
-  type EndpointProtocol,
-} from './store';
+import { sorbet, supportsSorbetEndpointEdit, useHarnessMachine, useSorbetTarget } from './sorbet';
+import { useHarness, type Scope, type CustomProvider, type EndpointProtocol } from './store';
 import { ENDPOINT_PROTOCOLS, PROTOCOL_LABEL } from './endpoint-models';
-
-function useScoped(scope: Scope) {
-  const state = useHarness();
-  const device = scope === 'profile' ? null : scope.device;
-  const config = effectiveConfig(state, device);
-  const overridden = new Set(overriddenKeys(state, device));
-  const set = <K extends ConfigKey>(key: K, value: HarnessConfig[K]) =>
-    harness.set(scope, key, value);
-  return { state, device, config, overridden, set };
-}
-
-/** Marks a value that this device sets differently from the profile. */
-export function Override({ scope, keys }: { scope: Scope; keys: ConfigKey[] }) {
-  const { device, overridden } = useScoped(scope);
-  const hit = keys.filter((key) => overridden.has(key));
-  return (
-    <AnimatePresence initial={false}>
-      {device && hit.length > 0 ? (
-        <motion.span
-          {...stylex.props(parts.override)}
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={spring}
-        >
-          This device
-          <button
-            type="button"
-            {...stylex.props(parts.overrideReset)}
-            onClick={() => harness.resetOverride(device, hit)}
-            aria-label="Reset to profile"
-          >
-            Reset
-          </button>
-        </motion.span>
-      ) : null}
-    </AnimatePresence>
-  );
-}
 
 /** A titled section: its name, what it is for, and the block under it. */
 export function Section({
@@ -319,12 +287,65 @@ function ProviderRow({ provider, ruled }: { provider: Provider; ruled: boolean }
   );
 }
 
-/** A provider the user added: its base URL is the row's subtitle, its models the chips. */
+/** How many model chips a row draws before it offers the rest. */
+const ENDPOINT_MODEL_PREVIEW = 12;
+
+/**
+ * A provider the user added: its base URL is the row's subtitle, the models
+ * Sorbet discovered on it are the chips. The row refreshes discovery and, on a
+ * daemon that supports it, edits the endpoint in place.
+ */
 function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }) {
   const state = useHarness();
   const credential = state.credentials[custom.id];
-  // Model picks land on the agent's own list; they are not edited here — the
-  // next read reflects what the endpoint actually serves.
+  const { machine } = useHarnessMachine();
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const canEdit = !!machine && supportsSorbetEndpointEdit(machine, localMachineId);
+  const [editing, setEditing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [error, setError] = useState('');
+
+  // The machine's model catalog is what the agent can actually select; the
+  // stored definition's own list is only a fallback for older reads.
+  const discovered = state.models
+    .filter((model) => model.providerId === custom.id)
+    .map((model) => ({ id: model.modelId, name: model.displayName }));
+  const models = discovered.length ? discovered : custom.models;
+  const shown = showAll ? models : models.slice(0, ENDPOINT_MODEL_PREVIEW);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    setError('');
+    try {
+      await sorbet.refresh(custom.id);
+    } catch {
+      setError('Could not refresh models on this machine.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div {...stylex.props(ruled && parts.listRuled)}>
+        <EndpointForm
+          initial={custom}
+          submitLabel="Save"
+          busyLabel="Saving"
+          hint="Models stay as discovered; refresh after changing the URL or protocol."
+          onCancel={() => setEditing(false)}
+          onSubmit={async (endpoint) => {
+            await sorbet.updateEndpoint(custom.id, endpoint);
+            setEditing(false);
+            // A new address or protocol can serve different models.
+            void refresh();
+          }}
+          failure="Could not save the endpoint on this machine."
+        />
+      </div>
+    );
+  }
 
   return (
     <div {...stylex.props(parts.prov, ruled && parts.listRuled, credential && parts.provConnected)}>
@@ -348,16 +369,38 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
           {custom.baseUrl}
         </div>
         <div {...stylex.props(ps.provModels)}>
-          {custom.models.length ? (
-            custom.models.map((model) => (
-              <span key={model.id} {...stylex.props(ps.modelChip)}>
-                {model.name ?? model.id}
-              </span>
-            ))
+          {models.length ? (
+            <>
+              {shown.map((model) => (
+                <span key={model.id} {...stylex.props(ps.modelChip)} title={model.id}>
+                  {model.name ?? model.id}
+                </span>
+              ))}
+              {models.length > ENDPOINT_MODEL_PREVIEW ? (
+                <button
+                  type="button"
+                  {...stylex.props(parts.link)}
+                  onClick={() => setShowAll((value) => !value)}
+                >
+                  {showAll ? 'Show fewer' : `+${models.length - ENDPOINT_MODEL_PREVIEW} more`}
+                </button>
+              ) : null}
+            </>
           ) : (
-            <span {...stylex.props(parts.provMeta)}>No models discovered yet</span>
+            <span {...stylex.props(parts.provMeta)}>
+              {refreshing
+                ? 'Discovering models…'
+                : credential
+                  ? 'No models discovered yet — refresh to ask the endpoint again.'
+                  : 'Add a key, then refresh to discover models.'}
+            </span>
           )}
         </div>
+        {error ? (
+          <span {...stylex.props(parts.error)} role="alert">
+            {error}
+          </span>
+        ) : null}
       </div>
       <div {...stylex.props(parts.provActions)}>
         {credential ? null : (
@@ -376,6 +419,27 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
             method="api_key"
           />
         )}
+        <button
+          type="button"
+          {...stylex.props(parts.iconBtn)}
+          aria-label={`Refresh models for ${custom.name}`}
+          title="Refresh models"
+          disabled={refreshing}
+          onClick={() => void refresh()}
+        >
+          {refreshing ? <Spinner size={12} /> : <RefreshCw size={13} />}
+        </button>
+        {canEdit ? (
+          <button
+            type="button"
+            {...stylex.props(parts.iconBtn)}
+            aria-label={`Edit ${custom.name}`}
+            title="Edit"
+            onClick={() => setEditing(true)}
+          >
+            <Pencil size={13} />
+          </button>
+        ) : null}
         <button
           type="button"
           {...stylex.props(parts.iconBtn)}
@@ -398,9 +462,55 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
  * is discovered once it answers, and edited afterwards on its row.
  */
 function AddEndpointForm({ onDone }: { onDone: () => void }) {
-  const [name, setName] = useState('');
-  const [protocol, setProtocol] = useState<EndpointProtocol>('openai-completions');
-  const [baseUrl, setBaseUrl] = useState('https://');
+  return (
+    <EndpointForm
+      submitLabel="Add endpoint"
+      busyLabel="Adding"
+      hint="The endpoint is stored on the agent; its row then takes the key."
+      failure="Could not reach the agent. The endpoint is not stored."
+      onCancel={onDone}
+      onSubmit={async (endpoint) => {
+        // Sorbet assigns the endpoint's id and can discover its models; the key
+        // is the sign-in the row then offers on its own.
+        await sorbet.createEndpoint(endpoint);
+        try {
+          await sorbet.reprobe();
+        } catch {
+          // The endpoint is stored; its sign-in method simply lands on the next probe.
+        }
+        onDone();
+      }}
+    />
+  );
+}
+
+/** The endpoint fields, shared by adding a new endpoint and editing a stored one. */
+function EndpointForm({
+  initial,
+  submitLabel,
+  busyLabel,
+  hint,
+  failure,
+  onCancel,
+  onSubmit,
+}: {
+  initial?: { name: string; protocol: EndpointProtocol; baseUrl: string };
+  submitLabel: string;
+  busyLabel: string;
+  hint: string;
+  failure: string;
+  onCancel: () => void;
+  onSubmit: (endpoint: {
+    name: string;
+    protocol: EndpointProtocol;
+    baseUrl: string;
+  }) => Promise<void>;
+}) {
+  const [name, setName] = useState(initial?.name ?? '');
+  const [protocol, setProtocol] = useState<EndpointProtocol>(
+    initial?.protocol ?? 'openai-completions'
+  );
+  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? 'https://');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -411,21 +521,9 @@ function AddEndpointForm({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError('');
     try {
-      // Sorbet assigns the endpoint's id and can discover its models; the key
-      // is the sign-in the row then offers on its own.
-      await sorbet.createEndpoint({
-        name: name.trim(),
-        protocol,
-        baseUrl: baseUrl.trim(),
-      });
-      try {
-        await sorbet.reprobe();
-      } catch {
-        // The endpoint is stored; its sign-in method simply lands on the next probe.
-      }
-      onDone();
+      await onSubmit({ name: name.trim(), protocol, baseUrl: baseUrl.trim() });
     } catch {
-      setError('Could not reach the agent. The endpoint is not stored.');
+      setError(failure);
     } finally {
       setBusy(false);
     }
@@ -476,27 +574,23 @@ function AddEndpointForm({ onDone }: { onDone: () => void }) {
       </div>
 
       <div {...stylex.props(ps.endpointFoot)}>
-        <span {...stylex.props(parts.provMeta)}>
-          {busy
-            ? 'Saving on this machine…'
-            : 'The endpoint is stored on the agent; its row then takes the key.'}
-        </span>
+        <span {...stylex.props(parts.provMeta)}>{busy ? 'Saving on this machine…' : hint}</span>
         {error ? (
           <span {...stylex.props(parts.error)} role="alert">
             {error}
           </span>
         ) : null}
         <div {...stylex.props(ps.endpointActions)}>
-          <Button size="sm" variant="ghost" type="button" onClick={onDone} disabled={busy}>
+          <Button size="sm" variant="ghost" type="button" onClick={onCancel} disabled={busy}>
             Cancel
           </Button>
           <Button size="sm" variant="primary" type="submit" disabled={!valid || busy}>
             {busy ? (
               <>
-                <Spinner size={12} /> Adding
+                <Spinner size={12} /> {busyLabel}
               </>
             ) : (
-              'Add endpoint'
+              submitLabel
             )}
           </Button>
         </div>
@@ -507,24 +601,77 @@ function AddEndpointForm({ onDone }: { onDone: () => void }) {
 
 /* ── models ────────────────────────────────────────────────────────────── */
 
+/** Shown on a control Lody Agent has no setting for yet: visible, not editable. */
+const UNSUPPORTED = 'Not supported by Lody Agent yet';
+
+function Unsupported() {
+  return <span {...stylex.props(parts.tag)}>{UNSUPPORTED}</span>;
+}
+
+/** Marks a real setting this device runs differently from the profile. */
+function DefaultsOverride({
+  defaults,
+  keys,
+}: {
+  defaults: SessionDefaults;
+  keys: SessionDefaultKey[];
+}) {
+  const hit = keys.filter((key) => defaults.overridden.has(key));
+  return (
+    <AnimatePresence initial={false}>
+      {hit.length > 0 ? (
+        <motion.span
+          {...stylex.props(parts.override)}
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.9 }}
+          transition={spring}
+        >
+          This device
+          <button
+            type="button"
+            {...stylex.props(parts.overrideReset)}
+            onClick={() => void defaults.reset(hit)}
+            aria-label="Reset to profile"
+          >
+            Reset
+          </button>
+        </motion.span>
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+/** Where a write stands: nothing to say once it landed. */
+function DefaultsStatus({ defaults }: { defaults: SessionDefaults }) {
+  const text = !defaults.available
+    ? 'Lody Agent is not set up on this device yet, so there is nothing to save to.'
+    : defaults.error
+      ? defaults.error
+      : defaults.saving
+        ? 'Saving…'
+        : null;
+  if (!text) return null;
+  return (
+    <p {...stylex.props(defaults.error ? parts.error : parts.provMeta)} role="status">
+      {text}
+    </p>
+  );
+}
+
 export function ModelsPanel({ scope }: { scope: Scope }) {
-  const { state, config, set } = useScoped(scope);
   const capabilities = useDeviceCapabilities();
-  const connected = Object.keys(state.credentials).length;
+  const defaults = useSessionDefaults(scope);
   const effortOption =
     capabilities.effortOption?.type === 'select' && capabilities.effortOption.options.length
       ? capabilities.effortOption
       : null;
-  // The agent's current effort is the initial pick until the user chooses one;
-  // a stored pick the agent does not advertise selects nothing rather than
-  // pointing at the wrong rung.
-  const effortValue: string | null =
-    effortOption &&
-    (effortOption.options.some((option) => option.value === config.effort)
-      ? config.effort
-      : typeof effortOption.currentValue === 'string'
-        ? effortOption.currentValue
-        : config.effort);
+  // A stored rung the agent does not advertise selects nothing rather than
+  // pointing at the wrong one.
+  const effortValue =
+    effortOption && effortOption.options.some((option) => option.value === defaults.values.effort)
+      ? (defaults.values.effort ?? null)
+      : null;
 
   if (!capabilities.models.length) {
     return (
@@ -538,21 +685,26 @@ export function ModelsPanel({ scope }: { scope: Scope }) {
 
   return (
     <div {...stylex.props(parts.panel)}>
+      <DefaultsStatus defaults={defaults} />
       <div {...stylex.props(parts.rows)}>
         <Row
           title="Main model"
-          hint="Plans, writes code and talks to you."
-          badge={<Override scope={scope} keys={['mainModel']} />}
+          hint="New conversations start on this model. You can still switch in the composer."
+          badge={<DefaultsOverride defaults={defaults} keys={['mainModel']} />}
         >
-          <ModelSelect value={config.mainModel} onChange={(id) => set('mainModel', id)} />
+          <ModelSelect
+            value={defaults.values.mainModel ?? ''}
+            disabled={!defaults.available}
+            onChange={(id) => void defaults.set('mainModel', id)}
+          />
         </Row>
         <div {...stylex.props(parts.listRuled)}>
           <Row
             title="Subagent model"
             hint="Searches, summarises and runs parallel tasks."
-            badge={<Override scope={scope} keys={['subModel']} />}
+            badge={<Unsupported />}
           >
-            <ModelSelect value={config.subModel} onChange={(id) => set('subModel', id)} />
+            <ModelSelect value="" placeholder="—" disabled onChange={() => {}} />
           </Row>
         </div>
         <div {...stylex.props(parts.listRuled)}>
@@ -560,16 +712,16 @@ export function ModelsPanel({ scope }: { scope: Scope }) {
             title="Reasoning effort"
             hint={
               effortOption
-                ? 'Higher thinks longer before acting; slower and costlier.'
+                ? 'Where new conversations start; higher thinks longer, slower and costlier.'
                 : 'Not advertised by this agent.'
             }
-            badge={<Override scope={scope} keys={['effort']} />}
+            badge={<DefaultsOverride defaults={defaults} keys={['effort']} />}
           >
             <Segmented
               label="Reasoning effort"
               value={effortValue}
-              onChange={(v) => set('effort', v)}
-              disabled={!effortOption}
+              onChange={(value) => void defaults.set('effort', value)}
+              disabled={!effortOption || !defaults.available}
               options={
                 effortOption
                   ? effortOption.options.map((option) => ({
@@ -588,19 +740,10 @@ export function ModelsPanel({ scope }: { scope: Scope }) {
         <div {...stylex.props(parts.listRuled)}>
           <Row
             title="Fallback"
-            hint={
-              connected > 1
-                ? 'On rate limits or outages, retry on the next connected provider.'
-                : 'Connect a second provider to enable fallback.'
-            }
-            badge={<Override scope={scope} keys={['fallback']} />}
+            hint="On rate limits or outages, retry on the next connected provider."
+            badge={<Unsupported />}
           >
-            <Switch
-              label="Fallback"
-              checked={config.fallback && connected > 1}
-              disabled={connected < 2}
-              onChange={(v) => set('fallback', v)}
-            />
+            <Switch label="Fallback" checked={false} disabled onChange={() => {}} />
           </Row>
         </div>
       </div>
@@ -615,7 +758,17 @@ export function ModelsPanel({ scope }: { scope: Scope }) {
  * probe's model list — so an option's own group becomes the provider group,
  * and ungrouped ids are read back to the catalogue's providers by prefix.
  */
-function ModelSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+function ModelSelect({
+  value,
+  onChange,
+  disabled,
+  placeholder = 'Connect a provider first',
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
   const { models } = useDeviceCapabilities();
   const current = models.find((model) => model.id === value);
   const groups = modelGroups(models);
@@ -625,12 +778,17 @@ function ModelSelect({ value, onChange }: { value: string; onChange: (id: string
   const items = models.map((model) => ({ value: model.id, label: model.name }));
 
   return (
-    <Select.Root items={items} value={value} onValueChange={(next) => onChange(String(next))}>
+    <Select.Root
+      items={items}
+      value={value}
+      disabled={disabled}
+      onValueChange={(next) => onChange(String(next))}
+    >
       <Select.Trigger size="small">
         {currentGroup?.provider ? (
           <ProviderMark provider={currentGroup.provider} size={16} />
         ) : null}
-        <Select.Value placeholder="Connect a provider first" />
+        <Select.Value placeholder={placeholder} />
         {current?.meta ? <span {...stylex.props(ps.modelMeta)}>{current.meta}</span> : null}
       </Select.Trigger>
       <Select.Content align="end">
@@ -702,145 +860,121 @@ function modelGroups(models: HarnessModel[]): ModelGroup[] {
 
 /* ── plugins ───────────────────────────────────────────────────────────── */
 
-function presetOf(ids: string[]): PluginPreset | 'custom' {
-  const key = [...ids].sort().join();
-  for (const [name, list] of Object.entries(PLUGIN_PRESETS)) {
-    if ([...list].sort().join() === key) return name as PluginPreset;
-  }
-  return 'custom';
-}
+/**
+ * Plugins Lody Agent installs in every conversation. Sorbet keeps each one's
+ * on/off state per conversation (its Plugin controls), so there is no default
+ * for this page to change: they are listed as they run.
+ */
+const SORBET_BUILTIN_PLUGINS = [
+  {
+    id: 'prompt-suggestion',
+    name: 'Prompt suggestions',
+    body: 'Suggests what to ask next after each turn.',
+  },
+  {
+    id: 'codemode',
+    name: 'CodeMode',
+    body: 'Lets the agent chain tool calls in one script instead of one call per step.',
+  },
+];
 
-export function contextTokens(ids: string[]) {
-  return PLUGINS.filter((plugin) => ids.includes(plugin.id)).reduce(
-    (sum, plugin) => sum + plugin.tokens,
-    0
-  );
-}
+/**
+ * What a new conversation starts with besides the model: the workspace's MCP
+ * servers it attaches by default, and the plugins Lody Agent brings itself.
+ * MCP defaults are workspace-wide — the same switches as Settings › MCP.
+ */
+export function PluginsPanel() {
+  const { servers, synced } = useWorkspaceMcpCatalog();
+  const { upsert } = useWorkspaceMcpCatalogActions();
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
-const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
-
-/** A plugin group's colour, stated once: the bar and its legend read it. */
-const TONE = {
-  context: ps.toneContext,
-  mcp: ps.toneMcp,
-  skills: ps.toneSkills,
-  hooks: ps.toneHooks,
-} as const;
-
-export function PluginsPanel({ scope }: { scope: Scope }) {
-  const { config, set } = useScoped(scope);
-  const enabled = new Set(config.plugins);
-  const preset = presetOf(config.plugins);
-  const total = contextTokens(config.plugins);
-
-  const toggle = (id: string, on: boolean) => {
-    const next = on ? [...config.plugins, id] : config.plugins.filter((p) => p !== id);
-    set('plugins', next);
+  const toggle = async (server: WorkspaceMcpServerMeta, enabledByDefault: boolean) => {
+    setPending(server.id);
+    setError('');
+    try {
+      await upsert({ ...server, enabledByDefault, updatedAt: getServerNow() });
+    } catch {
+      setError(`Could not update ${server.name}.`);
+    } finally {
+      setPending(null);
+    }
   };
 
   return (
     <div {...stylex.props(parts.panel)}>
-      <div {...stylex.props(ps.plugroupHead)}>
-        <Segmented
-          label="Preset"
-          value={preset}
-          onChange={(v) => v !== 'custom' && set('plugins', PLUGIN_PRESETS[v])}
-          options={[
-            { id: 'minimal', label: 'Minimal' },
-            { id: 'recommended', label: 'Recommended' },
-            { id: 'everything', label: 'Everything' },
-            ...(preset === 'custom' ? [{ id: 'custom' as const, label: 'Custom' }] : []),
-          ]}
-        />
-        <Override scope={scope} keys={['plugins']} />
-      </div>
-
-      <div {...stylex.props(ps.meter)} aria-label={`${total} of ${CONTEXT_BUDGET} tokens`}>
-        <div {...stylex.props(ps.meterHead)}>
-          <span>Idle context cost</span>
-          <span {...stylex.props(ps.meterValue)}>
-            {k(total)}{' '}
-            <i {...stylex.props(ps.meterUnit)}>/ {k(CONTEXT_BUDGET)} tokens per request</i>
+      <section {...stylex.props(ps.plugroup)}>
+        <header {...stylex.props(ps.plugroupHead)}>
+          <h4 {...stylex.props(ps.plugroupTitle)}>MCP servers</h4>
+          <span {...stylex.props(ps.plugroupHint)}>
+            Attached to new conversations · whole workspace
           </span>
-        </div>
-        <div {...stylex.props(ps.meterTrack)}>
-          <AnimatePresence initial={false}>
-            {PLUGINS.filter((plugin) => enabled.has(plugin.id) && plugin.tokens > 0).map(
-              (plugin, index) => (
-                <motion.span
-                  key={plugin.id}
-                  layout
-                  title={`${plugin.name} · ${plugin.tokens} tokens`}
-                  {...stylex.props(
-                    ps.meterSeg,
-                    index === 0 && ps.meterSegFirst,
-                    TONE[plugin.group]
-                  )}
-                  initial={{ width: 0 }}
-                  animate={{ width: `${(plugin.tokens / CONTEXT_BUDGET) * 100}%` }}
-                  exit={{ width: 0 }}
-                  transition={soft}
-                />
-              )
-            )}
-          </AnimatePresence>
-        </div>
-        <div {...stylex.props(ps.meterLegend)}>
-          {PLUGIN_GROUPS.map((group) => (
-            <span key={group.id} {...stylex.props(ps.meterLegendItem)}>
-              <i {...stylex.props(ps.meterSwatch, TONE[group.id])} />
-              {group.label}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {PLUGIN_GROUPS.map((group) => (
-        <section key={group.id} {...stylex.props(ps.plugroup)}>
-          <header {...stylex.props(ps.plugroupHead)}>
-            <h4 {...stylex.props(ps.plugroupTitle)}>{group.label}</h4>
-            <span {...stylex.props(ps.plugroupHint)}>{group.hint}</span>
-          </header>
+        </header>
+        {error ? (
+          <span {...stylex.props(parts.error)} role="alert">
+            {error}
+          </span>
+        ) : null}
+        {servers.length ? (
           <div {...stylex.props(ps.plugs)}>
-            {PLUGINS.filter((plugin) => plugin.group === group.id).map((plugin) => {
-              const on = enabled.has(plugin.id);
+            {servers.map((server) => {
+              const on = server.enabledByDefault === true;
               return (
-                <div
-                  key={plugin.id}
-                  {...stylex.props(ps.plug, on && ps.plugOn)}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => toggle(plugin.id, !on)}
-                  onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
-                      event.preventDefault();
-                      toggle(plugin.id, !on);
-                    }
-                  }}
-                >
+                <div key={server.id} {...stylex.props(ps.plug, on && ps.plugOn)}>
                   <div {...stylex.props(ps.plugText)}>
                     <b {...stylex.props(ps.plugName)}>
-                      {plugin.name}
-                      {plugin.needsAuth ? <span {...stylex.props(parts.tag)}>Sign-in</span> : null}
+                      {server.name}
+                      <span {...stylex.props(parts.tag)}>
+                        {server.transport === 'http' ? 'HTTP' : 'Local'}
+                      </span>
                     </b>
-                    <span {...stylex.props(ps.plugBody)}>{plugin.body}</span>
+                    <span {...stylex.props(ps.plugBody)}>
+                      {server.description || 'No description.'}
+                    </span>
                   </div>
                   <div {...stylex.props(ps.plugSide)}>
                     <Switch
-                      label={plugin.name}
+                      label={`Attach ${server.name} by default`}
                       checked={on}
-                      onChange={(v) => toggle(plugin.id, v)}
+                      disabled={pending === server.id}
+                      onChange={(value) => void toggle(server, value)}
                     />
-                    <span {...stylex.props(ps.plugCost)}>
-                      {plugin.tokens ? `${k(plugin.tokens)} tok` : '0 tok'}
-                    </span>
                   </div>
                 </div>
               );
             })}
           </div>
-        </section>
-      ))}
+        ) : (
+          <div {...stylex.props(parts.emptyInline)}>
+            {synced
+              ? 'No MCP servers in this workspace yet. Add one in Settings › MCP.'
+              : 'Reading this workspace’s MCP servers…'}
+          </div>
+        )}
+      </section>
+
+      <section {...stylex.props(ps.plugroup)}>
+        <header {...stylex.props(ps.plugroupHead)}>
+          <h4 {...stylex.props(ps.plugroupTitle)}>Built into Lody Agent</h4>
+          <span {...stylex.props(ps.plugroupHint)}>On in every conversation</span>
+        </header>
+        <div {...stylex.props(ps.plugs)}>
+          {SORBET_BUILTIN_PLUGINS.map((plugin) => (
+            <div key={plugin.id} {...stylex.props(ps.plug, ps.plugOn)}>
+              <div {...stylex.props(ps.plugText)}>
+                <b {...stylex.props(ps.plugName)}>
+                  {plugin.name}
+                  <span {...stylex.props(parts.tag)}>Set per conversation</span>
+                </b>
+                <span {...stylex.props(ps.plugBody)}>{plugin.body}</span>
+              </div>
+              <div {...stylex.props(ps.plugSide)}>
+                <Switch label={plugin.name} checked disabled onChange={() => {}} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -866,30 +1000,38 @@ function AutonomyGlyph({ level, active }: { level: Autonomy; active: boolean }) 
 }
 
 export function PermissionsPanel({ scope }: { scope: Scope }) {
-  const { config, set } = useScoped(scope);
+  const defaults = useSessionDefaults(scope);
+  const current = defaults.values.autonomy;
   return (
     <div {...stylex.props(parts.panel)}>
+      <DefaultsStatus defaults={defaults} />
       <div {...stylex.props(ps.sub)}>
         <span>Autonomy</span>
-        <Override scope={scope} keys={['autonomy']} />
+        <DefaultsOverride defaults={defaults} keys={['autonomy']} />
       </div>
       <div {...stylex.props(ps.auto)} role="radiogroup" aria-label="Autonomy">
         {AUTONOMY.map((level) => {
-          const active = config.autonomy === level.id;
+          const active = current === level.id;
+          // A mode the agent does not offer here (no sandbox for Automatic
+          // review, say) is shown, not selectable.
+          const offered = !defaults.autonomyOffered || defaults.autonomyOffered.has(level.id);
           return (
             <button
               key={level.id}
               type="button"
               role="radio"
               aria-checked={active}
+              disabled={!offered || !defaults.available}
               {...stylex.props(ps.autoCard)}
-              onClick={() => set('autonomy', level.id)}
+              onClick={() => void defaults.set('autonomy', level.id)}
             >
               {active ? <span {...stylex.props(ps.autoRing)} aria-hidden="true" /> : null}
               <AutonomyGlyph level={level.id} active={active} />
               <b {...stylex.props(ps.autoName)}>{level.title}</b>
               <span {...stylex.props(ps.autoBody)}>{level.body}</span>
-              <small {...stylex.props(ps.autoExample)}>{level.example}</small>
+              <small {...stylex.props(ps.autoExample)}>
+                {offered ? level.example : 'Not offered by this device’s agent.'}
+              </small>
             </button>
           );
         })}
@@ -903,12 +1045,13 @@ export function PermissionsPanel({ scope }: { scope: Scope }) {
             </>
           }
           hint="Where the agent can read and write."
-          badge={<Override scope={scope} keys={['fsScope']} />}
+          badge={<Unsupported />}
         >
           <Segmented
             label="File access"
-            value={config.fsScope}
-            onChange={(v) => set('fsScope', v)}
+            value="workspace"
+            disabled
+            onChange={() => {}}
             options={[
               { id: 'workspace', label: 'Workspace' },
               { id: 'home', label: 'Home' },
@@ -923,17 +1066,14 @@ export function PermissionsPanel({ scope }: { scope: Scope }) {
                 <Globe size={13} {...stylex.props(parts.rowTitleGlyph)} /> Network
               </>
             }
-            hint={
-              config.network === 'allowlist'
-                ? 'Package registries, docs and your connected services.'
-                : 'Outbound requests from tools and shell.'
-            }
-            badge={<Override scope={scope} keys={['network']} />}
+            hint="Outbound requests from tools and shell."
+            badge={<Unsupported />}
           >
             <Segmented
               label="Network"
-              value={config.network}
-              onChange={(v) => set('network', v)}
+              value="allowlist"
+              disabled
+              onChange={() => {}}
               options={[
                 { id: 'off', label: 'Off' },
                 { id: 'allowlist', label: 'Allowlist' },
@@ -946,33 +1086,21 @@ export function PermissionsPanel({ scope }: { scope: Scope }) {
 
       <div {...stylex.props(ps.sub)}>
         <span>Always ask before</span>
-        <Override scope={scope} keys={['guarded']} />
+        <Unsupported />
       </div>
       <div {...stylex.props(ps.chips)}>
-        {GUARDED_ACTIONS.map((action) => {
-          const on = config.guarded.includes(action.id);
-          return (
-            <button
-              key={action.id}
-              type="button"
-              aria-pressed={on}
-              {...stylex.props(ps.chip, on && ps.chipOn)}
-              onClick={() =>
-                set(
-                  'guarded',
-                  on
-                    ? config.guarded.filter((g) => g !== action.id)
-                    : [...config.guarded, action.id]
-                )
-              }
-            >
-              <span {...stylex.props(ps.chipBox, on && ps.chipBoxOn)}>
-                {on ? <DrawnCheck size={10} /> : null}
-              </span>
-              {action.label}
-            </button>
-          );
-        })}
+        {GUARDED_ACTIONS.map((action) => (
+          <button
+            key={action.id}
+            type="button"
+            aria-pressed={false}
+            disabled
+            {...stylex.props(ps.chip)}
+          >
+            <span {...stylex.props(ps.chipBox)} />
+            {action.label}
+          </button>
+        ))}
       </div>
     </div>
   );

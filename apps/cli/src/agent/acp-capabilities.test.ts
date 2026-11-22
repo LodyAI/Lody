@@ -142,6 +142,88 @@ describe('fetchAcpCapabilities', () => {
     expect(other.authMethods).toEqual([]);
   });
 
+  it('advertises the Provider session defaults as the probe session current values', async () => {
+    // A fake Sorbet: every switch answers with its whole option list, the way
+    // `session/set_config_option` does, and the thinking ladder follows the model.
+    const state = { model: 'a/fast', thought_level: 'low', permission_mode: 'ask' };
+    const options = () => [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select' as const,
+        currentValue: state.model,
+        options: [
+          { value: 'a/fast', name: 'Fast' },
+          { value: 'a/deep', name: 'Deep' },
+        ],
+      },
+      {
+        id: 'thought_level',
+        name: 'Thinking',
+        category: 'thought_level',
+        type: 'select' as const,
+        currentValue: state.thought_level,
+        options: (state.model === 'a/deep' ? ['low', 'high'] : ['low']).map((value) => ({
+          value,
+          name: value,
+        })),
+      },
+      {
+        id: 'permission_mode',
+        name: 'Permissions',
+        type: 'select' as const,
+        currentValue: state.permission_mode,
+        options: ['ask', 'auto', 'full-access'].map((value) => ({ value, name: value })),
+      },
+    ];
+    mocks.startLocalAcpAgent.mockImplementation(async () => {
+      const started = createSuccessfulStartupResult({
+        sessionId: 'acp-session-1',
+        configOptions: options(),
+      });
+      Object.assign(started.client as object, {
+        setSessionConfigOption: async (_session: string, id: string, value: string) => {
+          if (id === 'thought_level' && !options()[1]!.options.some((o) => o.value === value))
+            throw new Error('unsupported level for this model');
+          (state as Record<string, string>)[id] = value;
+          return options();
+        },
+      });
+      return started;
+    });
+
+    const probed = await fetchAcpCapabilities(
+      'builtin',
+      'sorbet',
+      createSilentLogger(),
+      {},
+      undefined,
+      undefined,
+      {
+        sessionDefaults: {
+          configOptionValues: {
+            // Listed before the model on purpose: `high` exists only once the model is `a/deep`.
+            thought_level: 'high',
+            model: 'a/deep',
+            permission_mode: 'full-access',
+            // Not offered by this agent: skipped, the probe still succeeds.
+            sandbox: 'off',
+          },
+        },
+      }
+    );
+
+    const current = Object.fromEntries(
+      (probed.configOptions ?? []).map((option) => [option.id, option.currentValue])
+    );
+    expect(current).toEqual({
+      model: 'a/deep',
+      thought_level: 'high',
+      permission_mode: 'full-access',
+    });
+  });
+
   it('reports missing builtin credentials before starting the ACP adapter', async () => {
     const authMethods = [
       {

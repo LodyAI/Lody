@@ -1345,6 +1345,8 @@ export function MachineAgentSettings({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
+            // Set from Settings > Lody Agent, not from this dialog: keep it.
+            sessionDefaults: dialogMode.config.sessionDefaults,
           });
         }
       } catch (error) {

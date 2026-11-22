@@ -178,6 +178,13 @@ export const SorbetCustomProviderInputSchema = z
     models: z.array(SorbetCustomProviderModelSchema).max(SORBET_CUSTOM_PROVIDER_MODELS_MAX_COUNT),
   })
   .strict();
+/**
+ * What the user can change on a stored endpoint. Models stay Sorbet's: the
+ * machine keeps the discovered list and any curated fields it holds.
+ */
+export const SorbetCustomProviderEditSchema = SorbetCustomProviderInputSchema.omit({
+  models: true,
+}).strict();
 export const SorbetCustomProviderSchema = SorbetCustomProviderInputSchema.extend({
   id: SorbetProviderIdSchema,
 }).strict();
@@ -201,6 +208,9 @@ export const SorbetProvidersResultSchema = z.discriminatedUnion('type', [
   z
     .object({ type: z.literal('sorbet/providers-create'), provider: SorbetCustomProviderSchema })
     .strict(),
+  z
+    .object({ type: z.literal('sorbet/providers-update'), provider: SorbetCustomProviderSchema })
+    .strict(),
   z.object({ type: z.literal('sorbet/providers-delete') }).strict(),
   z.object({ type: z.literal('sorbet/providers-refresh') }).strict(),
   z
@@ -212,6 +222,7 @@ export const SorbetProvidersResultSchema = z.discriminatedUnion('type', [
 ]);
 
 export type SorbetCustomProviderInput = z.infer<typeof SorbetCustomProviderInputSchema>;
+export type SorbetCustomProviderEdit = z.infer<typeof SorbetCustomProviderEditSchema>;
 export type SorbetCustomProvider = z.infer<typeof SorbetCustomProviderSchema>;
 export type SorbetProvidersResult = z.infer<typeof SorbetProvidersResultSchema>;
 
@@ -300,6 +311,16 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     method: z.literal('sorbet/providers-create'),
     params: z
       .object({ configId: AgentConfigIdSchema, provider: SorbetCustomProviderInputSchema })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/providers-update'),
+    params: z
+      .object({
+        configId: AgentConfigIdSchema,
+        providerId: SorbetProviderIdSchema,
+        provider: SorbetCustomProviderEditSchema,
+      })
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({

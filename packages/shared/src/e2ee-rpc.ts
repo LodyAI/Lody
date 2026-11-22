@@ -39,6 +39,7 @@ export const isE2eeFeatureMethod = (method: string): boolean =>
   method === 'sorbet/credentials-logout' ||
   method === 'sorbet/providers-list' ||
   method === 'sorbet/providers-create' ||
+  method === 'sorbet/providers-update' ||
   method === 'sorbet/providers-delete' ||
   method === 'sorbet/providers-refresh' ||
   method === 'sorbet/models-list' ||

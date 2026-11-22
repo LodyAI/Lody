@@ -6,6 +6,7 @@ import {
   sessionHistoryWriteIntentDigest,
   SessionHistoryReadResponseSchema,
   isContainedSession,
+  withAgentSessionDefaults,
 } from '@lody/shared';
 import { setTimeout as backfillWait } from 'node:timers/promises';
 import {
@@ -22,6 +23,7 @@ import {
 } from './session-local-attachments';
 import type {
   SorbetCustomProvider,
+  SorbetCustomProviderEdit,
   SorbetCustomProviderInput,
 } from '@lody/shared/local-machine-rpc';
 import { AndroidEmulatorService } from '@/android-emulator/service';
@@ -665,6 +667,12 @@ export interface MessageHandlerConfig {
     createProvider: (
       configId: AgentConfigId,
       provider: SorbetCustomProviderInput,
+      signal?: AbortSignal
+    ) => Promise<SorbetCustomProvider>;
+    updateProvider: (
+      configId: AgentConfigId,
+      providerId: string,
+      provider: SorbetCustomProviderEdit,
       signal?: AbortSignal
     ) => Promise<SorbetCustomProvider>;
     deleteProvider: (
@@ -1904,6 +1912,33 @@ export class MessageHandler {
     await backend.appendHistoryTurn(systemNotice);
   }
 
+  /**
+   * Settings > Lody Agent stores per-machine session defaults on the Provider.
+   * A request that names a value keeps it; the defaults only fill what it left
+   * out, e.g. a session created from the CLI or MCP without a run config.
+   */
+  private async withProviderSessionDefaults(
+    config: AcpSessionRunConfig,
+    sessionDoc: SessionDocument
+  ): Promise<AcpSessionRunConfig> {
+    if (config.agentType !== 'sorbet') return config;
+    try {
+      const agentConfigId = (await sessionDoc.getMetaState())?.agentConfigId;
+      if (!agentConfigId) return config;
+      const provider = await this.workspaceDocument.getAgentConfigById(
+        agentConfigId,
+        this.machineId
+      );
+      return withAgentSessionDefaults(config, provider?.sessionDefaults);
+    } catch (error) {
+      // Defaults are a convenience: an unreadable Provider row must not stop the turn.
+      this.logger.debug(
+        `[${sessionDoc.sessionId}] Session defaults unavailable: ${formatErrorMessage(error)}`
+      );
+      return config;
+    }
+  }
+
   private async applyAcpModeAndModel(
     session: {
       sessionId: SessionId;
@@ -1919,7 +1954,7 @@ export class MessageHandler {
   ): Promise<void> {
     const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
       session,
-      config,
+      config: await this.withProviderSessionDefaults(config, context.sessionDoc),
       logger: this.logger,
       signal: context.signal,
     });
@@ -8003,6 +8038,7 @@ export class MessageHandler {
       case 'sorbet/credentials-logout':
       case 'sorbet/providers-list':
       case 'sorbet/providers-create':
+      case 'sorbet/providers-update':
       case 'sorbet/providers-delete':
       case 'sorbet/providers-refresh':
       case 'sorbet/models-list': {
@@ -8049,6 +8085,17 @@ export class MessageHandler {
               type: 'sorbet/providers-create',
               provider: await this.sorbetCredentials.createProvider(
                 configId,
+                request.params.provider,
+                signal
+              ),
+            });
+          }
+          if (request.method === 'sorbet/providers-update') {
+            return SorbetProvidersResultSchema.parse({
+              type: 'sorbet/providers-update',
+              provider: await this.sorbetCredentials.updateProvider(
+                configId,
+                request.params.providerId,
                 request.params.provider,
                 signal
               ),

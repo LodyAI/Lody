@@ -44,7 +44,8 @@ import {
   McpAuthenticationResultSchema,
   MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
-  SORBET_PROVIDERS_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION,
   MACHINE_PROTOCOL_CAPABILITIES,
   E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
   E2EE_SESSION_FORK_PROTOCOL_VERSION,
@@ -2179,6 +2180,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           'method' | 'params'
         >
       | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-update' }>,
+          'method' | 'params'
+        >
+      | Pick<
           Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-delete' }>,
           'method' | 'params'
         >
@@ -2200,7 +2205,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       !machineSupportsProtocolCapability(
         { protocolCapabilities },
         capability,
-        SORBET_PROVIDERS_PROTOCOL_VERSION
+        // Editing an endpoint arrived later than the rest of the catalog.
+        request.method === 'sorbet/providers-update'
+          ? SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION
+          : SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION
       )
     ) {
       throw new Error('Sorbet custom providers are unsupported on this machine.');

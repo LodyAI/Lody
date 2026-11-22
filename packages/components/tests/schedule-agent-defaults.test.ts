@@ -95,6 +95,25 @@ describe('a new schedule starts from the chat landing’s choices', () => {
     });
   });
 
+  it('lets the Provider’s session defaults win over what was merely used last', () => {
+    // Settings > Lody Agent set Full access and a model for this Provider.
+    const config = {
+      ...agent('reviewer', 'macbook'),
+      sessionDefaults: { configOptionValues: { mode: 'auto', model: 'deep' } },
+    } as AgentConfigMeta;
+    agentDefaultsCache.set('reviewer', {
+      modeId: null,
+      modelId: null,
+      configOptionValues: { mode: 'ask', model: 'fast', verbose: true },
+    });
+    expect(seedScheduleAgentRunRef(config, machine('macbook')).configOptionValues).toEqual({
+      mode: 'auto',
+      model: 'deep',
+      // What the defaults do not name still comes from the last run.
+      verbose: true,
+    });
+  });
+
   it('shows the Agent’s default permission when nothing was remembered', () => {
     const config = agent('reviewer', 'macbook');
     const host = machine('macbook', {

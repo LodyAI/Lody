@@ -15,7 +15,7 @@ import { createPortal } from 'react-dom';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronsUpDown, Plus, Settings2, X } from 'lucide-react';
-import { Button, Select } from '@lody/ui';
+import { Button } from '@lody/ui';
 
 import { SettingsPageActions } from '@/components/settings/settings-page-header';
 
@@ -26,8 +26,9 @@ import { DeviceGlyph, Kbd, StatusDot, soft, spring } from './primitives';
 import { parts } from './parts';
 import { Settings, type HarnessPage, type HarnessStage } from './settings';
 import { Setup } from './setup';
-import { SorbetBridge, useHarnessMachine } from './sorbet';
-import { harness, overriddenKeys, useHarness } from './store';
+import { SorbetBridge } from './sorbet';
+import { useSessionDefaults } from './session-defaults';
+import { harness, useHarness } from './store';
 import { shell } from './shell.styles';
 
 export type { HarnessPage } from './settings';
@@ -81,7 +82,6 @@ export function Harness() {
          * the harness's tab row, where it competed with the pages.
          */}
         <SettingsPageActions>
-          <MachinePicker />
           {devices.length ? (
             // The switcher sits outside the harness surface; its menu draws with
             // the sheet's own tokens because they are module-scoped, not inherited.
@@ -146,39 +146,8 @@ export function Harness() {
   );
 }
 
-/**
- * Which machine's agent the Providers page reads and writes. It rides in the
- * same header slot as the device switcher and appears only when the choice
- * exists — the old Lody Agent page uses the same picker.
- */
-function MachinePicker() {
-  const { machines, machineId, select } = useHarnessMachine();
-  if (machines.size < 2 || !machineId) return null;
-  const ids = [...machines.keys()];
-  return (
-    <Select.Root
-      items={ids.map((id) => ({ value: id, label: machines.get(id)?.name ?? id }))}
-      value={machineId}
-      onValueChange={(next) => {
-        if (next) select(next as typeof machineId);
-      }}
-    >
-      <Select.Trigger size="small" aria-label="Machine">
-        <Select.Value />
-      </Select.Trigger>
-      <Select.Content>
-        {ids.map((id) => (
-          <Select.Item key={id} value={id}>
-            {machines.get(id)?.name ?? id}
-          </Select.Item>
-        ))}
-      </Select.Content>
-    </Select.Root>
-  );
-}
-
 function DeviceSwitcher({ onPair, onManage }: { onPair: () => void; onManage: () => void }) {
-  const state = useHarness();
+  const defaults = useSessionDefaults('profile');
   const { devices, activeDevice, select } = useHarnessDevices();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -241,7 +210,7 @@ function DeviceSwitcher({ onPair, onManage }: { onPair: () => void; onManage: ()
           >
             <div {...stylex.props(parts.popLabel)}>Run agents on</div>
             {devices.map((device) => {
-              const overrides = overriddenKeys(state, device.id).length;
+              const overrides = defaults.overridesFor(device.id);
               return (
                 <button
                   key={device.id}
