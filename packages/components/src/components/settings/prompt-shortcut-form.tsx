@@ -18,7 +18,7 @@ import { Input } from '@lody/ui/input';
 import { Textarea } from '@lody/ui/textarea';
 import { Select } from '@lody/ui/select';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { control, space } from '@lody/ui/tokens/scales.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 import {
   shortcutMentionRanges,
