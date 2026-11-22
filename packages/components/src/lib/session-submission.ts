@@ -161,6 +161,12 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!payload.parentSessionId && !payload.openedBySessionId && !payload.openedByRootSessionId) {
       const orderKey = payload.orderKey ?? planNewSessionOrderKey?.();
       if (orderKey) result.sessionMeta.orderKey = orderKey;
+      // Started from a pin section: the key above is below every other key,
+      // so the conversation is the first row of that section.
+      if (payload.isPinned === true) {
+        result.sessionMeta.isPinned = true;
+        if (payload.pinSectionId) result.sessionMeta.pinSectionId = payload.pinSectionId;
+      }
     }
     return result;
   };

@@ -24,13 +24,26 @@ function ChatRoute() {
   const setMobileBaseContext = useSetAtom(mobileWorkspaceBaseContextAtom);
 
   // Selection steering is an in-place correction of the current address, not
-  // a visit to a new page, so the mirror always replaces.
+  // a visit to a new page, so the mirror always replaces. The pin section is
+  // not part of the selection and survives the correction.
   const handleSelectionUrlSync = useCallback(
     (selectionSearch: ChatLandingSearch) => {
-      void navigate({ search: selectionSearch, replace: true });
+      void navigate({
+        search: (previous) =>
+          previous.pinSection
+            ? { ...selectionSearch, pinSection: previous.pinSection }
+            : selectionSearch,
+        replace: true,
+      });
     },
     [navigate]
   );
+  const handleClearPinSection = useCallback(() => {
+    void navigate({
+      search: ({ pinSection: _cleared, ...rest }) => rest,
+      replace: true,
+    });
+  }, [navigate]);
 
   /* On mobile the home/project landing is owned by `MobileWorkspaceStack` (so
      it stays mounted beneath the session overlay). Publish this route's
@@ -61,6 +74,8 @@ function ChatRoute() {
         preSelectedProject={search.project}
         preSelectedRepo={search.repo}
         preSelectedGroup={search.group}
+        pinSectionId={search.pinSection}
+        onClearPinSection={handleClearPinSection}
         onSelectionUrlSync={handleSelectionUrlSync}
       />
     </div>

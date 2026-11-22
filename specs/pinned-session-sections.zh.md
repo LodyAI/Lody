@@ -25,6 +25,9 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 - 用户可以拖动 pin 对话，在分组内调整顺序或移到另一个分组；拖到分组标题上会放到该分组最上方。
   把未 pin 的对话拖进 pin 区会在该位置 pin 它。右键菜单也提供“移动到分组”（放到该分组最上方）
   和“新建分组…”。
+- 桌面端用户分组的标题菜单提供“在此分组新建对话”。它打开新建对话页，页面在项目选择旁显示该分组，
+  并保留页面上已选的项目。从这里开始的对话会 pin 到该分组最上方；取消勾选该分组则不 pin。
+  若分组在此期间被删除，对话落在默认区。
 - 删除分组不会取消 pin：其中的对话回到默认区。
 - 取消 pin 会清除该对话的分组（`pinSectionId`），但保留其 `orderKey` 以维持状态视图中的手动顺序；再次 pin 时会生成新的 `orderKey` 并回到默认区最上方。
 - 每个分组可以单独折叠，折叠状态只保存在本机。
@@ -96,7 +99,8 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 - 指针拖拽与引用投递：`packages/components/src/components/pinned-rows-dnd.ts`、
   `packages/components/src/lib/pinned-drop-settle.ts`、`packages/components/src/lib/session-mention-drag.ts`
 - 侧栏：`packages/components/src/components/sidebar-pinned-sections.tsx`、
-  `sidebar-updated-session-list.tsx`、`loro-app-sidebar.tsx`；移动端：
+  `sidebar-updated-session-list.tsx`、`loro-app-sidebar.tsx`；在分组中新建对话：chat 路由的
+  `pinSection` 参数、`components/chat/pin-section-target-pill.tsx`、`lib/session-submission.ts`；移动端：
   `packages/components/src/components/mobile/mobile-chat-list.tsx`
 - 加密内容选择：`packages/shared/src/workspace-streams-content.ts`
 - 定时任务投递方式：`packages/shared/src/schedule-types.ts`

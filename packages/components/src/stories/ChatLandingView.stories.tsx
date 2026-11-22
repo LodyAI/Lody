@@ -31,6 +31,7 @@ import {
   homeWeekUsageFixture,
 } from './fixtures/home-week';
 import { ConvertDialogPreview } from './fixtures/convert-dialog';
+import { PinSectionTargetPill } from '@/components/chat/pin-section-target-pill';
 
 const samplePromptPlaceholder = "Press '/' for commands, '@' for mentions.";
 const sampleZhCnPromptPlaceholder = "按 '/' 使用命令，'@' 添加提及。";
@@ -268,6 +269,8 @@ interface DemoLandingProps {
   initialPastedTextDrafts?: PastedTextDraft[];
   /** Mount the desktop keyboard-nav controller (arrows/Esc over the config controls). */
   enableKeyboardNav?: boolean;
+  /** Opened from a pin section's "New Chat": the section the conversation is pinned into. */
+  pinSectionName?: string;
 }
 
 function DemoLandingContent({
@@ -282,6 +285,7 @@ function DemoLandingContent({
   initialPrompt = 'Write a quick plan for the CRDT metadata cleanup.',
   initialPastedTextDrafts = [],
   enableKeyboardNav = false,
+  pinSectionName,
 }: DemoLandingProps) {
   const navRef = useRef<HTMLDivElement>(null);
   // Landing mode: scoped to navRef, native Tab so focus can leave.
@@ -320,6 +324,9 @@ function DemoLandingContent({
         className="h-6 gap-1 rounded-md border-none bg-transparent px-1 [&_span]:text-[11px] [&_span]:leading-tight"
         contentClassName="w-72"
       />
+      {pinSectionName ? (
+        <PinSectionTargetPill sectionId="maintenance" name={pinSectionName} onClear={fn()} />
+      ) : null}
     </div>
   );
 
@@ -521,6 +528,11 @@ export const DialogLayoutNoMachine: Story = {
 
 export const DesktopLight: Story = {
   render: () => <DemoLanding tone="light" />,
+};
+
+/** Opened from a pin section's "New Chat": the section sits beside the project picker. */
+export const DesktopLightPinSection: Story = {
+  render: () => <DemoLanding tone="light" pinSectionName="Maintenance" />,
 };
 
 export const MobileDark: Story = {

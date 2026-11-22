@@ -688,6 +688,8 @@ export type ChatLandingSearch = {
   repo?: string;
   /** Project group id, with `context: 'group'`. */
   group?: string;
+  /** Pin section id: the conversation started here is pinned into that section. */
+  pinSection?: string;
 };
 
 export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
@@ -705,6 +707,8 @@ export function parseChatLandingSearch(search: Record<string, unknown>): ChatLan
     project: typeof search.project === 'string' ? search.project : undefined,
     repo: typeof search.repo === 'string' ? search.repo : undefined,
     group: typeof search.group === 'string' ? search.group : undefined,
+    pinSection:
+      typeof search.pinSection === 'string' && search.pinSection ? search.pinSection : undefined,
   };
 }
 

@@ -35,6 +35,12 @@ place them in named pin sections, such as "Maintenance".
   top. Dropping an unpinned conversation into the pin area pins it there. The
   context menu also offers "Move to section", which places the conversation at
   the top of that section, and "New section…".
+- On the desktop, a user section's header menu offers "New Chat in This Section". It
+  opens the new-chat page, which names the section beside the project pills and
+  keeps the project already chosen there. The conversation started from it is
+  pinned at the top of that section; unchecking the section starts it unpinned.
+  If the section is deleted meanwhile, the conversation lands in the default
+  section.
 - Deleting a section does not unpin its conversations; they return to the
   default section.
 - Unpinning clears the conversation's section (`pinSectionId`) while retaining
@@ -138,7 +144,9 @@ Implementation:
 - Pointer drag and mention delivery: `packages/components/src/components/pinned-rows-dnd.ts`,
   `packages/components/src/lib/pinned-drop-settle.ts`, `packages/components/src/lib/session-mention-drag.ts`
 - Sidebar: `packages/components/src/components/sidebar-pinned-sections.tsx`,
-  `sidebar-updated-session-list.tsx`, `loro-app-sidebar.tsx`; mobile:
+  `sidebar-updated-session-list.tsx`, `loro-app-sidebar.tsx`; new chat in a section:
+  the chat route's `pinSection` search, `components/chat/pin-section-target-pill.tsx`,
+  `lib/session-submission.ts`; mobile:
   `packages/components/src/components/mobile/mobile-chat-list.tsx`
 - Protected content selection: `packages/shared/src/workspace-streams-content.ts`
 - Scheduled task destinations: `packages/shared/src/schedule-types.ts`
