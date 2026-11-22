@@ -7074,5 +7074,9 @@
   "chat.mobileHome.status.moveUp": "Move up",
   "chat.mobileHome.status.moveDown": "Move down",
   "chat.mobileHome.filters.view.byStatus": "Group: Status",
-  "chat.mobileHome.status.deleteSectionDescription": "Delete “{{name}}”? Its conversations stay pinned and move to Pinned."
+  "chat.mobileHome.status.deleteSectionDescription": "Delete “{{name}}”? Its conversations stay pinned and move to Pinned.",
+  "settings.account.cliAuth.signInGroup": "Created at sign-in",
+  "settings.account.cliAuth.signInGroupHelper": "{{count}} tokens created automatically when computers signed in",
+  "settings.account.cliAuth.signInGroupHelper_one": "{{count}} token created automatically when a computer signed in",
+  "settings.account.cliAuth.signInGroupHelper_other": "{{count}} tokens created automatically when computers signed in"
 }
