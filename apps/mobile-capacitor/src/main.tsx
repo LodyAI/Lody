@@ -160,11 +160,6 @@ try {
     void cacheAppInfoForDiagnostics();
   }
 
-  // react-i18next only receives its instance once `initI18n` finishes, and a
-  // zh_CN boot first fetches its lazy bundle. A component that renders before
-  // then takes `useTranslation`'s no-instance path, which skips its hooks, so
-  // its next render reads mismatched hook slots and crashes (even the
-  // ErrorBoundary fallback). Commit nothing until i18n is ready, as Electron does.
   await initI18n(readStoredLanguagePreference() ?? detectBrowserLanguage() ?? fallbackLanguage);
 
   const rootElement = document.getElementById('root');
