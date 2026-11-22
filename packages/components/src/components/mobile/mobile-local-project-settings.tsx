@@ -66,6 +66,9 @@ export function MobileLocalProjectSettings({
   // Team sharing is cloud-only; the whole sharing section hides on the local
   // (open-source) platform.
   const teamSharingAvailable = useAppCapability('teamSharing');
+  // Script reads follow the sheet, rather than mounting the project settings.
+  const [worktreeSheetOpen, setWorktreeSheetOpen] = useState(false);
+  const projectKey = getLocalProjectVisibilityKey(machineId, projectId);
   const {
     sections,
     isLoading,
@@ -76,10 +79,9 @@ export function MobileLocalProjectSettings({
     onHistorySelectionChange,
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
-  } = useLocalProjectsAdmin();
+  } = useLocalProjectsAdmin(worktreeSheetOpen ? projectKey : null);
   const { removeLocalProject } = useRemoveLocalProject();
 
-  const projectKey = getLocalProjectVisibilityKey(machineId, projectId);
   const skillsSource: ProjectSkillsSource | null = workspaceId
     ? { kind: 'local', workspaceId, machineId, localProjectId: projectId }
     : null;
@@ -93,10 +95,6 @@ export function MobileLocalProjectSettings({
 
   /* Which provider the user has drilled into. `null` = list view. */
   const [selectedProviderKey, setSelectedProviderKey] = useState<string | null>(null);
-  /* Worktree setup + cleanup live behind a single drill-in row that opens
-     this sheet, so the Settings tab's first level stays a short list. */
-  const [worktreeSheetOpen, setWorktreeSheetOpen] = useState(false);
-
   if (isLoading && !row) {
     return (
       <>
