@@ -7,7 +7,11 @@ import {
   isNativeWorkspaceMetaEnabled,
   nativeRepoDataDir
 } from '@lody/shared/node/native-repo'
-import { finishPendingNativeWipes } from '@lody/shared/node/native-encrypted-workspace'
+import {
+  finishPendingNativeWipes,
+  nativeLocalIdentities,
+  nativeWriterSigningKey
+} from '@lody/shared/node/native-encrypted-workspace'
 import { commitFlockPayloads, observeNativeFlockDoc } from '@lody/shared/node/native-flock-docs'
 import {
   commitDocUpdates,
@@ -97,10 +101,11 @@ function refuseEncryptedImport() {
 }
 
 let swept: Promise<unknown> | undefined
+const nativeDataDir = () => nativeRepoDataDir(isLocalPlatform() ? 'local' : 'cloud')
 const connect = async () => {
   const connection = await connectNativeRepo({
     launcher: bundledNativeRepoHostLauncher,
-    dataDir: nativeRepoDataDir(isLocalPlatform() ? 'local' : 'cloud')
+    dataDir: nativeDataDir()
   })
   if (encryptedMode())
     await (swept ??= finishPendingNativeWipes(connection.client, connection.dataDir))
@@ -114,10 +119,27 @@ const connect = async () => {
  */
 export function removeNativeWorkspace(
   workspaceId: string,
-  reason: 'member_removed' | 'device_revoked'
+  reason: 'member_removed' | 'device_revoked',
+  revoked: {
+    writer: string
+    stillCurrent: (writers: readonly string[]) => Promise<boolean>
+  }
 ) {
   if (!enabled() || !encryptedMode()) return Promise.resolve()
-  return removeNativeEncryptedWorkspace(workspaceId, reason, connect)
+  return removeNativeEncryptedWorkspace(workspaceId, reason, {
+    ...revoked,
+    connect,
+    dataDir: nativeDataDir()
+  })
+}
+
+/** The other identities of this installation recorded for the namespace (candidates only). */
+export async function nativeLocalIdentityCandidates(workspaceId: string, writer: string) {
+  if (!enabled() || !encryptedMode()) return []
+  const writers = await nativeLocalIdentities(nativeDataDir(), workspaceId).list()
+  return writers
+    .filter((other) => other !== writer)
+    .map((other) => ({ writer: other, signingPublicKey: nativeWriterSigningKey(other) }))
 }
 
 /** One shared connection and one Meta observation per workspace in main. */

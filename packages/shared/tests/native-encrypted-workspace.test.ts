@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDevServer } from '@loro-dev/sqlite-riverrun';
 import type { RepoClient } from '@loro-dev/loro-repo-client';
+import { connectEngine } from '@loro-dev/loro-repo-client/node';
 import { afterEach, describe, expect, it } from 'vitest';
 import { connectNativeRepo } from '../src/node/native-repo';
 import { LoroDoc } from 'loro-crdt';
@@ -13,7 +14,10 @@ import { commitDocUpdates, createDocRoom } from '../src/node/native-docs';
 import {
   attachNativeEncryptedWorkspace,
   NATIVE_CONTENT_REMOTE_ID,
+  nativeLocalIdentities,
   nativePendingWipeMarker,
+  removeNativeLocalIdentity,
+  type NativeEncryptedWorkspace,
   type NativePendingWipe,
 } from '../src/node/native-encrypted-workspace';
 import { createLoroStreamUrl, getLoroStreamIdForDocId, type WorkspaceId } from '../src';
@@ -81,15 +85,30 @@ function memoryWipe(initial = false): NativePendingWipe & { pending: boolean } {
   return marker;
 }
 
-/** One device: its own engine data dir, host and connection, keys installed by "core". */
-async function device(name: 'a' | 'b', baseUrl: string) {
-  const dataDir = await mkdtemp(join(tmpdir(), `lody-native-e2ee-${name}-`));
-  const connection = await connectNativeRepo({ launcher, dataDir });
-  cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
-  cleanups.push(async () => process.kill(await hostPid(dataDir), 'SIGTERM'));
-  cleanups.push(() => connection.close());
-  const client = connection.client;
-  const writer = `device-${name}`;
+/**
+ * One device: its own engine data dir, host and connection, keys installed by "core".
+ * With `installation.dataDir`, it is a second identity of that installation (desktop
+ * main beside the daemon): its own connection to the same host and namespace.
+ */
+async function device(
+  name: 'a' | 'b',
+  baseUrl: string,
+  installation: { dataDir?: string; kind?: 'machine' | 'personal' } = {}
+) {
+  const shared = installation.dataDir;
+  const dataDir = shared ?? (await mkdtemp(join(tmpdir(), `lody-native-e2ee-${name}-`)));
+  if (!shared) {
+    cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
+    cleanups.push(async () => process.kill(await hostPid(dataDir), 'SIGTERM'));
+  }
+  /** A second identity is another process in production: its own connection, not the shared one. */
+  const connection = shared ? undefined : await connectNativeRepo({ launcher, dataDir });
+  const client =
+    connection?.client ?? (await connectEngine(dataDir, { queueWhileReconnecting: false }));
+  cleanups.push(() => (connection ? connection.close() : client.close()));
+  const writer = installation.kind
+    ? `${installation.kind}:${Buffer.from(publicKey(seeds[name])).toString('hex')}`
+    : `device-${name}`;
   let tokens = 0;
   let syncs = 0;
   const network = { online: true };
@@ -116,6 +135,7 @@ async function device(name: 'a' | 'b', baseUrl: string) {
         return { mayWrite: true };
       },
       pendingWipe,
+      identities: nativeLocalIdentities(dataDir, ws),
       onOpenPending,
     });
   return { dataDir, client, writer, attach, network, ledger, syncs: () => syncs };
@@ -131,6 +151,25 @@ const write = (client: RepoClient, note: string) => {
   doc.commit();
   return commitDocUpdates(client, ws, room.id, [doc.export({ mode: 'update', from })]);
 };
+
+const namespaceFile = (dataDir: string) =>
+  join(dataDir, 'namespaces', `ns_${Buffer.from(ws).toString('hex')}.sqlite3`);
+
+/** A device revocation as main and the daemon run it; `current` stands for the verified ledger. */
+const revoke = (
+  d: { dataDir: string; client: RepoClient; writer: string },
+  handle: NativeEncryptedWorkspace | undefined,
+  current: ReadonlySet<string>
+) =>
+  removeNativeLocalIdentity({
+    workspaceId: ws,
+    reason: 'device_revoked',
+    ...(handle ? { handle } : {}),
+    dataDir: d.dataDir,
+    writer: d.writer,
+    stillCurrent: async (writers) => writers.some((writer) => current.has(writer)),
+    connect: async () => ({ client: d.client }),
+  });
 
 describe('native encrypted workspace', () => {
   it('replicates encrypted rooms through the legacy stream URL, and the server sees only ciphertext', async () => {
@@ -233,6 +272,70 @@ describe('native encrypted workspace', () => {
     hostBlocked = false;
     await expect.poll(() => marker.read(), { timeout: 60_000 }).toBe(false);
     expect(existsSync(nsFile)).toBe(false);
+  }, 90_000);
+
+  it('revoking the personal device while the machine stays current retires only its writer; the daemon keeps uploading', async () => {
+    const baseUrl = await streamsServer();
+    const daemon = await device('a', baseUrl, { kind: 'machine' });
+    const main = await device('b', baseUrl, { kind: 'personal', dataDir: daemon.dataDir });
+    const wd = await daemon.attach(nativePendingWipeMarker(daemon.dataDir, ws));
+    const wm = await main.attach(nativePendingWipeMarker(daemon.dataDir, ws));
+    cleanups.push(async () => wd.close());
+    await createDocRoom(daemon.client, ws, room.id);
+    await write(daemon.client, 'before-revocation');
+
+    await revoke(main, wm, new Set([daemon.writer]));
+    expect(existsSync(namespaceFile(daemon.dataDir))).toBe(true);
+    expect(await nativeLocalIdentities(daemon.dataDir, ws).list()).toEqual([daemon.writer]);
+    await write(daemon.client, 'after-revocation');
+    expect((await daemon.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0);
+    const url = createLoroStreamUrl({
+      bucketId,
+      streamId: getLoroStreamIdForDocId(ws as WorkspaceId, room.id),
+      baseUrl,
+    });
+    const body = Buffer.from(await (await fetch(`${url}?offset=-1`)).arrayBuffer());
+    expect(body.includes(Buffer.from(publicKey(seeds.a)))).toBe(true);
+    expect(body.includes(Buffer.from(publicKey(seeds.b)))).toBe(false);
+  }, 60_000);
+
+  it('revoking the last current identity drops the namespace and clears its keyring', async () => {
+    const baseUrl = await streamsServer();
+    const daemon = await device('a', baseUrl, { kind: 'machine' });
+    const main = await device('b', baseUrl, { kind: 'personal', dataDir: daemon.dataDir });
+    const wd = await daemon.attach(nativePendingWipeMarker(daemon.dataDir, ws));
+    const wm = await main.attach(nativePendingWipeMarker(daemon.dataDir, ws));
+    cleanups.push(async () => wm.close());
+    await createDocRoom(daemon.client, ws, room.id);
+    await write(daemon.client, 'before-revocation');
+    await daemon.client.keyringSetSealEpoch(ws, 0);
+
+    await revoke(daemon, wd, new Set());
+    expect(existsSync(namespaceFile(daemon.dataDir))).toBe(false);
+    await expect(daemon.client.keyringSetSealEpoch(ws, 0)).rejects.toThrow();
+    expect(await nativeLocalIdentities(daemon.dataDir, ws).list()).toEqual([]);
+    expect(await nativePendingWipeMarker(daemon.dataDir, ws).read()).toBe(false);
+  }, 60_000);
+
+  it('revoking the last identity while the host is down drops the namespace once it is back', async () => {
+    const baseUrl = await streamsServer();
+    const main = await device('b', baseUrl, { kind: 'personal' });
+    const marker = nativePendingWipeMarker(main.dataDir, ws);
+    const wm = await main.attach(marker);
+    await createDocRoom(main.client, ws, room.id);
+    await write(main.client, 'before-revocation');
+    expect(existsSync(namespaceFile(main.dataDir))).toBe(true);
+
+    hostBlocked = true;
+    process.kill(await hostPid(main.dataDir), 'SIGKILL');
+    await expect.poll(() => main.client.connectionState, { timeout: 30_000 }).not.toBe('connected');
+    await expect(revoke(main, wm, new Set())).rejects.toThrow();
+    expect(await marker.read()).toBe(true);
+    expect(existsSync(namespaceFile(main.dataDir))).toBe(true);
+
+    hostBlocked = false;
+    await expect.poll(() => marker.read(), { timeout: 60_000 }).toBe(false);
+    expect(existsSync(namespaceFile(main.dataDir))).toBe(false);
   }, 90_000);
 
   it('reinstalls keys after the host restarts, and finishes a pending wipe before reopening', async () => {
