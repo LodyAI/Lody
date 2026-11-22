@@ -11,8 +11,10 @@ OSS 的 Role mention 会要求 Agent 通过仅支持 Cloud 的 MCP 路径创建 
 恢复路径又独立依赖远端 workspace 查询与 Streams。现在，本地 Session 工具
 通过有界 IPC 进入 daemon 已有 repo，与 Cloud 共用参数校验、Role 解析和
 Operation 持久化。请求作用域内的命令环境提供本地身份、权限检查和宿主操作，
-恢复则显式注入权威状态确认。Cloud 保留现有认证和远端追平要求；代价是本地
-MCP 增加一次 IPC，但不会产生第二个本地写入副本。
+恢复则显式注入权威状态确认。Cloud 对跨机和未验证目标保留现有认证和远端追平要求
+（Cloud 同机恢复后续改为当前机器 daemon 刷盘，见
+[Cloud 同机恢复采用可用性优先的本地权威确认](2026-11-21-cloud-same-machine-recovery-authority.zh.md)）；
+代价是本地 MCP 增加一次 IPC，但不会产生第二个本地写入副本。
 
 ## 职责
 
@@ -22,8 +24,8 @@ MCP Session/catalog 注册与校验
   Local -> session/call-tool -> daemon 作用域/活跃 Turn 校验
     -> 作用域 SessionCommandEnvironment -> 相同 handler + Operation store
 Operation coordinator -> 权威状态确认 -> 按冻结配置补齐目标
-  Cloud: 远端 Streams 追平
-  Local: 权威 daemon repo 落盘，再检查固定 Turn
+  Cloud（跨机/未解析）: 远端 Streams 追平
+  Local 与 Cloud 同机 daemon: 权威 daemon repo 落盘，再检查固定 Turn
 ```
 
 `session-tool-router.ts` 同时注册 MCP handler 和 daemon 白名单，在 IPC 边界

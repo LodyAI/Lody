@@ -1,6 +1,9 @@
 import { resolveSessionPullRequests } from '../session-pull-requests';
 import { z } from 'zod';
-import { getSessionPullRequestLegacyFields, type SessionMeta } from '../schema';
+// Sourced from the loro-free PR meta module so the notifications barrel does
+// not pull the loro-mirror graph (via `../schema`) into the renderer boot chunk.
+import { getSessionPullRequestLegacyFields } from '../session-pull-request-meta';
+import type { SessionMeta } from '../schema';
 import { parseGitHubPrNumber } from '../github-url';
 
 /** Display context only. It never determines eligibility, identity or routing. */

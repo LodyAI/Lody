@@ -86,7 +86,7 @@ export function PagedFileViewer({
           style={{ overflowX: 'auto' }}
         >
           {result.text.split('\n').map((line, index) => (
-            <div key={index} className="min-h-5 whitespace-pre px-3 leading-5">
+            <div key={index} className="min-h-5 whitespace-pre px-3 leading-5" data-text-selectable>
               {line || ' '}
             </div>
           ))}

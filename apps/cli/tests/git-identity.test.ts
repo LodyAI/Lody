@@ -1,100 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveGitIdentityPolicyLegacy } from '../src/session/git-identity-policy';
-import { buildMissingEmail } from '@lody/shared';
-
 import {
-  buildGitHubNoreplyEmail,
-  DEFAULT_AI_GIT_AUTHOR_EMAIL,
-  DEFAULT_AI_GIT_AUTHOR_NAME,
-  resolveSessionGitIdentity,
-} from '../src/session/git-identity';
+  resolveApprovedOwnerIdentityLegacy,
+  resolveGitIdentityPolicyLegacy,
+} from '../src/session/git-identity-policy';
 
-describe('resolveSessionGitIdentity', () => {
-  it('uses the machine identity first for the machine owner', () => {
-    expect(
-      resolveSessionGitIdentity(
-        { name: 'Ada', email: 'ada@example.com' },
-        {
-          preferMachineIdentity: true,
-          machineIdentity: { name: 'Local User', email: 'local@example.com' },
-        }
-      )
-    ).toEqual({
-      name: 'Local User',
-      email: 'local@example.com',
-    });
-  });
-
-  it('uses the Lody identity when the machine owner has no Git identity', () => {
-    expect(
-      resolveSessionGitIdentity(
-        { name: 'Ada', email: 'ada@example.com' },
-        { preferMachineIdentity: true, machineIdentity: {} }
-      )
-    ).toEqual({
-      name: 'Ada',
-      email: 'ada@example.com',
-    });
-  });
-
-  it('uses the LodyAI identity when the machine owner has no usable identity', () => {
-    expect(
-      resolveSessionGitIdentity(
-        { name: 'github-user', email: buildMissingEmail('github', '123') },
-        { preferMachineIdentity: true, machineIdentity: {} }
-      )
-    ).toEqual({
-      name: DEFAULT_AI_GIT_AUTHOR_NAME,
-      email: DEFAULT_AI_GIT_AUTHOR_EMAIL,
-    });
-  });
-
-  it('never uses the machine identity for a non-owner', () => {
-    expect(
-      resolveSessionGitIdentity(
-        { name: 'Teammate', email: 'teammate@example.com' },
-        {
-          preferMachineIdentity: false,
-          machineIdentity: { name: 'Machine Owner', email: 'owner@example.com' },
-        }
-      )
-    ).toEqual({
-      name: 'Teammate',
-      email: 'teammate@example.com',
-    });
-  });
-
-  it('falls back to the LodyAI identity for a non-owner without a usable identity', () => {
-    expect(
-      resolveSessionGitIdentity(
-        { name: 'github-user', email: buildMissingEmail('github', '123') },
-        {
-          preferMachineIdentity: false,
-          machineIdentity: { name: 'Machine Owner', email: 'owner@example.com' },
-        }
-      )
-    ).toEqual({
-      name: DEFAULT_AI_GIT_AUTHOR_NAME,
-      email: DEFAULT_AI_GIT_AUTHOR_EMAIL,
-    });
-  });
-
-  it('keeps a GitHub no-reply commit email over the host identity', () => {
-    const noreply = buildGitHubNoreplyEmail('4324', 'ada');
-    expect(
-      resolveSessionGitIdentity(
-        { name: 'Ada', email: noreply },
-        {
-          preferMachineIdentity: false,
-          machineIdentity: { email: 'local@example.com' },
-        }
-      )
-    ).toEqual({
-      name: 'Ada',
-      email: '4324+ada@users.noreply.github.com',
-    });
-  });
-});
+import { buildGitHubNoreplyEmail } from '../src/session/git-identity';
 
 describe('buildGitHubNoreplyEmail', () => {
   it('builds the canonical id+login attribution address', () => {
@@ -191,5 +101,34 @@ describe('Git identity policy deadline', () => {
     request.reject(new Error('late failure'));
     await vi.advanceTimersByTimeAsync(6_000);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('approved owner identity lookup', () => {
+  const logger = { debug: () => {}, warn: () => {} };
+  afterEach(() => vi.useRealTimers());
+
+  it('returns the owner account identity', async () => {
+    const owner = { name: 'Owner', email: 'owner@example.com' };
+    expect(await resolveApprovedOwnerIdentityLegacy(async () => owner, logger, 'test')).toEqual(
+      owner
+    );
+  });
+
+  it('keeps local Git identity when the account lookup hangs or fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const pending = resolveApprovedOwnerIdentityLegacy(() => new Promise(() => {}), logger, 'test');
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await pending).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
+    await expect(
+      resolveApprovedOwnerIdentityLegacy(
+        async () => {
+          throw new Error('offline');
+        },
+        logger,
+        'test'
+      )
+    ).resolves.toBeUndefined();
   });
 });

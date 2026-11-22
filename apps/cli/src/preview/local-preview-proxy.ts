@@ -311,6 +311,10 @@ export class LocalPreviewProxyManager {
     await this.closeRecord(sessionId, record, 'Preview endpoint released');
   }
 
+  getSessionTarget(sessionId: SessionId): PreviewTarget | undefined {
+    return this.records.get(sessionId)?.endpoint.target;
+  }
+
   async closeSession(sessionId: SessionId, reason: string): Promise<void> {
     const record = this.records.get(sessionId);
     if (record) {
@@ -576,7 +580,7 @@ export class LocalPreviewProxyManager {
               injectedHtml.runtimeInjected
             ),
             {
-              localOrigin: record.localOrigin,
+              requestUrl,
               previewOrigin: record.proxyOrigin,
             }
           ),
@@ -590,7 +594,7 @@ export class LocalPreviewProxyManager {
       const responseHeaders = this.buildResponseHeaders(
         record,
         headersToEntries(localResponse.headers, {
-          localOrigin: record.localOrigin,
+          requestUrl,
           previewOrigin: record.proxyOrigin,
         }),
         authorizedByQuery

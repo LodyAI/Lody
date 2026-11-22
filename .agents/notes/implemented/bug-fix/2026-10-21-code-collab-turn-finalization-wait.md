@@ -89,7 +89,7 @@ changing this queue. A shallow Git boundary cannot date the original introductio
 - #1672/#1677 adopted Flock queue/compaction fixes. #1713 withdrew native consumers
   but retained upgraded SDKs.
 - #1748 adopted CRDT 0.19.1, Client 0.12.1 and Repo 0.23.3. The
-  [separate read-loop investigation](../../proposed/bug-fix/2026-10-19-streams-read-loop-spin.md)
+  [separate read-loop investigation](../../implemented/bug-fix/2026-10-19-streams-read-loop-spin.md)
   concerns broader daemon failure; it cannot identify a responsive daemon's stuck
   owner queue without matching build/log evidence. Source merge is not installation.
 

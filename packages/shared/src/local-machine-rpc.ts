@@ -22,6 +22,7 @@ import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspa
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
+import { SessionHistoryReadQuerySchema, SessionHistoryReadResponseSchema } from './message-schemas';
 import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
 import { SESSION_GOAL_ACTIONS } from './goal';
@@ -58,10 +59,6 @@ import {
   SessionForkSpecSchema,
   SessionIdSchema,
   AgentConfigIdSchema,
-  SessionPreparationCancelSpecSchema,
-  SessionPreparationSpecSchema,
-  SessionPrepareCancelResponseSchema,
-  SessionPrepareResponseSchema,
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewCreateRequestSchema,
   SessionPreviewCreateResponseSchema,
@@ -185,6 +182,15 @@ export const SorbetCustomProviderSchema = SorbetCustomProviderInputSchema.extend
   id: SorbetProviderIdSchema,
 }).strict();
 
+export const SorbetAvailableModelSchema = z
+  .object({
+    selector: z.string().trim().min(1).max(2048),
+    providerId: SorbetProviderIdSchema,
+    modelId: z.string().trim().min(1).max(1024),
+    displayName: z.string().trim().min(1).max(1024),
+  })
+  .strict();
+
 export const SorbetProvidersResultSchema = z.discriminatedUnion('type', [
   z
     .object({
@@ -196,6 +202,13 @@ export const SorbetProvidersResultSchema = z.discriminatedUnion('type', [
     .object({ type: z.literal('sorbet/providers-create'), provider: SorbetCustomProviderSchema })
     .strict(),
   z.object({ type: z.literal('sorbet/providers-delete') }).strict(),
+  z.object({ type: z.literal('sorbet/providers-refresh') }).strict(),
+  z
+    .object({
+      type: z.literal('sorbet/models-list'),
+      models: z.array(SorbetAvailableModelSchema).max(10_000),
+    })
+    .strict(),
 ]);
 
 export type SorbetCustomProviderInput = z.infer<typeof SorbetCustomProviderInputSchema>;
@@ -262,6 +275,10 @@ export const E2eeAcpInteractionResultSchema = z
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/history-read'),
+    params: z.object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/acp-interaction'),
     params: E2eeAcpInteractionParamsSchema,
   }).strict(),
@@ -289,6 +306,18 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     method: z.literal('sorbet/providers-delete'),
     params: z
       .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/providers-refresh'),
+    params: z
+      .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema.optional() })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/models-list'),
+    params: z
+      .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema.optional() })
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
@@ -497,14 +526,6 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('session/prepare'),
-    params: SessionPreparationSpecSchema,
-  }).strict(),
-  BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('session/prepare-cancel'),
-    params: SessionPreparationCancelSpecSchema,
-  }).strict(),
-  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/steer'),
     params: z
       .object({
@@ -667,6 +688,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
 ]);
 
 export const LocalMachineRpcResultSchema = z.union([
+  SessionHistoryReadResponseSchema,
   E2eeAcpInteractionResultSchema,
   SorbetProvidersResultSchema,
   MachineStatusResponseSchema,
@@ -701,8 +723,6 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
   SessionForkResponseSchema,
-  SessionPrepareResponseSchema,
-  SessionPrepareCancelResponseSchema,
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   SessionSteerResponseSchema,

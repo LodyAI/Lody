@@ -184,6 +184,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
       </DialogBackdrop>
       <BaseDialog.Popup
         ref={panelRef}
+        data-text-selectable=""
         {...rest}
         style={mergePanelLayout(style, { width, centre })}
         className={(state) =>

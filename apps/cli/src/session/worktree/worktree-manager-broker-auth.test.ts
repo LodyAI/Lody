@@ -208,9 +208,7 @@ globalThis.fetch = async (url, init) => {
     return { ok: false, status: 403, json: async () => ({ error: 'invalid_context' }) };
   }
   fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ url, context }) + '\\n');
-  return { ok: true, status: 200, json: async () => url.endsWith('/github-auth-context')
-    ? { allowLocalAuth: false, personalEnabled: ${checkoutCredentials} }
-    : ${checkoutCredentials} && request.source !== 'personal'
+  return { ok: true, status: 200, json: async () => ${checkoutCredentials} && request.source !== 'personal'
       ? { available: false }
       : { tokenSource: request.source, token: 'synthetic-fixture-token' } };
 };

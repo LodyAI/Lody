@@ -182,6 +182,10 @@ remains local evidence and the next run can skip that id with
 
 ## Failure model
 
+Project journeys select empty folders through the picker and Settings because
+the sidebar lists populated projects only. The [Daily drift decision](../.agents/notes/implemented/testing/2026-09-29-daily-e2e-journey-drift.md)
+records the current observation boundaries and the retained product assertions.
+
 A failed scenario keeps the evidence described in [the artifact contract](./ARTIFACTS.md).
 Evidence capture failures are appended to the scenario log and do not replace
 the original product failure. Teardown failures do fail the scenario because a

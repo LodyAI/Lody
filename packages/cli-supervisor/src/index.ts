@@ -6,6 +6,9 @@ export {
   appendOutputTail,
   calculateWorkerMaxOldSpaceMiB,
   isV8OutOfMemoryExit,
+  parseWorkerMaxOldSpaceOverride,
+  resolveWorkerMaxOldSpaceMiB,
+  WORKER_MAX_OLD_SPACE_ENV,
   type ProcessExitSnapshot,
 } from './process-resources.js';
 export type {

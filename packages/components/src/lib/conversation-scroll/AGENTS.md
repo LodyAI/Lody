@@ -47,6 +47,10 @@ Design, invariants I1–I8 and the coverage lemma:
   rules, never by list index. A row rendering several turns lists the others in
   `groupTurnIds`, or a grouped anchor falls back and can loop with hydration
   ([decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-17-grouped-creation-record-anchor.md)).
+- Manual disclosures release follow and anchor the clicked header at its screen
+  position. Only mobile expansion with entirely invisible details may reveal up
+  to 96px. Temporary reply room is bounded by one viewport and shrinks with reader
+  movement; layout changes must not re-arm follow.
 - Upward conversation touch input releases follow before the first scroll event;
   post-touch momentum is reader input too. Taps, pinches, horizontal gestures,
   cancelled touches and nested scrolling must not arm conversation momentum.

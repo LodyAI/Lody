@@ -38,7 +38,7 @@ Claude 和 Codex 适配器其实已经在 `_meta.lody.modelCapabilities` 中报�
   `MachineDocument` 仍然只读 capability 行：它的去重要比较写入时的原值，而且它要响应严格的
   `machine/acp-capabilities-refresh_response` schema。
 - **使用**：
-  - UI 选择器使用所选模型报告的推理强度列表。Codex 也包括在内：报告会取代手工档位表。
+  - UI 选择器使用所选模型报告的推理强度列表。Codex 也包括在内：手工档位表后来已删除，未声明的 Codex 模型沿用探测或记录到的档位。
   - UI 选择器对报告为不支持 Fast 的模型隐藏 Fast；对报告为支持、但 probe 时没看到的模型，补上内置的 Fast 开关。
   - CLI 校验和 MCP 解析通过 `getModelEffortChoices` 读取推理强度（报告优先）。
   - 报告中的 Fast 信息从不作为拒绝请求的理由。

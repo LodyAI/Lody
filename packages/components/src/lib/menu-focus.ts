@@ -1,3 +1,4 @@
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 /**
  * Shared post-menu focus policy for composer-adjacent pickers.
  *
@@ -20,21 +21,37 @@ export function isTextInputElement(el: Element | null): el is HTMLElement {
   return Boolean(el.isContentEditable);
 }
 
+/** An open modal surface, in either the Radix (`data-state`) or Base UI (`data-open`) shape. */
+const OPEN_MODAL_SELECTOR = [
+  '[role="dialog"][data-state="open"]',
+  '[role="alertdialog"][data-state="open"]',
+  '[data-lody-dialog-content][data-open]',
+  '[role="alertdialog"][data-open]',
+].join(', ');
+
 /**
  * Return keyboard focus to the visible composer prompt, if any.
- * No-ops inside an open dialog so settings/auth surfaces keep their focus.
+ *
+ * The composer answers within the topmost open modal: a menu inside a dialog
+ * that hosts its own composer (Today's "Convert to task") returns to THAT
+ * prompt, never to the page's composer behind the backdrop. A dialog without
+ * a composer (settings, auth) keeps its focus: this is a no-op there.
  */
 export function restoreComposerFocusAfterMenu(): boolean {
   if (typeof document === 'undefined') return false;
+  const openModals = document.querySelectorAll(OPEN_MODAL_SELECTOR);
+  // Nested modals portal after their parent, so the last one is on top.
+  const scope: ParentNode | null =
+    openModals.length > 0 ? openModals[openModals.length - 1]! : document;
+  const composer = scope.querySelector<ComposerInputElement>(COMPOSER_FOCUS_SELECTOR);
+  if (!composer) return false;
   if (
-    document.querySelector(
-      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'
-    )
+    composer instanceof HTMLTextAreaElement
+      ? composer.disabled
+      : composer.hasAttribute('data-disabled')
   ) {
     return false;
   }
-  const composer = document.querySelector<HTMLTextAreaElement>(COMPOSER_FOCUS_SELECTOR);
-  if (!composer || composer.disabled) return false;
   composer.focus({ preventScroll: true });
   return true;
 }

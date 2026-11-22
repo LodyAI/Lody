@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { usePlatformCapability } from '@lody/platform/react';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -75,6 +75,7 @@ export interface DesktopOnboardingTraceProperties {
   result?:
     | 'cancelled'
     | 'current_window'
+    | 'degraded_empty_model_catalog'
     | 'external_browser'
     | 'imported'
     | 'needs_auth'

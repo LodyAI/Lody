@@ -10,6 +10,9 @@ mobile surfaces. Background for the rules below:
 ## General rules
 
 - Native shells do not emit `$pageview` or `$pageleave`; browser page tracking remains enabled. Mention file-fetch failures stay visible to consumers but are not analytics events. Authenticated account readiness is represented by `app/active`, not a second `onboarding/account_ready` event.
+- Text is unselectable by default on every host. A reading surface marks its container
+  `data-text-selectable`, not a `select-text` utility, which skips descendants; see
+  [text selection](../../.agents/docs/components-package.md#text-selection).
 - Regenerate TanStack routes after changing route files.
 - Use `pnpm --filter @lody/components dev` to generate and format the route tree
   with Oxfmt before CI compares it with the committed file.
@@ -42,12 +45,14 @@ mobile surfaces. Background for the rules below:
   sharing view (`useEncryptedSharedMachines`), never server machine tables. Keep them out
   of Convex-authorized probes; automatic writers and machine-RPC surfaces use
   `withoutEncryptedSharedMachines`. [Decision](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#member-visibility-a4).
+- Session read grants never expand execution indexes. Both modes default to
+  private; E2EE hides only the interface, retaining content keys.
 - A descriptor marked `public` can run before authentication and must expose only an
   intentionally public or narrowly token-scoped DTO.
 - Renderer and worker builds that cannot use native top-level await must use
   `vite-top-level-await-fixed.ts`. Do not bypass its audited-version assertion.
-- Keep accidental weight out of the test module graph: Vitest re-evaluates a
-  file's whole import graph per test file. Do not re-export a heavy leaf from
+- Keep accidental weight out of the test module graph: Vitest 5.0.2 reuses safe
+  graphs and disk transforms; module-mocked and long-lived owners stay isolated. Do not re-export a heavy leaf from
   `src/ui/index.ts`, deep-import `date-fns/locale/<tag>` rather than the barrel,
   and keep the icon-asset `new URL` glob alone in
   `src/components/icons/file-icons/asset-url.ts` so the test alias can replace

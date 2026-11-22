@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import Cropper, { type Area, type Point } from 'react-easy-crop';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import type { AvatarKind } from '@lody/shared';
-import { Slider } from '@/ui/slider';
+import type { AvatarCropArea } from '@/lib/avatar-crop';
+import { SquareCropper } from './avatar-square-cropper';
 import { Dialog } from '@/ui/dialog';
 import { useTranslation } from 'react-i18next';
 
@@ -20,28 +19,6 @@ const styles = stylex.create({
     gap: space[3],
     minWidth: 0,
   },
-  cropViewport: {
-    position: 'relative',
-    width: '100%',
-    aspectRatio: '1 / 1',
-    overflow: 'hidden',
-    backgroundColor: colors.wellBackground,
-    borderRadius: radius.medium,
-  },
-  zoomControl: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space[1],
-  },
-  zoomLabel: {
-    color: colors.secondaryLabel,
-    fontSize: '0.8125rem',
-  },
-  zoomSlider: {
-    display: 'flex',
-    alignItems: 'center',
-    minWidth: 0,
-  },
 });
 
 interface AvatarCropDialogProps {
@@ -49,7 +26,7 @@ interface AvatarCropDialogProps {
   kind: AvatarKind;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (file: File, crop: Area) => Promise<boolean>;
+  onConfirm: (file: File, crop: AvatarCropArea) => Promise<boolean>;
 }
 
 /** The square crop surface shared by user and workspace avatar uploads. */
@@ -62,9 +39,7 @@ export function AvatarCropDialog({
 }: AvatarCropDialogProps) {
   const { t } = useTranslation();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [cropAreaPixels, setCropAreaPixels] = useState<Area | null>(null);
+  const [cropAreaPixels, setCropAreaPixels] = useState<AvatarCropArea | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -82,8 +57,6 @@ export function AvatarCropDialog({
 
   useEffect(() => {
     if (!open) return;
-    setCrop({ x: 0, y: 0 });
-    setZoom(1);
     setCropAreaPixels(null);
   }, [file, open]);
 
@@ -110,43 +83,14 @@ export function AvatarCropDialog({
           <Dialog.Description>{t('settings.avatar.crop.description')}</Dialog.Description>
         </Dialog.Header>
         <div {...stylex.props(styles.body)}>
-          <div {...stylex.props(styles.cropViewport)}>
-            {imageUrl !== null ? (
-              <Cropper
-                image={imageUrl}
-                crop={crop}
-                zoom={zoom}
-                minZoom={1}
-                maxZoom={3}
-                aspect={1}
-                cropShape={kind === 'user' ? 'round' : 'rect'}
-                showGrid
-                roundCropAreaPixels
-                zoomWithScroll={false}
-                onCropChange={setCrop}
-                onZoomChange={setZoom}
-                onCropComplete={(_, areaPixels) => setCropAreaPixels(areaPixels)}
-                cropperProps={{ 'aria-label': t('settings.avatar.crop.description') }}
-              />
-            ) : null}
-          </div>
-          <div {...stylex.props(styles.zoomControl)}>
-            <label htmlFor="avatar-crop-zoom" {...stylex.props(styles.zoomLabel)}>
-              {t('settings.avatar.crop.zoom')}
-            </label>
-            <div {...stylex.props(styles.zoomSlider)}>
-              <Slider
-                id="avatar-crop-zoom"
-                value={zoom}
-                min={1}
-                max={3}
-                step={0.01}
-                onValueChange={setZoom}
-                disabled={isSaving}
-                aria-label={t('settings.avatar.crop.zoom')}
-              />
-            </div>
-          </div>
+          {imageUrl !== null ? (
+            <SquareCropper
+              imageUrl={imageUrl}
+              shape={kind === 'user' ? 'round' : 'rect'}
+              label={t('settings.avatar.crop.description')}
+              onAreaChange={setCropAreaPixels}
+            />
+          ) : null}
         </div>
         <Dialog.Footer>
           <Dialog.Close render={<Button variant="secondary" disabled={isSaving} />}>

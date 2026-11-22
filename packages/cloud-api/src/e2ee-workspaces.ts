@@ -43,6 +43,13 @@ export type E2eeWorkspaceCreateResult = Extract<
 /** A server-advertised history boundary, not a trusted cryptographic checkpoint. */
 export type E2eeLedgerCheckpoint = { headHash: string; length: number };
 
+/** Lightweight, untrusted change hint. Fetch and verify original records before use. */
+export type E2eeWorkspaceLedgerHead = {
+  workspaceId: string;
+  genesisHash: string;
+  checkpoint: E2eeLedgerCheckpoint;
+};
+
 export type E2eeWorkspaceHistoryRequest = {
   workspaceId: string;
   /** CLI identity supplements account authentication, never ledger authority. */
@@ -69,9 +76,33 @@ export type E2eeWorkspaceHistoryPage = {
   nextCursor: string | null;
 };
 
+/** Minimal self-reported display data. Never identity or authorization evidence. */
+export type E2eeDeviceProfile = {
+  client: 'mobile' | 'desktop' | 'daemon' | 'web';
+  name?: string;
+  model?: string;
+  os?: string;
+  osVersion?: string;
+  appVersion?: string;
+};
+export type E2eeDeviceProfileUpdate = {
+  workspaceId: string;
+  signingPublicKey: string;
+  profile: E2eeDeviceProfile;
+};
+
 /** Account directory labels only; these never establish ledger membership or key trust. */
 export type E2eeWorkspaceMemberProfilesRequest = { workspaceId: string };
 export type E2eeWorkspaceMemberProfiles = {
   workspaceId: string;
+  devices?: { signingPublicKey: string; profile: E2eeDeviceProfile }[];
   profiles: { cryptoUserId: string; name: string | null; image: string | null }[];
+};
+
+/** Bounded, ordered independent workspace results; an error never undoes a sibling CAS. */
+export type E2eeWorkspaceBatchReply<A> = {
+  items: Array<
+    | { workspaceId: string; status: 'ok'; result: A }
+    | { workspaceId: string; status: 'error'; code: string }
+  >;
 };

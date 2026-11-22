@@ -148,7 +148,9 @@ already pinned noble backend. HPKE uses the upstream pinned JS X25519 KEM;
 sealing does not require native X25519, while native recipient keys retain their
 existing path. Without WASM, only explicit native Ed25519 non-support (or absent
 SubtleCrypto) selects the fixed strict JS verifier; a false signature or other
-backend failure never selects another acceptance rule.
+backend failure never selects another acceptance rule. The WASM verifier and its
+differential evidence are recorded in the
+[WASM Ed25519 decision](../../../.agents/notes/implemented/architecture/2026-10-20-e2ee-wasm-ed25519.md).
 
 Raw private fields from the upstream JS key object must not escape behind the
 `CryptoKeyPair` type. Core keeps that object in a private WeakMap and exposes

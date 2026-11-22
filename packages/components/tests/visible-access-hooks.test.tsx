@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 
 import { act, createElement, useEffect, type ReactNode } from 'react';
@@ -77,7 +76,10 @@ import {
 import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
 import { PlatformContext } from '@lody/platform/react';
 import type { PlatformProvider } from '@lody/platform';
-import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
+import {
+  notifyE2eeLedgerChanged,
+  subscribeE2eeLedgerChanges,
+} from '../src/providers/e2ee-runtime-notifications';
 import { ENCRYPTED_SHARED_MACHINE_REFRESH_MS } from '../src/lib/encrypted-shared-machines';
 import { withoutEncryptedSharedMachines } from '../src/lib/visible-machine-index';
 import { availableLocalHistoryMachineIds } from '../src/lib/session-visibility';
@@ -538,7 +540,7 @@ describe('visible access hooks', () => {
     expectSessionSnapshot(['cached-session'], 'resolved', false);
   });
 
-  it('keeps the current user cached session visible while access is loading', async () => {
+  it('shows metadata-owned sessions read-only while machine authority is loading', async () => {
     const session = createCachedSession('viewer-user');
     cacheSession(session);
 
@@ -677,6 +679,7 @@ describe('encrypted shared machine visibility', () => {
     head: { revision: 1, digest: '33'.repeat(32) },
     sharedWithTeam: true,
     projects: ['shared-project'],
+    sessions: [],
     canManage: false,
     signer: '44'.repeat(32),
     needsResign: false,
@@ -702,6 +705,8 @@ describe('encrypted shared machine visibility', () => {
   let store: Store;
   let views: Map<string, View | Error>;
   let reads: string[];
+  // A machine whose policy read waits here until the test releases it.
+  let held: Map<string, Promise<void>>;
   let snapshot: { machines: string[]; projects: string[]; managed?: string[] } | undefined;
 
   let renderTree: (node: ReactNode) => Promise<void>;
@@ -731,6 +736,7 @@ describe('encrypted shared machine visibility', () => {
     store = createStore();
     views = new Map();
     reads = [];
+    held = new Map();
     snapshot = undefined;
     queryMocks.machineRows = undefined;
     queryMocks.localProjectRows = undefined;
@@ -763,6 +769,33 @@ describe('encrypted shared machine visibility', () => {
     views.set('failing-machine', new Error('e2ee_sharing_unavailable'));
     const platform = {
       ...TEST_CLOUD_PLATFORM,
+      sessionAccess: {
+        list: async () =>
+          [...views.values()]
+            .filter((value): value is View => !(value instanceof Error))
+            .map((value) => ({
+              machineId: value.machineId,
+              canManage: value.canManage,
+              generation: value.generation,
+              readSharedSessionIds: value.unavailable
+                ? []
+                : value.sessions.map((row) => row.sessionId),
+            })),
+        read: async (_workspace: string, machineId: string) => {
+          await held.get(machineId);
+          const value = views.get(machineId);
+          if (!value || value instanceof Error) throw new Error('missing');
+          return {
+            machineId,
+            canManage: value.canManage,
+            generation: value.generation,
+            readSharedSessionIds: value.sessions.map((row) => row.sessionId),
+          };
+        },
+        set: async () => ({ status: 'saved' }),
+        subscribe: (_workspace: string, invalidate: () => void) =>
+          subscribeE2eeLedgerChanges(member, workspaceId, invalidate),
+      },
       e2eeWorkspaces: {
         ...TEST_CLOUD_PLATFORM.e2eeWorkspaces,
         runtime: {
@@ -811,7 +844,7 @@ describe('encrypted shared machine visibility', () => {
     expect(reads.sort()).toEqual(['failing-machine', 'private-machine', 'shared-machine']);
   });
 
-  it('keeps readable encrypted history on an unshared owner machine out of the execution index', async () => {
+  it('hides encrypted history on an unshared machine by default without adding execution access', async () => {
     const history = {
       ...createCachedSession(owner),
       id: 'history-on-owner-machine' as SessionId,
@@ -833,7 +866,7 @@ describe('encrypted shared machine visibility', () => {
         />
       </>
     );
-    expect(result).toEqual({ activeIds: [history.id], archivedIds: [archived.id] });
+    expect(result).toEqual({ activeIds: [], archivedIds: [] });
     expect(snapshot?.machines).toEqual(['own-machine', 'shared-machine']);
     expect(snapshot?.projects).not.toContain('private-machine:private-project');
   });
@@ -885,13 +918,24 @@ describe('encrypted shared machine visibility', () => {
       }, [access]);
       return null;
     }
+    views.set(
+      'private-machine',
+      view('private-machine', {
+        sharedWithTeam: false,
+        sessions: [
+          { sessionId: privateHistory.id, audience: 'team', level: 'read' },
+          { sessionId: ownHistory.id, audience: 'team', level: 'read' },
+        ],
+      })
+    );
     await renderTree(<ArchiveProbe />);
     expect(result).toEqual({
       ids: [available.id, privateHistory.id, ownHistory.id].sort(),
-      readOnly: [privateHistory.id],
+      readOnly: [privateHistory.id, ownHistory.id].sort(),
       automaticReaders: ['own-machine'],
     });
-    // Existing authors retain metadata management, without gaining machine readers.
+    firstReadOnly = currentReadOnly;
+    // Assignment never changes read-only permission or adds machine readers.
     await act(async () =>
       store.set(sessionMetaCacheAtom, (previous) => ({
         ...previous,
@@ -900,6 +944,209 @@ describe('encrypted shared machine visibility', () => {
     );
     expect(currentReadOnly).toBe(firstReadOnly);
     expect(result?.automaticReaders).toEqual(['own-machine']);
+  });
+
+  it.each(
+    ['own-machine', 'shared-machine'].flatMap((machineId) =>
+      ['draft:new-tab', 'empty', 'session:root', 'session:child'].map((urlTab) => ({
+        machineId,
+        urlTab,
+      }))
+    )
+  )(
+    'keeps the composer available on $machineId through the $urlTab route',
+    async ({ machineId, urlTab }) => {
+      const parent = {
+        ...createCachedSession(owner),
+        id: 'root' as SessionId,
+        machineId: machineId as MachineId,
+      };
+      views.set(
+        machineId,
+        view(machineId, { sessions: [{ sessionId: parent.id, audience: 'team', level: 'read' }] })
+      );
+      const child = { ...parent, id: 'child' as SessionId, parentSessionId: parent.id };
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(parent.id)]: parent,
+        [getSessionRoomId(child.id)]: child,
+      });
+      await renderTree(
+        <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={urlTab}>
+          <input aria-label="Execution composer" />
+        </SessionHistoryAccessBoundary>
+      );
+      expect(container.querySelector('input')).not.toBeNull();
+      expect(container.querySelector('article')).toBeNull();
+    }
+  );
+
+  it.each(['draft:new-tab', 'empty', undefined])(
+    'never grants a composer to a read-only viewer through %s',
+    async (urlTab) => {
+      const parent = {
+        ...createCachedSession(owner),
+        id: 'root' as SessionId,
+        machineId: 'private-machine' as MachineId,
+      };
+      store.set(sessionMetaCacheAtom, { [getSessionRoomId(parent.id)]: parent });
+      views.set(
+        parent.machineId,
+        view(parent.machineId, {
+          sharedWithTeam: false,
+          sessions: [{ sessionId: parent.id, audience: 'team', level: 'read' }],
+        })
+      );
+      await renderTree(
+        <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={urlTab}>
+          <input aria-label="Execution composer" />
+        </SessionHistoryAccessBoundary>
+      );
+      expect(container.querySelector('input')).toBeNull();
+      expect(container.querySelector('article')?.textContent).toBe(parent.id);
+    }
+  );
+
+  it('says a failed sharing check failed, not that the session is unshared, and retries it', async () => {
+    const shared = {
+      ...createCachedSession(owner),
+      id: 'shared-on-failing-machine' as SessionId,
+      machineId: 'failing-machine' as MachineId,
+    };
+    store.set(sessionMetaCacheAtom, { [getSessionRoomId(shared.id)]: shared });
+    // The machine's policy cannot be read right now (the harness rejects it).
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={shared.id}>
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'sessions.access.readFailed'
+    );
+    expect(container.textContent).not.toContain('sessions.access.unavailable');
+    expect(container.querySelector('article')).toBeNull();
+    // Once the policy reads, retry shows the shared conversation read-only.
+    views.set(
+      'failing-machine',
+      view('failing-machine', {
+        sharedWithTeam: false,
+        sessions: [{ sessionId: shared.id, audience: 'team', level: 'read' }],
+      })
+    );
+    const retry = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'common.retry'
+    )!;
+    await act(async () => retry.click());
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('article')?.textContent).toBe(shared.id);
+    expect(container.querySelector('input')).toBeNull();
+  });
+
+  it('holds an unconfirmed conversation in the pane wait, then says it is not shared', async () => {
+    const unshared = {
+      ...createCachedSession(owner),
+      id: 'unshared-on-private-machine' as SessionId,
+      machineId: 'private-machine' as MachineId,
+    };
+    store.set(sessionMetaCacheAtom, { [getSessionRoomId(unshared.id)]: unshared });
+    let release!: () => void;
+    held.set('private-machine', new Promise<void>((resolve) => (release = resolve)));
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={unshared.id}>
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    const wait = container.querySelector(
+      '[data-loading-placeholder-scope="content"] [role="status"]'
+    );
+    expect(wait?.textContent).toBe('sessions.access.opening');
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.querySelector('article')).toBeNull();
+
+    await act(async () => release());
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(container.querySelector('[data-loading-placeholder-scope]')).toBeNull();
+    const page = container.querySelector('[data-status-page="pane"][role="status"]');
+    expect(page?.querySelector('h2')?.textContent).toBe('sessions.access.unavailable');
+    expect(page?.textContent).toContain('sessions.access.unavailableDescription');
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.querySelector('article')).toBeNull();
+  });
+
+  it('leaves new sessions without persisted metadata to the draft composer', async () => {
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={'new-draft' as SessionId}>
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  it('opens a newly created contained Side Chat for an editor', async () => {
+    const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
+    const child = {
+      ...parent,
+      id: 'side-chat' as SessionId,
+      parentSessionId: parent.id,
+      childSessionPlacement: 'side-panel' as const,
+    };
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId(parent.id)]: parent,
+      [getSessionRoomId(child.id)]: child,
+    });
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={child.id}>
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  it('waits for the root machine binding instead of denying partially hydrated metadata', async () => {
+    const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId(parent.id)]: { ...parent, machineId: '' as MachineId },
+    });
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={parent.id} urlTab="draft:new-tab">
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(
+      container.querySelector('[data-loading-placeholder-scope="content"] [role="status"]')
+        ?.textContent
+    ).toBe('sessions.access.opening');
+    expect(container.querySelector('input')).toBeNull();
+    await act(async () =>
+      store.set(sessionMetaCacheAtom, { [getSessionRoomId(parent.id)]: parent })
+    );
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  it('keeps a newly persisted child pending while its metadata is hydrating', async () => {
+    const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
+    store.set(sessionMetaCacheAtom, { [getSessionRoomId(parent.id)]: parent });
+    await renderTree(
+      <SessionHistoryAccessBoundary sessionId={parent.id} urlTab="session:hydrating">
+        <input aria-label="Execution composer" />
+      </SessionHistoryAccessBoundary>
+    );
+    expect(container.querySelector('input')).toBeNull();
+    expect(
+      container.querySelector('[data-loading-placeholder-scope="content"] [role="status"]')
+        ?.textContent
+    ).toBe('sessions.access.opening');
+    await act(async () =>
+      store.set(sessionMetaCacheAtom, (cache) => ({
+        ...cache,
+        [getSessionRoomId('hydrating' as SessionId)]: {
+          ...parent,
+          id: 'hydrating' as SessionId,
+          parentSessionId: parent.id,
+        },
+      }))
+    );
+    expect(container.querySelector('input')).not.toBeNull();
   });
 
   it('never mounts execution/probe controls for unshared history, including the author’s own session', async () => {
@@ -912,6 +1159,13 @@ describe('encrypted shared machine visibility', () => {
       }, []);
       return <input aria-label="Execution composer" />;
     }
+    views.set(
+      'private-machine',
+      view('private-machine', {
+        sharedWithTeam: false,
+        sessions: [{ sessionId: history.id, audience: 'team', level: 'read' }],
+      })
+    );
     const tree = (
       <SessionHistoryAccessBoundary sessionId={history.id}>
         <InteractiveControls />
@@ -925,38 +1179,92 @@ describe('encrypted shared machine visibility', () => {
     await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
     expect(container.querySelector('input')?.getAttribute('aria-label')).toBe('Execution composer');
     expect(mountedControls).toBe(1);
-    views.set('private-machine', view('private-machine', { sharedWithTeam: false }));
+    views.set(
+      'private-machine',
+      view('private-machine', {
+        sharedWithTeam: false,
+        sessions: [{ sessionId: history.id, audience: 'team', level: 'read' }],
+      })
+    );
     await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
     expect(container.querySelector('article')?.textContent).toBe(history.id);
     expect(container.querySelector('input')).toBeNull();
     expect(mountedControls).toBe(1);
   });
 
-  it('reads a private project or child tab without granting its shared machine’s other projects', async () => {
-    const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
-    const child = {
-      ...parent,
-      id: 'child' as SessionId,
-      parentSessionId: parent.id,
-      project: { kind: 'local', localProjectId: 'private-project' as LocalProjectId },
-    } as SessionMeta;
-    store.set(sessionMetaCacheAtom, {
-      [getSessionRoomId(parent.id)]: parent,
-      [getSessionRoomId(child.id)]: child,
-    });
-    await renderTree(
-      <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={child.id}>
-        <input aria-label="Execution composer" />
-      </SessionHistoryAccessBoundary>
-    );
-    expect(container.querySelector('article')?.textContent).toBe(child.id);
-    expect(container.querySelector('input')).toBeNull();
-    await act(async () => {
-      store.set(userAtom, { id: 'different-account' } as never);
-    });
-    expect(container.querySelector('article')).toBeNull();
-    expect(container.querySelector('input')).toBeNull();
-  });
+  it.each(['tab', 'direct'] as const)(
+    'reads a private project or child through a %s link without granting other projects',
+    async (route) => {
+      const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
+      const child = {
+        ...parent,
+        id: 'child' as SessionId,
+        parentSessionId: parent.id,
+        project: { kind: 'local', localProjectId: 'private-project' as LocalProjectId },
+      } as SessionMeta;
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(parent.id)]: parent,
+        [getSessionRoomId(child.id)]: child,
+      });
+      views.set(
+        parent.machineId,
+        view(parent.machineId, {
+          sessions: [{ sessionId: parent.id, audience: 'team', level: 'read' }],
+        })
+      );
+      await renderTree(
+        <SessionHistoryAccessBoundary
+          sessionId={route === 'direct' ? child.id : parent.id}
+          urlTab={route === 'tab' ? `session:${child.id}` : undefined}
+        >
+          <input aria-label="Execution composer" />
+        </SessionHistoryAccessBoundary>
+      );
+      expect(container.querySelector('article')?.textContent).toBe(child.id);
+      expect(container.querySelector('input')).toBeNull();
+      await act(async () => {
+        store.set(userAtom, { id: 'different-account' } as never);
+      });
+      expect(container.querySelector('article')).toBeNull();
+      expect(container.querySelector('input')).toBeNull();
+    }
+  );
+
+  it.each(['sidebar', 'other-machine', 'nested'] as const)(
+    'rejects a forged %s parent relation in a read-only tab deep link',
+    async (kind) => {
+      const parent = {
+        ...createCachedSession(owner),
+        id: 'root' as SessionId,
+        ...(kind === 'nested' ? { parentSessionId: 'outer' as SessionId } : {}),
+      };
+      const child = {
+        ...parent,
+        id: 'forged-child' as SessionId,
+        parentSessionId: parent.id,
+        ...(kind === 'sidebar' ? { childSessionPlacement: 'sidebar' } : {}),
+        ...(kind === 'other-machine' ? { machineId: 'different-machine' as MachineId } : {}),
+      } as unknown as SessionMeta;
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(parent.id)]: parent,
+        [getSessionRoomId(child.id)]: child,
+      });
+      views.set(
+        parent.machineId,
+        view(parent.machineId, {
+          sharedWithTeam: false,
+          sessions: [{ sessionId: parent.id, audience: 'team', level: 'read' }],
+        })
+      );
+      await renderTree(
+        <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={`session:${child.id}`}>
+          <input aria-label="Execution composer" />
+        </SessionHistoryAccessBoundary>
+      );
+      expect(container.querySelector('article')).toBeNull();
+      expect(container.querySelector('input')).toBeNull();
+    }
+  );
 
   it('removes a withdrawn machine on the next ledger change and on the bounded refresh', async () => {
     views.set(

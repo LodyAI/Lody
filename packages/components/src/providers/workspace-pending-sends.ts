@@ -2,33 +2,18 @@ import { isElectronRenderer } from '../lib/electron';
 import { resolveAttachmentRoute } from '../lib/session-attachment-routing';
 import { assertProtectedAttachmentReferences } from '../lib/encrypted-session-attachment';
 import {
-  getMachineRoomId,
-  getSessionRoomId,
-  isLoroRepoDocDeleted,
-  isSessionHistoryStatusAwaitingStart,
-  machineSupportsSessionInputAcceptance,
   normalizeSessionInputBlocks,
-  machineSupportsSessionInputDispatch,
   type MachineId,
-  type MachineMeta,
-  type SessionMeta,
   type SessionId,
 } from '@lody/shared';
-import i18next from 'i18next';
 import { prepareDraftAttachments } from '../lib/session-attachment-preparation';
 import { createPendingSessionSends, type PendingSessionSend } from '../lib/session-pending-sends';
-import {
-  createAcceptedSessionInputs,
-  SessionInputNotSentError,
-} from '../lib/session-accepted-inputs';
-import { createSessionInputStorage } from '../lib/session-input-storage';
-import { encryptedLocalInstance, type E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
+import { createWorkspaceAcceptedInputs } from '../lib/workspace-accepted-inputs';
+import type { E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
 import { recordClientLog } from '../lib/client-log';
 import {
   deliverUserTurn,
   writeUserTurn,
-  prepareUserTurnWrite,
-  persistHumanInputReceipt,
   type SessionSendRuntime,
 } from '../lib/session-send-delivery';
 import { throwIfSendAborted } from '../lib/session-send-resources';
@@ -45,135 +30,8 @@ export function createWorkspacePendingSends(args: {
   onDelivered?(sessionId: SessionId, turnId: string): void;
 }) {
   const { runtime } = args;
-  if (runtime.contentMode === 'e2ee' && !args.localIdentity)
-    throw new Error('e2ee_local_identity_required');
-  const scope = args.localIdentity
-    ? encryptedLocalInstance(args.localIdentity)
-    : JSON.stringify([args.accountId, args.workspaceId]);
-  const channel =
-    typeof BroadcastChannel === 'undefined'
-      ? null
-      : new BroadcastChannel(`lody-session-inputs:${scope}`);
-  const validateTarget = async (send: PendingSessionSend) => {
-    const found = await runtime.repo.getDocMeta(getSessionRoomId(send.sessionId));
-    const meta = found?.meta as SessionMeta | undefined;
-    if (isLoroRepoDocDeleted(found) || meta?.isArchived)
-      throw new SessionInputNotSentError(i18next.t('sessions.inputTargetUnavailable'));
-    const target = meta?.machineId ?? send.creation?.machineId;
-    const backend = meta?.historyBackend ?? send.creation?.historyBackend;
-    if (!send.targetMachineId || target !== send.targetMachineId || backend !== 'roost') {
-      throw new SessionInputNotSentError(i18next.t('sessions.inputTargetChanged'));
-    }
-    const machine = await runtime.repo.getDocMeta(getMachineRoomId(send.targetMachineId));
-    if (
-      !machineSupportsSessionInputAcceptance(machine?.meta as MachineMeta | undefined) ||
-      (send.delivery.kind === 'dispatch' &&
-        !machineSupportsSessionInputDispatch(machine?.meta as MachineMeta | undefined))
-    ) {
-      throw new SessionInputNotSentError(i18next.t('sessions.inputOwnerNeedsUpdate'));
-    }
-  };
-  const inputOwner = createAcceptedSessionInputs({
-    resources: runtime.sendResources,
-    storage: createSessionInputStorage(
-      args.accountId,
-      args.workspaceId,
-      undefined,
-      args.localIdentity
-    ),
-    paused: args.paused,
-    lock: async <T>(
-      sessionId: import('@lody/shared').SessionId,
-      signal: AbortSignal,
-      work: () => Promise<T>
-    ): Promise<T> => {
-      if (!navigator.locks)
-        return Promise.reject(
-          new SessionInputNotSentError(i18next.t('sessions.inputStorageUnavailable'))
-        );
-      return navigator.locks.request(`lody-session-input:${scope}:${sessionId}`, { signal }, work);
-    },
-    write: async (send, signal) => {
-      await validateTarget(send);
-      await prepareUserTurnWrite(runtime, send, signal);
-      await persistHumanInputReceipt(runtime, send.sessionId, send.entry, signal);
-      throwIfSendAborted(signal);
-      return runtime.sendResources.withSessionStore(
-        send.sessionId,
-        async (store) => {
-          if (!store.sessionData.inputAcceptance)
-            throw new SessionInputNotSentError(i18next.t('sessions.inputOwnerNeedsUpdate'));
-          await validateTarget(send);
-          if (store.sessionData.inputAcceptance.targetMachineId !== send.targetMachineId)
-            throw new SessionInputNotSentError(i18next.t('sessions.inputTargetChanged'));
-          throwIfSendAborted(signal);
-          if (send.delivery.kind === 'dispatch') {
-            const accept = store.sessionData.inputAcceptance.acceptAndDispatch;
-            if (!accept)
-              throw new SessionInputNotSentError(i18next.t('sessions.inputOwnerNeedsUpdate'));
-            return {
-              ...(await accept.call(store.sessionData.inputAcceptance, send.entry)),
-              dispatchHandled: true,
-            };
-          }
-          return store.sessionData.inputAcceptance.accept(send.entry);
-        },
-        signal
-      );
-    },
-    lookup: async (send, signal) => {
-      await validateTarget(send);
-      return runtime.sendResources.withSessionStore(
-        send.sessionId,
-        async (store) => {
-          if (!store.sessionData.inputAcceptance)
-            throw new SessionInputNotSentError(i18next.t('sessions.inputOwnerNeedsUpdate'));
-          await validateTarget(send);
-          if (store.sessionData.inputAcceptance.targetMachineId !== send.targetMachineId)
-            throw new SessionInputNotSentError(i18next.t('sessions.inputTargetChanged'));
-          throwIfSendAborted(signal);
-          return store.sessionData.inputAcceptance.lookup(send.entry);
-        },
-        signal
-      );
-    },
-    confirmed: (send) => {
-      if (send.delivery.kind !== 'guide') args.onDelivered?.(send.sessionId, send.id);
-    },
-    deliver: async (send, signal, receipt) => {
-      if (send.delivery.kind === 'dispatch' && receipt.dispatchHandled) return undefined;
-      await validateTarget(send);
-      throwIfSendAborted(signal);
-      if (send.delivery.kind === 'dispatch') {
-        return runtime.sendResources.withSessionStore(
-          send.sessionId,
-          (store) => {
-            const port = store.sessionData.inputAcceptance;
-            if (!port?.acceptAndDispatch || port.targetMachineId !== send.targetMachineId)
-              throw new SessionInputNotSentError(i18next.t('sessions.inputOwnerNeedsUpdate'));
-            return port.acceptAndDispatch(send.entry);
-          },
-          signal
-        );
-      }
-      const current = await runtime.sendResources.withSessionStore(
-        send.sessionId,
-        (store) => store.sessionData.history.readTurn(send.id),
-        signal
-      );
-      if (current.state !== 'ready') {
-        if (current.state === 'missing') return undefined;
-        throw new Error('Accepted Roost input history is not readable');
-      }
-      if (
-        !isSessionHistoryStatusAwaitingStart(current.turn.status) &&
-        send.delivery.kind !== 'guide'
-      )
-        return undefined;
-      throwIfSendAborted(signal);
-      await deliverUserTurn(runtime, send);
-      return undefined;
-    },
+  const inputOwner = createWorkspaceAcceptedInputs({
+    ...args,
     visible: (send, signal) =>
       runtime.sendResources.withSessionStore(
         send.sessionId,
@@ -183,8 +41,6 @@ export function createWorkspacePendingSends(args: {
         },
         signal
       ),
-    unknownMessage: () => i18next.t('sessions.inputOutcomeUnknown'),
-    changed: () => channel?.postMessage('changed'),
     diagnose: (level, event, details) => recordClientLog(level, event, undefined, details),
   });
   const barriers = new Map<string, Promise<readonly string[]>>();
@@ -257,9 +113,6 @@ export function createWorkspacePendingSends(args: {
     for (const listener of listeners) listener();
   };
   const unsubscribe = [held.subscribe(changed), inputOwner.subscribe(changed)];
-  channel?.addEventListener('message', () => {
-    void inputOwner.refresh().catch(() => {});
-  });
   return {
     canPrepareAttachmentsLocally: (machineId: MachineId) =>
       resolveAttachmentRoute({
@@ -325,7 +178,6 @@ export function createWorkspacePendingSends(args: {
       held.dispose();
       for (const release of unsubscribe) release();
       listeners.clear();
-      channel?.close();
       await inputOwner.dispose();
     },
   };

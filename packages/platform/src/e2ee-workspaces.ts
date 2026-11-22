@@ -1,15 +1,21 @@
 import type {
   E2eeWorkspaceCreateRequest,
+  E2eeAccountPairingMailboxPreview,
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest,
   E2eePersonalPairingOffer,
+  E2eeDeviceProfileUpdate,
   E2eeWorkspaceMemberProfilesRequest,
   E2eeWorkspaceMemberProfiles,
   WorkspaceAdmissionDescriptor,
+  E2eeWorkspaceLedgerHead,
 } from '@lody/cloud-api';
 
-import type { E2eeAccountPairingRuntime } from './e2ee-account-pairing';
+import type {
+  E2eeAccountPairingRuntime,
+  E2eeAutomaticPairingRuntime,
+} from './e2ee-account-pairing';
 import type { ReadonlyStore } from './store';
 import type { PlatformSessionState } from './provider';
 
@@ -54,10 +60,22 @@ export interface E2eeWorkspacePrepared extends E2eeWorkspacePrepareInput {
  */
 export interface PlatformE2eeWorkspaces {
   readonly runtime?: E2eeWorkspaceRuntime;
+  /** Observe an untrusted ledger change hint while a control surface is open.
+   * The caller owns unsubscribe; notifications never grant authority. Errors leave
+   * verified local reads usable. An absent port retains manual refresh.
+   */
+  readonly subscribeLedgerHead?: (
+    input: { workspaceId: string },
+    changed: (head: E2eeWorkspaceLedgerHead) => void,
+    failed: (error: unknown) => void
+  ) => () => void;
   /** Optional display directory. Names/images never establish permission, keys or identity pins. */
   readonly memberProfiles?: (
     input: E2eeWorkspaceMemberProfilesRequest
   ) => Promise<E2eeWorkspaceMemberProfiles>;
+  /** Best-effort display update for an admitted device owned by the live account.
+   * Does not grant access. The caller never submits another device's local metadata. */
+  readonly reportDeviceProfile?: (input: E2eeDeviceProfileUpdate) => Promise<null>;
   /** Absent when this platform has no installed, persistent key-custody adapter.
    * A failed/unknown creation preserves its original local intent for reconciliation.
    */
@@ -80,6 +98,13 @@ export interface PlatformE2eeWorkspaces {
 }
 
 /** Public status of a host-owned runtime. No secret key material crosses this port. */
+/** Scope of the key round after a ledger refresh; see {@link E2eeRuntimePort.refresh}. */
+export type E2eeRefreshKeyMode = 'none' | 'receive' | 'distribute' | 'full';
+export interface E2eeRefreshOptions {
+  readonly keyMode?: E2eeRefreshKeyMode;
+  /** Optional narrowing filter (device signing keys) for immediate post-admission distribution. */
+  readonly recipients?: readonly string[];
+}
 export interface E2eeRuntimeStatus {
   readonly workspaceId: string;
   readonly genesisHash: string;
@@ -126,9 +151,15 @@ export interface E2eeManagementState {
   readonly devices: readonly {
     key: string;
     kind: 'personal' | 'machine' | 'recovery';
+    /** Account display lookup key derived from this device's verified ledger member. */
+    cryptoUserId?: string;
     machineId: string | null;
     self: boolean;
     mayRevoke: boolean;
+    /** Removing this member's last personal device leaves recovery credentials as its only way back. */
+    requiresRecoveryConfirmation?: boolean;
+    /** Whether this member has an active recovery device in the verified ledger. */
+    recoveryDeviceAvailable?: boolean;
   }[];
 }
 /** Purpose-limited account-pairing admission signing. It exposes only the operations
@@ -142,7 +173,11 @@ export interface E2eeAccountApprovalSession {
     encryptionPublicKey: Uint8Array;
     possessionProof: Uint8Array;
   }): Promise<{ requestId: string; record: Uint8Array }>;
-  settle(record: Uint8Array): Promise<'committed' | 'lost' | 'unknown'>;
+  settle(record: Uint8Array, refresh?: boolean): Promise<'committed' | 'lost' | 'unknown'>;
+  /** Optional local transport optimizations; all originals pass the existing verifier. */
+  checkpoint?(): Promise<{ headHash: string; length: number; position?: string }>;
+  ingest?(page: E2eeWorkspaceHistoryPage): Promise<void>;
+  prepareDelivery?(recipient: string): Promise<{ id: string; frameHex: string } | null>;
   invitation(record: Uint8Array): Promise<Uint8Array | null>;
   access(): Promise<{ workspaceId: string; credential: string }>;
   refresh(): Promise<void>;
@@ -158,12 +193,23 @@ export interface E2eeAccountApprovalSession {
 }
 
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
-export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
+export interface E2eeWorkspaceRuntime
+  extends E2eeAccountPairingRuntime, E2eeAutomaticPairingRuntime {
+  /** Explicit user gesture: open recovery inside this application. True means the requested workspace is ready. */
+  openBrowserRecovery?(workspaceId: string): Promise<boolean>;
+  /** Browser device admission requires explicit personal-computer consent even
+   * when opening through recovery or another device. */
+  requirePersonalComputer?: boolean;
   /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
   readonly readerLeases?: 'preallocated-v1';
   /** Portable hosts that can sign an account-pairing admission from an already
    * approved workspace session. Absence keeps the approver surface hidden. */
   accountApproval?(workspaceId?: string): Promise<E2eeAccountApprovalSession>;
+  /** Receive after verified account admission, before requesting any new history. */
+  activateAccountPairing?(
+    workspaceId: string,
+    preview?: E2eeAccountPairingMailboxPreview
+  ): Promise<void>;
   readMachineSharing?(
     workspaceId: string,
     machineId: string
@@ -178,7 +224,11 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
 
   managementState?(workspaceId: string): Promise<E2eeManagementState>;
   updateKeys?(workspaceId: string): Promise<void>;
-  revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
+  revokeDevice?(
+    workspaceId: string,
+    signingPublicKey: string,
+    confirmation?: { confirmedRecoveryOnly: true }
+  ): Promise<void>;
   /** Explicit management intent; the host signs once and retains the exact original. */
   removeMember?(workspaceId: string, membershipId: string): Promise<void>;
   /** Owner-only Admin promotion/demotion, checked against the latest verified ledger. */
@@ -187,6 +237,8 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     membershipId: string,
     role: 'admin' | 'member'
   ): Promise<void>;
+  /** Owner-only transfer to an existing member, checked against the latest verified ledger. */
+  transferOwnership?(workspaceId: string, membershipId: string): Promise<void>;
   /** Create public email/link pins using a current manager's native device. */
   createMemberInvitation?(input: {
     workspaceId: string;
@@ -196,9 +248,14 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
   prepareMemberJoin?(
     offer: import('@lody/cloud-api').E2eeMemberOffer
   ): Promise<import('@lody/cloud-api').E2eeMemberRequest>;
-  pendingMemberJoin?(
-    workspaceId: string
-  ): Promise<{ offer: import('@lody/cloud-api').E2eeMemberOffer; requestId: string | null } | null>;
+  /** The retained team join for this workspace. `joined` says this device's admission was
+   * already accepted, so a reopened join page can show it joined at once; the page still
+   * claims to confirm. Hosts that omit it keep the ordinary resume. */
+  pendingMemberJoin?(workspaceId: string): Promise<{
+    offer: import('@lody/cloud-api').E2eeMemberOffer;
+    requestId: string | null;
+    joined?: boolean;
+  } | null>;
   memberJoinRequests?(
     workspaceId: string
   ): Promise<import('@lody/cloud-api').E2eeMemberReplies['pending']>;
@@ -281,12 +338,16 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     workspaceId: string,
     pairingSessionId: string
   ): Promise<{ admitted: true; ready: boolean }>;
-  /** Ledger-only refresh separates discovery from retryable background key reception. */
-  refresh(workspaceId: string, options?: { installKeys?: boolean }): Promise<E2eeRuntimeStatus>;
+  /**
+   * Ledger refresh, then an optional key round. `keyMode` selects its scope: `none`
+   * skips it, `receive` only installs this device's current key, `distribute` only
+   * sends this device's deliveries, `full` runs every phase. Without `keyMode`, each host keeps its
+   * default (desktop `full`, portable `none`).
+   */
+  refresh(workspaceId: string, options?: E2eeRefreshOptions): Promise<E2eeRuntimeStatus>;
   contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string,
     rpcOnly?: true
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(
@@ -309,6 +370,28 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     targetMachineId: string,
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  /** Sign one schedule declaration with this device. The host computes the definition
+   * fingerprint from the document; it is never a general signing capability. */
+  signScheduleDeclaration?(
+    workspaceId: string,
+    document: Pick<import('@lody/shared').ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+    manualRunKey?: string
+  ): Promise<string>;
+  /**
+   * Optional iroh route (desktop main with relays and the native module). `irohReady`
+   * reports a live connection to the machine's ledger device and starts one when
+   * absent; `irohCall` carries one already prepared envelope and returns its reply
+   * frames, which the caller verifies with the accept methods. Neither prepares,
+   * signs nor authorizes anything; failures mean "use Streams RPC".
+   */
+  irohPath?(workspaceId: string, targetMachineId: string): Promise<'direct' | 'relay' | 'none'>;
+  irohReady?(workspaceId: string, targetMachineId: string): Promise<boolean>;
+  irohCall?(
+    workspaceId: string,
+    targetMachineId: string,
+    envelope: { id: string; frame: string },
+    timeoutMs: number
+  ): Promise<string[]>;
   /** Verify and retain a correlated target-signed delivery ACK, never an execution result. */
   acceptDispatchResponse?(
     workspaceId: string,

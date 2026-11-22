@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { webcrypto } from 'node:crypto';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -746,15 +745,22 @@ describe('static publication client lifecycle', () => {
       'share_quota_exceeded',
       'at most 2 unfinished publications, 10 new publication attempts per hour, and 2 GiB',
     ],
+    // Each server-reported limit gets its own explanation instead of the combined one.
+    ['share_quota_exceeded:deployment_bytes', 'whole share can be up to 256 MiB'],
+    ['share_quota_exceeded:pending_deployments', 'already has 2 share publications in progress'],
+    ['share_quota_exceeded:hourly_deployments', '10 share publications in the past hour'],
+    ['share_quota_exceeded:workspace_storage', 'reached the 2 GiB storage limit'],
+    ['share_quota_exceeded:future_limit', 'at most 2 unfinished publications'],
     ['share_conflict', 'Close and reopen sharing'],
     ['share_forbidden', 'no longer have permission'],
     ['share_unavailable', 'no longer available'],
     ['share_confirmation_required', 'send a new request'],
     ['unauthenticated', 'Sign in again'],
   ])('explains %s without publishing or exposing the server payload', async (code, expected) => {
+    const [quota, limit] = code.split(':');
     cloud.mutation.mockRejectedValue(
       Object.assign(new Error('private transcript access=v1.secret'), {
-        data: { code, privateDetail: 'private transcript' },
+        data: { code: quota, ...(limit ? { limit } : {}), privateDetail: 'private transcript' },
       })
     );
     await render();
@@ -794,6 +800,24 @@ describe('static publication client lifecycle', () => {
     await act(async () => control.onCopy());
     expect(control.error).toContain('copy the full link');
     expect(control.shareLink).toBe(link);
+  });
+
+  it('copies the link through the native shell clipboard when the WebView denies the web API', async () => {
+    const writeText = vi.fn().mockRejectedValue(new DOMException('Denied', 'NotAllowedError'));
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const native = vi.fn().mockResolvedValue(undefined);
+    window.__LODY_CLIPBOARD__ = { writeText: native, readText: async () => null };
+    try {
+      cloud.state = entry;
+      saveSessionShareSecret(localStorage, key, { secret: 'a'.repeat(64), credentialVersion: 1 });
+      await render();
+      await act(async () => control.onCopy());
+      expect(native).toHaveBeenCalledWith(`https://share.test/s/share#access=v1.${'a'.repeat(64)}`);
+      expect(control.error).toBeNull();
+      expect(control.notice).toBe('Share link copied');
+    } finally {
+      delete window.__LODY_CLIPBOARD__;
+    }
   });
 
   it('explains a missing device credential without attempting clipboard access', async () => {

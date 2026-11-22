@@ -1,7 +1,8 @@
-import { IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { ProductWindowIpcService } from '../product-window-ipc-service'
+import { IpcMethod } from 'electron-ipc-decorator'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class LoroIpc extends IpcService {
+export class LoroIpc extends ProductWindowIpcService {
   static override readonly groupName = 'loro'
 
   @IpcMethod()

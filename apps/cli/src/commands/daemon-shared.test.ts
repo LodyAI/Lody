@@ -1,13 +1,19 @@
 import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CliRuntimeState } from '@lody/shared';
 import { startProcessLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
+import { registerDaemonAutostart } from './daemon-autostart';
+import { buildDaemonStartPassthroughArgs } from './daemon-start-options';
+import { formatDaemonBackendStatus, type DaemonStatusPalette } from './daemon-status-format';
+import { releaseScopedMallocArenaLimit, withDaemonMallocArenaLimit } from '@/utils/malloc-arena';
 import {
   DAEMON_RUNNER_READY_TIMEOUT_MS,
   interpretDaemonRunnerLaunchOutcome,
@@ -247,5 +253,176 @@ describe('daemon runner launch cleanup', () => {
     });
     await vi.advanceTimersByTimeAsync(20);
     expect(await stopped).toBe(false);
+  });
+});
+
+describe('daemon child allocator limit', () => {
+  it('caps glibc arenas for daemon Node children without passing the cap to what they launch', () => {
+    const childEnv = { ...withDaemonMallocArenaLimit({ PATH: '/bin' }, 'linux') };
+    expect(childEnv.MALLOC_ARENA_MAX).toBe('2');
+
+    releaseScopedMallocArenaLimit(childEnv);
+    expect(childEnv).toEqual({ PATH: '/bin' });
+  });
+
+  it('keeps a caller-chosen limit for the child and everything it launches', () => {
+    const childEnv = { ...withDaemonMallocArenaLimit({ MALLOC_ARENA_MAX: '4' }, 'linux') };
+    releaseScopedMallocArenaLimit(childEnv);
+    expect(childEnv).toEqual({ MALLOC_ARENA_MAX: '4' });
+  });
+
+  it('leaves non-glibc platforms untouched', () => {
+    expect(withDaemonMallocArenaLimit({ PATH: '/bin' }, 'darwin')).toEqual({ PATH: '/bin' });
+  });
+});
+
+describe('buildDaemonStartPassthroughArgs', () => {
+  it('never forwards auth credentials to the daemon runner', () => {
+    expect(
+      buildDaemonStartPassthroughArgs({ auth: 'lody_pair_secret', machineName: 'build-host' }, [
+        '--debug',
+        '--auth',
+        'fallback-secret',
+        '--auth=inline-secret',
+      ])
+    ).toEqual(['--machine-name', 'build-host', '--debug']);
+  });
+});
+
+describe('formatDaemonBackendStatus', () => {
+  const palette: DaemonStatusPalette = {
+    success: (value) => `<green>${value}</green>`,
+    warning: (value) => `<yellow>${value}</yellow>`,
+    error: (value) => `<red>${value}</red>`,
+    muted: (value) => `<gray>${value}</gray>`,
+  };
+
+  const runtimeState = (overrides: Partial<CliRuntimeState> = {}): CliRuntimeState => ({
+    schemaVersion: 1,
+    phase: 'running',
+    pid: 123,
+    updatedAtMs: 1,
+    issues: [],
+    ...overrides,
+  });
+
+  it('reports a red error after a connection stays unavailable for one minute', () => {
+    expect(
+      formatDaemonBackendStatus(
+        runtimeState({
+          backend: {
+            authorization: 'authorized',
+            connection: 'connecting',
+          },
+          connectionAges: {
+            backendNotConnectedSinceMs: 60_000,
+            workspaceNotConnectedSinceMs: { 'workspace-1': 30_000 },
+          },
+          connectedWorkspaces: [
+            {
+              id: 'workspace-1',
+              name: 'Alpha',
+              slug: 'alpha',
+              role: 'owner',
+              backendConnection: 'reconnecting',
+            },
+          ],
+        }),
+        { palette, nowMs: 120_000 }
+      )
+    ).toEqual([
+      '  Backend Auth: <green>authorized</green>',
+      '  Backend Link: <red>connecting (1m)</red>',
+      '<red>  Backend Error: not connected for 1m</red>',
+      '  Workspaces:   1',
+      '    - Alpha (alpha) [owner]',
+      '      ID: workspace-1',
+      '      Backend: <red>reconnecting (1m 30s)</red>',
+      '<red>      Error: not connected for 1m 30s</red>',
+    ]);
+  });
+
+  it('does not claim backend state for an older daemon payload', () => {
+    expect(formatDaemonBackendStatus(runtimeState(), { palette })).toEqual([
+      '  Backend Auth: <gray>unknown</gray>',
+      '  Backend Link: <gray>unknown</gray>',
+      '  Workspaces:   <gray>unavailable</gray>',
+    ]);
+  });
+});
+
+describe('registerDaemonAutostart', () => {
+  const roots: string[] = [];
+  afterEach(async () => {
+    await Promise.all(
+      roots.splice(0).map((root) => fsp.rm(root, { recursive: true, force: true }))
+    );
+  });
+
+  async function autostartFixture() {
+    const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'lody-install-service-'));
+    roots.push(home);
+    return {
+      home,
+      dataDir: path.join(home, 'data with & spaces'),
+      service: path.join(home, 'data with & spaces', 'service'),
+    };
+  }
+
+  it('registers the fixed absolute Mac entry for next login, preserves the installation profile and never starts another host', async () => {
+    const options = await autostartFixture();
+    const result = await registerDaemonAutostart({
+      ...options,
+      platform: 'darwin',
+      run: async () => {
+        throw new Error('Must not spawn on registration');
+      },
+    });
+    const directory = path.join(options.home, 'Library', 'LaunchAgents');
+    const files = await fsp.readdir(directory);
+    const file = path.join(directory, files[0] ?? '');
+    const installed = await fsp.readFile(file, 'utf8');
+    expect(installed).toContain('data with &amp; spaces');
+    expect(installed).toContain('<string>daemon-runner</string>');
+    expect(result).toContain('Login autostart registered');
+    await registerDaemonAutostart({ ...options, platform: 'darwin' });
+    expect(await fsp.readFile(file, 'utf8')).toBe(installed);
+    await fsp.writeFile(file, 'user-owned configuration');
+    await expect(registerDaemonAutostart({ ...options, platform: 'darwin' })).rejects.toThrow(
+      /preserved/
+    );
+    expect(await fsp.readFile(file, 'utf8')).toBe('user-owned configuration');
+  });
+
+  it('enables a user Linux unit without starting it, preserves percent/space paths, and leaves unavailable managers recoverable', async () => {
+    const options = await autostartFixture();
+    options.dataDir += '%profile';
+    const commands: string[][] = [];
+    await registerDaemonAutostart({
+      ...options,
+      platform: 'linux',
+      run: async (command, args) => {
+        commands.push([command, ...args]);
+      },
+    });
+    const directory = path.join(options.home, '.config', 'systemd', 'user');
+    const [name] = await fsp.readdir(directory);
+    expect(await fsp.readFile(path.join(directory, name ?? ''), 'utf8')).toContain('%%profile');
+    expect(commands).toEqual([
+      ['systemctl', '--user', 'show', '--property=Version', '--value'],
+      ['systemctl', '--user', 'daemon-reload'],
+      ['systemctl', '--user', 'enable', name],
+    ]);
+    const unavailable = await autostartFixture();
+    await expect(
+      registerDaemonAutostart({
+        ...unavailable,
+        platform: 'linux',
+        run: async () => {
+          throw new Error('No user bus');
+        },
+      })
+    ).rejects.toThrow('No user bus');
+    await expect(fsp.access(path.join(unavailable.home, '.config'))).rejects.toThrow();
   });
 });

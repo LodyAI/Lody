@@ -131,6 +131,25 @@ export class NotificationService {
     )
   }
 
+  /** Discovery hint only: no device name, code, key, account or authorization. */
+  async showDevicePairingRequest(language: 'en' | 'zh'): Promise<{ shown: boolean }> {
+    if (!Notification.isSupported() || [...productWindows].some((window) => window.isFocused()))
+      return { shown: false }
+    const notification = new Notification({
+      title: language === 'zh' ? '新设备请求授权' : 'Device approval requested',
+      body:
+        language === 'zh'
+          ? '打开 Lody，在你的两台设备上核对配对码后授权。'
+          : 'Open Lody and compare the codes on both of your devices before authorizing.',
+      silent: true
+    })
+    notification.on('click', () => {
+      const window = this.getMainWindow()
+      if (window && !window.isDestroyed()) focusWindow(window)
+    })
+    return showNativeNotification(notification, this.activeNotifications)
+  }
+
   async showSessionCompletion(
     input: ShowSessionCompletionNotificationInput
   ): Promise<ShowSessionCompletionNotificationResult> {

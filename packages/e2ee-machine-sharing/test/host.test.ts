@@ -6,12 +6,68 @@ import { Clock, Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
 import * as P from '@lody/e2ee-core/protocol';
 import { disposeEpochKey } from '@lody/e2ee-core/internal';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
-import { makeMachineSharingHost, makeLazyMachineSharingHost, type SharingRemote } from '../src';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import {
+  makeMachineSharingHost,
+  makeLazyMachineSharingHost,
+  MachineSharingError,
+  type OpenMachineSharingStore,
+  type SharingRemote,
+} from '../src';
+import { openSqliteMachineSharingStore } from '../src/sqlite';
+import { openIndexedDbMachineSharingStore } from '../src/indexeddb';
 import type { E2eeMachineSharingVersion, E2eeMachineSharingHeadState } from '@lody/platform';
 
 const hex = (v: { toBytes(): Uint8Array }) => Buffer.from(v.toBytes()).toString('hex');
 const ok = Result.getOrThrow;
-const setup = Effect.fnUntraced(function* (directory: string) {
+/** Every case runs once per store: the desktop's SQLite file, then the browser's
+ * IndexedDB (fake-indexeddb in Node). Same names reopen the same storage in one case. */
+type Backend = {
+  readonly name: 'sqlite' | 'indexeddb';
+  readonly storeFor: (name: string) => OpenMachineSharingStore;
+  /** A store whose open fails until `repair` runs, as a missing directory does. */
+  readonly broken: () => { store: OpenMachineSharingStore; repair: () => Promise<void> };
+  readonly cleanup: () => Promise<void>;
+};
+const backends: readonly (() => Promise<Backend>)[] = [
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'sharing-host-'));
+    return {
+      name: 'sqlite',
+      storeFor: (name) => openSqliteMachineSharingStore(join(directory, `${name}.sqlite`)),
+      broken: () => ({
+        store: openSqliteMachineSharingStore(join(directory, 'missing', 'policy.sqlite')),
+        repair: async () => {
+          const { mkdir } = await import('node:fs/promises');
+          await mkdir(join(directory, 'missing'));
+        },
+      }),
+      cleanup: () => rm(directory, { recursive: true, force: true }),
+    };
+  },
+  async () => {
+    const environment = { indexedDB: new IDBFactory(), IDBKeyRange };
+    return {
+      name: 'indexeddb',
+      storeFor: (name) => openIndexedDbMachineSharingStore(name, environment),
+      broken: () => {
+        let repaired = false;
+        return {
+          store: Effect.suspend(() =>
+            repaired
+              ? openIndexedDbMachineSharingStore('policy', environment)
+              : Effect.fail(new MachineSharingError({ code: 'sharing_storage' }))
+          ),
+          repair: async () => {
+            repaired = true;
+          },
+        };
+      },
+      cleanup: async () => {},
+    };
+  },
+];
+const setup = Effect.fnUntraced(function* (backend: Backend) {
   const f = envelopeFixture(1);
   yield* Effect.addFinalizer(() => Effect.sync(() => disposeEpochKey(f.secret)));
   let view = f.view();
@@ -112,7 +168,7 @@ const setup = Effect.fnUntraced(function* (directory: string) {
   };
   const make = (name: string, signer = f.owner.signer) =>
     makeMachineSharingHost({
-      filename: join(directory, `${name}.sqlite`),
+      store: backend.storeFor(name),
       workspaceId: 'workspace',
       genesisHash: hex(view.genesis),
       signer,
@@ -132,6 +188,7 @@ const setup = Effect.fnUntraced(function* (directory: string) {
   const owner = yield* make('owner');
   const machine = yield* make('machine', f.phone.signer);
   return {
+    backend,
     f,
     bob,
     owner,
@@ -171,23 +228,409 @@ async function test(
     f: Effect.Success<ReturnType<typeof setup>>
   ) => Effect.Effect<unknown, unknown, Scope.Scope>
 ) {
-  const directory = await mkdtemp(join(tmpdir(), 'sharing-host-'));
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const f = yield* setup(directory);
-          return yield* body(f);
-        })
-      )
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+  for (const open of backends) {
+    const backend = await open();
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* setup(backend);
+            return yield* body(f);
+          })
+        )
+      );
+    } catch (error) {
+      if (error instanceof Error) error.message = `[${backend.name} store] ${error.message}`;
+      throw error;
+    } finally {
+      await backend.cleanup();
+    }
   }
 }
 const change = { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true } as const;
 const rid = (n: number) => n.toString(16).padStart(32, '0');
 describe('native machine-sharing control and execution', () => {
+  for (const denied of ['machine', 'project'] as const) {
+    it(`refreshes a cached ${denied} denial before refusing a newly shared project`, () =>
+      test((f) =>
+        Effect.gen(function* () {
+          const write = (n: number, update: Parameters<typeof f.owner.write>[3]) =>
+            f.run(
+              f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(n), update, f.remote)
+            );
+          yield* write(
+            1,
+            denied === 'machine'
+              ? { kind: 'machine', sharedWithTeam: false }
+              : { kind: 'project', localProjectId: 'other', sharedWithTeam: true }
+          );
+          yield* f.run(f.machine.read('fixture-machine', f.remote));
+          yield* write(2, change);
+          const decision = yield* f.run(
+            f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+          );
+          expect(decision).toMatchObject({ allowed: true, reason: 'team' });
+          expect(
+            'isCurrent' in decision &&
+              typeof decision.isCurrent === 'function' &&
+              decision.isCurrent()
+          ).toBe(true);
+        })
+      ));
+  }
+  it('shares concurrent denial refreshes and retries after the five-second window', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            hex(f.f.phone.publicKey),
+            rid(1),
+            { kind: 'machine', sharedWithTeam: false },
+            f.remote
+          )
+        );
+        yield* f.run(f.machine.read('fixture-machine', f.remote));
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let reads = 0;
+        const remote: SharingRemote = {
+          ...f.remote,
+          readHead: (input) =>
+            Effect.gen(function* () {
+              reads++;
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(release);
+              return yield* f.remote.readHead(input);
+            }),
+        };
+        const authorize = () =>
+          f.run(f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', remote));
+        const first = yield* Effect.forkChild(authorize());
+        yield* Deferred.await(entered);
+        const second = yield* Effect.forkChild(authorize());
+        yield* Deferred.succeed(release, undefined);
+        expect(yield* Fiber.join(first)).toMatchObject({
+          allowed: false,
+          reason: 'machine-not-shared',
+        });
+        expect(yield* Fiber.join(second)).toMatchObject({
+          allowed: false,
+          reason: 'machine-not-shared',
+        });
+        expect(reads).toBe(1);
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(2), change, f.remote)
+        );
+        f.io.wall += 4_999;
+        f.io.mono += 4_999;
+        expect(yield* authorize()).toMatchObject({ allowed: false, reason: 'machine-not-shared' });
+        expect(reads).toBe(1);
+        f.io.wall++;
+        f.io.mono++;
+        expect(yield* authorize()).toMatchObject({ allowed: true, reason: 'team' });
+        expect(reads).toBe(2);
+      })
+    ));
+  it('shares one authenticated read among concurrent cold dispatch checks', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+        );
+        // A restarted machine host: no RAM grant, only the persisted pin.
+        const cold = yield* f.make('machine', f.f.phone.signer);
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let heads = 0;
+        let versions = 0;
+        const remote: SharingRemote = {
+          ...f.remote,
+          readHead: (input) =>
+            Effect.gen(function* () {
+              heads++;
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(release);
+              return yield* f.remote.readHead(input);
+            }),
+          readVersion: (input) => {
+            versions++;
+            return f.remote.readVersion(input);
+          },
+        };
+        const authorize = () =>
+          f.run(cold.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', remote));
+        const first = yield* Effect.forkChild(authorize());
+        yield* Deferred.await(entered);
+        const second = yield* Effect.forkChild(authorize());
+        const third = yield* Effect.forkChild(authorize());
+        yield* Deferred.succeed(release, undefined);
+        for (const fiber of [first, second, third])
+          expect(yield* Fiber.join(fiber)).toMatchObject({ allowed: true, reason: 'team' });
+        expect(heads).toBe(1);
+        expect(versions).toBeLessThanOrEqual(1);
+        // Warm: the shared read filled the cache for every later dispatch.
+        expect(yield* authorize()).toMatchObject({ allowed: true, reason: 'team' });
+        expect(heads).toBe(1);
+      })
+    ));
+  it('uses an inlined original from readHead instead of a second readVersion round trip', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+        );
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            hex(f.f.phone.publicKey),
+            rid(2),
+            { kind: 'project', localProjectId: 'project-b', sharedWithTeam: true },
+            f.remote
+          )
+        );
+        let versions = 0;
+        const inlining = (version: (head: E2eeMachineSharingHeadState) => unknown) =>
+          ({
+            ...f.remote,
+            readHead: (input) =>
+              Effect.map(f.remote.readHead(input), (head) =>
+                head?.status === 'active' ? { ...head, version: version(head) } : head
+              ),
+            readVersion: (input) => {
+              versions++;
+              return f.remote.readVersion(input);
+            },
+          }) as SharingRemote;
+        // This machine host last pinned revision 1: revision 2 needs its original.
+        yield* f.run(f.machine.read('fixture-machine', f.remote));
+        const fresh = yield* f.make('machine-inline', f.f.phone.signer);
+        const decision = yield* f.run(
+          fresh.authorize(
+            'fixture-machine',
+            hex(f.bob.publicKey),
+            'project-b',
+            inlining((head) => f.versions.get(head.revision))
+          )
+        );
+        expect(decision).toMatchObject({ allowed: true, reason: 'team' });
+        expect(versions).toBe(0);
+        // An inlined original for a different head is ignored, never trusted.
+        const other = yield* f.make('machine-mismatch', f.f.phone.signer);
+        const mismatched = yield* f.run(
+          other.authorize(
+            'fixture-machine',
+            hex(f.bob.publicKey),
+            'project-b',
+            inlining(() => f.versions.get(1))
+          )
+        );
+        expect(mismatched).toMatchObject({ allowed: true, reason: 'team' });
+        expect(versions).toBe(1);
+        // The persisted pin stays the plain head: a restarted host reads it back and
+        // verifies the same revision from its retained original.
+        const reopened = yield* f.make('machine-inline', f.f.phone.signer);
+        expect(
+          yield* f.run(
+            reopened.authorize('fixture-machine', hex(f.bob.publicKey), 'project-b', f.remote)
+          )
+        ).toMatchObject({ allowed: true, reason: 'team' });
+        expect(versions).toBe(1);
+      })
+    ));
+  it('keeps the accepted denial through a failed refresh without caching a grant', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            hex(f.f.phone.publicKey),
+            rid(1),
+            { kind: 'machine', sharedWithTeam: false },
+            f.remote
+          )
+        );
+        yield* f.run(f.machine.read('fixture-machine', f.remote));
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(2), change, f.remote)
+        );
+        let attempts = 0;
+        const remote: SharingRemote = {
+          ...f.remote,
+          readHead: () =>
+            Effect.suspend(() => {
+              attempts++;
+              return Effect.fail(new Error('offline'));
+            }),
+        };
+        const authorize = () =>
+          f.run(f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', remote));
+        expect(yield* authorize()).toMatchObject({ allowed: false, reason: 'machine-not-shared' });
+        expect(yield* authorize()).toMatchObject({ allowed: false, reason: 'machine-not-shared' });
+        expect(attempts).toBe(1);
+        expect(f.machine.inspectCache('fixture-machine')).toEqual({
+          cachedPolicies: 0,
+          cachedExecutionGrants: 0,
+        });
+        expect(
+          yield* f.run(f.machine.knownDenial('fixture-machine', hex(f.bob.publicKey), 'project-a'))
+        ).toMatchObject({ allowed: false, reason: 'machine-not-shared' });
+        f.io.wall += 5_000;
+        f.io.mono += 5_000;
+        expect(
+          yield* f.run(
+            f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+          )
+        ).toMatchObject({ allowed: true, reason: 'team' });
+      })
+    ));
+  it('fences a denial refresh invalidated while its newly granted head is in flight', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            hex(f.f.phone.publicKey),
+            rid(1),
+            { kind: 'machine', sharedWithTeam: false },
+            f.remote
+          )
+        );
+        yield* f.run(f.machine.read('fixture-machine', f.remote));
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(2), change, f.remote)
+        );
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const remote: SharingRemote = {
+          ...f.remote,
+          readHead: (input) =>
+            Effect.gen(function* () {
+              const head = yield* f.remote.readHead(input);
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(release);
+              return head;
+            }),
+        };
+        const waiting = yield* Effect.forkChild(
+          f
+            .run(f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', remote))
+            .pipe(Effect.result)
+        );
+        yield* Deferred.await(entered);
+        f.machine.invalidate();
+        yield* Deferred.succeed(release, undefined);
+        const outcome = yield* Fiber.join(waiting);
+        expect(Result.isFailure(outcome) || !outcome.success.allowed).toBe(true);
+        expect(f.machine.inspectCache('fixture-machine')).toEqual({
+          cachedPolicies: 0,
+          cachedExecutionGrants: 0,
+        });
+        expect(
+          yield* f.run(
+            f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+          )
+        ).toMatchObject({ allowed: true, reason: 'team' });
+      })
+    ));
+  it('opens and updates the latest signed policy without fetching missing intermediate revisions', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        const generation = hex(f.f.phone.publicKey);
+        yield* f.run(f.owner.write('fixture-machine', generation, rid(1), change, f.remote));
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            generation,
+            rid(2),
+            { ...change, localProjectId: 'project-b' },
+            f.remote
+          )
+        );
+        yield* f.run(
+          f.owner.write(
+            'fixture-machine',
+            generation,
+            rid(3),
+            { ...change, localProjectId: 'project-c' },
+            f.remote
+          )
+        );
+        f.versions.delete(1);
+        f.versions.delete(2);
+        const cold = yield* f.make('cold-latest', f.bob.signer);
+        expect(yield* f.run(cold.read('fixture-machine', f.remote))).toMatchObject({
+          head: { revision: 3 },
+          projects: ['project-a', 'project-b', 'project-c'],
+        });
+        const writer = yield* f.make('cold-writer');
+        yield* f.run(
+          writer.write(
+            'fixture-machine',
+            generation,
+            rid(4),
+            { kind: 'session', sessionId: 'session-a', audience: 'team' as const, level: 'read' },
+            f.remote
+          )
+        );
+        expect(yield* f.run(cold.read('fixture-machine', f.remote))).toMatchObject({
+          head: { revision: 4 },
+          sessions: [{ sessionId: 'session-a', audience: 'team' as const, level: 'read' }],
+        });
+      })
+    ));
+  it('retains owner-only session grants across restart and revokes without opening execution', () =>
+    test((f) =>
+      Effect.gen(function* () {
+        const generation = hex(f.f.phone.publicKey);
+        const member = yield* f.make('member-session-reader', f.bob.signer);
+        const grant = {
+          kind: 'session',
+          sessionId: 'session-a',
+          audience: 'team' as const,
+          level: 'read',
+        } as const;
+        const denied = yield* Effect.result(
+          f.run(member.write('fixture-machine', generation, rid(1), grant, f.remote))
+        );
+        expect(Result.isFailure(denied) && denied.failure).toMatchObject({
+          code: 'machine_not_owned',
+        });
+        yield* f.run(f.owner.write('fixture-machine', generation, rid(1), grant, f.remote));
+        const reopened = yield* f.make('new-session-reader', f.bob.signer);
+        expect(yield* f.run(reopened.read('fixture-machine', f.remote))).toMatchObject({
+          canManage: false,
+          sharedWithTeam: false,
+          projects: [],
+          sessions: [{ sessionId: 'session-a', audience: 'team' as const, level: 'read' }],
+        });
+        const admission = yield* f.run(reopened.readSessionAccess('fixture-machine', f.remote));
+        expect(admission.isCurrent()).toBe(true);
+        // Another unchanged read must not invalidate an active poll.
+        yield* f.run(reopened.readSessionAccess('fixture-machine', f.remote));
+        expect(admission.isCurrent()).toBe(true);
+        expect(
+          yield* f.run(
+            f.machine.authorize('fixture-machine', hex(f.bob.publicKey), undefined, f.remote)
+          )
+        ).toMatchObject({
+          allowed: false,
+          reason: 'machine-not-shared',
+        });
+        yield* f.run(
+          f.owner.write('fixture-machine', generation, rid(2), { ...grant, level: null }, f.remote)
+        );
+        expect(yield* f.run(reopened.read('fixture-machine', f.remote))).toMatchObject({
+          sessions: [],
+          sharedWithTeam: false,
+        });
+        expect(admission.isCurrent()).toBe(false);
+        const withdrawn = yield* f.run(reopened.readSessionAccess('fixture-machine', f.remote));
+        expect(withdrawn.view.sessions).toEqual([]);
+        reopened.invalidate();
+        expect(withdrawn.isCurrent()).toBe(false);
+      })
+    ));
   it('reconciles a lost commit after restart using exact originals and no second publication', () =>
     test((f) =>
       Effect.gen(function* () {
@@ -492,11 +935,25 @@ it('does not rebase a confirmed CAS conflict or replace its original on retry', 
     })
   ));
 
-it('rejects stale policy signatures immediately after a known issuer revocation', () =>
+it('keeps the accepted sharing list usable after issuer revocation and re-signs it intact', () =>
   test((f) =>
     Effect.gen(function* () {
       yield* f.run(
         f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+      );
+      yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(98),
+          {
+            kind: 'session',
+            sessionId: 'retained-history',
+            audience: { userId: 'reader-account' },
+            level: 'read',
+          },
+          f.remote
+        )
       );
       expect(
         yield* f.run(
@@ -537,7 +994,7 @@ it('rejects stale policy signatures immediately after a known issuer revocation'
         yield* f.run(
           f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
         )
-      ).toMatchObject({ allowed: false, reason: 'policy-signer-ineligible' });
+      ).toMatchObject({ allowed: true });
       // A stale owner UI cannot use its old personal signer after ledger revocation.
       expect(
         Result.isFailure(
@@ -554,7 +1011,7 @@ it('rejects stale policy signatures immediately after a known issuer revocation'
           )
         )
       ).toBe(true);
-      expect(f.head()?.revision).toBe(1);
+      expect(f.head()?.revision).toBe(2);
       const secondHost = yield* f.make('second-personal', second.signer);
       expect(yield* f.run(secondHost.read('fixture-machine', f.remote))).toMatchObject({
         canManage: true,
@@ -562,7 +1019,7 @@ it('rejects stale policy signatures immediately after a known issuer revocation'
         needsResign: true,
         sharedWithTeam: true,
         projects: ['project-a'],
-        head: { revision: 1 },
+        head: { revision: 2 },
       });
       expect(yield* f.run(f.machine.read('fixture-machine', f.remote))).toMatchObject({
         canManage: false,
@@ -571,14 +1028,14 @@ it('rejects stale policy signatures immediately after a known issuer revocation'
       const denied = yield* Effect.result(
         f.run(f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote))
       );
-      expect(Result.isFailure(denied) || !denied.success.allowed).toBe(true);
+      expect(Result.isSuccess(denied) && denied.success.allowed).toBe(true);
       expect(
         yield* f.run(
           secondHost.write(
             'fixture-machine',
             hex(f.f.phone.publicKey),
             rid(2),
-            { kind: 'machine', sharedWithTeam: true },
+            { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true },
             f.remote
           )
         )
@@ -586,7 +1043,10 @@ it('rejects stale policy signatures immediately after a known issuer revocation'
       expect(yield* f.run(secondHost.read('fixture-machine', f.remote))).toMatchObject({
         signer: hex(second.publicKey),
         needsResign: false,
-        head: { revision: 2 },
+        sessions: [
+          { sessionId: 'retained-history', audience: { userId: 'reader-account' }, level: 'read' },
+        ],
+        head: { revision: 3 },
       });
       f.machine.invalidate();
       expect((yield* f.run(f.machine.read('fixture-machine', f.remote))).projects).toEqual([
@@ -748,12 +1208,9 @@ it('charges slow I/O to the cache lifetime and a backward clock never renews it'
 it('opens policy storage lazily and retries a failed open without touching content owners', () =>
   test((f) =>
     Effect.gen(function* () {
-      const directory = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'sharing-lazy-')));
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() => rm(directory, { recursive: true, force: true }))
-      );
+      const broken = f.backend.broken();
       const host = yield* makeLazyMachineSharingHost({
-        filename: join(directory, 'missing', 'policy.sqlite'),
+        store: broken.store,
         workspaceId: 'workspace',
         genesisHash: hex(f.view().genesis),
         signer: f.f.phone.signer,
@@ -775,10 +1232,7 @@ it('opens policy storage lazily and retries a failed open without touching conte
       expect(Result.isFailure(yield* Effect.result(host.read('fixture-machine', f.remote)))).toBe(
         true
       );
-      yield* Effect.promise(async () => {
-        const { mkdir } = await import('node:fs/promises');
-        await mkdir(join(directory, 'missing'));
-      });
+      yield* Effect.promise(broken.repair);
       expect((yield* host.read('fixture-machine', f.remote)).sharedWithTeam).toBe(false);
     })
   ));
@@ -1230,3 +1684,104 @@ for (const revocation of ['member', 'device', 'generation', 'withdrawal'] as con
       })
     ));
 }
+
+it('skips remote.readRequest on fresh writes while reconciling retained pending writes via readRequest', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      let readRequests = 0;
+      const countedRemote: SharingRemote = {
+        ...f.remote,
+        readRequest: (input) => {
+          readRequests++;
+          return f.remote.readRequest(input);
+        },
+      };
+      // Fresh write succeeds with 0 readRequest calls.
+      const fresh = yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(10),
+          { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true },
+          countedRemote
+        )
+      );
+      expect(fresh.status).toBe('saved');
+      expect(readRequests).toBe(0);
+      expect(f.io.commits).toBe(1);
+
+      // Interrupted write retains a pending request, then retry reconciles via readRequest.
+      f.io.lost = true;
+      const pending = yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(11),
+          { kind: 'machine', sharedWithTeam: true },
+          countedRemote
+        )
+      );
+      expect(pending.status).toBe('pending');
+      expect(readRequests).toBe(0);
+      expect(f.io.commits).toBe(2);
+
+      f.io.lost = false;
+      const reconciled = yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          hex(f.f.phone.publicKey),
+          rid(11),
+          { kind: 'machine', sharedWithTeam: true },
+          countedRemote
+        )
+      );
+      expect(reconciled.status).toBe('saved');
+      expect(readRequests).toBe(1);
+      expect(f.io.commits).toBe(2);
+    })
+  ));
+
+it('overlaps refreshLedger and readHead concurrently during read', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      const refreshEntered = yield* Deferred.make<void>();
+      const headEntered = yield* Deferred.make<void>();
+      const releaseRefresh = yield* Deferred.make<void>();
+      const releaseHead = yield* Deferred.make<void>();
+      const concurrentHost = yield* makeMachineSharingHost({
+        store: f.backend.storeFor('concurrent-read'),
+        workspaceId: 'workspace',
+        genesisHash: hex(f.view().genesis),
+        signer: f.f.owner.signer,
+        ledger: () => Effect.sync(() => f.view()),
+        refreshLedger: () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(refreshEntered, undefined);
+            yield* Deferred.await(releaseRefresh);
+          }),
+        admissionHistory: () =>
+          Effect.succeed(f.f.records().map((record, index) => ({ record, length: index + 1 }))),
+        readEpochKey: () => Effect.succeed(f.f.secret),
+        credential: 'synthetic-secret',
+      });
+      const overlappingRemote: SharingRemote = {
+        ...f.remote,
+        readHead: (input) =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(headEntered, undefined);
+            yield* Deferred.await(releaseHead);
+            return yield* f.remote.readHead(input);
+          }),
+      };
+      const fiber = yield* Effect.forkChild(
+        f.run(concurrentHost.read('fixture-machine', overlappingRemote))
+      );
+      // Both refreshLedger and readHead must enter before either is released.
+      yield* Deferred.await(refreshEntered);
+      yield* Deferred.await(headEntered);
+      yield* Deferred.succeed(releaseRefresh, undefined);
+      yield* Deferred.succeed(releaseHead, undefined);
+      const result = yield* Fiber.join(fiber);
+      expect(result.head).toBeNull();
+    })
+  ));

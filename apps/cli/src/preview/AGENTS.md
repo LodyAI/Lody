@@ -4,8 +4,9 @@
 
 [apps/cli/AGENTS.md](../../AGENTS.md) applies.
 
-- Quick Tunnel replacement is in progress; target contract:
-  [Quick Tunnel preview](../../../../specs/quick-tunnel-preview.md).
+- Quick Tunnels are the only remote preview transport; contract:
+  [Quick Tunnel preview](../../../../specs/quick-tunnel-preview.md), rationale and
+  evidence: [decision](../../../../.agents/notes/implemented/architecture/2026-09-21-quick-tunnel-preview.md).
   `preview-http.ts` owns shared target/path guards, header conversion and optional
   HTML injection; these helpers must not depend on a transport implementation.
 - `cloudflared-manifest.json` is the only version/checksum source. The binary helper
@@ -45,8 +46,7 @@
 - `PreviewService` now creates only `QuickTunnelSession` remote owners. The owner
   releases its proxy and child on cancellation, failed readiness, idle expiry or
   process exit. Its `closed` result joins cleanup; `cleanupFailed` distinguishes resource failure from a network error.
-  Lifecycle writes are serialized per Session; revoke cancels acquisition before
-  joining that queue. One-hour activity deadlines stay in memory. Machine slots
+  Lifecycle writes serialize per Session; revoke cancels acquisition first; only `stopProcess` kills user loopback listeners. One-hour activity deadlines stay in memory. Machine slots
   span workspaces in the singleton Worker, never a PID registry on disk.
 - Ordinary remote create/revoke/status must pass `authorizeRemoteControl` before touching
   endpoint state. Verified encrypted feature ingress instead uses the existing fresh

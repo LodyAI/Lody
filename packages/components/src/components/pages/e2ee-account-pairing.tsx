@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { Result } from 'effect';
 import { ScanLine } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PAIRING_URL_PREFIX, parsePairingString } from '@lody/e2ee-core/protocol';
 import {
@@ -44,11 +44,11 @@ const POLL_MS = 3000;
 const time = (value: number) =>
   new Date(value).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 /** QR payload of a host-supplied, possibly grouped pairing string. */
-const qrPayload = (pairingString: string) =>
+export const qrPayload = (pairingString: string) =>
   PAIRING_URL_PREFIX + pairingString.replace(/[\s-]/g, '');
 /** Checks a typed or scanned code locally, before any network request; the host
  * parses it again and owns the secret. The decoded bytes are wiped at once. */
-function localCodeError(input: string): string | null {
+export function localCodeError(input: string): string | null {
   const parsed = parsePairingString(input);
   if (Result.isSuccess(parsed)) {
     parsed.success.fill(0);
@@ -57,29 +57,58 @@ function localCodeError(input: string): string | null {
   return `e2ee.accountPair.code.${parsed.failure.code}`;
 }
 /** Host refusals become specific messages; anything else keeps the custody wording. */
-function failureKey(error: unknown) {
+export function failureKey(error: unknown) {
   const code = accountPairingErrorCode(error);
   if (code) return `e2ee.accountPair.error.${code}`;
   return (
     custodyFailureMessage(classifyE2eeControlFailure(error).kind) ?? 'e2ee.accountPair.error.failed'
   );
 }
-/** Runs `tick` every `ms` while `active`, never overlapping; the latest `tick` is used. */
-function usePoll(active: boolean, ms: number, tick: () => Promise<void>) {
+/** Runs `tick` every `ms` while `active`, never overlapping; the latest `tick` is used.
+ * An optional `subscribe` hint runs it at once on a change; the poll stays the fallback,
+ * and the hint is released whenever the poll stops. */
+function usePoll(
+  active: boolean,
+  ms: number,
+  tick: () => Promise<void>,
+  subscribe?: (changed: () => void) => () => void
+) {
   const latest = useRef(tick);
   latest.current = tick;
   useEffect(() => {
     if (!active) return undefined;
     let running = false;
-    const timer = setInterval(() => {
-      if (running) return;
+    let again = false;
+    let stopped = false;
+    const run = () => {
+      if (running) {
+        again = true;
+        return;
+      }
       running = true;
       void latest.current().finally(() => {
         running = false;
+        if (again && !stopped) {
+          again = false;
+          run();
+        }
       });
+    };
+    const timer = setInterval(() => {
+      if (!running) run();
     }, ms);
-    return () => clearInterval(timer);
-  }, [active, ms]);
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribe?.(run);
+    } catch {
+      /* Live hints are optional; the poll still reads the same verified state. */
+    }
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      unsubscribe?.();
+    };
+  }, [active, ms, subscribe]);
 }
 function useLive() {
   const live = useRef(true);
@@ -94,7 +123,12 @@ function useLive() {
 
 type RequestRuntime = Pick<
   E2eeWorkspaceRuntime,
-  'requestAccountPairing' | 'accountPairingRequest' | 'cancelAccountPairing'
+  | 'requestAccountPairing'
+  | 'accountPairingRequest'
+  | 'subscribeAccountPairingRequest'
+  | 'cancelAccountPairing'
+  | 'openBrowserRecovery'
+  | 'requirePersonalComputer'
 >;
 
 /**
@@ -110,6 +144,8 @@ export function E2eeAccountPairingRequest(props: {
   onJoined: () => void;
   workspaceId?: string;
   pollMs?: number;
+  /** Consent-first browser choice; approval then uses the existing automatic flow. */
+  onRequestApproval?: () => void;
 }) {
   const { runtime } = props;
   const { t } = useTranslation();
@@ -118,6 +154,8 @@ export function E2eeAccountPairingRequest(props: {
   const [phase, setPhase] = useState<'loading' | 'idle' | 'busy' | 'ready'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
+  const [personalComputer, setPersonalComputer] = useState(false);
+  const personalRequired = Boolean(runtime.requirePersonalComputer || runtime.openBrowserRecovery);
   const [input, setInput] = useState('');
   const joined = useRef(false);
   const accept = (next: E2eeAccountPairingRequestState | null) => {
@@ -143,9 +181,21 @@ export function E2eeAccountPairingRequest(props: {
       setPhase((current) => (current === 'busy' ? (state ? 'ready' : 'idle') : current));
     }
   };
-  const start = (pairingString?: string) =>
-    run(async () => accept(await runtime.requestAccountPairing!({ pairingString })));
+  const start = (pairingString?: string) => {
+    if (personalRequired && !personalComputer) return Promise.resolve();
+    if (props.onRequestApproval) {
+      props.onRequestApproval();
+      return Promise.resolve();
+    }
+    return run(async () => accept(await runtime.requestAccountPairing!({ pairingString })));
+  };
   useEffect(() => {
+    if (props.onRequestApproval) {
+      setPhase('idle');
+      return undefined;
+    }
+    // Approver-only portable hosts must not start an unsupported requester.
+    if (!runtime.requestAccountPairing) return undefined;
     let cancelled = false;
     void (async () => {
       try {
@@ -165,6 +215,14 @@ export function E2eeAccountPairingRequest(props: {
     // Recovery and automatic start happen once per mounted host.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtime]);
+  const lookupId = state?.status === 'waiting' ? state.lookupId : undefined;
+  const subscribeRequest = useMemo(
+    () =>
+      lookupId && runtime.subscribeAccountPairingRequest
+        ? (changed: () => void) => runtime.subscribeAccountPairingRequest!(lookupId, changed)
+        : undefined,
+    [lookupId, runtime]
+  );
   usePoll(
     phase === 'ready' && state?.status === 'waiting' && Boolean(runtime.accountPairingRequest),
     props.pollMs ?? POLL_MS,
@@ -175,7 +233,8 @@ export function E2eeAccountPairingRequest(props: {
       } catch (failure) {
         if (live.current) setError(failureKey(failure));
       }
-    }
+    },
+    subscribeRequest
   );
   const restart = () =>
     run(async () => {
@@ -191,14 +250,53 @@ export function E2eeAccountPairingRequest(props: {
   if (!runtime.requestAccountPairing) return null;
   const terminal = state && state.status !== 'waiting' && state.status !== 'joined';
   return (
-    <Card.Root data-testid="e2ee-account-pairing-request">
+    <Card.Root data-testid="e2ee-account-pairing-request" data-e2ee-pairing-surface="">
       <Card.Title>{t('e2ee.accountPair.request.title')}</Card.Title>
       {phase === 'idle' && !state && (
         <>
-          <p {...stylex.props(styles.muted)}>{t('e2ee.accountPair.request.web')}</p>
+          <p {...stylex.props(styles.muted)}>
+            {t(personalRequired ? 'e2ee.browserUnlock.help' : 'e2ee.accountPair.request.web')}
+          </p>
           <div {...stylex.props(styles.actions)}>
-            <Button onClick={() => void start()}>{t('e2ee.accountPair.request.start')}</Button>
+            <Button disabled={personalRequired && !personalComputer} onClick={() => void start()}>
+              {t('e2ee.accountPair.request.start')}
+            </Button>
           </div>
+        </>
+      )}
+      {personalRequired && state?.status !== 'joined' && (
+        <>
+          <label {...stylex.props(styles.actions)}>
+            <Checkbox
+              checked={personalComputer}
+              aria-label={t('e2ee.browserUnlock.personal')}
+              onCheckedChange={(checked) => setPersonalComputer(checked === true)}
+            />
+            {t('e2ee.browserUnlock.personal')}
+          </label>
+          <p {...stylex.props(styles.muted)}>{t('e2ee.browserUnlock.risk')}</p>
+          {runtime.openBrowserRecovery && props.workspaceId && (
+            <Button
+              variant="secondary"
+              disabled={!personalComputer || phase === 'busy' || phase === 'loading'}
+              onClick={() =>
+                void run(async () => {
+                  if (
+                    props.workspaceId &&
+                    (await runtime.openBrowserRecovery!(props.workspaceId))
+                  ) {
+                    if (live.current && !joined.current) {
+                      joined.current = true;
+                      props.onJoined();
+                    }
+                  }
+                  if (live.current) setPhase(state ? 'ready' : 'idle');
+                })
+              }
+            >
+              {t('e2ee.browserUnlock.open')}
+            </Button>
+          )}
         </>
       )}
       {state?.status === 'waiting' && state.pairingString && (
@@ -251,7 +349,12 @@ export function E2eeAccountPairingRequest(props: {
             }}
           />
           <div {...stylex.props(styles.actions)}>
-            <Button disabled={!input.trim() || phase === 'busy'} onClick={enterCode}>
+            <Button
+              disabled={
+                !input.trim() || phase === 'busy' || (personalRequired && !personalComputer)
+              }
+              onClick={enterCode}
+            >
               {t('e2ee.accountPair.request.useCode')}
             </Button>
           </div>
@@ -259,11 +362,15 @@ export function E2eeAccountPairingRequest(props: {
       )}
       <div {...stylex.props(styles.actions)}>
         {state && state.status !== 'joined' && (
-          <Button variant="secondary" disabled={phase === 'busy'} onClick={() => void restart()}>
+          <Button
+            variant="secondary"
+            disabled={phase === 'busy' || (personalRequired && !personalComputer)}
+            onClick={() => void restart()}
+          >
             {t('e2ee.accountPair.request.restart')}
           </Button>
         )}
-        {!entering && state?.status !== 'joined' && (
+        {!props.onRequestApproval && !entering && state?.status !== 'joined' && (
           <Button variant="ghost" disabled={phase === 'busy'} onClick={() => setEntering(true)}>
             {t('e2ee.accountPair.request.haveCode')}
           </Button>
@@ -293,11 +400,15 @@ export function E2eeAccountPairingKeyRetry(props: { onRetry: () => void }) {
 
 type ApproveRuntime = Pick<
   E2eeWorkspaceRuntime,
-  'accountPairingCode' | 'inspectAccountPairing' | 'approveAccountPairing' | 'declineAccountPairing'
+  | 'accountPairingCode'
+  | 'subscribeAccountPairingApproval'
+  | 'inspectAccountPairing'
+  | 'approveAccountPairing'
+  | 'declineAccountPairing'
 >;
 type ApprovePhase =
   | { kind: 'enter' }
-  | { kind: 'showing'; pairingString: string; expiresAt: number }
+  | { kind: 'showing'; pairingString: string; expiresAt: number; lookupId?: string }
   | { kind: 'confirm'; pairingString: string; preview: E2eeAccountPairingPreview }
   | { kind: 'done'; result: E2eeAccountPairingApproval; preview: E2eeAccountPairingPreview }
   | { kind: 'declined' };
@@ -351,6 +462,15 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
     setInput(scanned);
     check(scanned);
   });
+  const shownLookupId = phase.kind === 'showing' ? phase.lookupId : undefined;
+  const subscribeApproval = useMemo(
+    () =>
+      shownLookupId && runtime.subscribeAccountPairingApproval
+        ? (changed: () => void) =>
+            runtime.subscribeAccountPairingApproval!(shownLookupId, changed)
+        : undefined,
+    [shownLookupId, runtime]
+  );
   usePoll(
     phase.kind === 'showing' && Boolean(runtime.inspectAccountPairing),
     props.pollMs ?? POLL_MS,
@@ -362,7 +482,8 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
       } catch (failure) {
         if (live.current) setError(failureKey(failure));
       }
-    }
+    },
+    subscribeApproval
   );
   if (!runtime.inspectAccountPairing || !runtime.approveAccountPairing) return null;
   const reset = () => {
@@ -371,7 +492,7 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
     setError(null);
   };
   return (
-    <Card.Root data-testid="e2ee-account-pairing-approve">
+    <Card.Root data-testid="e2ee-account-pairing-approve" data-e2ee-pairing-surface="">
       <Card.Title>{t('e2ee.accountPair.approve.title')}</Card.Title>
       {phase.kind === 'enter' && (
         <>

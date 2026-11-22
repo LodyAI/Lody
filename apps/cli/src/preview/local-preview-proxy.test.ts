@@ -1008,6 +1008,36 @@ describe('LocalPreviewProxyManager', () => {
     }
   });
 
+  it('loads a nested module after a path-relative redirect on a remote endpoint', async () => {
+    const server = http.createServer((request, response) => {
+      if (request.url === '/build/import.js')
+        response.writeHead(302, { location: './chunks/entry.mjs?v=2' }).end();
+      else if (request.url === '/build/chunks/entry.mjs?v=2')
+        response.writeHead(200, { 'content-type': 'text/javascript' }).end('export default 42');
+      else response.writeHead(404).end();
+    });
+    servers.push(server);
+    const port = await listenTestIPv4(server, 0);
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'relative-remote-module' as SessionId;
+    const endpoint = await manager.acquire({
+      sessionId,
+      target: { protocol: 'http', host: '127.0.0.1', port, path: '/build/import.js' },
+      remote: true,
+    });
+    const viewer = manager.bindViewerOrigin(sessionId, 'https://test-preview.trycloudflare.com');
+    const redirect = await fetch(endpoint.viewerUrl, { redirect: 'manual' });
+    expect(redirect.status).toBe(302);
+    const location = new URL(redirect.headers.get('location')!);
+    expect(location.origin).toBe(new URL(viewer.viewerUrl).origin);
+    const asset = await fetch(new URL(location.pathname + location.search, endpoint.viewerUrl), {
+      headers: { referer: viewer.viewerUrl },
+    });
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toBe('export default 42');
+  });
+
   it('rejects redirects that leave the bound target origin', async () => {
     const { server, target } = await listenHtmlServer();
     servers.push(server);

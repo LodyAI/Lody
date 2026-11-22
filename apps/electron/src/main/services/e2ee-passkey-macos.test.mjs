@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createRequire } from 'node:module'
 import { E2eePasskeyCancelled } from '@lody/platform/e2ee-passkey'
 import { base64url, makeMacosPasskeyPort } from './e2ee-passkey-macos.mts'
 
 const request = {
-  rpId: 'vault.lody.ai',
+  rpId: 'lody.ai',
   prfInput: new Uint8Array([1]),
   allowCredentialIds: ['AQID']
 }
@@ -43,7 +44,7 @@ void test('registration passes exactly what the ceremony needs and reports PRF a
     window: () => Buffer.from('window')
   })
   const created = await port.register({
-    rpId: 'vault.lody.ai',
+    rpId: 'lody.ai',
     userHandle: new Uint8Array(32).fill(7),
     userName: 'Lody recovery vault',
     prfInput: new Uint8Array([9]),
@@ -80,3 +81,74 @@ void test('an assertion keeps a missing result missing and maps a dismissed prom
   dismiss = true
   await assert.rejects(port.authenticate(request), E2eePasskeyCancelled)
 })
+
+// Opt in after building the addon; ordinary cross-platform runs need no native binary.
+const nativeAddon = process.env.LODY_PASSKEY_TEST_ADDON
+void test(
+  'native passkey input validation fails before accessing a window',
+  {
+    skip: !nativeAddon
+  },
+  async () => {
+    const native = createRequire(import.meta.url)(nativeAddon)
+    for (const method of ['register', 'authenticate']) {
+      const valid = {
+        window: Buffer.alloc(0),
+        rpId: 'lody.ai',
+        prfInput: new Uint8Array([1]),
+        userName: 'Synthetic recovery vault',
+        userHandle: new Uint8Array(32),
+        excludeCredentialIds: [],
+        allowCredentialIds: []
+      }
+      for (const input of [undefined, null, 1, {}, { window: {} }]) {
+        assert.throws(() => native[method](input), TypeError)
+      }
+      assert.throws(() => native[method](), TypeError)
+      const fields = {
+        window: [null, {}, new Uint16Array([1]), new DataView(new ArrayBuffer(8))],
+        rpId: [null, 1, {}],
+        prfInput: [null, {}, new Uint16Array([1])],
+        [method === 'register' ? 'excludeCredentialIds' : 'allowCredentialIds']: [
+          null,
+          {},
+          [null],
+          [new Uint16Array([1])],
+          new Array(1)
+        ],
+        ...(method === 'register' ? { userName: [null, 1], userHandle: [null, {}] } : {})
+      }
+      for (const [field, values] of Object.entries(fields)) {
+        for (const value of values) {
+          assert.throws(() => native[method]({ ...valid, [field]: value }), TypeError, field)
+        }
+      }
+      // Valid empty byte buffers and arrays reach the ordinary unavailable path.
+      await assert.rejects(native[method](valid), { code: 'unavailable' })
+      const error = new Error('synthetic getter failure')
+      for (const field of Object.keys(fields)) {
+        const input = { ...valid }
+        Object.defineProperty(input, field, {
+          get() {
+            throw error
+          }
+        })
+        assert.throws(
+          () => native[method](input),
+          (caught) => caught === error
+        )
+      }
+      const ids = []
+      Object.defineProperty(ids, 0, {
+        get() {
+          throw error
+        }
+      })
+      const field = method === 'register' ? 'excludeCredentialIds' : 'allowCredentialIds'
+      assert.throws(
+        () => native[method]({ ...valid, [field]: ids }),
+        (caught) => caught === error
+      )
+    }
+  }
+)

@@ -1,11 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcpSessionNotification } from '@lody/shared';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
+import os from 'node:os';
 
 import type { Logger } from '@/utils/logger';
 
 const mocks = vi.hoisted(() => ({
   startLocalAcpAgent: vi.fn(),
-  shutdownLocalAcpAgent: vi.fn(async () => {}),
+  shutdownLocalAcpAgent: vi.fn(
+    async (_options: import('./acp-runner').ShutdownLocalAcpAgentOptions) => {}
+  ),
 }));
 
 vi.mock('./acp-runner', () => ({
@@ -205,6 +209,213 @@ describe('builtin Codex isolated title configuration', () => {
       titleConfig: configured ? { configOptionValues: configured } : undefined,
     });
     expect(title).toBe(expected);
+  });
+});
+
+describe('builtin Codex title deadline', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    { platform: 'linux', blocked: 'prompt' },
+    { platform: 'win32', blocked: 'prompt' },
+    { platform: 'win32', blocked: 'config' },
+  ] as const)(
+    'falls back and releases the $platform process tree when $blocked does not return',
+    async ({ platform, blocked }) => {
+      const { shutdownLocalAcpAgent } =
+        await vi.importActual<typeof import('./acp-runner')>('./acp-runner');
+      const table = new FakeProcessTable(platform);
+      const child = table.api.spawn('codex-acp', [], { detached: true });
+      const pid = child.pid ?? -1;
+      const descendant = table.addDescendant(pid);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let promptStarted = false;
+      let promptSignal: AbortSignal | undefined;
+      const configOptions = [
+        {
+          id: 'model',
+          name: 'Model',
+          type: 'select' as const,
+          category: 'model' as const,
+          currentValue: 'title-model',
+          options: [{ value: 'title-model', name: 'Title model' }],
+        },
+      ];
+      mocks.startLocalAcpAgent.mockImplementationOnce(async () => {
+        // Start the fake clock after the real git setup and before the title deadline.
+        vi.useFakeTimers();
+        return {
+          agentProcess: child,
+          acpSessionId: SESSION_ID,
+          sessionResponse: { sessionId: SESSION_ID, configOptions },
+          client: {
+            setSessionConfigOption: async () => {
+              if (blocked === 'config') {
+                entered.resolve();
+                await release.promise;
+              }
+              return configOptions;
+            },
+            prompt: async (_id: string, _prompt: unknown, options: { signal: AbortSignal }) => {
+              promptStarted = true;
+              promptSignal = options.signal;
+              entered.resolve();
+              await release.promise;
+              return { stopReason: 'end_turn' };
+            },
+            closeSession: async () => true,
+          },
+        };
+      });
+      mocks.shutdownLocalAcpAgent.mockImplementationOnce(async (options) => {
+        await shutdownLocalAcpAgent({ ...options, nodeProcess: table.api });
+      });
+
+      const result = generateTitleIsolated({
+        cliType: 'builtin',
+        agentType: 'codex',
+        taskPrompt: 'Original task',
+        titleConfig: { configOptionValues: { model: 'title-model' } },
+        logger: createSilentLogger(),
+      });
+      await entered.promise;
+      expect(table.isAlive(pid)).toBe(true);
+      expect(table.isAlive(descendant)).toBe(true);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(await result).toBe('Original task');
+      expect(table.isAlive(pid)).toBe(false);
+      expect(table.isAlive(descendant)).toBe(false);
+      if (blocked === 'prompt') expect(promptSignal?.aborted).toBe(true);
+
+      // A late configuration response cannot dispatch a prompt on a retired process.
+      release.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      if (blocked === 'config') expect(promptStarted).toBe(false);
+    }
+  );
+
+  it('ends a real isolated process when its title prompt never returns', async () => {
+    const { spawnAcpProcess, shutdownLocalAcpAgent } =
+      await vi.importActual<typeof import('./acp-runner')>('./acp-runner');
+    const child = spawnAcpProcess({
+      cliType: 'custom',
+      agentType: 'synthetic',
+      workdir: os.tmpdir(),
+      env: process.env,
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write("ready"); process.stdin.resume()'],
+    });
+    const ready = new Promise<void>((resolve, reject) => {
+      child.stdout?.once('data', () => resolve());
+      child.once('error', reject);
+    });
+    const entered = Promise.withResolvers<void>();
+    const deadline = Promise.withResolvers<() => void>();
+    const realSetTimeout = globalThis.setTimeout;
+    const timerSpy = vi
+      .spyOn(globalThis, 'setTimeout')
+      .mockImplementation((handler, delay, ...args) => {
+        if (delay === 5 * 60_000 && typeof handler === 'function') {
+          deadline.resolve(() => handler(...args));
+          return realSetTimeout(() => {}, delay).unref();
+        }
+        return realSetTimeout(handler, delay, ...args);
+      });
+    const configOptions = [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select' as const,
+        category: 'model' as const,
+        currentValue: 'title-model',
+        options: [{ value: 'title-model', name: 'Title model' }],
+      },
+    ];
+    mocks.startLocalAcpAgent.mockImplementationOnce(async () => {
+      await ready;
+      return {
+        agentProcess: child,
+        acpSessionId: SESSION_ID,
+        sessionResponse: { sessionId: SESSION_ID, configOptions },
+        client: {
+          setSessionConfigOption: async () => configOptions,
+          prompt: async () => {
+            entered.resolve();
+            return await new Promise(() => {});
+          },
+          closeSession: async () => true,
+        },
+      };
+    });
+    mocks.shutdownLocalAcpAgent.mockImplementationOnce(shutdownLocalAcpAgent);
+
+    try {
+      const result = generateTitleIsolated({
+        cliType: 'builtin',
+        agentType: 'codex',
+        taskPrompt: 'Original task',
+        titleConfig: { configOptionValues: { model: 'title-model' } },
+        logger: createSilentLogger(),
+      });
+      await entered.promise;
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+      (await deadline.promise)();
+      expect(await result).toBe('Original task');
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    } finally {
+      timerSpy.mockRestore();
+      if (child.exitCode === null && child.signalCode === null) {
+        await shutdownLocalAcpAgent({
+          agentProcess: child,
+          logger: createSilentLogger(),
+          sessionLabel: 'title-deadline-test',
+          exitTimeoutMs: 3000,
+        });
+      }
+    }
+  }, 15_000);
+
+  it('does not apply the Codex deadline to another Provider', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let finished = false;
+    mocks.startLocalAcpAgent.mockImplementationOnce(
+      async (options: { onUpdateMessage: (message: AcpSessionNotification) => void }) => {
+        vi.useFakeTimers();
+        return {
+          agentProcess: {} as never,
+          acpSessionId: SESSION_ID,
+          sessionResponse: { sessionId: SESSION_ID, configOptions: [] },
+          client: {
+            prompt: async () => {
+              entered.resolve();
+              await release.promise;
+              options.onUpdateMessage(agentChunk('Provider title'));
+              return { stopReason: 'end_turn' };
+            },
+          },
+        };
+      }
+    );
+    const result = generateTitleIsolated({
+      cliType: 'registry',
+      agentType: 'pi-acp',
+      taskPrompt: 'Original task',
+      logger: createSilentLogger(),
+    }).finally(() => {
+      finished = true;
+    });
+    await entered.promise;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(finished).toBe(false);
+    release.resolve();
+    expect(await result).toBe('Provider title');
   });
 });
 

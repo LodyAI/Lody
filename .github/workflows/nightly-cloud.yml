@@ -1,0 +1,790 @@
+name: Nightly cloud clients
+on:
+  schedule:
+    - cron: 0 18 * * *
+  workflow_dispatch: null
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: lody-desktop-nightly
+  queue: max
+  cancel-in-progress: false
+jobs:
+  candidate:
+    if:
+      github.repository == 'LodyAI/Lody' && github.ref == 'refs/heads/main' && vars.CLIENT_RELEASES_ENABLED == 'true' &&
+      vars.NIGHTLY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      private-sha: ${{ steps.candidate.outputs.private-sha }}
+      oss-sha: ${{ steps.candidate.outputs.oss-sha }}
+      publish: ${{ steps.candidate.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: recursive
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+      - name: Restore original candidate on retry
+        if: github.run_attempt > 1
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-candidate-${{ github.run_id }}
+          path: candidate
+      - name: Admit and freeze source pair
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_BUILD_NUMBER_OFFSET: ${{ vars.NIGHTLY_BUILD_NUMBER_OFFSET }}
+        run: |-
+          mkdir -p candidate
+          node .github/scripts/nightly-cloud-source.mjs candidate/candidate.json
+      - name: Preserve immutable candidate
+        if: github.run_attempt == 1 && steps.candidate.outputs.publish == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-candidate-${{ github.run_id }}
+          path: candidate/candidate.json
+          if-no-files-found: error
+          retention-days: 30
+  prepare:
+    needs:
+      - candidate
+      - validate
+    runs-on: ubuntu-latest
+    environment: cloud-nightly
+    outputs:
+      publish: ${{ steps.prepare.outputs.publish }}
+      bootstrap: ${{ steps.prepare.outputs.bootstrap }}
+      version: ${{ steps.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-candidate-${{ github.run_id }}
+          path: candidate
+      - name: Ensure AWS CLI
+        shell: bash
+        run: bash .github/scripts/setup-aws-cli.sh
+      - name: Recover interrupted publication and check candidate
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_NIGHTLY_BUCKET: ${{ vars.R2_NIGHTLY_BUCKET }}
+          R2_NIGHTLY_PREFIX: ${{ vars.R2_NIGHTLY_PREFIX }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          NIGHTLY_ALLOW_BOOTSTRAP: ${{ vars.NIGHTLY_ALLOW_BOOTSTRAP }}
+          NIGHTLY_MINIMUM_STABLE_VERSION: ${{ vars.NIGHTLY_MINIMUM_STABLE_VERSION }}
+          STABLE_ELECTRON_VERSION_URL: ${{ vars.STABLE_ELECTRON_VERSION_URL }}
+          VITE_ELECTRON_UPDATE_URL: ${{ vars.ELECTRON_UPDATE_URL_NIGHTLY }}
+        run: node apps/electron/nightly-release.mjs prepare candidate/candidate.json
+    if: needs.candidate.outputs.publish == 'true'
+  validate:
+    needs: candidate
+    if: needs.candidate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+      LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Install validation dependencies
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+      - name: Run independent validation
+        env:
+          CHECK: ${{ matrix.check }}
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 3GiB
+        shell: bash
+        run: >
+          set -euo pipefail
+
+          case "$CHECK" in
+            lint) corepack pnpm check:quick ;;
+            typecheck-desktop-cli)
+              corepack pnpm --dir apps/cli prepare:acp-adapters
+              corepack pnpm -r --no-sort --workspace-concurrency=2 --filter '!{**/acp-extension-*}' --filter '!./apps/mobile-capacitor' run typecheck
+              ;;
+            typecheck-mobile) corepack pnpm --dir apps/mobile-capacitor typecheck ;;
+            *) exit 1 ;;
+          esac
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - lint
+          - typecheck-desktop-cli
+          - typecheck-mobile
+    name: validate (${{ matrix.check }})
+  build:
+    needs:
+      - candidate
+      - prepare
+      - validate
+    if: needs.prepare.outputs.publish == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: mac
+          - os: windows-2022
+            target: win
+          - os: ubuntu-latest
+            target: linux
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+    runs-on: ${{ matrix.os }}
+    environment: cloud-nightly
+    env:
+      LODY_ENV: production
+      LODY_RELEASE_CHANNEL: nightly
+      LODY_NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+      VITE_LODY_ENV: production
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
+      VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL }}
+      VITE_SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SESSION_SHARE_ORIGIN: ${{ vars.VITE_SESSION_SHARE_ORIGIN }}
+      VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
+      VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
+      VITE_ELECTRON_UPDATE_URL: ${{ vars.ELECTRON_UPDATE_URL_NIGHTLY }}
+      VITE_ELECTRON_UPDATE_CHANNEL: nightly
+      ELECTRON_UPDATE_CHANNEL: nightly
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      NODE_OPTIONS: --max-old-space-size=6144
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-candidate-${{ github.run_id }}
+          path: candidate
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+      - name: Install exact composition dependencies
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+      - name: Export frozen identity
+        id: identity
+        run: |
+          node apps/electron/nightly-candidate.mjs export candidate/candidate.json
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import {resolveElectronReleaseProfile} from "./apps/electron/release-profile.mjs";
+          const candidate=JSON.parse(fs.readFileSync("candidate/candidate.json"));
+          Object.assign(process.env,{LODY_SOURCE_SHA:candidate.sourceSha??candidate.ossSha,LODY_NIGHTLY_BUILD_NUMBER:candidate.buildNumber,LODY_BUILD_RUN_ID:candidate.runId,LODY_BUILD_TIMESTAMP:candidate.builtAt});
+          const {version}=JSON.parse(fs.readFileSync("apps/electron/package.json"));
+          const profile=resolveElectronReleaseProfile({environment:"production",baseVersion:version});
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`version=${profile.version}\nnative-version=${profile.nativeVersion}\nupdate-url=${process.env.VITE_ELECTRON_UPDATE_URL.replace(/\/$/u, "")}\n`);
+          NODE
+      - name: Find immutable platform artifact from an earlier attempt
+        id: cached
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: nightly-build-${{ github.run_id }}-${{ matrix.target }}
+        run: >
+          set -euo pipefail
+
+          artifact_id="$(gh api --paginate
+          "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" |
+            jq -s --arg name "${ARTIFACT_NAME}" '[.[].artifacts[] | select(.name == $name)] | if length == 0 then 0 elif length != 1 or .[0].expired then error("Ambiguous or expired build artifact") else .[0].id end')"
+          echo "id=${artifact_id}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.cached.outputs.id != '0'
+        with:
+          artifact-ids: ${{ steps.cached.outputs.id }}
+          path: release-assets
+          merge-multiple: true
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+        if: steps.cached.outputs.id == '0'
+      - name: Build native Windows and Linux installers
+        if: steps.cached.outputs.id == '0' && matrix.target != 'mac'
+        env:
+          TARGET: ${{ matrix.target }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+        run: |
+          corepack pnpm --dir apps/electron build
+          corepack pnpm --dir apps/electron "package:nightly:${TARGET}"
+          node apps/electron/nightly-artifacts.mjs stage "$TARGET" candidate/candidate.json release-assets
+      - name: Build, sign and notarize directly on native macOS
+        if: steps.cached.outputs.id == '0' && matrix.target == 'mac'
+        shell: bash
+        env:
+          SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          CSC_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: >
+          set -euo pipefail
+
+          for key in CSC_NAME CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            test -n "${!key}" || { echo "Missing ${key}" >&2; exit 1; }
+          done
+
+          umask 077
+
+          key_file="$(mktemp "${RUNNER_TEMP}/nightly-notary.XXXXXX")"
+
+          trap 'rm -f "${key_file}"' EXIT
+
+          printf '%s' "${APPLE_API_KEY_P8}" > "${key_file}"
+
+          unset APPLE_API_KEY_P8
+
+          APPLE_API_KEY="${key_file}" bash .github/scripts/observe-macos-build.sh corepack pnpm --dir apps/electron
+          build && APPLE_API_KEY="${key_file}" bash .github/scripts/observe-macos-build.sh corepack pnpm --dir
+          apps/electron package:nightly:mac
+      - name: Verify signed and notarized macOS archives
+        if: steps.cached.outputs.id == '0' && matrix.target == 'mac'
+        shell: bash
+        env:
+          NIGHTLY_VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          set -euo pipefail
+          verify_dir="$(mktemp -d "${RUNNER_TEMP}/nightly-signature.XXXXXX")"
+          trap 'rm -rf "${verify_dir}"' EXIT
+          for arch in arm64 x64; do
+            archive="apps/electron/dist/Lody-${NIGHTLY_VERSION}-${arch}-nightly.zip"
+            app="${verify_dir}/${arch}/Lody Nightly.app"
+            ditto -x -k "${archive}" "${verify_dir}/${arch}"
+            # Reject unsigned/ad-hoc builds and verify all nested code in the shipped ZIP.
+            codesign --verify --deep --strict -R='anchor apple generic' "${app}"
+            xcrun stapler validate "${app}"
+          done
+      - name: Sign arm64 Sparkle feed and deltas
+        if: steps.cached.outputs.id == '0' && matrix.target == 'mac'
+        uses: ./.github/actions/generate-sparkle-appcast
+        with:
+          appcast-url: ${{ steps.identity.outputs.update-url }}/arm64/appcast.xml
+          archive-dir: ${{ runner.temp }}/nightly-sparkle-arm64
+          dist-dir: apps/electron/dist
+          archive-pattern: Lody-${{ steps.identity.outputs.version }}-arm64-nightly.zip
+          output-dir: apps/electron/dist/arm64
+          download-url-prefix: ${{ steps.identity.outputs.update-url }}/arm64/
+          public-key: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          allow-missing-appcast: ${{ needs.prepare.outputs.bootstrap }}
+          current-version: ${{ steps.identity.outputs.version }}
+          current-build-version: ${{ steps.identity.outputs.native-version }}
+      - name: Sign x64 Sparkle feed and deltas
+        if: steps.cached.outputs.id == '0' && matrix.target == 'mac'
+        uses: ./.github/actions/generate-sparkle-appcast
+        with:
+          appcast-url: ${{ steps.identity.outputs.update-url }}/x64/appcast.xml
+          archive-dir: ${{ runner.temp }}/nightly-sparkle-x64
+          dist-dir: apps/electron/dist
+          archive-pattern: Lody-${{ steps.identity.outputs.version }}-x64-nightly.zip
+          output-dir: apps/electron/dist/x64
+          download-url-prefix: ${{ steps.identity.outputs.update-url }}/x64/
+          public-key: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          allow-missing-appcast: ${{ needs.prepare.outputs.bootstrap }}
+          current-version: ${{ steps.identity.outputs.version }}
+          current-build-version: ${{ steps.identity.outputs.native-version }}
+      - name: Stage and verify signed macOS assets
+        env:
+          SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+        if: steps.cached.outputs.id == '0' && matrix.target == 'mac'
+        run: node apps/electron/nightly-artifacts.mjs stage ${{ matrix.target }} candidate/candidate.json release-assets
+      - name: Verify cached release assets
+        env:
+          SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+        if: steps.cached.outputs.id != '0'
+        run: node apps/electron/nightly-artifacts.mjs verify ${{ matrix.target }} candidate/candidate.json release-assets
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.cached.outputs.id == '0'
+        with:
+          name: nightly-build-${{ github.run_id }}-${{ matrix.target }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 30
+    defaults:
+      run:
+        shell: bash
+  build-android:
+    needs:
+      - candidate
+      - prepare
+      - validate
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: macos-15
+    environment: cloud-nightly
+    env:
+      LODY_ENV: production
+      NODE_OPTIONS: --max-old-space-size=8192
+      LODY_NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
+      VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL }}
+      VITE_SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SESSION_SHARE_ORIGIN: ${{ vars.VITE_SESSION_SHARE_ORIGIN }}
+      VITE_GITHUB_APP_NAME: ${{ vars.VITE_GITHUB_APP_NAME }}
+      VITE_ONESIGNAL_APP_ID: ${{ vars.VITE_ONESIGNAL_APP_ID || vars.ONESIGNAL_APP_ID }}
+      VITE_ONESIGNAL_SAFARI_WEB_ID: ${{ vars.VITE_ONESIGNAL_SAFARI_WEB_ID || vars.ONESIGNAL_SAFARI_WEB_ID }}
+      VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
+      VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
+      VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-candidate-${{ github.run_id }}
+          path: candidate
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+      - name: Setup Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            apps/mobile-capacitor/android/**/*.gradle*
+            apps/mobile-capacitor/android/gradle/wrapper/gradle-wrapper.properties
+      - name: Install exact composition dependencies
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+      - name: Export frozen mobile identity
+        run: >
+          node --input-type=module <<'JS'
+
+          import { appendFile, readFile } from 'node:fs/promises';
+
+          import { androidNightlyIdentity } from './apps/electron/nightly-mobile.mjs';
+
+          const candidate = JSON.parse(await readFile('candidate/candidate.json'));
+
+          const identity = androidNightlyIdentity(candidate, process.env.LODY_NIGHTLY_VERSION);
+
+          await appendFile(process.env.GITHUB_ENV,
+          `MOBILE_VERSION_NAME=${identity.versionName}\nMOBILE_VERSION_CODE=${identity.versionCode}\n`);
+
+          const auth = new URL(process.env.VITE_CONVEX_SITE_URL);
+
+          if (auth.hostname.endsWith('.convex.cloud')) auth.hostname = auth.hostname.replace(/\.convex\.cloud$/u,
+          '.convex.site');
+
+          await appendFile(process.env.GITHUB_ENV, `VITE_CONVEX_SITE_URL=${auth.href.replace(/\/$/u, '')}\n`);
+
+          JS
+      - name: Find immutable platform artifact from an earlier attempt
+        id: cached
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: nightly-build-${{ github.run_id }}-android
+        run: >
+          set -euo pipefail
+
+          artifact_id="$(gh api --paginate
+          "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" |
+            jq -s --arg name "${ARTIFACT_NAME}" '[.[].artifacts[] | select(.name == $name)] | if length == 0 then 0 elif length != 1 or .[0].expired then error("Ambiguous or expired build artifact") else .[0].id end')"
+          echo "id=${artifact_id}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.cached.outputs.id != '0'
+        with:
+          artifact-ids: ${{ steps.cached.outputs.id }}
+          path: release-assets
+          merge-multiple: true
+      - name: Setup Android SDK
+        if: steps.cached.outputs.id == '0'
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+      - name: Build signed Nightly APK
+        if: steps.cached.outputs.id == '0'
+        shell: bash
+        env:
+          PUSH_ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.PUSH_ANDROID_GOOGLE_SERVICES_JSON }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for key in PUSH_ANDROID_GOOGLE_SERVICES_JSON VITE_SERVER_URL VITE_CONVEX_SITE_URL VITE_CONVEX_DEPLOY_URL VITE_SITE_URL VITE_ONESIGNAL_APP_ID ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            test -n "${!key}" || { echo "Missing ${key}" >&2; exit 1; }
+          done
+          umask 077
+          export ANDROID_KEYSTORE_PATH="${RUNNER_TEMP}/nightly-android.keystore"
+          trap 'rm -f "${ANDROID_KEYSTORE_PATH}"' EXIT
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | sed -e 's/\\n//g' -e 's/\\r//g' | tr -d '[:space:]' | openssl base64 -A -d > "${ANDROID_KEYSTORE_PATH}"
+          unset ANDROID_KEYSTORE_BASE64
+          corepack pnpm --filter @lody/mobile-capacitor run ci:sync:android:nightly
+          (cd apps/mobile-capacitor/android && ./gradlew --no-daemon :app:assembleRelease -PmobileVersionName="${MOBILE_VERSION_NAME}" -PmobileVersionCode="${MOBILE_VERSION_CODE}")
+          APKANALYZER="$(command -v apkanalyzer)"
+          export APKANALYZER
+          APKSIGNER="$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort | tail -n 1)"
+          export APKSIGNER
+          node apps/electron/nightly-mobile.mjs stage candidate/candidate.json release-assets "apps/mobile-capacitor/android/app/build/outputs/apk/release/lody-release-v${MOBILE_VERSION_NAME}+${MOBILE_VERSION_CODE}.apk"
+      - name: Verify cached Nightly APK
+        if: steps.cached.outputs.id != '0'
+        run: node apps/electron/nightly-mobile.mjs verify candidate/candidate.json release-assets
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.cached.outputs.id == '0'
+        with:
+          name: nightly-build-${{ github.run_id }}-android
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 30
+  verify-daemon-installation:
+    needs:
+      - candidate
+      - prepare
+      - validate
+      - publish-daemon
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment: cloud-nightly
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+      - name: Verify Nightly installation before client publication
+        env:
+          DAEMON_EXPECTED_VERSION: ${{ needs.prepare.outputs.version }}
+        run: node apps/cli/check-installer.mjs . nightly "$DAEMON_EXPECTED_VERSION"
+  publish-ios:
+    needs:
+      - candidate
+      - prepare
+      - validate
+    if: needs.prepare.outputs.publish == 'true'
+    uses: ./.github/workflows/publish-ios.yml
+    secrets: inherit
+    with:
+      source-sha: ${{ needs.candidate.outputs.private-sha }}
+      nightly-version: ${{ needs.prepare.outputs.version }}
+  publish:
+    needs:
+      - candidate
+      - prepare
+      - build
+      - validate
+      - verify-daemon-installation
+    runs-on: ubuntu-latest
+    environment: cloud-nightly
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+      - name: Install verification dependencies without lifecycle scripts
+        run:
+          corepack pnpm --filter '{./apps/electron}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+          --ignore-scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-candidate-${{ github.run_id }}
+          path: candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-build-${{ github.run_id }}-mac
+          path: release-assets/mac
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-build-${{ github.run_id }}-win
+          path: release-assets/win
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-build-${{ github.run_id }}-linux
+          path: release-assets/linux
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-build-${{ github.run_id }}-linux-arm64
+          path: release-assets/linux-arm64
+      - name: Ensure AWS CLI
+        shell: bash
+        run: bash .github/scripts/setup-aws-cli.sh
+      - name: Verify complete matrix, upload immutable assets and commit feeds
+        env:
+          LODY_NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_NIGHTLY_BUCKET: ${{ vars.R2_NIGHTLY_BUCKET }}
+          R2_NIGHTLY_PREFIX: ${{ vars.R2_NIGHTLY_PREFIX }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          NIGHTLY_ALLOW_BOOTSTRAP: ${{ vars.NIGHTLY_ALLOW_BOOTSTRAP }}
+          NIGHTLY_MINIMUM_STABLE_VERSION: ${{ vars.NIGHTLY_MINIMUM_STABLE_VERSION }}
+          STABLE_ELECTRON_VERSION_URL: ${{ vars.STABLE_ELECTRON_VERSION_URL }}
+          VITE_ELECTRON_UPDATE_URL: ${{ vars.ELECTRON_UPDATE_URL_NIGHTLY }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+        run: node apps/electron/nightly-release.mjs publish candidate/candidate.json release-assets
+  publish-android:
+    needs:
+      - candidate
+      - prepare
+      - build-android
+      - validate
+      - verify-daemon-installation
+    runs-on: ubuntu-latest
+    environment: cloud-nightly
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-candidate-${{ github.run_id }}
+          path: candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-build-${{ github.run_id }}-android
+          path: release-assets
+      - name: Ensure AWS CLI
+        shell: bash
+        run: bash .github/scripts/setup-aws-cli.sh
+      - name: Verify and publish Android independently
+        env:
+          LODY_NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_NIGHTLY_BUCKET: ${{ vars.R2_NIGHTLY_BUCKET }}
+          R2_NIGHTLY_PREFIX: ${{ vars.R2_NIGHTLY_PREFIX }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          VITE_ELECTRON_UPDATE_URL: ${{ vars.ELECTRON_UPDATE_URL_NIGHTLY }}
+        run: node apps/electron/nightly-mobile.mjs publish candidate/candidate.json release-assets
+  publish-cli:
+    needs:
+      - candidate
+      - prepare
+      - validate
+      - verify-daemon-installation
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment: cloud-nightly
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      LODY_ENV: production
+      LODY_NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      NODE_OPTIONS: --max-old-space-size=6144
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-candidate-${{ github.run_id }}
+          path: candidate
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: Setup npm trusted publishing
+        run: npm install -g npm@11.21.0
+      - name: Find immutable npm artifact from an earlier attempt
+        id: cached
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: nightly-npm-${{ github.run_id }}
+        run: >
+          set -euo pipefail
+
+          artifact_id="$(gh api --paginate
+          "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" |
+            jq -s --arg name "${ARTIFACT_NAME}" '[.[].artifacts[] | select(.name == $name)] | if length == 0 then 0 elif length != 1 or .[0].expired then error("Ambiguous or expired npm artifact") else .[0].id end')"
+          echo "id=${artifact_id}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.cached.outputs.id != '0'
+        with:
+          artifact-ids: ${{ steps.cached.outputs.id }}
+          path: nightly-npm
+          merge-multiple: true
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: steps.cached.outputs.id == '0'
+        with:
+          bun-version: 1.4.4
+      - name: Install exact composition dependencies
+        if: steps.cached.outputs.id == '0'
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+      - name: Build and freeze the nightly npm package
+        if: steps.cached.outputs.id == '0'
+        run: >
+          set -euo pipefail
+
+          for name in LODY_AUTH_URL LODY_AUTH_SITE_URL LODY_SERVER_URL SITE_URL; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "${name} is required for the CLI package build"
+              exit 1
+            fi
+          done
+
+          # Standalone npm CLI inlines production URLs; desktop provenance is separate.
+
+          node apps/cli/nightly-npm.mjs prepare candidate/candidate.json
+
+          corepack pnpm --dir apps/cli build
+
+          corepack pnpm --dir apps/cli prepare:publish
+
+          mkdir -p nightly-npm
+
+          corepack pnpm --dir apps/cli/.publish/lody pack --out
+          "${GITHUB_WORKSPACE}/nightly-npm/lody-${LODY_NIGHTLY_VERSION}.tgz"
+
+          node apps/cli/nightly-npm.mjs seal candidate/candidate.json
+      - name: Preserve immutable npm artifact before publishing
+        if: steps.cached.outputs.id == '0'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-npm-${{ github.run_id }}
+          path: nightly-npm
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish lody under the nightly tag
+        env:
+          NPM_CONFIG_LOGLEVEL: verbose
+        run: |
+          node --version
+          pnpm --version
+          npm --version
+          pnpm exec npm --version
+          node apps/cli/nightly-npm.mjs publish candidate/candidate.json
+  publish-daemon:
+    permissions:
+      contents: read
+      actions: read
+    needs:
+      - candidate
+      - prepare
+      - validate
+    if: needs.prepare.outputs.publish == 'true'
+    uses: ./.github/workflows/publish-daemon-sea.yml
+    with:
+      source-sha: ${{ needs.candidate.outputs.private-sha }}
+      channel: nightly
+      version: ${{ needs.prepare.outputs.version }}
+      target-environment: cloud-nightly
+    secrets: inherit
+  tag-release:
+    needs:
+      - candidate
+      - prepare
+      - publish
+      - publish-android
+      - publish-ios
+      - publish-cli
+      - publish-daemon
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - name: Tag the successfully published source commit
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+          NIGHTLY_SHA: ${{ needs.candidate.outputs.private-sha }}
+        with:
+          script: >
+            const { tagNightlyRelease } = await
+            import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/nightly-release-tag.mjs`);
+
+            const tag = await tagNightlyRelease({
+              github,
+              ...context.repo,
+              version: process.env.NIGHTLY_VERSION,
+              sha: process.env.NIGHTLY_SHA,
+            });
+
+            core.info(`Published source tagged: ${tag}`);

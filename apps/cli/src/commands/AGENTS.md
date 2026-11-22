@@ -15,10 +15,19 @@ Parent rules apply; see [Session rules](../session/AGENTS.md).
   and let the process boundary decide.
 - Remote restart/upgrade: attempt a bounded ACK; even on delivery failure, accepted
   work asks `start.ts` to exit with the lifecycle code for watchdog restart/upgrade. See [ACK contract](../../../../specs/machine-lifecycle-ack.md).
-- Upgrade handoff must use the verified entry from the installing npm's global root,
-  never the old watchdog's argv or a PATH-resolved `lody`. Success requires the
-  replacement's ready report to match the installed version; ordinary launches
-  still accept legacy readiness. See [upgrade contract](../../../../specs/daemon-upgrade-installation.md).
+- Managed updates keep the fixed SEA service entry and its Host lease alive while
+  replacing versioned children. Verify SHA-256-checked artifacts and prepare them before
+  stopping the old Worker. A clean root exit is not descendant termination proof;
+  require the authenticated drain receipt and process containment. POSIX npm runners
+  relay an authorized, drained remote update to the managed service and keep or reclaim
+  the Host lease until it reports ready (`lib/managed-daemon-migration.ts`); older and
+  Windows npm installations need explicit migration. Never install global npm packages remotely.
+  The official installer reuses foreground authentication and initial readiness.
+  The installer stops an occupying Host only after owner consent; see the upgrade contract.
+  Autostart registration targets the next login/boot, never another concurrent Host;
+  preserve foreign definitions and report unavailable registration independently.
+  Never persist pairing credentials in download URLs or service definitions.
+  See [upgrade contract](../../../../specs/daemon-upgrade-installation.md).
 - `lody daemon start` resolves cloud authentication in the FOREGROUND process before spawning the
   detached runner (`daemon-auth-preflight.ts`): validate the cached credential, and on a
   missing/rejected one run the interactive device-authorization flow there. An unreachable backend
@@ -90,9 +99,15 @@ Metadata idle/Presence loss is not completion; sequence is local.
   Remote identity is not authorization: the PR reconciler uses authenticated GitHub reads,
   never a product-cloud registry. Absent/unreadable remotes leave creation local.
 - Dispatch point-of-no-rollback (`createSessionResult` / `sendSessionChatResult`):
-  `writeDispatchPointer` commits `latestUserMsgId` and enables execution. AWAIT
-  `confirmDispatchSyncedBestEffort` before transport teardown; it must NEVER throw.
-  The durable pointer and SQLite Operation own delivery.
+  `writeDispatchPointer` commits `latestUserMsgId` and enables execution. One-shot CLI
+  processes and cross-machine targets must AWAIT `confirmDispatchSyncedBestEffort` before
+  transport teardown so writes do not strand in a closing transport; it must NEVER throw.
+  When `resolveDaemonTarget` confirms the resident daemon's own replica, flush locally
+  (`repo.flush()`) instead because the daemon keeps syncing that replica in the background
+  and executes the turn in-process. Cloud daemon Machine Flock reads skip remote confirmation
+  through `resolveDaemonTarget` but report unconfirmed freshness (`FlockSyncUnavailableError`
+  `local-replica-unconfirmed`), so absent local selections return retryable `SYNC_UNAVAILABLE`
+  rather than permanent absence. The durable pointer and SQLite Operation own delivery.
   Create/chat may unwind only before dispatch (`if (!dispatched)`). Never roll back
   a dispatched Session or introduce a hard-fail Streams acknowledgement.
 - MCP create combines semantic controls with `modeId`/`configOptionValues` via shared
@@ -121,3 +136,9 @@ Metadata idle/Presence loss is not completion; sequence is local.
 - `agent-config-output.ts` owns the allowlisted inspection DTO; never spread a stored
   config into output. Default show emits only `envKeys`; raw values require show-only
   `--show-secrets`. Mutations emit receipts. Assignment errors never echo input.
+
+## Command loading
+
+Keep root command summaries in `register.ts` aligned with the real commands. Registration
+must not import command implementations eagerly. Forward arguments unchanged to the selected
+implementation, which owns nested parsing and help.

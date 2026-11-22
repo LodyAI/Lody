@@ -1,6 +1,5 @@
 import { contextBridge } from 'electron'
 import { ipcBridge } from './ipc-bridge'
-import { electronAPI } from '@electron-toolkit/preload'
 import { setupRenderer } from '@better-auth/electron/preload'
 import os from 'node:os'
 import { readPreferredSystemLanguagesArgument } from '../system-language-argument'
@@ -30,7 +29,6 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('__LODY_PLATFORM__', platformInfo)
     if (bootProfiler) contextBridge.exposeInMainWorld('__LODY_E2E_BOOT__', bootProfiler)
     if (clientLossProbe) contextBridge.exposeInMainWorld('__LODY_E2E_CLIENT_LOSS__', true)
-    contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('ipc', ipcBridge)
   } catch (error) {
     console.error(error)
@@ -44,8 +42,6 @@ if (process.contextIsolated) {
   if (bootProfiler) legacyWindow.__LODY_E2E_BOOT__ = bootProfiler
   if (clientLossProbe)
     (window as { __LODY_E2E_CLIENT_LOSS__?: true }).__LODY_E2E_CLIENT_LOSS__ = true
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
   // @ts-ignore (define in dts)
   window.ipc = ipcBridge
 }

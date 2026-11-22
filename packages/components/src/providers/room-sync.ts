@@ -17,6 +17,7 @@ type WaitForRoomSyncOptions<T extends SyncRoomSubscription> = {
    * local writes before the first remote bootstrap starts.
    */
   initialDelayMs?: number;
+  signal?: AbortSignal;
   isCancelled?: () => boolean;
   onSubscription?: (sub: T) => void;
   /**
@@ -37,6 +38,38 @@ const defaultSleep = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
+const raceAbortSignal = async <R>(
+  promise: Promise<R>,
+  signal: AbortSignal | undefined
+): Promise<{ aborted: true } | { aborted: false; value: R }> => {
+  if (!signal) {
+    return { aborted: false, value: await promise };
+  }
+  if (signal.aborted) {
+    void promise.catch(() => {});
+    return { aborted: true };
+  }
+  let onAbort: (() => void) | null = null;
+  const abortedPromise = new Promise<{ aborted: true }>((resolve) => {
+    onAbort = () => resolve({ aborted: true });
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    const outcome = await Promise.race([
+      promise.then((value) => ({ aborted: false as const, value })),
+      abortedPromise,
+    ]);
+    if (outcome.aborted) {
+      void promise.catch(() => {});
+    }
+    return outcome;
+  } finally {
+    if (onAbort) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  }
+};
+
 const formatErrorMessage = (error: unknown): string => {
   const syncError = formatLoroSyncError(error);
   if (syncError) return syncError;
@@ -55,6 +88,7 @@ export async function waitForRoomToSync<T extends SyncRoomSubscription>(
     maxJoinRetries = DEFAULT_MAX_JOIN_RETRIES,
     retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
     initialDelayMs,
+    signal,
     isCancelled,
     onSubscription,
     firstSynced = (sub: T) => sub.firstSyncedWithRemote,
@@ -64,11 +98,11 @@ export async function waitForRoomToSync<T extends SyncRoomSubscription>(
     },
   } = options;
 
-  const cancelled = () => isCancelled?.() ?? false;
+  const cancelled = () => Boolean(signal?.aborted) || (isCancelled?.() ?? false);
 
   if (initialDelayMs !== undefined) {
-    await sleep(initialDelayMs);
-    if (cancelled()) {
+    const delayed = await raceAbortSignal(sleep(initialDelayMs), signal);
+    if (delayed.aborted || cancelled()) {
       return null;
     }
   }
@@ -81,10 +115,26 @@ export async function waitForRoomToSync<T extends SyncRoomSubscription>(
 
     let sub: T | null = null;
     try {
-      sub = await joinRoom();
-      onSubscription?.(sub);
-      await firstSynced(sub);
+      const joinPromise = joinRoom();
+      void joinPromise.catch(() => {});
+      const joinedOutcome = await raceAbortSignal(joinPromise, signal);
+      if (joinedOutcome.aborted) {
+        void joinPromise.then(
+          (lateSub) => {
+            lateSub.unsubscribe();
+          },
+          () => {}
+        );
+        return null;
+      }
+      sub = joinedOutcome.value;
       if (cancelled()) {
+        sub.unsubscribe();
+        return null;
+      }
+      onSubscription?.(sub);
+      const syncedOutcome = await raceAbortSignal(firstSynced(sub), signal);
+      if (syncedOutcome.aborted || cancelled()) {
         sub.unsubscribe();
         return null;
       }
@@ -108,7 +158,10 @@ export async function waitForRoomToSync<T extends SyncRoomSubscription>(
         warn(
           `[${roomId}] joinRoom failed (attempt ${attempt + 1}/${maxJoinRetries}), retrying in ${delayMs}ms: ${errMsg}`
         );
-        await sleep(delayMs);
+        const backoff = await raceAbortSignal(sleep(delayMs), signal);
+        if (backoff.aborted || cancelled()) {
+          return null;
+        }
         continue;
       }
 

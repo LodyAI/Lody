@@ -9,7 +9,6 @@ const billingOverviewSchema: z.ZodType<BillingOverviewData> = z.object({
   effectivePlanTier: z.enum(['free', 'plus', 'enterprise']),
   entitlementSource: z.enum(['free', 'stripe', 'stripe_gift', 'enterprise']),
   offerKey: z.string().nullable(),
-  yearlyEarlyBirdEligible: z.boolean(),
   promotionalEntitlementEndsAt: z.number().nullable(),
   giftStartsAt: z.number().nullable().catch(null),
   giftEndsAt: z.number().nullable().catch(null),
@@ -57,7 +56,6 @@ export const OPTIMISTIC_BILLING_OVERVIEW: BillingOverviewData = {
   effectivePlanTier: 'free',
   entitlementSource: 'free',
   offerKey: null,
-  yearlyEarlyBirdEligible: false,
   promotionalEntitlementEndsAt: null,
   giftStartsAt: null,
   giftEndsAt: null,
@@ -119,7 +117,6 @@ export function areBillingOverviewsEqual(
     left.effectivePlanTier === right.effectivePlanTier &&
     left.entitlementSource === right.entitlementSource &&
     left.offerKey === right.offerKey &&
-    left.yearlyEarlyBirdEligible === right.yearlyEarlyBirdEligible &&
     left.promotionalEntitlementEndsAt === right.promotionalEntitlementEndsAt &&
     left.giftStartsAt === right.giftStartsAt &&
     left.giftEndsAt === right.giftEndsAt &&

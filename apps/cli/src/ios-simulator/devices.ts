@@ -1,5 +1,5 @@
 import { Effect } from 'effect';
-import { processLayer, runCommandOk } from '@lody/shared/node/process';
+import { processLayer, runCommand, runCommandOk } from '@lody/shared/node/process';
 import { z } from 'zod';
 import type { IosSimulatorDevice } from '@lody/shared';
 const Devices = z.object({
@@ -63,4 +63,24 @@ export async function bootSimulator(udid: string, signal: AbortSignal): Promise<
     ),
     { signal }
   );
+}
+export async function shutdownSimulator(udid: string, signal?: AbortSignal): Promise<void> {
+  if (process.platform !== 'darwin') throw new Error('iOS Simulator requires macOS.');
+  const validated = z.string().uuid().parse(udid);
+  const result = await Effect.runPromise(
+    Effect.provide(
+      runCommand({
+        command: '/usr/bin/xcrun',
+        args: ['simctl', 'shutdown', validated],
+        timeout: 30000,
+        maxOutputBytes: 1024 * 1024,
+      }),
+      processLayer({})
+    ),
+    { signal }
+  );
+  if (result.code === 0) return;
+  const output = result.stdout.toString('utf8') + '\n' + result.stderr.toString('utf8');
+  if (/Unable to shutdown device in current state:\s*Shutdown/i.test(output)) return;
+  throw new Error('Unable to shut down simulator (exit ' + String(result.code ?? 'unknown') + ').');
 }

@@ -250,6 +250,6 @@ CLI Agent / backfill：独立所有者，不是渲染进程的子任务
 ## 12. 证据与验证状态
 
 - **意图**：本文（draft，未经人工批准）。决策历史：[延迟附件方案](../.agents/notes/implemented/architecture/2026-09-14-deferred-attachment-send.zh.md)与[移除发送日志](../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.zh.md)。
-- **已检查的实现**（未注明时位于 `packages/components/src/`）：`lib/{session-send-delivery,session-send-admission,session-submission,session-pending-sends,legacy-session-send-migration,session-attachment-preparation,session-send-resources,clear-local-cache}.ts`；`providers/workspace-pending-sends.ts`；`components/chat/session-pending-sends-host.tsx`；`apps/electron/src/main/renderer-unload.ts`；CLI dispatch 位于 `apps/cli/src/session/session-dispatch-logic.ts`。
+- **已检查的实现**（未注明时位于 `packages/components/src/`）：`lib/{session-send-delivery,session-send-admission,session-submission,session-pending-sends,session-attachment-preparation,session-send-resources,clear-local-cache}.ts`；`providers/workspace-pending-sends.ts`；`components/chat/session-pending-sends-host.tsx`；`apps/electron/src/main/renderer-unload.ts`；CLI dispatch 位于 `apps/cli/src/session/session-dispatch-logic.ts`。
 - **已执行的验证**：这些模块的组件行为测试，结果记录在 PR 中。尚未执行打包桌面、真实多窗口网络或原生移动端验收。
 - 相关说明：[CLI 附件说明](../.agents/docs/cli-lib-session-files.md)、[输入框/运行配置](../.agents/docs/sessions-run-config.md)。平台参考：[浏览器 beforeunload 限制](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)、[Electron will-prevent-unload](https://www.electronjs.org/docs/latest/api/web-contents#event-will-prevent-unload)。

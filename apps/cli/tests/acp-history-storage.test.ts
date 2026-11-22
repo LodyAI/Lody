@@ -511,6 +511,102 @@ describe('session history storage (integration)', () => {
     expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(2500);
   });
 
+  describe('running tool snapshots do not accumulate in the document', () => {
+    // A 32 KiB window over a build log whose start moves every update, as a
+    // carriage-return progress screen or tail window does. The prefix/suffix
+    // text diff cannot reuse it, so each stored snapshot would stay in the oplog.
+    // Deterministic pseudo-random lines keep snapshot compression from hiding that.
+    const screen = (step: number) => {
+      let seed = step + 1;
+      const word = () => {
+        seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+        return seed.toString(36);
+      };
+      return Array.from(
+        { length: 512 },
+        (_, line) => `[${step}:${line}] cc ${word()} ${word()} ${word()} ${word()}\r`
+      )
+        .join('\n')
+        .padEnd(32 * 1024, '.')
+        .slice(0, 32 * 1024);
+    };
+    const textContent = (text: string) => [
+      { type: 'content' as const, content: { type: 'text' as const, text } },
+    ];
+    const run = async (kind: 'execute' | 'other', completion: Record<string, unknown>) => {
+      const repo = await LoroRepo.create({});
+      const doc = new SessionDocument(repo, uuidv4() as SessionId);
+      await doc.initOffline();
+      const toolCallId = `running-${kind}`;
+      const updates: SessionNotification[] = [
+        {
+          sessionId: 'agent',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId,
+            title: 'make build-pro',
+            kind,
+            status: 'in_progress',
+          },
+        },
+        ...Array.from({ length: 60 }, (_, step) => ({
+          sessionId: 'agent',
+          update: {
+            sessionUpdate: 'tool_call_update' as const,
+            toolCallId,
+            status: 'in_progress' as const,
+            content: textContent(screen(step)),
+          },
+        })),
+        {
+          sessionId: 'agent',
+          update: { sessionUpdate: 'tool_call_update', toolCallId, ...completion },
+        },
+      ];
+      try {
+        for (const update of updates) await appendAutonomousACPNotifications(doc, update);
+        return {
+          tool: findToolCall(await doc.sessionData.history.readAll(), toolCallId),
+          snapshotBytes: doc.handle?.doc.export({ mode: 'snapshot' }).length ?? Infinity,
+        };
+      } finally {
+        await repo.destroy();
+      }
+    };
+
+    it('keeps only the bounded tail of unfenced execute output', async () => {
+      const { tool, snapshotBytes } = await run('execute', { status: 'completed' });
+      const output = tool?.content?.find((block) => block.type === 'terminal_output');
+      expect(tool?.status).toBe('completed');
+      expect(output?.type === 'terminal_output' && screen(59).endsWith(output.output)).toBe(true);
+      expect(output?.type === 'terminal_output' && output.output.length).toBeLessThanOrEqual(1024);
+      expect(snapshotBytes).toBeLessThan(16 * 1024);
+    });
+
+    it('bounds a failed execute call the same way', async () => {
+      const { tool, snapshotBytes } = await run('execute', { status: 'failed' });
+      expect(tool?.status).toBe('failed');
+      expect(tool?.content?.some((block) => block.type === 'terminal_output')).toBe(true);
+      expect(snapshotBytes).toBeLessThan(16 * 1024);
+    });
+
+    it('stores the last snapshot of another tool once it outgrows the running budget', async () => {
+      const { tool, snapshotBytes } = await run('other', { status: 'completed' });
+      expect(tool?.status).toBe('completed');
+      expect(tool?.content).toEqual(textContent(screen(59)));
+      expect(snapshotBytes).toBeLessThan(256 * 1024);
+    });
+
+    it('lets the completion content of another tool supersede deferred snapshots', async () => {
+      const { tool, snapshotBytes } = await run('other', {
+        status: 'completed',
+        content: textContent('done'),
+      });
+      expect(tool?.content).toEqual(textContent('done'));
+      expect(snapshotBytes).toBeLessThan(160 * 1024);
+    });
+  });
+
   it('should record notifications', async () => {
     const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;
@@ -908,5 +1004,296 @@ describe('session history storage (integration)', () => {
     const history = await doc.sessionData.history.readAll();
     expect(history.length).toBe(0);
     expect(warnings.length).toBe(1);
+  });
+  it('compacts subagent_event execute terminal snapshots and isolates state from colliding root toolCallIds', async () => {
+    const repo = await LoroRepo.create({});
+    const doc = new SessionDocument(repo, uuidv4() as SessionId);
+    await doc.initOffline();
+
+    const snapshot: LodySubagentSnapshot = {
+      state: 'running',
+      parentRunId: null,
+      support: { stream: ['tool'], progress: false, outputRead: 'none', cancel: false },
+    };
+    const subagentUpdate = (
+      runId: string,
+      payload:
+        | { type: 'snapshot'; snapshot: LodySubagentSnapshot }
+        | { type: 'output'; update: Extract<LodySubagentEvent, { type: 'output' }>['update'] }
+    ): AcpSessionNotification => ({
+      sessionId: 'agent',
+      update: {
+        sessionUpdate: 'subagent_event',
+        event: { version: 1, sessionId: 'agent', runId, ...payload },
+      },
+    });
+    const screen = (step: number) => `sub-step-${step}:${'z'.repeat(64 * 1024)}`;
+
+    try {
+      await updateTestHistory(doc, () => [
+        {
+          id: 'parent-turn',
+          role: 'assistant',
+          items: [],
+          timestamp: '2026-09-26T00:00:00.000Z',
+          fileDiff: [],
+        },
+      ]);
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'shared-exec',
+              title: 'Root shell',
+              kind: 'execute',
+              status: 'in_progress',
+            },
+          },
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-exec',
+              status: 'in_progress',
+              content: [{ type: 'content', content: { type: 'text', text: 'ROOT_ONLY_OUTPUT' } }],
+            },
+          },
+          subagentUpdate('run-exec', { type: 'snapshot', snapshot }),
+          subagentUpdate('run-exec', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'shared-exec',
+              title: 'Child shell',
+              kind: 'execute',
+              status: 'in_progress',
+              content: [{ type: 'content', content: { type: 'text', text: screen(0) } }],
+            },
+          }),
+        ],
+        'parent-turn'
+      );
+
+      for (let step = 1; step < 30; step += 1) {
+        await appendACPNotificationsToAssistantEntry(
+          doc,
+          subagentUpdate('run-exec', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-exec',
+              status: 'in_progress',
+              content: [{ type: 'content', content: { type: 'text', text: screen(step) } }],
+            },
+          }),
+          'parent-turn'
+        );
+      }
+
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          subagentUpdate('run-exec', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-exec',
+              status: 'completed',
+              rawOutput: { exit_code: 0, output: `${screen(29)}\nSUBAGENT_FINAL` },
+            },
+          }),
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-exec',
+              status: 'completed',
+            },
+          },
+        ],
+        'parent-turn'
+      );
+
+      const history = await doc.sessionData.history.readAll();
+      const rootTool = findToolCall(history, 'shared-exec');
+      const rootOutput = rootTool?.content?.find((block) => block.type === 'terminal_output');
+      expect(rootOutput?.type === 'terminal_output' && rootOutput.output).toBe('ROOT_ONLY_OUTPUT');
+
+      const subagentItem = history
+        .flatMap((entry) => parseContents(entry))
+        .find(
+          (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+            item.type === 'subagent_task' && item.taskId === 'run-exec'
+        );
+      const childTool = subagentItem?.run?.items.find(
+        (item): item is Extract<typeof item, { type: 'tool_call' }> =>
+          item.type === 'tool_call' && item.toolCallId === 'shared-exec'
+      );
+      const childOutput = childTool?.content?.find((block) => block.type === 'terminal_output');
+      expect(childTool?.status).toBe('completed');
+      expect(
+        childOutput?.type === 'terminal_output' && childOutput.output.endsWith('SUBAGENT_FINAL')
+      ).toBe(true);
+      expect(childOutput?.type === 'terminal_output' && childOutput.output).not.toContain(
+        'ROOT_ONLY_OUTPUT'
+      );
+      expect(
+        childOutput?.type === 'terminal_output' && childOutput.output.length
+      ).toBeLessThanOrEqual(1024);
+      expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(16 * 1024);
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('defers and caps oversized running other-kind content inside subagent_event and initial tool_call', async () => {
+    const repo = await LoroRepo.create({});
+    const doc = new SessionDocument(repo, uuidv4() as SessionId);
+    await doc.initOffline();
+
+    const snapshot: LodySubagentSnapshot = {
+      state: 'running',
+      parentRunId: null,
+      support: { stream: ['tool'], progress: false, outputRead: 'none', cancel: false },
+    };
+    const subagentUpdate = (
+      payload:
+        | { type: 'snapshot'; snapshot: LodySubagentSnapshot }
+        | { type: 'output'; update: Extract<LodySubagentEvent, { type: 'output' }>['update'] }
+    ): AcpSessionNotification => ({
+      sessionId: 'agent',
+      update: {
+        sessionUpdate: 'subagent_event',
+        event: { version: 1, sessionId: 'agent', runId: 'run-other', ...payload },
+      },
+    });
+    const hugeChunk = (label: string) => `${label}:${'m'.repeat(400 * 1024)}:end`;
+
+    try {
+      await updateTestHistory(doc, () => [
+        {
+          id: 'parent-turn',
+          role: 'assistant',
+          items: [],
+          timestamp: '2026-09-26T00:00:00.000Z',
+          fileDiff: [],
+        },
+      ]);
+      // Root initial tool_call carrying >256 KiB text while running.
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'root-initial-huge',
+              title: 'Huge initial',
+              kind: 'other',
+              status: 'in_progress',
+              content: [{ type: 'content', content: { type: 'text', text: hugeChunk('root') } }],
+            },
+          },
+          subagentUpdate({ type: 'snapshot', snapshot }),
+          subagentUpdate({
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'sub-other',
+              title: 'Sub other',
+              kind: 'other',
+              status: 'in_progress',
+            },
+          }),
+        ],
+        'parent-turn'
+      );
+
+      for (let i = 0; i < 15; i += 1) {
+        await appendACPNotificationsToAssistantEntry(
+          doc,
+          subagentUpdate({
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'sub-other',
+              status: 'in_progress',
+              content: [
+                { type: 'content', content: { type: 'text', text: hugeChunk(`sub-${i}`) } },
+                {
+                  type: 'content',
+                  content: { type: 'image', data: 'iVBOR', mimeType: 'image/png' },
+                },
+              ],
+            },
+          }),
+          'parent-turn'
+        );
+      }
+
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'root-initial-huge',
+              status: 'completed',
+            },
+          },
+          subagentUpdate({
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'sub-other',
+              status: 'completed',
+            },
+          }),
+        ],
+        'parent-turn'
+      );
+
+      const history = await doc.sessionData.history.readAll();
+      const rootTool = findToolCall(history, 'root-initial-huge');
+      const rootBlock = rootTool?.content?.[0];
+      expect(rootBlock?.type).toBe('content');
+      if (
+        rootBlock?.type === 'content' &&
+        'content' in rootBlock &&
+        rootBlock.content.type === 'text'
+      ) {
+        expect(rootBlock.content.text).toContain('[truncated');
+        expect(Buffer.byteLength(rootBlock.content.text, 'utf8')).toBeLessThanOrEqual(256 * 1024);
+      }
+
+      const subagentItem = history
+        .flatMap((entry) => parseContents(entry))
+        .find(
+          (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+            item.type === 'subagent_task' && item.taskId === 'run-other'
+        );
+      const subTool = subagentItem?.run?.items.find(
+        (item): item is Extract<typeof item, { type: 'tool_call' }> =>
+          item.type === 'tool_call' && item.toolCallId === 'sub-other'
+      );
+      expect(subTool?.content).toHaveLength(1);
+      const subBlock = subTool?.content?.[0];
+      if (
+        subBlock?.type === 'content' &&
+        'content' in subBlock &&
+        subBlock.content.type === 'text'
+      ) {
+        expect(subBlock.content.text.startsWith('sub-14:')).toBe(true);
+        expect(Buffer.byteLength(subBlock.content.text, 'utf8')).toBeLessThanOrEqual(256 * 1024);
+      }
+
+      expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(600 * 1024);
+    } finally {
+      await repo.destroy();
+    }
   });
 });

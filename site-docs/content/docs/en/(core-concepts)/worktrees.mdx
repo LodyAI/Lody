@@ -43,7 +43,7 @@ Each task gets its own worktree, so agents never step on each other's changes.
 
 ### Automatic Cleanup
 
-Manual archive and [PR auto-archive](/docs/github#auto-archive-finished-pr-sessions) make a root
+Archiving makes a root
 session's Lody-managed worktree eligible for cleanup. The conversation stays in the archive list
 until permanent deletion; the working directory can be removed earlier.
 
@@ -65,7 +65,7 @@ or a backup commit fails, the directory is retained for retry.
 The backup is a local Git commit, not a remote push or a full-directory backup. A configured
 cleanup script runs before the backup, so files it deletes or changes are outside that protection;
 script failure does not prevent removal. Save needed ignored files and any files affected by the
-script outside the worktree before archiving or enabling auto-archive.
+script outside the worktree before archiving.
 
 When you restore and continue a session whose worktree was removed, Lody recreates it from the
 preserved local branch and runs the setup script again. Ignored files must be recreated separately.

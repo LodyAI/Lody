@@ -1,7 +1,8 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { BrowserWindow } from 'electron'
 import { assertProductWindowSender } from '../assert-sender'
 import { PublicBrowserService } from '../../services/public-browser-service'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
   ElectronPublicBrowserBoundsInputSchema,
   ElectronPublicBrowserCreateInputSchema,
@@ -32,7 +33,7 @@ function getWindowBrowser(): PublicBrowserService {
   return service
 }
 
-export class PublicBrowserIpc extends IpcService {
+export class PublicBrowserIpc extends ProductWindowIpcService {
   static override readonly groupName = 'publicBrowser'
 
   @IpcMethod()

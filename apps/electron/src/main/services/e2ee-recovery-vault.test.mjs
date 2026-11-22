@@ -11,7 +11,8 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { Effect, Exit, Result, Scope } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect'
+import { recoveryHistoryBatcher } from './e2ee-recovery-history.mts'
 import { decodeRecoveryVaultCiphertext } from '@lody/e2ee-core/host'
 import { sqliteRecoveryVaultLocalStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { vaultCiphertextDigest } from '@lody/e2ee-core/protocol'
@@ -22,11 +23,14 @@ import {
   beginAccountVaultReplacement,
   continueAccountVaultReplacement,
   createAccountRecoveryVault,
+  createAccountRecoveryVaultWithPasskey,
+  createAccountRecoveryVaultWithPassword,
   defaultPasskeyLabel,
   enrollRecoveryPasskey,
   recentAccountSecurityEvents,
   listRecoveryPasskeys,
   removeRecoveryPasskey,
+  removeRecoveryPassword,
   passkeyLabel,
   inspectRecoveryFile,
   recoveryReplacementPlan,
@@ -34,15 +38,18 @@ import {
   recoveryVaultEnabled,
   recoveryVaultFailure,
   restoreAccountWorkspaces,
+  saveAccountRecoveryFile,
   saveRecoveryFile,
-  setupWorkspaceRecovery
+  setRecoveryPassword,
+  setupWorkspaceRecovery,
+  setupWorkspacesRecovery
 } from './e2ee-recovery-vault.mts'
 
 const response = (value) => Response.json({ status: 'success', value })
 
 // Synthetic Convex service: one account's immutable entries plus index CAS with
 // referenced-entry checks, exactly as the declared `e2eeRecoveryVault` contract.
-function syntheticService() {
+function syntheticService({ missingReadEntries = false } = {}) {
   const entries = new Map(),
     index = new Map(),
     calls = [],
@@ -67,6 +74,13 @@ function syntheticService() {
       }
       case 'e2eeRecoveryVault:readEntry':
         return response(entries.get(key(args.vaultId, args.entryId)) ?? null)
+      case 'e2eeRecoveryVault:readEntries':
+        if (missingReadEntries)
+          return Response.json({
+            status: 'error',
+            errorMessage: "Could not find public function for 'e2eeRecoveryVault:readEntries'"
+          })
+        return response(args.entryIds.map((id) => entries.get(key(args.vaultId, id)) ?? null))
       case 'e2eeRecoveryVault:readIndex':
         return response(index.get(args.vaultId)?.entry ?? null)
       case 'e2eeRecoveryVault:compareAndSwapIndex': {
@@ -149,10 +163,12 @@ async function withClient(service, work) {
   }
 }
 
-void test('the recovery vault gate is off unless explicitly enabled', () => {
-  assert.equal(recoveryVaultEnabled({}), false)
-  assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: '1' }), false)
+void test('recovery defaults on while off and malformed explicit configuration refuse', () => {
+  assert.equal(recoveryVaultEnabled({}), true)
   assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: 'on' }), true)
+  assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: ' on ' }), true)
+  for (const mode of ['off', ' off ', '', ' ', 'maybe', 'ON'])
+    assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: mode }), false)
 })
 
 void test('creates an account vault, reopens it from the saved file through the wire, and rejects a foreign file', async () => {
@@ -793,7 +809,11 @@ void test('a restore sends both credentials and names the R as endorser', async 
     stagedGroup: () => Effect.succeed(null),
     identity: (pin) =>
       Effect.succeed({
-        device: { enc: 'encryption', pin },
+        device: {
+          enc: 'encryption',
+          pin,
+          publicKey: { toBytes: () => new Uint8Array(32).fill(6) }
+        },
         credentialHash: 'c'.repeat(64)
       }),
     adopt: (join) =>
@@ -820,7 +840,10 @@ void test('a restore sends both credentials and names the R as endorser', async 
   assert.deepEqual(credential, new Uint8Array(32))
   await Effect.runPromise(ports.adopt([]))
   assert.equal(adopted[0].endorser, '02'.repeat(32))
-  assert.equal(adopted[0].pairingSessionId, appended[0].requestId.slice(0, 32))
+  assert.match(adopted[0].pairingSessionId, /^[0-9a-f]{32}$/)
+  const retry = await Effect.runPromise(Effect.scoped(target.connect(anchor)))
+  await Effect.runPromise(retry.adopt([]))
+  assert.equal(adopted[1].pairingSessionId, adopted[0].pairingSessionId)
 })
 
 void test('a file covering nothing here restores nothing', async () => {
@@ -922,6 +945,230 @@ void test('a passkey enrolled with the file then sets up a workspace without it'
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+void test('several workspaces set up after one passkey prompt, and one failure leaves the rest', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file, vaultId } = await createdVault(dir, service)
+    service.replacement.current = vaultId
+    const port = syntheticAuthenticator()
+    await withClient(service, (store) =>
+      Effect.runPromise(
+        enrollRecoveryPasskey({
+          journalPath: join(dir, 'recovery-vault.sqlite'),
+          store,
+          file,
+          port,
+          label: 'iCloud Keychain'
+        })
+      )
+    )
+    let prompts = 0
+    const counted = {
+      ...port,
+      authenticate: async (request) => {
+        prompts += 1
+        return port.authenticate(request)
+      }
+    }
+    const log = []
+    const broken = {
+      ...fakeTarget(log),
+      id: 'broken',
+      owner: () => Effect.fail({ code: 'missing' })
+    }
+    const results = await withClient(service, (store, client) =>
+      Effect.runPromise(
+        setupWorkspacesRecovery({
+          journalPath: join(dir, 'recovery-vault.sqlite'),
+          store,
+          unlock: { passkey: counted, locator: 'https://synthetic.convex.cloud' },
+          replacement: client.recoveryVaultReplacement(),
+          targets: [{ ...fakeTarget(log), id: 'first' }, broken, { ...fakeTarget(log), id: 'last' }]
+        })
+      )
+    )
+    assert.equal(prompts, 1)
+    assert.deepEqual(results, [
+      { workspaceId: 'first', outcome: 'Committed', recoverable: true },
+      { workspaceId: 'broken', outcome: 'Failed', recoverable: false },
+      { workspaceId: 'last', outcome: 'Committed', recoverable: true }
+    ])
+    assert.deepEqual(log, ['setup', 'setup'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test(
+  'a held backup does not block another workspace and duplicate targets stay serial',
+  { timeout: 15000 },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+    try {
+      const service = syntheticService()
+      const { file, vaultId } = await createdVault(dir, service)
+      service.replacement.current = vaultId
+      await withClient(service, (store, client) =>
+        Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const entered = yield* Deferred.make()
+              const release = yield* Deferred.make()
+              let held = 0
+              let maxHeld = 0
+              const first = {
+                ...fakeTarget([]),
+                id: 'first',
+                owner: () =>
+                  Effect.gen(function* () {
+                    held++
+                    maxHeld = Math.max(maxHeld, held)
+                    yield* Deferred.succeed(entered, undefined)
+                    yield* Deferred.await(release)
+                    held--
+                    return {
+                      setup: () =>
+                        Effect.succeed({ outcome: 'Committed', status: { recoverable: true } })
+                    }
+                  })
+              }
+              const last = {
+                ...fakeTarget([]),
+                id: 'last',
+                owner: () =>
+                  Effect.gen(function* () {
+                    yield* Deferred.await(entered)
+                    yield* Deferred.succeed(release, undefined)
+                    return {
+                      setup: () =>
+                        Effect.succeed({ outcome: 'Committed', status: { recoverable: true } })
+                    }
+                  })
+              }
+              const results = yield* setupWorkspacesRecovery({
+                store,
+                journalPath: join(dir, 'recovery-vault.sqlite'),
+                replacement: client.recoveryVaultReplacement(),
+                unlock: { file },
+                targets: [first, first, last]
+              })
+              assert.equal(maxHeld, 1)
+              assert.deepEqual(
+                results.map((row) => row.workspaceId),
+                ['first', 'first', 'last']
+              )
+              assert.ok(results.every((row) => row.outcome === 'Committed' && row.recoverable))
+            })
+          )
+        )
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+)
+
+void test('batched histories retain each cursor and checkpoint, isolate failures, and reread after admission', async () => {
+  const point = { headHash: 'aa'.repeat(32), length: 3 }
+  const inputs = [
+    { workspaceId: 'first', cursor: 'original', checkpoint: point },
+    { workspaceId: 'second', credential: 'synthetic-only' }
+  ]
+  let rounds = 0
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const read = yield* recoveryHistoryBatcher({
+          history: () => Effect.die('the independent reads must share a batch'),
+          historyBatch: (items) =>
+            Effect.sync(() => {
+              rounds++
+              assert.deepEqual(items, inputs)
+              return {
+                items: items.map((item, i) =>
+                  i
+                    ? { workspaceId: item.workspaceId, status: 'error', code: 'e2ee_unavailable' }
+                    : {
+                        workspaceId: item.workspaceId,
+                        status: 'ok',
+                        result: {
+                          workspaceId: item.workspaceId,
+                          genesisHash: point.headHash,
+                          checkpoint: { ...point, length: rounds + 3 },
+                          startIndex: 0,
+                          recordsHex: [],
+                          position: 'tail',
+                          nextCursor: null
+                        }
+                      }
+                )
+              }
+            })
+        })
+        for (let round = 1; round <= 2; round++) {
+          const replies = yield* Effect.forEach(inputs, (item) => Effect.result(read(item)), {
+            concurrency: 2
+          })
+          assert.equal(Result.isSuccess(replies[0]), true)
+          assert.equal(replies[0].success.checkpoint.length, round + 3)
+          assert.equal(Result.isFailure(replies[1]), true)
+        }
+        assert.equal(rounds, 2)
+      })
+    )
+  )
+})
+
+void test('an interrupted recovery reader retains its owner until the admitted history batch settles', async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make()
+        const release = yield* Deferred.make()
+        let closed = false
+        const page = {
+          workspaceId: 'workspace',
+          genesisHash: 'aa'.repeat(32),
+          checkpoint: { headHash: 'aa'.repeat(32), length: 1 },
+          startIndex: 0,
+          recordsHex: [],
+          position: 'tail',
+          nextCursor: null
+        }
+        const read = yield* recoveryHistoryBatcher({
+          history: () =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(release)
+              return page
+            }),
+          historyBatch: () => Effect.die('one item uses original history')
+        })
+        const worker = yield* Effect.forkChild(
+          Effect.scoped(
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  closed = true
+                })
+              )
+              yield* read({ workspaceId: 'workspace' })
+            })
+          )
+        )
+        yield* Deferred.await(started)
+        const stopping = yield* Effect.forkChild(Fiber.interrupt(worker))
+        yield* Effect.yieldNow
+        assert.equal(closed, false, 'caller interruption cannot release a live batch owner')
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(stopping)
+        assert.equal(closed, true)
+      })
+    )
+  )
 })
 
 void test('a passkey without PRF is reported plainly and enrolls nothing', async () => {
@@ -1129,6 +1376,332 @@ void test('an unfinished removal is reported as such and finishes on retry', asy
     const second = await remove()
     assert.equal(second.removed, true)
     assert.deepEqual(second.pending, [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('a partially restored workspace stays uncovered until current-key recovery finishes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const journalPath = join(dir, 'recovery-vault.sqlite')
+    for (const [before, state, covered] of [
+      [null, 'partial', false],
+      ['partial', 'done', true]
+    ]) {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const local = yield* sqliteRecoveryVaultLocalStore({
+              path: journalPath,
+              mode: 'create-or-open'
+            })
+            yield* local.compareAndSwap(
+              'restore-progress/here',
+              before === null ? null : new TextEncoder().encode(before),
+              new TextEncoder().encode(state)
+            )
+          })
+        )
+      )
+      const plan = await Effect.runPromise(
+        recoveryReplacementPlan({
+          journalPath,
+          store: {},
+          replacement: {
+            state: () => Effect.succeed({ current: 'a'.repeat(64), replacing: null })
+          },
+          accountWorkspaces: Effect.succeed([{ id: 'here', name: 'Here' }]),
+          hasIdentity: () => Effect.succeed(true)
+        })
+      )
+      assert.equal(
+        plan.covered.some((row) => row.id === 'here'),
+        covered
+      )
+      assert.equal(
+        plan.uncovered.some((row) => row.id === 'here'),
+        !covered
+      )
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+const fastKdf = { m: 19456, t: 2, p: 1 }
+
+for (const missingReadEntries of [false, true]) {
+  void test(`password vault keeps unlock, method replacement and anti-orphaning on ${missingReadEntries ? 'older' : 'batched'} backend`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+    try {
+      const service = syntheticService({ missingReadEntries })
+      const journalPath = join(dir, 'recovery-vault.sqlite')
+      const freshJournalPath = join(dir, 'fresh-device.sqlite')
+      const locator = 'https://synthetic.convex.cloud'
+      const password = 'correct-horse-battery-staple'
+
+      const created = await withClient(service, (store) =>
+        Effect.runPromise(
+          createAccountRecoveryVaultWithPassword({
+            journalPath,
+            store,
+            exists: Effect.succeed(false),
+            locator,
+            password,
+            kdf: fastKdf
+          })
+        )
+      )
+      service.replacement.current = created.vaultId
+
+      // Neither the service nor the local SQLite journal ever saw the password bytes.
+      for (const entry of service.entries.values())
+        assert.equal(Buffer.from(entry.ciphertext, 'hex').includes(Buffer.from(password)), false)
+      assert.equal(readFileSync(journalPath).includes(Buffer.from(password)), false)
+
+      const planHere = await withClient(service, (store, client) =>
+        Effect.runPromise(
+          recoveryReplacementPlan({
+            journalPath,
+            store,
+            replacement: client.recoveryVaultReplacement(),
+            accountWorkspaces: Effect.succeed([]),
+            hasIdentity: () => Effect.succeed(false)
+          })
+        )
+      )
+      assert.deepEqual(planHere.methods, {
+        hasFile: false,
+        hasPassword: true,
+        hasPasskey: false
+      })
+
+      // On a fresh device without local index summary, remote slot probing still detects password wrap.
+      const planElsewhere = await withClient(service, (store, client) =>
+        Effect.runPromise(
+          recoveryReplacementPlan({
+            journalPath: freshJournalPath,
+            store,
+            replacement: client.recoveryVaultReplacement(),
+            accountWorkspaces: Effect.succeed([]),
+            hasIdentity: () => Effect.succeed(false)
+          })
+        )
+      )
+      assert.deepEqual(planElsewhere.methods, {
+        hasFile: false,
+        hasPassword: true,
+        hasPasskey: null
+      })
+
+      // Removing the sole unlock method is refused before mutating the vault.
+      const soleRemove = await withClient(service, (store, client) =>
+        Effect.runPromise(
+          Effect.exit(
+            removeRecoveryPassword({
+              journalPath,
+              store,
+              replacement: client.recoveryVaultReplacement(),
+              unlock: {
+                password,
+                locator,
+                replacement: client.recoveryVaultReplacement()
+              }
+            })
+          )
+        )
+      )
+      assert.equal(Exit.isFailure(soleRemove), true)
+      assert.equal(
+        recoveryVaultFailure(Exit.isFailure(soleRemove) ? soleRemove.cause.reasons[0]?.error : null)
+          .message,
+        'e2ee_recovery_conflict'
+      )
+
+      // Enrolling a passkey unlocked by password shares the same vault and enables password removal.
+      const port = syntheticAuthenticator()
+      const enrolled = await withClient(service, (store, client) =>
+        Effect.runPromise(
+          enrollRecoveryPasskey({
+            journalPath,
+            store,
+            unlock: {
+              password,
+              locator,
+              replacement: client.recoveryVaultReplacement()
+            },
+            port,
+            label: 'MacBook Touch ID'
+          })
+        )
+      )
+      assert.deepEqual(enrolled, { passkeys: 1, labels: ['MacBook Touch ID'] })
+
+      const planBoth = await withClient(service, (store, client) =>
+        Effect.runPromise(
+          recoveryReplacementPlan({
+            journalPath,
+            store,
+            replacement: client.recoveryVaultReplacement(),
+            accountWorkspaces: Effect.succeed([]),
+            hasIdentity: () => Effect.succeed(false)
+          })
+        )
+      )
+      assert.deepEqual(planBoth.methods, {
+        hasFile: false,
+        hasPassword: true,
+        hasPasskey: true
+      })
+
+      const removed = await withClient(service, (store, client) =>
+        Effect.runPromise(
+          removeRecoveryPassword({
+            journalPath,
+            store,
+            replacement: client.recoveryVaultReplacement(),
+            unlock: { passkey: port, locator }
+          })
+        )
+      )
+      assert.deepEqual(removed, { removed: true, pending: false })
+
+      const planAfterRemove = await withClient(service, (store, client) =>
+        Effect.runPromise(
+          recoveryReplacementPlan({
+            journalPath,
+            store,
+            replacement: client.recoveryVaultReplacement(),
+            accountWorkspaces: Effect.succeed([]),
+            hasIdentity: () => Effect.succeed(false)
+          })
+        )
+      )
+      assert.deepEqual(planAfterRemove.methods, {
+        hasFile: false,
+        hasPassword: false,
+        hasPasskey: true
+      })
+
+      // Old password can no longer unlock the vault.
+      const afterRemoveOpen = await withClient(service, (store, client) =>
+        Effect.runPromise(
+          Effect.exit(
+            setupWorkspaceRecovery({
+              journalPath,
+              store,
+              unlock: {
+                password,
+                locator,
+                replacement: client.recoveryVaultReplacement()
+              },
+              replacement: client.recoveryVaultReplacement(),
+              target: fakeTarget([])
+            })
+          )
+        )
+      )
+      assert.equal(Exit.isFailure(afterRemoveOpen), true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+}
+
+void test('creates a passkey-first vault, saves an offline recovery file later, and rotates a password', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const journalPath = join(dir, 'recovery-vault.sqlite')
+    const filePath = join(dir, 'later.lodyrecovery')
+    const locator = 'https://synthetic.convex.cloud'
+    const port = syntheticAuthenticator()
+
+    const created = await withClient(service, (store) =>
+      Effect.runPromise(
+        createAccountRecoveryVaultWithPasskey({
+          journalPath,
+          store,
+          exists: Effect.succeed(false),
+          locator,
+          port,
+          label: 'Primary Mac'
+        })
+      )
+    )
+    service.replacement.current = created.vaultId
+
+    const saved = await withClient(service, (store, client) =>
+      Effect.runPromise(
+        saveAccountRecoveryFile({
+          journalPath,
+          store,
+          replacement: client.recoveryVaultReplacement(),
+          unlock: { passkey: port, locator },
+          persist: (bytes) =>
+            Effect.sync(() => {
+              writeFileSync(filePath, bytes, { mode: 0o600 })
+              return new Uint8Array(readFileSync(filePath))
+            })
+        })
+      )
+    )
+    assert.equal(saved.vaultId, created.vaultId)
+    const file = new Uint8Array(readFileSync(filePath))
+    const inspected = await withClient(service, (store) =>
+      Effect.runPromise(inspectRecoveryFile({ journalPath, store, file }))
+    )
+    assert.equal(inspected.vaultId, created.vaultId)
+
+    // Add and rotate a password wrap on the same vault.
+    await withClient(service, (store, client) =>
+      Effect.runPromise(
+        setRecoveryPassword({
+          journalPath,
+          store,
+          replacement: client.recoveryVaultReplacement(),
+          unlock: { passkey: port, locator },
+          password: 'first-recovery-passphrase',
+          kdf: fastKdf
+        })
+      )
+    )
+    await withClient(service, (store, client) =>
+      Effect.runPromise(
+        setRecoveryPassword({
+          journalPath,
+          store,
+          replacement: client.recoveryVaultReplacement(),
+          unlock: {
+            password: 'first-recovery-passphrase',
+            locator,
+            replacement: client.recoveryVaultReplacement()
+          },
+          password: 'rotated-recovery-passphrase',
+          kdf: fastKdf
+        })
+      )
+    )
+
+    const log = []
+    const setupRes = await withClient(service, (store, client) =>
+      Effect.runPromise(
+        setupWorkspaceRecovery({
+          journalPath,
+          store,
+          unlock: {
+            password: 'rotated-recovery-passphrase',
+            locator,
+            replacement: client.recoveryVaultReplacement()
+          },
+          replacement: client.recoveryVaultReplacement(),
+          target: fakeTarget(log)
+        })
+      )
+    )
+    assert.deepEqual(setupRes, { outcome: 'Committed', recoverable: true })
+    assert.deepEqual(log, ['setup'])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

@@ -131,6 +131,8 @@ export interface SessionFileHistoryProvider {
     }
   ): Promise<SessionFileDiffResult>;
   listChangedFiles(turnId?: string): Promise<SessionFileChangedFilesResult>;
+  /** Read the complete current Branch list when the Changes surface opens. */
+  refreshChangedFiles?(signal?: AbortSignal): Promise<SessionFileChangedFilesResult>;
   /** A successful live Branch read can replace the older index-derived change list. */
   subscribeChangedFiles?(listener: () => void): () => void;
   // Batched "All Changes" (current disk vs base) diff. Optional: providers that cannot

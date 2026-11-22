@@ -1,6 +1,7 @@
 import {
   getProjectMcpKey,
   getWorkspaceFlockDocId,
+  normalizePinSection,
   normalizeProjectMcpDefault,
   serializeAgentRoleRow,
   assertPublicMcpServer,
@@ -8,6 +9,7 @@ import {
   type AgentRole,
   type AgentRoleId,
   type McpServerId,
+  type PinSection,
   type ProjectId,
   type ProjectRef,
   type WorkspaceId,
@@ -116,6 +118,25 @@ export const deleteWorkspaceProject = (
   deps: WorkspaceCatalogWriteDeps,
   id: ProjectId
 ): Promise<void> => deleteRow(deps, workspaceFlockKeys.project(id));
+/**
+ * Create, rename or reorder a pin section: the whole row is one write.
+ * A row the shared catalog would drop (blank name, bad key) is refused here.
+ */
+export const writeWorkspacePinSection = (
+  deps: WorkspaceCatalogWriteDeps,
+  section: PinSection
+): Promise<void> => {
+  const normalized = normalizePinSection(section);
+  if (!normalized) return Promise.reject(new Error('Invalid pin section'));
+  return putRow(deps, workspaceFlockKeys.pinSection(normalized.id), normalized);
+};
+
+/** Delete a section; its conversations fall back to the default section on read. */
+export const deleteWorkspacePinSection = (
+  deps: WorkspaceCatalogWriteDeps,
+  id: string
+): Promise<void> => deleteRow(deps, workspaceFlockKeys.pinSection(id));
+
 /**
  * Who may manage a project's defaults, resolved from live state by the caller
  * at the moment of the write — never from whether a switch was enabled.

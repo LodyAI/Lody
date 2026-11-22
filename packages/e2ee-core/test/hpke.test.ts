@@ -115,7 +115,7 @@ describe('fixed Base HPKE epoch primitive through the public entry', () => {
     );
     const low = new Uint8Array(32);
     low[0] = 1;
-    await failure(Public.sealEpochKeyHpke(ok(Public.Bytes.encryptionPublicKey(low)), key, context));
+    expect(Result.isFailure(Public.Bytes.encryptionPublicKey(low))).toBe(true);
     expect(owned.length).toBeGreaterThan(0);
     for (const privateBytes of owned) expect(privateBytes).toEqual(new Uint8Array(32));
   });
@@ -252,7 +252,7 @@ describe('fixed Base HPKE epoch primitive through the public entry', () => {
     ).toMatchObject({ code: 'recipient-mismatch' });
     const low = new Uint8Array(32);
     low[0] = 1;
-    await failure(Public.sealEpochKeyHpke(ok(Public.Bytes.encryptionPublicKey(low)), key, context));
+    expect(Result.isFailure(Public.Bytes.encryptionPublicKey(low))).toBe(true);
   });
 
   it('rejects old info and arbitrary plaintext lengths without changing the public suite', async () => {

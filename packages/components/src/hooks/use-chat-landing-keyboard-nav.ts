@@ -218,7 +218,8 @@ export function useChatLandingKeyboardNav(
         if (dropdownOpen) return;
         if (!active || !root.contains(active)) return;
         const options = collectOptions(root);
-        if (active.tagName === 'TEXTAREA') {
+        // The composer: its plain textarea, or the mention editor.
+        if (active.tagName === 'TEXTAREA' || active.hasAttribute('data-lody-composer-input')) {
           event.preventDefault();
           event.stopImmediatePropagation();
           if (options.length > 0) {

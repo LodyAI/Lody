@@ -1,10 +1,11 @@
+import { prepareReplacement } from '@lody/shared/history-writer';
 import { describe, expect, it } from 'vitest';
 
 import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/shared';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 
 import { applyNotificationOnHistory } from '../src/lib/acp/history';
-import { planAgentHistoryMutation, prepareReplacement } from '@lody/shared';
+import { planAgentHistoryMutation } from '@lody/shared';
 import {
   roostContentPatches,
   stageRoostContent,

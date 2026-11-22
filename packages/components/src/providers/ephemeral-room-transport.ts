@@ -7,6 +7,8 @@ import type { EphemeralStore } from 'loro-crdt';
 import {
   LORO_STREAMS_BUCKET_ID,
   createLoroStreamUrl,
+  loroStreamsWebSocketOptions,
+  type LoroStreamsWebSocketOptions,
   getLoroMetaStreamId,
   getLoroStreamsPresenceBaseUrl,
   pickLoroStreamsPresenceShardId,
@@ -60,6 +62,7 @@ export type EphemeralRoomStartArgs = {
   /** Workspace-authorized bucket; ordinary callers retain the default. */
   bucketId?: string;
   baseUrl: string;
+  webSocketEnabled?: boolean;
   auth: EphemeralRoomAuthCallback;
   /** Hosted shard topology (bare host suffix) injected at runtime; absent for unsharded gateways. */
   shardHostSuffix?: string;
@@ -144,7 +147,16 @@ export abstract class EphemeralRoomTransport<
     });
     const store = this.createStore();
     const streamUrl = this.tagStreamUrl(durableStreamUrl);
-    const transport = this.createTransport({ streamUrl, auth: args.auth, store });
+    const transport = this.createTransport({
+      streamUrl,
+      auth: args.auth,
+      store,
+      ...loroStreamsWebSocketOptions(
+        args.webSocketEnabled === true,
+        args.baseUrl,
+        this.options.workspaceId
+      ),
+    });
     this.store = store;
     this.transport = transport;
     this.streamUrl = streamUrl;
@@ -269,8 +281,10 @@ export abstract class EphemeralRoomTransport<
     streamUrl: string;
     auth: EphemeralRoomAuthCallback;
     store: TStore;
+    webSocket?: LoroStreamsWebSocketOptions;
   }): EphemeralRoomTransportLike {
     return new EphemeralStreamCrdt({
+      ...(args.webSocket ? { webSocket: args.webSocket } : {}),
       streamUrl: args.streamUrl,
       auth: args.auth,
       adaptor: EphemeralStoreAdaptor(args.store as unknown as EphemeralStore),

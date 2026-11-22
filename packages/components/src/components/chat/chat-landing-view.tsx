@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
 import type { ClipboardEvent, KeyboardEvent, ReactNode, Ref } from 'react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
@@ -20,7 +20,7 @@ import {
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { ErrorBoundary } from '@/components/error-boundary';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import { ArrowUp, Settings } from 'lucide-react';
+import { ArrowUp, CornerDownLeft, Settings } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
@@ -29,6 +29,16 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
+import { DialogChatLandingScreen } from './dialog-chat-landing-screen';
+import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  // The Return glyph inside the dialog's submit button: part of the label,
+  // one step quieter than the word. An icon, never the ↩ character, which
+  // macOS paints as a colour emoji.
+  chord: { opacity: 0.6, flexShrink: 0 },
+});
 
 export type ChatLandingTone = 'light' | 'dark';
 
@@ -39,6 +49,14 @@ export interface ChatLandingViewProps {
   tone: ChatLandingTone;
   /** Whether the view is in mobile mode */
   isMobile?: boolean;
+  /**
+   * `page` is the new-chat route; `dialog` is the compact layout of a landing
+   * embedded in a dialog: hints and composer only, no greeting, ambient boards,
+   * page chrome or sidebar session drop target. Ignored on mobile.
+   */
+  layout?: 'page' | 'dialog';
+  /** DOM id of the prompt; an embedded landing needs its own beside the page's. */
+  promptId?: string;
   /** Scope root for desktop keyboard navigation (web layout only) — wraps the config
    *  controls + composer so arrow/Esc nav stays out of the sidebar and page chrome. */
   navRootRef?: Ref<HTMLDivElement>;
@@ -57,9 +75,9 @@ export interface ChatLandingViewProps {
   /** Callback when prompt changes */
   onPromptChange: (value: string) => void;
   /** Callback for prompt keydown events */
-  onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPromptKeyDown?: (event: KeyboardEvent<ComposerInputElement>) => void;
   /** Callback for prompt paste events */
-  onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onPromptPaste?: (event: ClipboardEvent<ComposerInputElement>) => void;
   /** Callback when files are dropped onto the composer */
   onImageDrop?: (files: File[]) => void;
   /** Placeholder text for the prompt textarea */
@@ -68,7 +86,7 @@ export interface ChatLandingViewProps {
   /** Mobile keyboard action hint for the prompt textarea */
   promptEnterKeyHint?: 'send' | 'enter';
   /** Ref for the prompt textarea */
-  promptRef?: Ref<HTMLTextAreaElement>;
+  promptRef?: Ref<ComposerInputElement>;
   /** Inline pasted text drafts rendered as protected tokens inside the textarea */
   pastedTextDrafts?: PastedTextDraft[];
   /** Callback when pasted text draft ranges change */
@@ -93,8 +111,6 @@ export interface ChatLandingViewProps {
   onFileRetry?: (id: string) => void;
   /** Per-turn MCP selection, rendered inside the composer's "+" menu. */
   mcp?: AttachmentAddMenuMcp;
-  /** @deprecated Use topSelector and footerSelector instead */
-  selector?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, branch) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -120,6 +136,12 @@ export interface ChatLandingViewProps {
   submitLabel?: string;
   /** Label for submit button when idle */
   submittingLabel?: string;
+  /**
+   * The dialog layout's dismiss action, beside its labelled submit button.
+   * Absent: no Cancel button (the panel's own close still dismisses).
+   */
+  onCancel?: () => void;
+  cancelLabel?: string;
   /** Hint type to display around the composer area */
   hintType?: ChatLandingHintType;
   /**
@@ -182,7 +204,7 @@ export interface ChatLandingViewProps {
  */
 function useSessionMentionDrop(enabled: boolean) {
   const mentionActionsRef = useRef<CombinedMentionTextareaHandle | null>(null);
-  const { dropZone, overlayActive } = useSessionMentionDropZone({
+  const { dropZone, pointerDropRef, overlayActive } = useSessionMentionDropZone({
     enabled,
     onDropSessionId: useCallback((sessionId: string) => {
       mentionActionsRef.current?.insertSessionMention(sessionId);
@@ -191,6 +213,7 @@ function useSessionMentionDrop(enabled: boolean) {
   return {
     mentionActionsRef,
     dropZone,
+    pointerDropRef,
     overlayActive,
   };
 }
@@ -198,6 +221,8 @@ function useSessionMentionDrop(enabled: boolean) {
 export function ChatLandingView({
   tone,
   isMobile = false,
+  layout = 'page',
+  promptId: promptIdProp,
   navRootRef,
   mentionSource,
   availableCommands,
@@ -225,7 +250,6 @@ export function ChatLandingView({
   onFileRemove,
   onFileRetry,
   mcp,
-  selector,
   topSelector,
   footerSelector,
   bottomBar,
@@ -239,6 +263,8 @@ export function ChatLandingView({
   onSubmit,
   submitLabel = 'Send',
   submittingLabel = 'Sending...',
+  onCancel,
+  cancelLabel = 'Cancel',
   hintType = null,
   noMachineVariant = 'download-client',
   hintDownloadClientTitle = "Nothing's plugged in yet",
@@ -260,8 +286,11 @@ export function ChatLandingView({
   errorLabels = {},
 }: ChatLandingViewProps) {
   const postHog = usePostHog();
-  const { mentionActionsRef, dropZone, overlayActive } = useSessionMentionDrop(
-    !isMobile && !submissionPending
+  const isDialogLayout = !isMobile && layout === 'dialog';
+  const promptId = promptIdProp ?? (isMobile ? 'chat-prompt-mobile' : 'chat-prompt');
+  // A dialog's backdrop covers the sidebar, so no session can be dragged in.
+  const { mentionActionsRef, dropZone, pointerDropRef, overlayActive } = useSessionMentionDrop(
+    !isMobile && !submissionPending && !isDialogLayout
   );
   // A folder is not an attachment — it becomes a `@path` mention, through the
   // same handle the session drop uses, so it lands in this composer's draft.
@@ -277,7 +306,7 @@ export function ChatLandingView({
   );
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const handlePromptPasteWithSessionUrl = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       const text = event.clipboardData.getData('text/plain');
       // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
       const sessionUrl = text
@@ -291,8 +320,7 @@ export function ChatLandingView({
           });
         } else {
           const target = event.currentTarget;
-          const at = target.selectionStart ?? target.value.length;
-          const replaceEnd = target.selectionEnd ?? at;
+          const { start: at, end: replaceEnd } = getComposerSelection(target);
           if (
             mentionActionsRef.current?.insertSessionMention(sessionUrl.sessionId, {
               at,
@@ -381,13 +409,47 @@ export function ChatLandingView({
     </ErrorBoundary>
   );
 
+  // A create dialog states its action in words, with the chord that sends it.
+  // Enter sends too (the prompt's own keydown); the chord is what a person
+  // who has learned to press it for a newline-friendly editor expects.
+  const dialogActionsNode = (
+    <ErrorBoundary name="ChatLandingPrimaryAction" variant="inline" resetKeys={resetKeys}>
+      {onCancel ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          data-testid="composer-cancel"
+          onClick={onCancel}
+          disabled={submissionPending}
+        >
+          {cancelLabel}
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        variant="primary"
+        size="small"
+        data-testid="composer-send"
+        onClick={onSubmit}
+        disabled={submitDisabled}
+        aria-label={submissionPending ? submittingLabel : submitLabel}
+      >
+        {submissionPending ? <Spinner className="h-3.5 w-3.5" /> : null}
+        <span>{submitLabel}</span>
+        {/* Return sends, as in the new-conversation composer. */}
+        <CornerDownLeft size={14} strokeWidth={2} aria-hidden {...stylex.props(styles.chord)} />
+      </Button>
+    </ErrorBoundary>
+  );
+
   const fallbackRender = ({ resetErrorBoundary }: { resetErrorBoundary: () => void }) => (
     <div className="w-full rounded-xl border border-border/60 bg-background/80 p-4">
       <div className="text-sm font-semibold text-foreground">{somethingWentWrong}</div>
       <div className="mt-1 text-xs text-muted-foreground">{composerCrashed}</div>
       <textarea
-        id={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
-        ref={promptRef}
+        id={promptId}
+        ref={promptRef as Ref<HTMLTextAreaElement>}
         value={submissionPending ? '' : promptValue}
         onChange={(event) => onPromptChange(event.target.value)}
         onKeyDown={onPromptKeyDown}
@@ -417,7 +479,7 @@ export function ChatLandingView({
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1">{selector ?? footerSelector}</div>
+        <div className="flex flex-wrap items-center gap-1">{footerSelector}</div>
         <div className="ml-auto flex items-center gap-2">
           {primaryActionNode}
           <button
@@ -442,11 +504,11 @@ export function ChatLandingView({
       {composerNotice}
       <ChatComposer
         tone={tone}
-        variant={isMobile ? 'landing' : 'session'}
+        variant={isMobile ? 'landing' : isDialogLayout ? 'modal' : 'session'}
         mentionSource={mentionSource}
         availableCommands={availableCommands}
         skillAgent={skillAgent}
-        promptId={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
+        promptId={promptId}
         promptRef={promptRef}
         promptValue={submissionPending ? '' : promptValue}
         onPromptChange={onPromptChange}
@@ -475,13 +537,13 @@ export function ChatLandingView({
         onFileRetry={submissionPending ? undefined : onFileRetry}
         mcp={mcp}
         topSelector={topSelector}
-        footerSelector={footerSelector ?? selector}
+        footerSelector={footerSelector}
         bottomBar={bottomBar}
         statusMessage={composerStatusMessage}
         statusTone={composerStatusTone}
-        primaryAction={primaryActionNode}
+        primaryAction={isDialogLayout ? dialogActionsNode : primaryActionNode}
         autoResize
-        maxRows={isMobile ? 10 : 11}
+        maxRows={isMobile ? 10 : isDialogLayout ? 14 : 11}
       />
     </ErrorBoundary>
   );
@@ -499,12 +561,24 @@ export function ChatLandingView({
     );
   }
 
+  if (isDialogLayout) {
+    return (
+      <DialogChatLandingScreen
+        navRootRef={navRootRef}
+        composer={composerNode}
+        noMachineHint={noMachineHintNode}
+        agentConfigHint={agentConfigHintNode}
+      />
+    );
+  }
+
   return (
     <WebChatLandingScreen
       title={title}
       dropActive={overlayActive}
       dropKind="session-mention"
       dropHandlers={dropZone.handlers}
+      dropRef={pointerDropRef}
       navRootRef={navRootRef}
       contextSwitch={contextSwitch}
       ambient={

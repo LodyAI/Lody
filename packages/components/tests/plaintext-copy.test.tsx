@@ -1,15 +1,10 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Blob as NodeBlob } from 'node:buffer';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
 import { buildConversationMarkdown, type WorkspaceId, type SessionMeta } from '@lody/shared';
 import { PlatformContext } from '@lody/platform/react';
 import {

@@ -38,7 +38,7 @@ note tools or change result delivery timing.
 ## Agent chat to a busy Session
 
 An orchestrating Agent sends corrections or new information to a Session that is
-still working. `lody_session_chat` and `lody_session_chat_many` steer that input
+still working. `lody_session_chat`, in single or batch mode, steers that input
 into the running turn on either Machine when its agent accepts steering, regardless
 of the human's queue or guide preference and of who started the running turn. A
 target whose agent cannot acknowledge a steer queues the input as its next ordinary
@@ -124,8 +124,8 @@ lock tasks or reject sends as duplicates.
 - **Queued inputs.** A requester may list, withdraw or replace its own queued
   inputs that have not started. A started input returns `ALREADY_STARTED` and is
   never cancelled by this path.
-- **Machine resources.** `lody_machine_list` reports agent quota with reset
-  times and disk usage. `lody_agent_config_list` and
+- **Machine resources.** `lody_catalog` action `machines` reports agent quota with reset
+  times and disk usage. Its `agent_configs` action and
   `lody_session_create_options` report an exhausted scoped quota as
   `quota_exhausted` with `availableAt`, so a coordinator stops dispatching to
   that config until the window resets. Lody does not manage or report agent-held
@@ -143,7 +143,7 @@ completion output, which already omits tool calls.
 ## Session creation configuration
 
 An orchestrator can select the target Agent's advertised configuration on
-`lody_session_create` and `lody_session_create_many` without creating an Agent Role.
+`lody_session_create`, in single or batch mode, without creating an Agent Role.
 Optional `modeId` uses ACP mode ids; `configOptionValues` uses actual option ids
 with string or boolean values. All advertised options are eligible, including
 permission options without a category. Discovery reports modes and option
@@ -226,11 +226,21 @@ machine and project, and executes the same Role resolution and durable Operation
 state machine used by cloud. Hosted repository contexts remain unavailable;
 registered local projects and plain chat are supported.
 
+An Agent may keep working after its Turn ends, woken by its own background task,
+scheduled wake-up or cron. Until Stop, the Agent's exit or replacement, a
+collaboration stop or the next Turn, that same Agent's calls act for the last Turn
+that ended without Stop or cancellation, with that Turn's frozen identity. Only
+that Agent holds the Session's tool binding, so Lody does not require it to report
+its own activity; providers such as Codex report none.
+
 Recovery uses the frozen prompt, Role revision and dispatch configuration. Before
-replaying a missing target input, cloud confirms remote document catch-up; OSS
-confirms the authoritative daemon repo and rechecks the fixed Turn under the
-existing materialization claim. Missing cloud connectivity never counts as local
-authority in a cloud workspace. Completion writes directly to the native Inbox in
+replaying a missing target input, OSS and Cloud same-machine targets authored through
+the daemon's own repo confirm the authoritative daemon repo (`repo.flush()`) and
+recheck the fixed Turn under the existing materialization claim; Cloud remote-machine
+or locally absent targets confirm remote Streams document catch-up
+([availability trade-off](../.agents/notes/implemented/architecture/2026-11-21-cloud-same-machine-recovery-authority.md)).
+Missing cloud connectivity never counts as authority for remote targets or unverified
+cross-account access in a cloud workspace. Completion writes directly to the native Inbox in
 the same Operation transaction; the result-consumption rules below control execution.
 This changes local persisted storage, not the hosted API.
 

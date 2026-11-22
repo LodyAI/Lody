@@ -1,10 +1,10 @@
+// @vitest-environment jsdom
 vi.mock('@/lib/desktop-window', () => ({ desktopWindowId: () => '' }));
-// @vitest-environment jsdom
-// @vitest-environment jsdom
+// The security-code card links to public docs; the route never opens it here.
+vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => true }));
 import { act, createElement, Fragment, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { Result } from 'effect';
 import vector from '../../e2ee-core/test/ledger-v1-vector.json';
 import {
   Bytes,
@@ -18,6 +18,9 @@ import type {
   WorkspacesState,
 } from '@lody/platform';
 import { PersonalHostError } from '@lody/e2ee-client';
+import { makeAutomaticPairingRuntime } from '@lody/e2ee-client/automatic-pairing';
+import { Effect, Result } from 'effect';
+import type { E2eeWorkspaceLedgerHead, E2eeWorkspaceHistoryPage } from '@lody/cloud-api';
 const fixture = vi.hoisted(() => ({
   port: undefined as PlatformE2eeWorkspaces | undefined,
   session: { status: 'authenticated', user: { id: 'account', name: 'A', email: 'a@example.test' } },
@@ -26,6 +29,7 @@ const fixture = vi.hoisted(() => ({
   cachedUser: null as { id: string } | null,
   showTools: false,
   realPairing: false,
+  realTeam: false,
   workspaces: { status: 'loading' } as WorkspacesState,
   navigation: [] as unknown[],
   management: undefined as
@@ -49,11 +53,15 @@ vi.mock('@lody/platform/react', () => ({
   usePlatformSession: () => fixture.session,
   usePlatformWorkspaces: () => fixture.workspaces,
 }));
-vi.mock('jotai', () => ({
+vi.mock('jotai', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('jotai')>()),
   useSetAtom: () => fixture.clear,
   useAtomValue: () => fixture.cachedUser,
 }));
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('react-i18next', () => {
+  const t = (key: string) => key;
+  return { useTranslation: () => ({ t }) };
+});
 vi.mock('@/atoms', () => ({ setWorkspaceContextAtom: 'workspace', userAtom: 'user' }));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
 vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
@@ -109,7 +117,14 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     );
   },
 }));
-vi.mock('@/components/settings/e2ee-team-settings', () => ({ E2eeTeamSettingsHost: () => null }));
+vi.mock('@/components/settings/e2ee-team-settings', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../src/components/settings/e2ee-team-settings')>();
+  return {
+    E2eeTeamSettingsHost: (props: Parameters<typeof actual.E2eeTeamSettingsHost>[0]) =>
+      fixture.realTeam ? createElement(actual.E2eeTeamSettingsHost, props) : null,
+  };
+});
 vi.mock('@/components/e2ee/email-admission-worker', () => ({ EmailAdmissionWorker: () => null }));
 vi.mock('@/components/pages/e2ee-personal-pairing', async (importOriginal) => {
   const actual =
@@ -135,8 +150,13 @@ import {
   readObservedLedgerCheckpoint,
 } from '../src/lib/e2ee-workspace-storage';
 import { Route } from '../src/routes/workspace/e2ee/$workspaceId';
+import { E2eeWorkspaceConsole } from '../src/components/pages/e2ee-workspace-console';
 import { writePreferredWorkspaceSlug } from '../src/lib/workspace';
 import { useE2eeAccountId } from '../src/lib/e2ee-account';
+import { e2eeAccessLoss } from '../src/lib/e2ee-member-removal';
+import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
+// The portable host's own strict page capture: what a Web or mobile runtime accepts.
+import { capturePage } from '../../e2ee-client/src/runtime-input';
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -188,6 +208,7 @@ beforeEach(() => {
   fixture.cachedUser = null;
   fixture.showTools = false;
   fixture.realPairing = false;
+  fixture.realTeam = false;
   fixture.workspaces = { status: 'loading' };
   fixture.navigation = [];
   fixture.management = undefined;
@@ -417,9 +438,9 @@ it('guides a desktop that never joined this workspace to approval and, by defaul
   );
   if (start) await act(async () => start.click());
   expect(started).toEqual([{ pairingString: undefined }]);
-  expect(
-    container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent
-  ).toBe('50M6-HA79-55MT');
+  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent).toBe(
+    '50M6-HA79-55MT'
+  );
 });
 
 it('opens the local ledger with an expired renderer snapshot and offline main identity, then reconnects', async () => {
@@ -479,6 +500,69 @@ it('opens the local ledger with an expired renderer snapshot and offline main id
   await act(async () => window.dispatchEvent(new Event('online')));
   expect(container.textContent).toBe('1');
 });
+
+it.each([
+  ['a page carrying backend-only fields', [] as string[], '1'],
+  ['records that fail local validation', ['zz'], 'failed'],
+] as const)(
+  'catches up through the cloud boundary on %s without reporting the console offline',
+  async (_label, recordsHex, shown) => {
+    const ingested: unknown[] = [];
+    fixture.port = createCloudE2eeWorkspaces({
+      session: () => fixture.session as never,
+      refreshWorkspaces: async () => {},
+      remote: {
+        create: async () => {
+          throw new Error('unused');
+        },
+        describe: async () => ({
+          workspaceId,
+          contentMode: 'e2ee',
+          contentModeVersion: 1,
+          genesisHash,
+          cryptoOrgId: genesisHash,
+          activation: 'control-only',
+        }),
+        // The hosted backend's real reply also reports its storage capacity.
+        history: async () =>
+          ({
+            workspaceId,
+            genesisHash,
+            checkpoint: { headHash: genesisHash, length: 1 },
+            startIndex: 1,
+            recordsHex: [...recordsHex],
+            position: local.status.position!,
+            nextCursor: null,
+            ledgerCapacity: {
+              limitBytes: 1_000_000,
+              observedBytes: 512,
+              observedLength: 1,
+              nearLimit: false,
+            },
+          }) as E2eeWorkspaceHistoryPage,
+      },
+      runtime: {
+        account: async () => ({ userId: 'account', source: 'network' }),
+        recordCreated: async () => {},
+        open: async () => local.status,
+        close: async () => {},
+        status: async () => local.status,
+        ledgerView: async () => local,
+        ingestLedgerRecords: async (_id, page) => {
+          const captured = capturePage(page);
+          if (Result.isFailure(captured)) throw captured.failure;
+          ingested.push(captured.success);
+          return local.status;
+        },
+      },
+    });
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    expect(container.textContent).not.toContain('sessions.offline');
+    expect(container.querySelector('[data-control-state]')?.textContent).toBe(shown);
+    if (shown === '1') expect(ingested).toHaveLength(1);
+  }
+);
 
 it('keeps E2EE identity IPC dormant for an ordinary workspace even while auth is loading', async () => {
   fixture.session.status = 'loading';
@@ -593,6 +677,7 @@ it('closes only its captured portable reader and spares the workspace reader', a
       readers.add(requested ?? 'legacy-control-reader');
       return { ...local.status, readerOwner: requested };
     },
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => local.status,
     close: async (...args) => {
@@ -624,6 +709,7 @@ it('joins one legacy reader close when member removal and unmount overlap', asyn
       count += 1;
       return { ...local.status, readerOwner: 'account-owner' };
     },
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => {
       throw new Error('e2ee_member_removed');
@@ -659,6 +745,7 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
         throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_device_revoked");
       return { ...local.status, readerOwner: 'account-owner' };
     },
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => {
       throw new Error('e2ee_device_revoked');
@@ -678,6 +765,166 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
   expect(guide?.getAttribute('data-control-state')).toBe('approval-required');
   expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
   expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
+});
+
+it.each(['automatic', 'scanned'] as const)(
+  'shows a device revoked after it joined (%s) as revoked with pairing again, never as syncing',
+  async (joinedBy) => {
+    fixture.workspaces = {
+      status: 'ready',
+      activeWorkspaceId: workspaceId,
+      workspaces: [{ id: workspaceId, slug: 'protected-home', name: 'Protected', role: 'member' }],
+    };
+    fixture.port = displayPort(async () => [] as never);
+    delete fixture.port.memberProfiles;
+    let revoked = false,
+      opens = 0,
+      requests = 0;
+    // Main's exact public projection after it recorded this device's revocation.
+    const refused = (method: string) =>
+      new Error(`Error invoking remote method 'e2ee.${method}': Error: e2ee_device_revoked`);
+    const joined = { ...local.status, hasDeviceCredential: true };
+    const host = {
+      recordCreated: async () => {},
+      open: async () => {
+        opens += 1;
+        if (revoked && opens > 1) throw refused('open');
+        return { ...joined, readerOwner: 'account-owner' };
+      },
+      status: async () => {
+        if (revoked) throw refused('status');
+        return joined;
+      },
+      refresh: async () => {
+        if (revoked) throw refused('refresh');
+        return joined;
+      },
+      ledgerView: async () => local,
+      ingestLedgerRecords: async () => {
+        if (revoked) throw refused('ingestLedgerRecords');
+        return joined;
+      },
+      close: async () => {},
+      requestAccountPairing: async () => {
+        requests += 1;
+        throw new Error('e2ee_network');
+      },
+      accountPairingRequest: async () => null,
+      cancelAccountPairing: async () => {},
+    } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+    const relayed = new Map<string, unknown>();
+    // The application's real coordinator over this host, as the cloud provider builds it.
+    const automatic = makeAutomaticPairingRuntime({
+      runtime: host,
+      relay: {
+        pending: () => Effect.succeed([]),
+        read: () => Effect.succeed(null),
+        exchange: (command) => {
+          if (command.context) relayed.set(command.id, command.context);
+          return Effect.succeed({
+            id: command.id,
+            state: command.terminal ?? 'pending',
+            context: relayed.get(command.id),
+          } as never);
+        },
+      },
+      account: () => 'account',
+      workspaces: () => [{ workspaceId, name: 'Protected', genesisHash }],
+      deviceName: 'Synthetic phone',
+      canPresent: () => true,
+      accessLoss: e2eeAccessLoss,
+      crypto: globalThis.crypto,
+      run: Effect.runPromise,
+    });
+    try {
+      if (joinedBy === 'automatic') {
+        // Earlier in this app session the automatic request completed.
+        expect(await automatic.startAutomaticPairing(workspaceId)).toMatchObject({
+          phase: 'joined',
+        });
+      } else {
+        // A scanned join finished on the page, which then ended the automatic request.
+        revoked = true;
+        await automatic.startAutomaticPairing(workspaceId).catch(() => null);
+        await automatic.cancelAutomaticPairing(workspaceId);
+        revoked = false;
+      }
+      // The page's coordinator calls are the completion signals awaited below.
+      const pending = new Set<Promise<unknown>>();
+      const tracked = Object.fromEntries(
+        Object.entries(automatic).map(([name, method]) => [
+          name,
+          (...args: unknown[]) => {
+            const result = (method as (...input: unknown[]) => unknown)(...args);
+            if (result instanceof Promise) {
+              pending.add(result);
+              void result.then(
+                () => pending.delete(result),
+                () => pending.delete(result)
+              );
+            }
+            return result;
+          },
+        ])
+      );
+      const settle = async () => {
+        for (let turn = 0; turn < 20; turn++) await act(async () => {});
+        while (pending.size > 0)
+          await act(async () => {
+            await Promise.allSettled([...pending]);
+          });
+        await act(async () => {});
+      };
+      fixture.port.runtime = { ...host, ...tracked };
+      revoked = true;
+      const Component = Route.options.component as () => ReturnType<typeof createElement>;
+      await act(async () => root.render(createElement(Component)));
+      await settle();
+      expect(container.textContent).toContain('e2ee.auto.revoked.title');
+      expect(container.textContent).not.toContain('e2ee.auto.syncing.title');
+      expect(requests).toBe(0);
+      const again = container.querySelector<HTMLButtonElement>(
+        '[data-testid="e2ee-auto-pair-again"]'
+      );
+      expect(again).not.toBeNull();
+      // Pairing again is a new request, never the revoked credential's old approval.
+      await act(async () => again!.click());
+      await settle();
+      expect(container.textContent).not.toContain('e2ee.auto.revoked.title');
+      expect(container.textContent).not.toContain('e2ee.auto.syncing.title');
+      expect(container.textContent).toContain('e2ee.auto.waiting.title');
+    } finally {
+      automatic.disposeAutomaticPairing();
+    }
+  }
+);
+
+it('stops reopening a host that keeps refusing a revoked identity and offers re-pairing', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.showTools = true;
+  let opens = 0;
+  // Every reopen reaches the same revoked identity again: one retry, then guidance.
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      opens += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    status: async () => local.status,
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => {
+      throw new Error('e2ee_device_revoked');
+    },
+    refresh: async () => local.status,
+    close: async () => {},
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  for (let turn = 0; turn < 20; turn++) await act(async () => {});
+  expect(opens).toBe(2);
+  const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
+  expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
 });
 
 it.each(['describe', 'history'] as const)(
@@ -722,6 +969,7 @@ it.each(['describe', 'history'] as const)(
         readers.delete(reader!);
         closed.resolve();
       },
+      status: async () => local.status,
       ledgerView: async () => local,
       ingestLedgerRecords: async (_id, received) => {
         ingested.push(received);
@@ -779,6 +1027,7 @@ it('does not let an old public-directory read block a newly available protected 
       open: async () => local.status,
       recordCreated: async () => {},
       close: async () => {},
+      status: async () => local.status,
       ledgerView: async () => local,
       ingestLedgerRecords: async () => local.status,
     };
@@ -812,6 +1061,7 @@ it('retains an incomplete cold reader across remounts while independent workspac
       }
       return { ...local.status, workspaceId: id, readerOwner: reader };
     },
+    status: async (id) => ({ ...local.status, workspaceId: id }),
     ledgerView: async (id) => ({ ...local, status: { ...local.status, workspaceId: id } }),
     ingestLedgerRecords: async (id) => ({ ...local.status, workspaceId: id }),
     close: async (id, account, reader) => {
@@ -864,6 +1114,7 @@ it('offers the routed workspace only after a successful approved host open', asy
       if (!approved) throw new PersonalHostError({ code: 'approval-required' });
       return local.status;
     },
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => local.status,
     recordCreated: async () => {
@@ -914,6 +1165,9 @@ it('opens the workspace by itself once account pairing joins this device to it, 
       throw new PersonalHostError({ code: 'unsupported' });
     },
     close: async () => {},
+    requestAccountPairing: async () => {
+      throw new Error('retained request must not be replaced');
+    },
     accountPairingRequest: async () => {
       joined = true;
       return {
@@ -954,7 +1208,7 @@ it('waits for the current key after account pairing joins this device, and opens
     writeEpoch: keyInstalled ? 0 : null,
     hasDeviceCredential: true,
   });
-  const keyRefreshes: Array<{ installKeys?: boolean } | undefined> = [];
+  const keyRefreshes: Array<{ keyMode?: string } | undefined> = [];
   let installKey!: () => void;
   const keyInstall = new Promise<void>((resolve) => {
     installKey = resolve;
@@ -965,8 +1219,10 @@ it('waits for the current key after account pairing joins this device, and opens
         throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
       return status();
     },
-    refresh: async (_: string, options?: { installKeys?: boolean }) => {
+    refresh: async (_: string, options?: { keyMode?: string }) => {
       keyRefreshes.push(options);
+      if (options?.keyMode !== 'receive' && options?.keyMode !== 'full')
+        throw new Error('native key installation was not requested');
       await keyInstall;
       keyInstalled = true;
       return status();
@@ -978,6 +1234,9 @@ it('waits for the current key after account pairing joins this device, and opens
       throw new PersonalHostError({ code: 'unsupported' });
     },
     close: async () => {},
+    requestAccountPairing: async () => {
+      throw new Error('retained request must not be replaced');
+    },
     accountPairingRequest: async () => {
       joined = true;
       return {
@@ -993,7 +1252,7 @@ it('waits for the current key after account pairing joins this device, and opens
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
   expect(fixture.navigation).toEqual([]);
-  expect(keyRefreshes).toEqual([undefined]);
+  expect(keyRefreshes).toEqual([{ keyMode: 'receive' }]);
   await act(async () => installKey());
   await act(async () => {});
   expect(fixture.navigation).toEqual([
@@ -1001,7 +1260,90 @@ it('waits for the current key after account pairing joins this device, and opens
   ]);
 });
 
-const keyRequestPort = (refresh: (options?: { installKeys?: boolean }) => Promise<void>) => {
+it.each(['held-native-round', 'late-key-notification'])(
+  'keeps automatic syncing until the key arrives, then navigates without another click (%s)',
+  async (mode) => {
+    fixture.session.user.id = 'automatic-native-key-' + mode;
+    fixture.workspaces = {
+      status: 'ready',
+      activeWorkspaceId: workspaceId,
+      workspaces: [{ id: workspaceId, slug: 'protected-home', name: 'Protected', role: 'member' }],
+    };
+    fixture.port = displayPort(async () => [] as never);
+    const key = Promise.withResolvers<void>();
+    let updated: (() => void) | undefined;
+    let joined = false,
+      installed = false;
+    const status = () => ({
+      ...local.status,
+      hasDeviceCredential: true,
+      hasCurrentKey: installed,
+      writeEpoch: installed ? 0 : null,
+    });
+    fixture.port.runtime = {
+      open: async () => {
+        if (!joined) throw new Error('e2ee_missing-binding');
+        return status();
+      },
+      status: async () => status(),
+      ledgerView: async () => ({ ...local, status: status() }),
+      ingestLedgerRecords: async () => status(),
+      recordCreated: async () => {
+        throw new PersonalHostError({ code: 'unsupported' });
+      },
+      close: async () => {},
+      refresh: async (_id: string, options?: { keyMode?: string }) => {
+        if (options?.keyMode !== 'receive' && options?.keyMode !== 'full')
+          throw new Error('keys were not requested');
+        if (mode === 'held-native-round') {
+          await key.promise;
+          installed = true;
+        }
+        return status();
+      },
+      subscribeAutomaticPairing: (listener: () => void) => {
+        updated = listener;
+        return () => {
+          updated = undefined;
+        };
+      },
+      startAutomaticPairing: async () => {
+        throw new Error('must resume retained attempt');
+      },
+      automaticPairingState: async () => {
+        joined = true;
+        return {
+          id: 'synthetic-auto',
+          workspaceId,
+          workspaceName: 'Protected',
+          deviceName: 'Synthetic phone',
+          expiresAt: Date.now() + 600_000,
+          comparisonCode: '528193',
+          phase: installed ? 'joined' : 'syncing',
+        };
+      },
+    } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    expect(fixture.navigation).toEqual([]);
+    expect(container.textContent).toContain('e2ee.auto.syncing.title');
+    expect(container.querySelector('[data-control-state]')).toBeNull();
+    await act(async () => {
+      if (mode === 'held-native-round') key.resolve();
+      else {
+        installed = true;
+        updated?.();
+      }
+    });
+    await act(async () => {});
+    expect(fixture.navigation).toEqual([
+      { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+    ]);
+  }
+);
+
+const keyRequestPort = (refresh: (options?: { keyMode?: string }) => Promise<void>) => {
   fixture.workspaces = {
     status: 'ready',
     activeWorkspaceId: workspaceId,
@@ -1022,7 +1364,7 @@ const keyRequestPort = (refresh: (options?: { installKeys?: boolean }) => Promis
         throw new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding");
       return status();
     },
-    refresh: async (_: string, options?: { installKeys?: boolean }) => {
+    refresh: async (_: string, options?: { keyMode?: string }) => {
       await refresh(options);
       keyInstalled = true;
       return status();
@@ -1034,6 +1376,9 @@ const keyRequestPort = (refresh: (options?: { installKeys?: boolean }) => Promis
       throw new PersonalHostError({ code: 'unsupported' });
     },
     close: async () => {},
+    requestAccountPairing: async () => {
+      throw new Error('retained request must not be replaced');
+    },
     accountPairingRequest: async () => {
       joined = true;
       return {
@@ -1047,40 +1392,63 @@ const keyRequestPort = (refresh: (options?: { installKeys?: boolean }) => Promis
   } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
 };
 
-// A failed key request after an account-pairing join must not leave the device on a
-// keyless control page without saying so, and it is retried only when the user asks.
-it('shows a failed key request after account pairing joins this device, and retries it once on request', async () => {
-  fixture.session.user.id = 'account-key-retry';
-  const keyRefreshes: unknown[] = [];
-  keyRequestPort(async (options) => {
-    keyRefreshes.push(options);
-    if (keyRefreshes.length === 1) throw new Error('e2ee_key_round_failed');
+it('receives the approved device key after a transient reader handoff without showing permanent failure', async () => {
+  fixture.session.user.id = 'account-key-transient';
+  let attempts = 0;
+  keyRequestPort(async () => {
+    if (++attempts === 1) throw new Error('e2ee_not_open');
   });
   const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => {});
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  await act(async () => root.render(createElement(Component)));
-  await act(async () => {});
-  await act(async () => {});
-  expect(keyRefreshes).toHaveLength(1);
-  expect(fixture.navigation).toEqual([]);
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-    'e2ee.accountPair.request.keyFailed'
-  );
-  expect(diagnostics).toHaveBeenCalledWith(
-    'E2EE account pairing key request failed',
-    expect.anything(),
-    expect.anything()
-  );
-  diagnostics.mockRestore();
-  const retry = [...container.querySelectorAll('button')].find(
-    (button) => button.textContent === 'e2ee.accountPair.request.keyRetry'
-  );
-  await act(async () => retry?.click());
-  await act(async () => {});
-  expect(keyRefreshes).toHaveLength(2);
-  expect(fixture.navigation).toEqual([
-    { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
-  ]);
+  vi.useFakeTimers();
+  try {
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    expect(fixture.navigation).toEqual([]);
+    expect(container.textContent).not.toContain('e2ee.accountPair.request.keyFailed');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(fixture.navigation).toEqual([
+      { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+    ]);
+  } finally {
+    vi.useRealTimers();
+    diagnostics.mockRestore();
+  }
+});
+
+it('offers manual key receipt retry after exhausting the bounded automatic recovery window', async () => {
+  fixture.session.user.id = 'account-key-retry';
+  let unavailable = true;
+  keyRequestPort(async () => {
+    if (unavailable) throw new Error('e2ee_key_round_failed');
+  });
+  const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.useFakeTimers();
+  try {
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_100);
+    });
+    expect(fixture.navigation).toEqual([]);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'e2ee.accountPair.request.keyFailed'
+    );
+    unavailable = false;
+    const retry = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'e2ee.accountPair.request.keyRetry'
+    );
+    await act(async () => retry?.click());
+    expect(fixture.navigation).toEqual([
+      { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+    ]);
+  } finally {
+    vi.useRealTimers();
+    diagnostics.mockRestore();
+  }
 });
 
 // The join and its single key request outlive the control page: remounting it for the
@@ -1097,16 +1465,16 @@ it('asks for the key once across a remount of the same account and workspace, th
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
-  expect(keyRefreshes).toEqual([undefined]);
+  expect(keyRefreshes).toEqual([{ keyMode: 'receive' }]);
   await act(async () => root.unmount());
   root = createRoot(container);
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
-  expect(keyRefreshes).toEqual([undefined]);
+  expect(keyRefreshes).toEqual([{ keyMode: 'receive' }]);
   expect(fixture.navigation).toEqual([]);
   await act(async () => keyInstall.resolve());
   await act(async () => {});
-  expect(keyRefreshes).toEqual([undefined]);
+  expect(keyRefreshes).toEqual([{ keyMode: 'receive' }]);
   expect(fixture.navigation).toEqual([
     { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
   ]);
@@ -1155,6 +1523,7 @@ it.each([
   fixture.port = displayPort(async () => [] as never);
   fixture.port.runtime = {
     open: async () => local.status,
+    status: async () => local.status,
     ledgerView: async () => local,
     ingestLedgerRecords: async () => local.status,
     recordCreated: async () => {
@@ -1224,7 +1593,7 @@ it.each(['account', 'workspace'] as const)(
 );
 
 // Frozen, independently signed synthetic vector: member admission then Owner promotion.
-function roleLedger(length: 2 | 3): E2eeRuntimeLedgerView {
+function roleLedger(length: 1 | 2 | 3): E2eeRuntimeLedgerView {
   const records = vector.records.slice(0, length);
   const headHash = records.at(-1)!.hash;
   const view = Result.getOrThrow(
@@ -1256,8 +1625,8 @@ function roleLedger(length: 2 | 3): E2eeRuntimeLedgerView {
   };
 }
 
-function roleChangePort() {
-  let current = roleLedger(2);
+function roleChangePort(initialLength: 1 | 2 = 2) {
+  let current = roleLedger(initialLength);
   const promoted = roleLedger(3);
   const drain = Promise.withResolvers<void>();
   let readers = 0;
@@ -1290,6 +1659,7 @@ function roleChangePort() {
       readers--;
       await drain.promise;
     },
+    status: async () => current.status,
     ledgerView: async () => {
       if (!readers) throw new Error('e2ee_not_open');
       return current;
@@ -1313,6 +1683,251 @@ function roleChangePort() {
 }
 const renderedRoles = () =>
   container.querySelector('[data-member-roles]')?.getAttribute('data-member-roles');
+
+function liveLedgerPort() {
+  const f = roleChangePort(1);
+  let local = roleLedger(1);
+  let remote = local;
+  let changed!: (head: E2eeWorkspaceLedgerHead) => void;
+  let failed!: (error: unknown) => void;
+  let subscribed = false;
+  const requests: string[] = [];
+  let hold: Promise<E2eeWorkspaceHistoryPage> | undefined;
+  Object.assign(f.port.runtime!, {
+    status: async () => local.status,
+    ledgerView: async () => local,
+    ingestLedgerRecords: async (_id: string, page: E2eeWorkspaceHistoryPage) => {
+      // Simulate the host's verified result, using the real signed vector.
+      expect(page.recordsHex).toEqual(
+        remote.recordsHex.slice(page.startIndex, page.checkpoint.length)
+      );
+      local = roleLedger(page.checkpoint.length as 1 | 2 | 3);
+      return local.status;
+    },
+  });
+  f.port.history = async (input) => {
+    requests.push(input.after!);
+    if (hold) return hold;
+    return page();
+  };
+  const page = (): E2eeWorkspaceHistoryPage => ({
+    workspaceId,
+    genesisHash: vector.anchor,
+    checkpoint: { length: remote.status.length, headHash: remote.status.headHash },
+    startIndex: local.status.length,
+    recordsHex: remote.recordsHex.slice(local.status.length),
+    nextCursor: null,
+    position: remote.status.position!,
+  });
+  f.port.subscribeLedgerHead = (_input, listener, onError) => {
+    changed = listener;
+    failed = onError;
+    subscribed = true;
+    return () => {
+      subscribed = false;
+    };
+  };
+  const notify = (length: 1 | 2 | 3) => {
+    remote = roleLedger(length);
+    changed({
+      workspaceId,
+      genesisHash: vector.anchor,
+      checkpoint: { length, headHash: remote.status.headHash },
+    });
+  };
+  return {
+    ...f,
+    requests,
+    notify,
+    page,
+    fail: () => failed(new Error('offline')),
+    hold: (value: typeof hold) => {
+      hold = value;
+    },
+    subscribed: () => subscribed,
+    local: () => local,
+    nativeAdvance: (length: 1 | 2 | 3) => {
+      local = roleLedger(length);
+    },
+  };
+}
+
+it('publishes a native-ingested hint without fetching or ingesting the same suffix again', async () => {
+  const f = liveLedgerPort();
+  const ingest = vi.spyOn(f.port.runtime!, 'ingestLedgerRecords');
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    const before = ingest.mock.calls.length;
+    f.nativeAdvance(2);
+    await act(async () => f.notify(2));
+    expect(renderedRoles()).toBe('member,owner');
+    expect(f.requests).toHaveLength(1);
+    expect(ingest.mock.calls).toHaveLength(before);
+    await act(async () => f.notify(1));
+    expect(renderedRoles()).toBe('member,owner');
+    expect(f.requests).toHaveLength(1);
+  } finally {
+    await act(async () => root.unmount());
+    await act(async () => f.drain.resolve());
+  }
+});
+
+it('updates remote ledger changes from suffixes, skips unchanged hints and unsubscribes on close', async () => {
+  const f = liveLedgerPort();
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    expect(f.subscribed()).toBe(true);
+    expect(renderedRoles()).toBe('owner');
+    await act(async () => f.notify(1));
+    expect(f.requests).toEqual([roleLedger(1).status.position]);
+    await act(async () => f.notify(2));
+    expect(renderedRoles()).toBe('member,owner');
+    await act(async () => f.notify(2));
+    expect(f.requests).toEqual([roleLedger(1).status.position, roleLedger(1).status.position]);
+    expect(f.readers()).toBe(1);
+    await act(async () => root.unmount());
+    expect(f.subscribed()).toBe(false);
+    await act(async () => f.notify(3));
+    expect(f.local().status.length).toBe(2);
+  } finally {
+    await act(async () => root.unmount());
+    await act(async () => f.drain.resolve());
+  }
+});
+
+it('coalesces updates during a suffix read and catches the next head from the new position', async () => {
+  const f = liveLedgerPort();
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    const pending = Promise.withResolvers<E2eeWorkspaceHistoryPage>();
+    f.hold(pending.promise);
+    await act(async () => f.notify(2));
+    const second = f.page();
+    await act(async () => {
+      f.notify(3);
+      f.notify(3);
+    });
+    expect(renderedRoles()).toBe('owner');
+    expect(f.requests).toHaveLength(2);
+    f.hold(undefined);
+    await act(async () => pending.resolve(second));
+    expect(renderedRoles()).toBe('admin,owner');
+    expect(f.requests).toEqual([
+      roleLedger(1).status.position,
+      roleLedger(1).status.position,
+      roleLedger(2).status.position,
+    ]);
+    expect(f.readers()).toBe(1);
+  } finally {
+    await act(async () => root.unmount());
+    await act(async () => f.drain.resolve());
+  }
+});
+
+it('keeps verified evidence usable on subscription failure and discards a read after unmount', async () => {
+  const f = liveLedgerPort();
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => f.fail());
+    expect(renderedRoles()).toBe('owner');
+    expect(fixture.management).toBeDefined();
+    const pending = Promise.withResolvers<E2eeWorkspaceHistoryPage>();
+    f.hold(pending.promise);
+    await act(async () => f.notify(2));
+    const page = f.page();
+    await act(async () => root.unmount());
+    expect(f.subscribed()).toBe(false);
+    await act(async () => pending.resolve(page));
+    expect(f.local().status.length).toBe(1);
+  } finally {
+    await act(async () => root.unmount());
+    await act(async () => f.drain.resolve());
+  }
+});
+
+it('never publishes an invalid ledger export received after a live hint', async () => {
+  const f = liveLedgerPort();
+  const runtime = f.port.runtime!;
+  const read = runtime.ledgerView;
+  runtime.ledgerView = async (id) => {
+    const view = await read(id);
+    return view.status.length === 1 ? view : { ...view, stateHex: '00' };
+  };
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    const checkpoint = readObservedLedgerCheckpoint(localStorage, 'account', workspaceId);
+    await act(async () => f.notify(2));
+    expect(renderedRoles()).toBe('owner');
+    expect(fixture.management).toBeUndefined();
+    expect(container.querySelector('[data-control-state]')?.textContent).toBe('failed');
+    expect(readObservedLedgerCheckpoint(localStorage, 'account', workspaceId)).toEqual(checkpoint);
+    expect(f.readers()).toBe(1);
+  } finally {
+    await act(async () => root.unmount());
+    await act(async () => f.drain.resolve());
+  }
+});
+
+it('publishes admitted members immediately without retiring the control reader', async () => {
+  const f = roleChangePort(1);
+  fixture.realTeam = true;
+  let admitted = false;
+  const approved = roleLedger(2);
+  f.port.memberProfiles = async () => ({
+    workspaceId,
+    profiles: admitted
+      ? [{ cryptoUserId: '02'.repeat(32), name: 'Admitted profile', image: null }]
+      : [],
+  });
+  Object.assign(f.port.runtime!, {
+    createMemberInvitation: async () => {
+      throw new Error('unused');
+    },
+    memberJoinRequests: async () => ({
+      items: admitted
+        ? []
+        : [
+            {
+              requestId: '0b'.repeat(16),
+              source: 'link',
+              state: 'pending',
+              applicantName: 'New member',
+              signingPublicKey: '44'.repeat(32),
+            },
+          ],
+      invitations: [],
+      hasMore: false,
+      seatPreview: { status: 'not_billed', reason: 'free' },
+    }),
+    approveMemberJoin: async () => {
+      admitted = true;
+      return { admitted: true, keyPending: true };
+    },
+    ledgerView: async () => (admitted ? approved : roleLedger(1)),
+    rejectMemberJoin: async () => ({ state: 'rejected' }),
+    revokeMemberInvitation: async () => ({ revoked: true }),
+  });
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    expect(renderedRoles()).toBe('owner');
+    const approve = container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]');
+    expect(approve).not.toBeNull();
+    await act(async () => approve!.click());
+    expect(renderedRoles()).toBe('member,owner');
+    expect(container.textContent).toContain('Admitted profile');
+    expect(container.querySelector('[data-testid="e2ee-join-request"]')).toBeNull();
+    expect(f.readers()).toBe(1);
+  } finally {
+    await act(async () => root.unmount());
+    await act(async () => f.drain.resolve());
+  }
+});
 
 it('keeps the control reader available after a verified role change', async () => {
   const f = roleChangePort();
@@ -1567,4 +2182,191 @@ it('does not carry an in-flight personal registration into another account', asy
   expect(f.button('common.cancel')).toBeUndefined();
   expect(container.querySelector('textarea')).not.toBeNull();
   expect(f.button('e2ee.pair.trust')).toBeDefined();
+});
+
+it('opened from Settings keeps the running workspace, closes instead of navigating and releases its reader', async () => {
+  const cleared: unknown[] = [];
+  const previousClear = fixture.clear;
+  fixture.clear = (value: unknown) => {
+    cleared.push(value);
+  };
+  const leases = new Set<string>();
+  fixture.port = {
+    create: async () => {
+      throw new Error('unused');
+    },
+    describe: async () => ({
+      workspaceId,
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash,
+      cryptoOrgId: genesisHash,
+      activation: 'control-only',
+    }),
+    history: async () => ({
+      workspaceId,
+      genesisHash,
+      checkpoint: { headHash: genesisHash, length: 1 },
+      startIndex: 1,
+      recordsHex: [],
+      position: local.status.position!,
+      nextCursor: null,
+    }),
+    runtime: {
+      account: async () => ({ userId: 'account', source: 'offline' }),
+      recordCreated: async () => {},
+      open: async (id) => {
+        leases.add(id);
+        return local.status;
+      },
+      close: async (id) => {
+        leases.delete(id);
+      },
+      readIdentity: async () => ({ workspaceId, genesisHash }),
+      status: async () => local.status,
+      ledgerView: async () => local,
+      ingestLedgerRecords: async () => local.status,
+    },
+  };
+  let closed = 0;
+  try {
+    await act(async () => {
+      root.render(
+        createElement(E2eeWorkspaceConsole, {
+          workspaceId,
+          presentation: 'modal',
+          onClose: () => {
+            closed += 1;
+          },
+        })
+      );
+    });
+    for (let tick = 0; tick < 10; tick++) await act(async () => {});
+    expect(container.textContent).toContain('1');
+    expect(leases.has(workspaceId)).toBe(true);
+    // The Settings dialog sits over an open workspace: it must not clear that context.
+    expect(cleared).toEqual([]);
+    await act(async () => (container.querySelector('[data-back]') as HTMLButtonElement).click());
+    expect(closed).toBe(1);
+    expect(fixture.navigation).toEqual([]);
+    await act(async () => root.render(createElement('div')));
+    for (let tick = 0; tick < 10; tick++) await act(async () => {});
+    expect(leases.size).toBe(0);
+  } finally {
+    fixture.clear = previousClear;
+  }
+});
+
+it('renders automatic pairing before public describe/history settle and retries empty mailbox after Instant QR join', async () => {
+  vi.useFakeTimers();
+  try {
+    fixture.session.user.id = 'account-instant-fast';
+    fixture.workspaces = {
+      status: 'ready',
+      activeWorkspaceId: workspaceId,
+      workspaces: [{ id: workspaceId, slug: 'protected-home', name: 'Protected', role: 'member' }],
+    };
+    const neverDescribe = new Promise<never>(() => {});
+    let joined = false;
+    let keyInstalled = false;
+    let refreshCount = 0;
+    const status = () => ({
+      ...local.status,
+      hasCurrentKey: keyInstalled,
+      writeEpoch: keyInstalled ? 0 : null,
+      hasDeviceCredential: true,
+    });
+    fixture.port = {
+      create: async () => {
+        throw new Error('unused');
+      },
+      describe: () => neverDescribe,
+      history: () => neverDescribe,
+      runtime: {
+        open: async () => {
+          if (!joined)
+            throw new Error(
+              "Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding"
+            );
+          return status();
+        },
+        close: async () => {},
+        status: async () => status(),
+        ledgerView: async () => ({ ...local, status: status() }),
+        ingestLedgerRecords: async () => status(),
+        recordCreated: async () => {
+          throw new PersonalHostError({ code: 'unsupported' });
+        },
+        startAutomaticPairing: async () => ({
+          id: 'auto-1',
+          workspaceId,
+          workspaceName: 'Protected',
+          deviceName: 'Phone',
+          comparisonCode: null,
+          expiresAt: Date.now() + 600_000,
+          phase: 'preparing',
+        }),
+        automaticPairingState: async () => null,
+        requestAccountPairing: async () => {
+          throw new Error('unused');
+        },
+        accountPairingRequest: async () =>
+          joined
+            ? {
+                direction: 'approver-shows',
+                pairingString: '50M6-HA79-55MT',
+                expiresAt: Date.now() + 600_000,
+                status: 'joined',
+                workspaces: [{ workspaceId, name: 'Protected', state: 'joined' }],
+              }
+            : null,
+        refresh: async (_id: string, options?: { keyMode?: string }) => {
+          if (options?.keyMode !== 'receive' && options?.keyMode !== 'full')
+            throw new Error('expected a key round');
+          refreshCount += 1;
+          // First mailbox check arrives 100ms before desktop finishes uploading the key; second succeeds.
+          if (refreshCount >= 2) keyInstalled = true;
+          return status();
+        },
+      },
+    } as unknown as PlatformE2eeWorkspaces;
+
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    // Automatic pairing UI renders immediately even though describe() & history() have not settled!
+    expect(container.querySelector('[data-testid="e2ee-awaiting-device"]')).not.toBeNull();
+
+    // Now simulate Instant QR / account-pairing join where mailbox key arrives on the 2nd check (after 300ms retry).
+    delete (fixture.port.runtime as Record<string, unknown>).startAutomaticPairing;
+    delete (fixture.port.runtime as Record<string, unknown>).automaticPairingState;
+    (fixture.port.runtime as Record<string, unknown>).accountPairingRequest = async () => {
+      joined = true;
+      return {
+        direction: 'approver-shows',
+        pairingString: '50M6-HA79-55MT',
+        expiresAt: Date.now() + 600_000,
+        status: 'joined',
+        workspaces: [{ workspaceId, name: 'Protected', state: 'joined' }],
+      };
+    };
+    fixture.port.describe = displayPort(async () => [] as never).describe;
+    fixture.port.history = displayPort(async () => [] as never).history;
+    await act(async () => root.render(createElement('div')));
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    await act(async () => {});
+    expect(refreshCount).toBe(1);
+    expect(fixture.navigation).toEqual([]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350);
+    });
+    await act(async () => {});
+    expect(refreshCount).toBe(2);
+    expect(fixture.navigation).toEqual([
+      { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

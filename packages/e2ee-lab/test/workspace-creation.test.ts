@@ -389,6 +389,7 @@ describe('current signed-genesis workspace publication', () => {
               ledger: () => creation.refresh().pipe(Effect.map((value) => value.view)),
             });
             const gateway = yield* makeLabControlGateway({
+              quotaPath: join(dir, 'ledger-quota.sqlite'),
               genesis: f.anchor,
               stream: creation.stream,
               checkpoint: creation.checkpoint,
@@ -665,6 +666,7 @@ describe('current signed-genesis workspace publication', () => {
               ledger,
             });
             const gateway = yield* makeLabControlGateway({
+              quotaPath: join(directory, 'ledger-quota.sqlite'),
               genesis: f.genesis,
               stream: creation.stream,
               checkpoint: creation.checkpoint,

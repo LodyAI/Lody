@@ -45,7 +45,8 @@ Translation: current
   `expired_token` 拒绝 refresh，且没有并发写入的新 token 对时，清除账号的 token 对。
   设置查询随后报告 `missing`，现有的 Authorize 按钮重新链接。
 - 提交身份：启用个人身份的请求者以其 Lody 账号提交。否则机器所有者使用机器的
-  **全局** Git 身份；永不读取仓库级配置。`SessionManager` 按请求者从凭据策略解析
+  **全局** Git 身份；永不读取仓库级配置。（后来收窄为：只有 Lody 管理的共享 clone 的仓库
+  身份不可信，见[原生身份说明](2026-11-16-native-owner-git-identity.zh.md)。）`SessionManager` 按请求者从凭据策略解析
   `{ preferMachineIdentity, personalIdentityEnabled }`，包括会话中途切换请求者。
   身份仍按 agent 进程通过 `GIT_AUTHOR_*` / `GIT_COMMITTER_*` 注入，这正是同一台
   机器上不同请求者互不干扰的原因。

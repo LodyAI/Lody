@@ -30,6 +30,7 @@ import {
   SessionPrIcon,
   SessionMergeablePill,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SidebarListSkeleton,
@@ -47,6 +48,7 @@ import type {
 import type { TaskListPullRequestOpen, TaskListTaskOwner } from '@/components/task-list';
 import { SessionSharingIndicator } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type SidebarUpdatedItemKind = SidebarRowKind;
 
@@ -744,12 +746,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       ) : null}
 
       <div className="flex w-full min-w-0 items-center gap-1.5 text-sm">
-        <SessionRowLeadingSlot
-          showMenuButton={hasMenuActions}
-          menuLabel={contextMenuLabels.moreActions}
-          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
-          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
-        />
+        <SessionRowLeadingSlot />
         {showPinnedIcon && item.isPinned ? (
           <Pin
             aria-hidden="true"
@@ -795,6 +792,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 ) : null}
                 {item.sharing ? <SessionSharingIndicator state={item.sharing} /> : null}
               </span>
+            ) : undefined
+          }
+          menu={
+            hasMenuActions ? (
+              <SessionRowMenuButton
+                label={contextMenuLabels.moreActions}
+                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+              />
             ) : undefined
           }
           archive={
@@ -930,7 +935,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              void copyTextToClipboard(branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}

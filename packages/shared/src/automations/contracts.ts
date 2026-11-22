@@ -76,7 +76,7 @@ export const automationInvocationSchema = z
     target: automationTargetSchema,
     input: z
       .object({
-        kind: z.enum(['external_event', 'pending_work']),
+        kind: z.enum(['external_event', 'pending_work', 'delivery']),
         ref: id,
         values: jsonObject.optional(),
       })
@@ -129,7 +129,7 @@ export const automationRuleDraftSchema = z
       z
         .object({
           kind: z.literal('policy'),
-          policy: z.enum(['archive-after-merge', 'compact-idle', 'recover-capacity']),
+          policy: z.enum(['archive-after-merge', 'auto-deliver', 'compact-idle', 'recover-capacity']),
           options: jsonObject,
         })
         .strict(),

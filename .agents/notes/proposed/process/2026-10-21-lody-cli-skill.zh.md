@@ -11,7 +11,7 @@ Translation: current
 
 ## 决策
 
-- 正本位于 `.agents/skills/lody-cli/SKILL.md`，并由 `.claude/skills/lody-cli` 链接，与仓库内其他技能布局一致。
+- 正本位于 `skills/lody-cli/SKILL.md`。仓库根目录的 `skills/` 存放面向外部用户、而非仓库维护者的技能；`.agents/skills/lody-cli` 和 `.claude/skills/lody-cli` 是指向它的符号链接，仓库内的技能发现方式不变。
 - 面向外部：全局安装 `lody` 或用 `npx lody` 的用户，由 Lody 会话内的 Agent 或外部编码 Agent 调用。技能只描述产品行为，不写源码路径、内部通信方式或构建步骤；维护者需要的证据留在本记录里。
 - 只覆盖登录后的云端产品功能。开源本地版和 `migrate --from-oss` 导入不写入技能，正文开头明确这一范围，避免 Agent 将云端登录前提套用到本地版。
 - 登录指引对 Agent 安全：不在 Agent 里直接运行裸 `lody login`；由用户在终端运行，或由用户通过受控的密钥渠道提供 CLI API key 后使用 `--auth`。技能用只读命令探测认证，并区分 Lody token 失效与模型提供方凭据错误。

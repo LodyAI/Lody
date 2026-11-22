@@ -18,7 +18,7 @@ export const CLI_EXIT_CODE_RETRYABLE_STARTUP = 2;
 export const CLI_EXIT_CODE_REMOTE_RESTART = 42;
 /** Worker exits with this after the RPC handler acknowledges a remote upgrade. */
 export const CLI_EXIT_CODE_REMOTE_UPGRADE = 43;
-/** Credentials are missing/invalid; supervising hosts must go fatal, not crash-loop. */
+/** Credentials or retained identity recovery are rejected; stop instead of crash-looping. */
 export const CLI_EXIT_CODE_AUTH_FAILURE = 44;
 /** The launch identity/contract failed validation; the host and worker releases are incompatible. */
 export const CLI_EXIT_CODE_SUPERVISOR_CONTRACT_MISMATCH = 45;

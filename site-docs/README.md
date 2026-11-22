@@ -21,6 +21,9 @@ builds to `site-docs/out/client`. Binding rules live in
 ## Component responsibilities
 
 - `components/landing.tsx` — landing copy, nav, and footer.
+- `components/landing-hero-download.tsx` and `components/landing-cta-section.tsx` —
+  platform-aware download and Web App links on the landing page; unknown platforms
+  link to all downloads.
 - `components/underwater-experience.tsx` — hero, in-flow product stage, and the
   post-demo stack (free scroll; no wheel lock). Styles in `app/underwater.css`.
 - `components/underwater-background.tsx` — the three.js point-cloud scene and

@@ -1,3 +1,6 @@
+import { useOptionalAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
+import { ShortcutTokenAttempts, shortcutTokenDiagnostic } from '@/lib/shortcut-token-attempt';
+import { deferredPostHog } from '@/lib/deferred-posthog';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import {
   useLegacyWorkspaceQuery,
@@ -14,15 +17,12 @@ import {
   type ReactNode,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { LoroRepo } from 'loro-repo';
-import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
-import {
-  LocalShortcutStore,
+import type { LoroRepo } from 'loro-repo';
+import type {
   PromptShortcutRuntime,
-  PromptShortcutSync,
-  shortcutByteLength,
-  type ShortcutRuntimeSnapshot,
+  ShortcutRuntimeSnapshot,
 } from '@lody/shared/prompt-shortcuts';
+import { getShortcutResourceStreamId } from '@lody/shared/prompt-shortcuts/access';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { cloudOperations as api } from '@/lib/cloud-api-operations';
@@ -99,24 +99,48 @@ export function PromptShortcutProvider({
   const scope = useResolvedWorkspaceScope({ enabled });
   const userId = session.status === 'authenticated' ? session.user.id : null;
   const cloud = platform.capabilities.has('cloudAccount');
+  const cloudSyncEnabled = cloud && workspaceRuntime?.cloudStreamsEnabled !== false;
   const legacyStatus = useLegacyWorkspaceQueryStatus(scope.workspaceId);
+  const auth = useOptionalAuthenticatedConvex();
+  const tokenSession = useRef({ userId, id: auth?.authSessionId ?? null });
+  // A userless/refetching auth response is not another login or a new outage.
+  if (tokenSession.current.userId !== userId || auth?.confirmedUnauthenticated)
+    tokenSession.current = { userId, id: auth?.authSessionId ?? null };
+  else if (auth?.authSessionId) tokenSession.current.id = auth.authSessionId;
+  const authSessionId = tokenSession.current.id;
   const workspaceId =
-    (!cloud || legacyStatus === 'allowed') &&
+    (!cloud || (!auth?.confirmedUnauthenticated && legacyStatus === 'allowed')) &&
     scope.enabled &&
     scope.workspaceId === workspaceRuntime?.workspaceId
       ? scope.workspaceId
       : null;
-  const stage = useLegacyWorkspaceMutation(api.promptShortcuts.stageDocument);
-  const activate = useLegacyWorkspaceMutation(api.promptShortcuts.activateDocument);
   const revoke = useLegacyWorkspaceMutation(api.promptShortcuts.revokeShortcut);
-  const settle = useLegacyWorkspaceMutation(api.promptShortcuts.settleDocument);
   const grant = useLegacyWorkspaceAction(api.promptShortcuts.getStreamToken);
+  const attempt = useLegacyWorkspaceAction(api.promptShortcuts.getStreamTokenV2);
   const directory = useLegacyWorkspaceQuery(
     api.promptShortcuts.listAccessibleDocuments,
-    cloud && workspaceId && userId ? { workspaceId } : 'skip'
+    cloudSyncEnabled && workspaceId && userId ? { workspaceId } : 'skip'
   );
-  const current = useRef({ workspaceId, userId, stage, activate, revoke, grant, settle });
-  current.current = { workspaceId, userId, stage, activate, revoke, grant, settle };
+  const current = useRef({
+    workspaceId,
+    userId,
+    revoke,
+    grant,
+    attempt,
+    auth,
+    authSessionId,
+    getWorkspaceStreamsGrant: workspaceRuntime?.getWorkspaceStreamsGrant,
+  });
+  current.current = {
+    workspaceId,
+    userId,
+    revoke,
+    grant,
+    attempt,
+    auth,
+    authSessionId,
+    getWorkspaceStreamsGrant: workspaceRuntime?.getWorkspaceStreamsGrant,
+  };
   const [generation, setGeneration] = useState(0);
   const [instance, setInstance] = useState<{
     runtime: PromptShortcutRuntime;
@@ -137,7 +161,7 @@ export function PromptShortcutProvider({
     instance.runtime.userId === userId &&
     instance.generation === generation &&
     instance.platform === platform &&
-    instance.cloud === cloud &&
+    instance.cloud === cloudSyncEnabled &&
     instance.isActive()
       ? instance.runtime
       : null;
@@ -161,13 +185,45 @@ export function PromptShortcutProvider({
         disposed ||
         current.current.workspaceId !== workspaceId ||
         current.current.userId !== userId ||
+        current.current.authSessionId !== authSessionId ||
         identity.status !== 'authenticated' ||
         identity.user.id !== userId
       )
         throw new Error('Shortcut identity changed');
     };
+    const tokenAttempts = new ShortcutTokenAttempts({
+      attempt: (request) => current.current.attempt(request),
+      legacy: (request) => current.current.grant(request),
+      active: () => {
+        const identity = platform.identity.session.get();
+        return (
+          !disposed &&
+          current.current.workspaceId === workspaceId &&
+          current.current.userId === userId &&
+          current.current.authSessionId === authSessionId &&
+          identity.status === 'authenticated' &&
+          identity.user.id === userId
+        );
+      },
+      authRejected: () => current.current.auth?.requestAuthRecovery(),
+      report: (failure) => {
+        const diagnostic = shortcutTokenDiagnostic(failure);
+        deferredPostHog.captureException(diagnostic.error, diagnostic.properties);
+      },
+    });
     const opening = (async () => {
       await previousClose;
+      check();
+      // This provider file is statically reachable from the boot chunk (the
+      // mention textarea imports usePromptShortcuts), so loro-repo and the
+      // shortcut Streams stack load only once a workspace/user pair actually
+      // needs the shortcut store.
+      const [{ LoroRepo }, { IndexedDBStorageAdaptor }, shortcuts] = await Promise.all([
+        import('loro-repo'),
+        import('loro-repo/storage/indexeddb'),
+        import('@lody/shared/prompt-shortcuts'),
+      ]);
+      const { LocalShortcutStore, PromptShortcutRuntime, PromptShortcutSync } = shortcuts;
       check();
       repo = await LoroRepo.create({
         storageAdapter: new IndexedDBStorageAdaptor({
@@ -176,14 +232,30 @@ export function PromptShortcutProvider({
       });
       check();
       const store = await LocalShortcutStore.open({ repo, workspaceId, userId });
-      const sync = cloud
+      const sync = cloudSyncEnabled
         ? new PromptShortcutSync({
             content: { mode: 'plaintext' },
             repo,
             now: Date.now,
-            grant: async (resource, write) => {
+            grant: async (resource, write, force) => {
               check();
-              const result = await current.current.grant({
+              if (resource.kind === 'workspace-index' || resource.kind === 'workspace-body') {
+                const getWorkspaceGrant = current.current.getWorkspaceStreamsGrant;
+                if (!getWorkspaceGrant) {
+                  throw new Error('Workspace Streams grant provider unavailable');
+                }
+                const { token, gatewayBaseUrl } = await getWorkspaceGrant({
+                  forceRefresh: force,
+                });
+                check();
+                return {
+                  token,
+                  gatewayBaseUrl,
+                  expiresIn: 300,
+                  streamId: getShortcutResourceStreamId(resource),
+                };
+              }
+              const result = await tokenAttempts.grant({
                 workspaceId,
                 write,
                 target:
@@ -208,32 +280,7 @@ export function PromptShortcutProvider({
                 check();
                 return sync.acquire(resource, write);
               },
-              stage: async ({ entry }) => {
-                check();
-                const result = await current.current.stage({
-                  workspaceId,
-                  ownerUserId: userId,
-                  shortcutId: entry.id,
-                  bodyDocId: entry.bodyDocId,
-                  visibility: entry.visibility,
-                });
-                check();
-                return result.status;
-              },
-              activate: async ({ entry, published }) => {
-                check();
-                await current.current.activate({
-                  workspaceId,
-                  bodyDocId: entry.bodyDocId,
-                  previousBodyDocId: published?.bodyDocId ?? null,
-                  previousRevision: published?.revision ?? null,
-                  revision: entry.revision,
-                  slug: entry.slug,
-                  indexBytes: shortcutByteLength(JSON.stringify(entry)),
-                });
-                check();
-              },
-              revoke: async (entry) => {
+              revokeLegacy: async (entry) => {
                 check();
                 await current.current.revoke({
                   workspaceId,
@@ -243,23 +290,18 @@ export function PromptShortcutProvider({
                 });
                 check();
               },
-              settle: async ({ entry }) => {
-                check();
-                const status = await current.current.settle({
-                  workspaceId,
-                  shortcutId: entry.id,
-                  bodyDocId: entry.bodyDocId,
-                  visibility: entry.visibility,
-                });
-                check();
-                return status;
-              },
               dispose: () => sync.dispose(),
             }
           : undefined
       );
       check();
-      setInstance({ runtime: owned, generation, platform, cloud, isActive: () => !disposed });
+      setInstance({
+        runtime: owned,
+        generation,
+        platform,
+        cloud: cloudSyncEnabled,
+        isActive: () => !disposed && current.current.authSessionId === authSessionId,
+      });
       void owned.flush();
     })().catch((error) => {
       if (!disposed) {
@@ -269,6 +311,7 @@ export function PromptShortcutProvider({
     });
     return () => {
       disposed = true;
+      tokenAttempts.dispose();
       // Identity can return before the replacement finishes opening. Retire this
       // effect's instance immediately, even while its durable close is pending.
       setInstance((value) => (value?.runtime === owned ? null : value));
@@ -284,7 +327,7 @@ export function PromptShortcutProvider({
         if (closingDatabases.get(databaseName) === closing) closingDatabases.delete(databaseName);
       });
     };
-  }, [workspaceId, userId, cloud, platform, generation]);
+  }, [workspaceId, userId, authSessionId, cloudSyncEnabled, platform, generation]);
 
   useEffect(() => {
     if (runtime && directory) void runtime.setDirectory(directory);

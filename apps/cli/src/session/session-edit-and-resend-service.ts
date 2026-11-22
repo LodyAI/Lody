@@ -358,9 +358,23 @@ export class SessionEditAndResendService {
           );
         }
 
+        // Encrypted starts run only signed input. This machine writes the replacement
+        // on its owner's verified request, so it signs it in the same commit, as it
+        // does for every input it writes itself.
+        const e2eeIntent = this.deps.workspaceDocument.isEncryptedWorkspace()
+          ? await this.deps.workspaceDocument.signMachineInput({
+              sessionId: spec.sessionId,
+              targetMachineId: this.deps.machineId,
+              userTurnId: spec.replacementUserTurnId,
+              inputConfig: pending.inputConfig,
+            })
+          : undefined;
+        if (this.deps.workspaceDocument.isEncryptedWorkspace() && !e2eeIntent)
+          throw new Error('e2ee_signature_unavailable');
         const replacement: SessionTurn = {
           ...pending,
           id: spec.replacementUserTurnId,
+          ...(e2eeIntent ? { e2eeIntent } : {}),
         };
         // One domain command re-runs the eligibility and active-goal rules against
         // the history read inside the store's commit; the caller cannot supply a
@@ -407,7 +421,6 @@ export class SessionEditAndResendService {
             lastHandledUserMsgId: previousUserId,
             processingUserMsgId: undefined,
             lastCanceledTurn: undefined,
-            lastMissingHistoryUserMsgId: undefined,
             lastMessageAt: getServerNow(),
           });
           await this.deps.workspaceDocument.persistPendingChanges('session-edit-and-resend-commit');
@@ -430,7 +443,6 @@ export class SessionEditAndResendService {
               lastHandledUserMsgId: commitMeta.lastHandledUserMsgId,
               processingUserMsgId: commitMeta.processingUserMsgId,
               lastCanceledTurn: commitMeta.lastCanceledTurn,
-              lastMissingHistoryUserMsgId: commitMeta.lastMissingHistoryUserMsgId,
               lastMessageAt: commitMeta.lastMessageAt,
             })
             .catch((rollbackError) => {

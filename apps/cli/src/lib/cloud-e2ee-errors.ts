@@ -58,22 +58,35 @@ function isTransportInterruption(cause: Error): boolean {
   return false;
 }
 
-/** A proxy or gateway reply can carry a refusal in its body, which the SDK reduces to a message. */
-const REFUSAL_TEXT = /e2ee_[a-z_]+|\bunauthori[sz]ed\b|\bforbidden\b|\brevoked\b|\bremoved\b/i;
+/** The SDK can reduce protocol errors to message text, even on an upstream-error status. */
+const E2EE_FAILURE_CODE = /\be2ee_[a-z_]+\b/i;
+const REFUSAL_TEXT = /\bunauthori[sz]ed\b|\bforbidden\b|\brevoked\b|\bremoved\b/i;
 
 /** Maps a failed latest ledger read to the outage rule of
  * specs/e2ee/execution-freshness-outage.md. `httpStatus` is absent when no response arrived.
- * Only a confirmed transport failure is an outage; anything else stays a refusal. */
+ * Explicit protocol/authentication refusals take precedence over upstream failures.
+ * Unknown or invalid replies remain refusals. */
 export function ledgerReadFailure(cause: unknown, httpStatus?: number): unknown {
   if (!(cause instanceof Error)) return cause;
   if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) return cause;
-  if ('data' in cause) return cause;
-  if (httpStatus === undefined) return new CloudE2eeLedgerOutage({ cause });
+  if ('data' in cause || E2EE_FAILURE_CODE.test(cause.message)) return cause;
   // A refusal already received stands, even if its body was then cut off.
-  if (httpStatus >= 400 && httpStatus < 500 && httpStatus !== 429) return cause;
-  if (isTransportInterruption(cause)) return new CloudE2eeLedgerOutage({ cause });
-  const failedUpstream = httpStatus >= 500 || httpStatus === 429;
-  return failedUpstream && cause.name === 'Error' && !REFUSAL_TEXT.test(cause.message)
+  if (
+    httpStatus !== undefined &&
+    httpStatus >= 400 &&
+    httpStatus < 500 &&
+    httpStatus !== 408 &&
+    httpStatus !== 429
+  )
+    return cause;
+  // Gateway HTML is not a business refusal merely because it mentions authorization.
+  if (httpStatus === 408 || httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500))
+    return new CloudE2eeLedgerOutage({ cause });
+  if (REFUSAL_TEXT.test(cause.message)) return cause;
+  if (httpStatus === undefined || isTransportInterruption(cause))
+    return new CloudE2eeLedgerOutage({ cause });
+  // Convex actions may return HTTP 200 for an unstructured internal server error.
+  return cause.name === 'Error' && /\bServer Error\b/i.test(cause.message)
     ? new CloudE2eeLedgerOutage({ cause })
     : cause;
 }

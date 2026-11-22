@@ -10,7 +10,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { runtimeInitializingAtom, userAtom } from '@/atoms';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { normalizeCurrentUserFromSessionUser } from '@/lib/current-user';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { deriveConvexSiteUrl } from '@lody/shared';

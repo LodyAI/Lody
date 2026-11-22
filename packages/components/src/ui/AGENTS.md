@@ -60,6 +60,9 @@ strings on i18n rather than the registry's inline English.
 - Every floating surface passes `useSafeAreaCollisionPadding` as
   `collisionPadding`; the default parks a colliding surface flush against the
   screen edge and caps `--available-height` there too.
+- A submenu that fits on neither side of its trigger shifts over its parent
+  instead of flipping off-screen; `ui/menu.tsx` decides this as the submenu mounts,
+  so submenus must be built from its `Menu.Submenu` and `Menu.SubmenuTrigger`.
 - Menus, context menus, dialogs, alert dialogs, popovers and tooltips come from
   `@lody/ui` through the adapters in `src/ui/{menu,dialog,card}.tsx` or direct
   package imports. Base UI opens on `mousedown` (scheduled in a frame), exposes

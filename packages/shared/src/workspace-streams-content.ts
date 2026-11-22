@@ -93,7 +93,9 @@ export function encryptedWorkspaceResolver(
   };
 }
 
-/** Shared feature verdicts: schedules use protected CRDT; minimal presence stays plaintext. */
+/** Shared feature verdicts: schedules use protected CRDT; minimal presence stays plaintext.
+ * Automations run on the local Host with machine-signed inputs; their remote control
+ * rides workspace Machine RPC and therefore follows `rpc`. */
 export type WorkspaceRestrictedFeature =
   | 'schedules'
   | 'automations'
@@ -124,7 +126,8 @@ export function workspaceSupports(
     feature === 'presence' ||
     feature === 'export' ||
     feature === 'attachments' ||
-    feature === 'schedules'
+    feature === 'schedules' ||
+    feature === 'automations'
   );
 }
 

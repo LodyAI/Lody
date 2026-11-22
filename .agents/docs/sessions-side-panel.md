@@ -21,7 +21,7 @@ synchronous merge endpoint. Local PR summary access still opens GitHub externall
   All Changes UI lives here via
   `session-changes-sidebar.tsx` (story: `SessionChangesSidebar.stories.tsx`). Desktop file/diff
   viewers never split the conversation surface: opt-in Files, All Changes, Browser, conditional PR,
-  and file/conversation-diff/turn-diff tabs all live in the right panel under
+  and file/attachment/conversation-diff/turn-diff tabs all live in the right panel under
   `session-side-panel-tab-bar.tsx`, and every tab is closeable. Functional panels start from an empty
   state, are added through its launcher or `+` menu, return to that menu when closed, and persist
   their open order/current selection per parent session in frontend local storage. Closing the active
@@ -30,6 +30,9 @@ synchronous merge endpoint. Local PR summary access still opens GitHub externall
   (fixed panels → side chats → viewers) and every close handler must take its fallback neighbour from
   the derived `sidePanelTabIds`; hand-building a partial order per close path silently breaks
   "previous sibling" as soon as a new tab kind lands between the existing ones.
+  The strip shrinks tab labels before it scrolls; the selected tab retains a wider minimum and a
+  visible close button. Truncated labels keep their full accessible name and hover title. At the
+  minimum widths the strip scrolls, and selecting a tab brings it into view.
   Device previews (iOS Simulator, Android Emulator) can be dragged onto each other to form a
   split: the tab bar draws the pair as one tray-and-key group, and selecting either member shows
   both side by side (`getFixedPanelPlacement`). A `SidePanelSplitHandle` between them resizes the

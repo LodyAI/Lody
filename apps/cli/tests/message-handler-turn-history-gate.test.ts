@@ -226,6 +226,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
             agentClient: {
               isCreated: () => true,
               getAvailableCommands: () => [],
+              getAvailableCommandsForSession: () => [],
               getConfigOptions: () => [
                 { id: 'model', category: 'model', type: 'select', currentValue: 'active-model' },
               ],

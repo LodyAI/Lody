@@ -79,3 +79,12 @@ null`: browser offline, machine removed or offline) — the chip owns that story
   (Stop visibility, busy-send queue routing) shares the SAME time-bounded
   pre-start signal, so a stalled dispatch no longer holds the composer in a busy
   state either.
+
+## Stop and retained queue drafts
+
+Stop pauses existing queue rows without removing their content or adding them to model context.
+The queue keeps editing and removal, and offers Send while idle or Steer while working. Explicitly
+sending a paused row creates a fresh input with its frozen configuration; other paused rows stay
+out of automatic dispatch even when a later message clears the Inbox pause. Host cancellation
+receipts remain final. The [Inbox decision](../notes/implemented/architecture/2026-10-12-operation-inbox.md)
+explains the split between retained drafts and retired execution eligibility.

@@ -49,11 +49,13 @@ export async function readAutomationContext(options: {
     !record ||
     !meta ||
     isLoroRepoDocDeleted(record) ||
-    meta.userId !== wait.ownerUserId ||
     meta.machineId !== ledger.machineId ||
     meta.isArchived
   )
     throw new Error('AUTOMATION_SESSION_UNAVAILABLE');
+  const access = await authority.canEdit(meta.id, wait.ownerUserId);
+  if (access === 'no') throw new Error('AUTOMATION_PERMISSION_DENIED');
+  if (access === 'unknown') throw new Error('AUTOMATION_PERMISSION_UNCONFIRMED');
   if (input.resource !== 'events') automationEmptyReadParametersSchema.parse(input.parameters);
   // Record demand even when the first read has no snapshot yet.
   if (current.state === 'checking') ledger.recordRead(wait.id, input.resource, [], now);

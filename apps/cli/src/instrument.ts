@@ -92,7 +92,7 @@ export const flushTelemetry = async (timeoutMs = DEFAULT_FLUSH_TIMEOUT_MS): Prom
 };
 
 export const captureException = (
-  _error: unknown,
+  error: unknown,
   context?: { component?: string; extra?: Record<string, unknown> }
 ): Promise<void> => {
   if (!client) {
@@ -104,7 +104,21 @@ export const captureException = (
     const pending = client.captureImmediate({
       event: '$exception',
       distinctId,
-      properties: { ...baseExceptionProps, ...redactedTelemetryException(context?.extra) },
+      properties: {
+        ...baseExceptionProps,
+        ...redactedTelemetryException(
+          {
+            ...baseExceptionProps,
+            source:
+              context?.component === 'uncaughtException' ||
+              context?.component === 'unhandledRejection'
+                ? context.component
+                : 'captureException',
+            ...context?.extra,
+          },
+          error
+        ),
+      },
     });
     return Promise.race([
       pending.catch(() => {}),

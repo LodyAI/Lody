@@ -1,16 +1,8 @@
-// @vitest-environment jsdom
-
 // Coverage for the "Recently used" run-config list: what counts as the SAME
 // combination, what a row is allowed to offer (only agents that are still
 // selectable), and that the currently selected combination never appears —
 // picking it would be a no-op row at the top of the menu.
-
-// @vitest-environment jsdom
-// Coverage for the "Recently used" run-config list: what counts as the SAME
-// combination, what a row is allowed to offer (only agents that are still
-// selectable), and that the currently selected combination never appears —
-// picking it would be a no-op row at the top of the menu.
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
   type AgentConfigId,
@@ -69,7 +61,15 @@ describe('appendRecentRunConfig', () => {
 });
 
 describe('storage', () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    vi.stubGlobal('window', { localStorage });
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
 
   it('round-trips per workspace and ignores corrupt payloads', () => {
     recordRecentRunConfig('ws-1', record(), 10);

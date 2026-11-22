@@ -32,10 +32,7 @@ context/message-flow.md "Upstream".
   Claude single-question forms retain their request-message prompt. The shared bridge
   maps recognized Droid AskUser labels and custom answers back to its option IDs and
   companion fields ([Droid decision](../../../../.agents/notes/implemented/bug-fix/2026-11-03-droid-ask-user-elicitation.md)).
-- `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
-  updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
-  Claude reports no actor, so later events preserve an earlier identity. Providers that
-  rely on an unknown-actor label can configure a separate metadata fallback.
+- `antigravity-background.ts` — identifies Antigravity ACP v1 servers (builtin or custom `Antigravity ACP Server`) while excluding legacy `antigravity-acp`.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
@@ -53,17 +50,19 @@ context/message-flow.md "Upstream".
   upstream auto-update in its child process and never downloads a fallback. Credentials
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
-  [Sorbet authentication](../../../../.agents/notes/proposed/feature/2026-11-02-sorbet-acp-authentication.md)
-  uses the existing protected ACP interaction path. Its `sorbet.dev` credentials v1
-  extension runs in a separate bounded builtin Sorbet ACP process, with no session or
-  terminal; the daemon verifies the local Provider identity and does not use stored
-  launch overrides. Socket disconnect cancels the operation. Authentication and logout
-  share a daemon-wide mutation owner across workspaces; unconfirmed process cleanup is
-  retried before a later mutation. Account management is also available through signed E2EE
-  owned execution when the target advertises `sorbetCredentialsRemote`: the target verifies
-  the signer belongs to its owner's membership. List and logout use the execution journal;
-  an interrupted logout can have an unknown result. Metadata lists saved credential types,
-  not account identities, remote validity or environment-provided credentials.
+  Builtin Devin is a bundled proxy over the pinned official runtime; discovery hides duplicate
+  registry Devin, Dimcode and Kimi entries while saved configurations keep their launch
+  contracts ([decision and ablations](../../../../.agents/notes/implemented/feature/2026-09-30-builtin-devin.md)).
+  [Sorbet authentication and control](../../../../.agents/notes/implemented/feature/2026-11-02-sorbet-acp-authentication.md)
+  sends interactive sign-in, credential metadata, logout, Provider mutations, model refresh,
+  and model catalog reads directly through `@sorbetai/control@alpha` against the same
+  `<LodyDataDir>/sorbet` directory. The existing protected Machine RPC interaction stream carries
+  prompts and progress, but no temporary ACP process or duplicate management abstraction sits
+  between the handler and Sorbet. The daemon still verifies the local Provider identity and
+  ignores stored launch overrides. Account management is also available through signed E2EE
+  owned execution when the target advertises `sorbetCredentialsRemote`; the target verifies the
+  signer belongs to its owner's membership. Metadata lists saved credential types, not account
+  identities, remote validity or environment-provided credentials.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
   a supported standalone Node from the final launch PATH in the target working directory.
@@ -255,6 +254,92 @@ ACP capabilities, without AIR, terminal-output deltas or session notices. Standa
 tool fields and text fallback remain authoritative. Consumer audit and limits:
 [compatibility decision](../../../../.agents/notes/implemented/bug-fix/2026-09-29-claude-acp-sparse-updates.md).
 
+### Managed Antigravity
+
+Builtin Antigravity launches the pinned official `agy acp --process-per-session
+--disable-telemetry` directly, with `AGY_CLI_DISABLE_AUTO_UPDATE=true`. Its only
+version/archive pins are in `antigravity-runtime-manifest.json`; downloads use the
+same public runtime channel, cache and verification as other managed agents.
+`runtimeOverrides.antigravityPath` selects a user-managed binary.
+`runtimeOverrides.antigravitySkipPermissions: true` (Provider setting "Skip
+permission requests", off by default) appends `--dangerously-skip-permissions`,
+so agy approves every tool permission request itself; agy's Auto mode still asks
+for non-safe commands without it. The flag is a launch policy, not a runtime
+replacement: it keeps the managed runtime, static capabilities, title ownership
+and capability cache key, and takes effect when the next agy process starts.
+Older daemons reject the field in their strict session schema, so the dialog
+offers it only when the machine advertises `antigravitySkipPermissions` v1.
+Authentication
+uses the official `agy acp --login --disable-telemetry` command. Lody opens
+the Google authorization link and forwards the returned code or callback URL to
+that command through the existing encrypted remote authentication-input channel.
+The command uses the selected managed runtime or `antigravityPath`, keeps its
+normal credential store, and disables auto-update.
+
+New Provider discovery omits `registry/antigravity-acp`. Persisted Providers retain
+the old fixed binary launch definition and show a Legacy label; neither Provider
+identity nor native session IDs are rewritten. Create a builtin Provider for new
+work. Compatibility of old server sessions with agy is not assumed.
+
+Quota refresh runs the selected agy executable with `--print /usage
+--output-format json` and its launch environment. This command reports zero model
+turns; its model-group weekly and five-hour fractions become the existing Provider
+quota windows. The ACP `/usage` prompt belongs only to the legacy server reader:
+agy does not advertise it and would send that text to the model. The legacy reader
+deletes its scratch `/usage` session when the server advertises `session/delete`, within
+three seconds and without affecting the reading.
+
+Capability probes and real new/load/resume session snapshots use the same
+normalizer to project the builtin and legacy Antigravity quota readers. Session
+startup must not erase that declaration while updating the Provider cache;
+native Core declarations remain authoritative. Builtin quota display accepts
+only audited proxy and locale environment overrides. Credential/home overrides,
+unknown environment keys, and Magpie routing remain ineligible.
+
+Native `ask_question` forms use each `qN.title` as the prompt, numbered option
+IDs with labels in `oneOf[].title` / `items.anyOf[].title`, and a `qN_other`
+custom-answer field. The shared bridge receives explicit builtin Antigravity
+provenance, persists readable Core questions/answers, and maps replies back to
+the original IDs or custom field. It does not reinterpret other providers'
+legacy forms or canonical Core forms.
+
+Native tool updates carry the tool identity in a top-level `name`; AgentClient
+projects that bounded value into `_meta.lody.toolName` for history. Existing
+canonical metadata takes precedence. In live 1.5.9 Hydrogen experiments,
+`search_web`, `invoke_subagent` and `manage_subagents` emitted ordinary tool
+start/completion updates without `content` or `rawOutput`. Child activity and
+results were reported in parent assistant text, not structured child events;
+no `subagentEvents` capability was advertised. Keep these as tool calls rather
+than inventing child lifecycle or treating spawn acknowledgement as child success.
+
+A custom Provider whose `initialize` reports `Antigravity ACP Server` gets the same
+compatibility as builtin Antigravity; legacy `antigravity-acp` does not. AgentClient
+negotiates the `realpath` of the workdir as the ACP `cwd`, because agy compares edit
+targets by realpath and would otherwise ask permission for in-workspace edits under a
+symlinked path such as macOS `/tmp`.
+
+Lody does not synthesize Core `sessionActivity` from stdout heuristics or `session/list`
+polling for `agy`: without an authoritative activity signal from the server, heuristic
+counting over-counts in-turn completed background tasks and merged wakeups, locking
+sessions in `running` presence and suppressing completion signals for up to 24 hours.
+If `agy` advertises Core `sessionActivity` v1 in the future, `AgentClient` will consume
+it authoritatively. See the
+[background work decision](../../../../.agents/notes/implemented/bug-fix/2026-11-16-antigravity-background-wakeup.md).
+
+`antigravity-usage.ts` projects end-turn `PromptResponse.usage` into disjoint token
+buckets. Each submitted request has a fresh accounting scope and freezes its
+confirmed session model before dispatch, so later model changes and smaller next
+turns do not overwrite earlier totals. Cache reads/writes and reasoning retain
+separate buckets; provider cost stays unknown. Standard `usage_update` records
+both current occupancy (`used`) and capacity (`size`) in Session metadata for the
+composer, including zero occupancy and decreases after compaction. The latest
+reported positive capacity also accompanies aggregate token usage as
+`usage.contextWindow` for statistics persistence; it is neither summed across
+turns nor inferred from token totals. Model-level counters retain only token
+buckets. Standard context observations are not cumulative billable tokens. Optional malformed
+telemetry cannot fail the prompt. The existing delivery contract remains in
+[usage snapshots](../../../../specs/usage-delivery.md).
+
 ### Managed runtimes
 
 Codex version/archive pins come from `codex-runtime-manifest.json`, which the outer
@@ -284,9 +369,8 @@ then rank eligible candidates by installedAt and command. Best-effort cleanup co
 because the manager cannot prove their readers have exited. Downloads have a 60-second idle deadline;
 progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-21-acp-auth-runtime-download.md).
 
-Completed caches written before metadata schema v1 remain reusable through a separate strict
-legacy schema; their old `name`/`version`/`platform` fields are normalized in memory and only
-the trusted runtime definition's command and host requirement are inferred. Repacked Node
+Completed caches must match metadata schema v1; a pre-v1 cache is invalid and the runtime is
+installed again. Repacked Node
 packages intentionally publish no convenience link because non-ACP subcommands may be
 omitted. A fully validated install that has already crossed the final complete-marker commit
 may remain a safe cache hit even though that caller observes cancellation, and network
@@ -298,7 +382,10 @@ Which authentication path runs is decided by the provider, not the caller: a man
 runs its pinned login command; registry, custom ACP, and builtin Devin and Sorbet open a
 temporary standard ACP connection in the same bounded lifecycle. The authentication connection
 advertises credential form version 1; forms support text, secret and single-select fields.
-Kimi runs `acp --login`;
+Kimi runs `acp --login`; Antigravity runs `acp --login --disable-telemetry`
+and accepts a Google authorization code or callback URL through stdin. Its raw
+terminal output is not forwarded to progress; only its Google authorization URL
+is exposed.
 Grok runs the official `login --device-auth`; Claude Code runs the official
 `auth login --claudeai` subscription flow. Codex ChatGPT runs official
 `login --device-auth`; managed API profiles use the existing secret-input interaction
@@ -364,9 +451,14 @@ Codex only — other agents use the same brackets for unrelated variants (Claude
 is a context window). Vendor model `_meta` never enters the CLI.
 
 Commands have separate ownership: only independent probes replace the Provider's
-startup command preview. Real sessions retain their commands in `AgentClient` and
+startup command preview. Standard ACP agents (Antigravity among them) advertise commands
+with `available_commands_update` after `session/new` returns, so a probe without a
+response list waits up to `ACP_PROBE_COMMANDS_WAIT_MS` (2 s), overlapped with its other
+reads, for that notification. Real sessions retain their commands in `AgentClient` and
 publish them through the existing Session runtime-config path; an explicit empty
-list clears that Session's menu. Session capability writes preserve the latest
+list clears that Session's menu. The run-config snapshot reads the client's commands at
+write time, and a command notification arriving before any assistant entry patches the
+snapshot of the same ACP session instead of being dropped. Session capability writes preserve the latest
 same-runtime preview without copying project commands into it. A capability entry
 without a confirmed probe list is re-probed; an empty probed list is confirmed.
 
@@ -405,6 +497,9 @@ the isolated session selects `gpt-5.6-luna`, low reasoning, and full access. Uns
 requested options fail to the existing prompt-derived fallback. The bundled adapter
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
+After startup, Codex title configuration and prompting have a five-minute deadline;
+expiry aborts the request, attempts to terminate its isolated process tree and uses the existing
+prompt-derived fallback. [Ownership and limits](../../../../.agents/notes/implemented/architecture/2026-10-10-codex-client-titles.md).
 When a Provider loses its account reference, session startup and isolated titles use
 `CodexProfileStore.isAccountBound`: the durable binding marker precedes the legacy
 profile scan. Bound titles skip with a debug message, preserving the draft without
@@ -414,10 +509,12 @@ Other isolated title sessions retain the Provider's current model unless a title
 was explicitly saved. Catalog order does not define a model preference; inferred safe
 mode and reasoning options remain independent of the model choice.
 
-Every generated or agent-pushed title names one tab. A root Session's sidebar title is
-the separate `groupTitle`: the first generated root title is copied into it once, and
-later titles never replace it. See the
-[group title decision](../../../../.agents/notes/implemented/architecture/2026-11-05-session-group-titles.md).
+Isolated title sessions are never resumed. Shutdown sends ACP `session/delete` when the
+agent advertises `sessionCapabilities.delete`, so the scratch conversation leaves the
+agent's native history; otherwise it sends `session/close` as before. Delete failure only
+logs: the title and process termination proceed. What delete removes is agent-defined
+(builtin Codex archives the thread for a non-AIR client). Normal sessions never use this
+path, because Lody archive is reversible.
 
 Title output accepts normal assistant text with an absent message phase, as Codex
 providers do not all emit that optional field. Explicit `commentary` is excluded;
@@ -482,7 +579,7 @@ five seconds. Unconfirmed process release retains its owner and prevents a secon
 
 [Ownership decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 
-Provider quota refresh uses `queryLocalAcpRateLimits`: initialize a separately owned ACP process, verify Core `rateLimits.query`, query without a session, and await process-tree cleanup. The session execution service owns Provider coalescing and guarded Flock publication. See the [quota refresh decision](../../../../.agents/notes/implemented/architecture/2026-10-13-provider-quota-refresh.md).
+Provider quota refresh uses `queryLocalAcpRateLimits`: initialize a separately owned ACP process, verify Core `rateLimits.query`, query without a session, and await process-tree cleanup. The official registry Antigravity server uses `antigravity-quota.ts` instead when Core query support is absent: create a scratch session with no MCP servers, wait for its advertised `usage` command, and parse the official `/usage` reply into named weekly and five-hour windows. Its existing launcher and account environment are preserved; no separate CLI or credential reader is used. Missing commands, unavailable/malformed quota, cancellation and timeout preserve cached quota. The session execution service owns Provider coalescing and guarded Flock publication. See the [quota refresh decision](../../../../.agents/notes/implemented/architecture/2026-10-13-provider-quota-refresh.md).
 
 Account eligibility for both renderer display and daemon refresh lives in
 [`subscription-quota.ts`](../../../../packages/shared/src/subscription-quota.ts).

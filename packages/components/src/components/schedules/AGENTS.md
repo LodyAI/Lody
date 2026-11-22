@@ -90,7 +90,7 @@
   chat destination is a button that opens the chat) and status in words from
   `describeScheduleState`; colour and glyph mark only states needing a look.
   A scheduled message shows its own text (the stored title is fallback only)
-  on the viewer's clock. No status pills or dots, no resizable columns. Project
+  on the viewer's clock. No status pills or dots, no resizable columns. Project, ownership (`ownerId`),
   and status filters and sort sit above the sections. Every row has a ⋯ menu and the same
   context menu (open, run, pause/resume, open chat, last run, delete); delete
   always confirms. The hover action is Run for a manual task, Pause/Resume

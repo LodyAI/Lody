@@ -1,5 +1,6 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { BrowserWindow } from 'electron'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
   CopyImageToClipboardInputSchema,
   SaveImageFileInputSchema,
@@ -15,7 +16,7 @@ import {
 } from '../../services/image-export-service'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class ImageIpc extends IpcService {
+export class ImageIpc extends ProductWindowIpcService {
   static override readonly groupName = 'image'
 
   @IpcMethod()

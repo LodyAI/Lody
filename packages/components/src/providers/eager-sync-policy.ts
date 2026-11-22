@@ -11,8 +11,6 @@ export type EagerSyncSurface = 'web' | 'desktop' | 'mobile';
 
 export const EAGER_SYNC_CANDIDATE_WINDOW = 20;
 export const WEB_EAGER_SYNC_CANDIDATE_WINDOW = EAGER_SYNC_CANDIDATE_WINDOW;
-/** @deprecated All surfaces now use a bounded candidate window. */
-export const FULL_EAGER_SYNC_CANDIDATE_WINDOW = EAGER_SYNC_CANDIDATE_WINDOW;
 
 export const WEB_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   concurrency: 1,
@@ -31,9 +29,6 @@ export const DESKTOP_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   candidateWindow: EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
 };
-
-/** @deprecated Desktop prefetch is no longer full-history. */
-export const FULL_EAGER_SYNC_POLICY = DESKTOP_EAGER_SYNC_POLICY;
 
 export const MOBILE_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   concurrency: 1,

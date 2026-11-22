@@ -524,6 +524,56 @@ export async function invoke(action: string) {
             (globalThis as unknown as { outerReturned: boolean }).outerReturned = true;
             return yield* Fiber.join(child);
           }
+          // A key round holds the writer (a held unwrap) while content reads a key in the
+          // same tab. The read waits for its turn instead of failing.
+          case 'queuedRead': {
+            const blob = yield* custody.wrap('installed-epoch-key', new Uint8Array(32).fill(0x44));
+            const entered = yield* Deferred.make<void>(),
+              release = yield* Deferred.make<void>();
+            const holder = yield* Effect.forkChild(
+              writer.run(
+                Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+              )
+            );
+            yield* Deferred.await(entered);
+            const reader = yield* Effect.forkChild(
+              custody.unwrap('installed-epoch-key', blob).pipe(Effect.map(hex))
+            );
+            // Without the queue the read fails at once; with it, it is still waiting.
+            const early = yield* Fiber.await(reader).pipe(Effect.timeoutOption(300));
+            yield* Deferred.succeed(release, undefined);
+            yield* Fiber.join(holder);
+            return { waitedWhileHeld: early._tag === 'None', read: yield* Fiber.join(reader) };
+          }
+          // A holder that never finishes: another call gives up after its bounded wait with
+          // conflict, never stealing the lock, and calls run again once the holder settles.
+          case 'hungHolder': {
+            const short = yield* Layer.buildWithScope(
+              browserClientWriter({
+                accountId: binding.accountId,
+                workspaceId: binding.workspaceId,
+                queueTimeout: 100,
+              }).pipe(Layer.provide(Layer.succeed(WorkspaceScope, { genesis: binding.genesis }))),
+              scope
+            ).pipe(Effect.map((context) => Context.get(context, ClientCustodyWriter)));
+            const entered = yield* Deferred.make<void>(),
+              release = yield* Deferred.make<void>();
+            const holder = yield* Effect.forkChild(
+              writer.run(
+                Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+              )
+            );
+            yield* Deferred.await(entered);
+            const whileHung = yield* Effect.result(short.run(Effect.succeed('ran')));
+            yield* Deferred.succeed(release, undefined);
+            yield* Fiber.join(holder);
+            return {
+              whileHung: Result.isFailure(whileHung)
+                ? (whileHung.failure as { reason?: string }).reason
+                : whileHung.success,
+              afterRelease: yield* short.run(Effect.succeed('ran')),
+            };
+          }
           case 'nestedWrap':
             return yield* writer.run(custody.wrap('signing-private-key', secrets[0]));
           case 'wrapEpoch':

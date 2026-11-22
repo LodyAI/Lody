@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect';
+import { Effect, Layer, Schema } from 'effect';
 import * as Bytes from '../../internal/foundation/bytes';
 import {
   decodeRecord,
@@ -34,7 +34,22 @@ export interface LedgerSubmissionStream extends LedgerStreamReader {
     | { readonly ok: false; readonly result: unknown }
   >;
 }
-const fail = () => new LedgerLogError();
+const fail = (cause?: unknown) => (cause instanceof LedgerLogError ? cause : new LedgerLogError());
+const rateLimit = Schema.decodeUnknownSync(
+  Schema.Struct({ status: Schema.Literal(429), bodyText: Schema.String })
+);
+const refusedBody = Schema.decodeUnknownSync(
+  Schema.Struct({ error: Schema.Literal('self-service-rate-limited'), retryAt: Schema.Number })
+);
+function appendRefusal(value: unknown): LedgerLogError {
+  try {
+    const response = rateLimit(value),
+      body = refusedBody(JSON.parse(response.bodyText));
+    if (Number.isSafeInteger(body.retryAt) && body.retryAt >= 0)
+      return new LedgerLogError({ reason: 'self-service-rate-limited', retryAt: body.retryAt });
+  } catch {}
+  return fail();
+}
 /** Options of {@link makeStreamsLedgerLog} and {@link streamsLedgerLog}. */
 export interface StreamsLedgerLogOptions {
   /** The workspace's ledger control stream (released streams-client 0.9 shape). */
@@ -179,7 +194,8 @@ export function makeStreamsLedgerLog(
                   expectedOffset: selected.offset,
                   part: { contentType: 'application/octet-stream', body },
                 });
-                if (closed || !response.ok) throw fail();
+                if (closed) throw fail();
+                if (!response.ok) throw appendRefusal(response.result);
                 const result = response.result;
                 if (result.kind === 'mismatch') {
                   if (

@@ -32,5 +32,9 @@
   and auth status, never credentials, tokens, URLs, raw errors, Causes or owners.
   Timeout, interruption and release failure remain observable. [Contract](README.md).
 
+- Only an owner-initiated close with a pure-interruption producer Exit emits
+  `fetch-cancelled` / `owner_released`. The first stop reason wins; deadlines,
+  unknown cancellation and mixed cleanup failures remain `fetch-failure`.
+
 - Legacy invalidation after close begins is idempotent. Failed close/cleanup still
   retains its owner and Cause; invalidation never confirms release or reopens admission.

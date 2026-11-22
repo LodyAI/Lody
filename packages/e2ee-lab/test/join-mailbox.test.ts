@@ -46,7 +46,7 @@ describe('public signed Lab join metadata, synthetic account labels only', () =>
           genesis: f.anchor,
           requestId: ok(Bytes.requestId(new Uint8Array(16).fill(126))),
           userId: ok(Bytes.userId(new Uint8Array(32).fill(127))),
-          encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(128))),
+          encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(28))),
           expiresAt: null,
           signer: outsider,
         })
@@ -129,7 +129,7 @@ describe('public signed Lab join metadata, synthetic account labels only', () =>
               genesis: f.anchor,
               requestId: ok(Bytes.requestId(new Uint8Array(16).fill(130))),
               userId: ok(Bytes.userId(new Uint8Array(32).fill(131))),
-              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(132))),
+              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(32))),
               expiresAt: 1,
               signer: outsider,
             });
@@ -193,7 +193,7 @@ describe('public signed Lab join metadata, synthetic account labels only', () =>
               genesis: f.anchor,
               requestId: ok(Bytes.requestId(new Uint8Array(16).fill(134))),
               userId: ok(Bytes.userId(new Uint8Array(32).fill(135))),
-              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(136))),
+              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(36))),
               expiresAt: null,
               signer: outsider,
             });
@@ -260,7 +260,7 @@ describe('public signed Lab join metadata, synthetic account labels only', () =>
               genesis: f.anchor,
               requestId: ok(Bytes.requestId(new Uint8Array(16).fill(140))),
               userId: ok(Bytes.userId(new Uint8Array(32).fill(141))),
-              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(142))),
+              encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(42))),
               expiresAt: null,
               signer: outsider,
             });

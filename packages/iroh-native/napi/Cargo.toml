@@ -1,0 +1,21 @@
+[package]
+name = "lody-iroh-napi"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lody-iroh = { path = "../core" }
+napi = { version = "3", default-features = false, features = ["napi8", "async", "tokio_rt"] }
+napi-derive = "3"
+hex.workspace = true
+zeroize.workspace = true
+tokio.workspace = true
+
+[build-dependencies]
+napi-build = "2"

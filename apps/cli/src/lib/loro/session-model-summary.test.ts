@@ -1,14 +1,10 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import { describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 import { SessionDocument } from './doc';
 import type { Logger } from '@/utils/logger';
-import {
-  createSessionMirror,
-  type SessionHistoryInput,
-  type SessionId,
-  type SessionMeta,
-} from '@lody/shared';
+import { type SessionHistoryInput, type SessionId, type SessionMeta } from '@lody/shared';
 import { type SessionTurn } from '@lody/shared/session-data';
 import { attachSessionModelSummary, latestSessionModel } from './session-model-summary';
 

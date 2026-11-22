@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { createCloudSessionAccess } from '@/providers/cloud-session-access';
 
-// @vitest-environment jsdom
 import { getDefaultStore } from 'jotai';
 import type { WorkspaceId } from '@lody/shared';
 import { userAtom, currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
@@ -9,7 +10,16 @@ import { postHogPrivacy, setTelemetryRouteTarget } from '@/lib/posthog-privacy';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type FunctionReference } from 'convex/server';
+import { getFunctionName, type FunctionReference } from 'convex/server';
+import { ConvexError } from 'convex/values';
+import {
+  defineCloudQuery,
+  defineCloudAction,
+  defineCloudMutation,
+  definePublicCloudQuery,
+} from '@lody/platform';
+import { cloudPlatformApi, useCloudPlatformClient } from '@/providers/cloud-platform-api';
+import type { AuthenticatedConvexContextValue } from '@/hooks/use-authenticated-convex';
 import type {
   PlatformProvider,
   E2eeRuntimeFactory,
@@ -37,6 +47,10 @@ const fixture = vi.hoisted(() => ({
       }
     | undefined,
   cloudClient: {
+    watchQuery: (_reference: FunctionReference<'query'>, _args: unknown) => ({
+      onUpdate: (_changed: () => void) => () => {},
+      localQueryResult: (): unknown => undefined,
+    }),
     query: async (_reference: FunctionReference<'query'>, _args: unknown): Promise<unknown> => {
       throw new Error('unexpected query');
     },
@@ -64,7 +78,11 @@ vi.mock('@/atoms', async () => {
     currentWorkspaceSlugAtom: atom(null),
   };
 });
-vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
+vi.mock('@/atoms/runtime', async () => {
+  const { atom } = await import('jotai');
+  const runtime = atom(null);
+  return { activeWorkspaceRuntimeAtom: runtime, runtimeAtom: runtime };
+});
 vi.mock('@/atoms/local-probe', () => ({ localAgentEnabledAtom: 'local-agent' }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => fixture.electron }));
 vi.mock('@/lib/electron-ipc-client', async (importOriginal) => {
@@ -87,6 +105,10 @@ vi.mock('@/providers/convex-provider', () => ({ useAuthSignOut: () => async () =
 vi.mock('convex/react', async (importOriginal) => ({
   ...(await importOriginal<typeof import('convex/react')>()),
   useConvex: () => fixture.cloudClient,
+  useAction: (reference: FunctionReference<'action'>) => (args: unknown) =>
+    fixture.cloudClient.action(reference, args),
+  useMutation: (reference: FunctionReference<'mutation'>) => (args: unknown) =>
+    fixture.cloudClient.mutation(reference, args),
 }));
 vi.mock('@/hooks/use-recoverable-convex-query', () => ({
   usePublicConvexQuery: () => undefined,
@@ -201,6 +223,69 @@ describe('CloudPlatformProvider', () => {
     expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBeUndefined();
   });
 
+  it('subscribes to only the scoped ledger head, delivers cached state and fences late values', async () => {
+    refetch('A');
+    const initial = {
+      workspaceId: 'workspace-a',
+      genesisHash: '11'.repeat(32),
+      checkpoint: { length: 1, headHash: '11'.repeat(32) },
+    };
+    let value: unknown = initial;
+    let changed!: () => void;
+    let active = false;
+    const originalWatch = fixture.cloudClient.watchQuery;
+    fixture.cloudClient.watchQuery = (reference, args) => {
+      expect(getFunctionName(reference)).toBe('e2eeWorkspaces:ledgerHead');
+      expect(args).toEqual({ workspaceId: 'workspace-a' });
+      return {
+        onUpdate: (callback) => {
+          changed = callback;
+          active = true;
+          return () => {
+            active = false;
+          };
+        },
+        localQueryResult: () => {
+          if (value instanceof Error) throw value;
+          return value;
+        },
+      };
+    };
+    try {
+      await render();
+      const observed: unknown[] = [];
+      const errors: unknown[] = [];
+      const stop = seen.at(-1)!.e2eeWorkspaces!.subscribeLedgerHead!(
+        { workspaceId: 'workspace-a' },
+        (head) => observed.push(head),
+        (error) => errors.push(error)
+      );
+      expect(active).toBe(true);
+      expect(observed).toEqual([initial]);
+      value = { ...initial, checkpoint: { length: 2, headHash: '22'.repeat(32) } };
+      changed();
+      expect(observed).toHaveLength(2);
+      value = { ...initial, workspaceId: 'other-workspace' };
+      changed();
+      expect(observed).toHaveLength(2);
+      value = new Error('subscription unavailable');
+      changed();
+      expect(errors).toEqual([value]);
+      refetch('Other account');
+      (fixture.session.data as { user: { id: string } }).user.id = 'account-other';
+      await render();
+      value = initial;
+      changed();
+      expect(observed).toHaveLength(2);
+      stop();
+      expect(active).toBe(false);
+      changed();
+      expect(observed).toHaveLength(2);
+    } finally {
+      fixture.cloudClient.watchQuery = originalWatch;
+    }
+  });
+
   it('keeps Electron IPC as the runtime owner when a browser factory is supplied', async () => {
     fixture.electron = true;
     refetch('A');
@@ -216,6 +301,54 @@ describe('CloudPlatformProvider', () => {
         accountId: 'user-a',
       })
     ).toEqual(binding);
+  });
+
+  it('admits ordinary session access only after the shared live mode verdict, and fences account switches', async () => {
+    refetch('A');
+    const atoms = getDefaultStore();
+    const previous = {
+      runtime: atoms.get(runtimeAtom),
+      mode: atoms.get(workspaceContentModeAtom),
+      user: atoms.get(userAtom),
+      workspace: atoms.get(currentWorkspaceIdAtom),
+      slug: atoms.get(currentWorkspaceSlugAtom),
+    };
+    const rows = [{ machineId: 'private', canManage: true, readSharedSessionIds: ['root'] }];
+    fixture.cloudClient.query = async () => rows;
+    try {
+      atoms.set(userAtom, { id: 'user-a' } as never);
+      atoms.set(currentWorkspaceIdAtom, 'workspace-a' as WorkspaceId);
+      atoms.set(currentWorkspaceSlugAtom, 'a');
+      atoms.set(runtimeAtom, {
+        workspaceId: 'workspace-a',
+        workspaceSlug: 'a',
+        accountId: 'user-a',
+        contentMode: 'plaintext',
+      } as WorkspaceRuntime);
+      atoms.set(workspaceContentModeAtom, null);
+      await render();
+      const access = seen.at(-1)!.sessionAccess!;
+      await expect(access.list('workspace-a')).rejects.toMatchObject({
+        code: 'legacy_workspace_admission_pending',
+      });
+      atoms.set(workspaceContentModeAtom, {
+        accountId: 'user-a',
+        workspaceId: 'workspace-a',
+        workspaceSlug: 'a',
+        descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+      });
+      await expect(access.list('workspace-a')).resolves.toEqual(rows);
+      atoms.set(userAtom, { id: 'different-account' } as never);
+      await expect(access.read('workspace-a', 'private')).rejects.toThrow(
+        'session_access_scope_changed'
+      );
+    } finally {
+      atoms.set(runtimeAtom, previous.runtime);
+      atoms.set(workspaceContentModeAtom, previous.mode);
+      atoms.set(userAtom, previous.user);
+      atoms.set(currentWorkspaceIdAtom, previous.workspace);
+      atoms.set(currentWorkspaceSlugAtom, previous.slug);
+    }
   });
 
   it('keeps cloud mode control available when the injected factory reports no runtime', async () => {
@@ -357,6 +490,7 @@ describe('CloudPlatformProvider', () => {
     head: { revision: 1, digest: '33'.repeat(32) },
     sharedWithTeam: false,
     projects: [],
+    sessions: [],
     signer: '44'.repeat(32),
     canManage: true,
     needsResign: false,
@@ -470,37 +604,57 @@ describe('CloudPlatformProvider', () => {
     expect(container.textContent).toContain('v9');
   });
 
-  it('re-signs a revoked issuer policy without dropping undisplayed project choices', async () => {
-    let view = {
-      ...policyView(),
-      needsResign: true,
-      sharedWithTeam: true,
-      projects: ['project-a', 'retained-project'],
-    };
-    fixture.invoke = async (channel, ...args) => {
-      if (channel === 'e2ee.readMachineSharing') return view;
-      expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
-      expect(args[4]).toEqual({ kind: 'machine', sharedWithTeam: true });
-      view = {
-        ...view,
-        needsResign: false,
-        head: { revision: 2, digest: '55'.repeat(32) },
-        signer: '66'.repeat(32),
+  it.each(['en', 'zh_CN'] as const)(
+    'keeps a revoked signer policy effective and re-signs without dropping choices (%s)',
+    async (language) => {
+      let view = {
+        ...policyView(),
+        needsResign: true,
+        sharedWithTeam: true,
+        projects: ['project-a', 'retained-project'],
       };
-      return { status: 'saved', requestId: args[3] };
-    };
-    await renderSharing();
-    expect(container.textContent).toContain('Re-sign required');
-    await clickSharing('Re-sign with this device');
-    expect(container.textContent).toContain('v2');
-    expect(container.textContent).toContain('666666666666');
-    expect(container.textContent).toContain('retained-project');
-    expect(
-      container
-        .querySelector('[aria-label="Share Lody with the team"]')
-        ?.getAttribute('aria-checked')
-    ).toBe('true');
-  });
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.readMachineSharing') return view;
+        expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
+        expect(args[4]).toEqual({ kind: 'machine', sharedWithTeam: true });
+        view = {
+          ...view,
+          needsResign: false,
+          head: { revision: 2, digest: '55'.repeat(32) },
+          signer: '66'.repeat(32),
+        };
+        return { status: 'saved', requestId: args[3] };
+      };
+      await renderSharing();
+      await act(async () => {
+        await initI18n(language);
+      });
+      expect(container.textContent).toContain(
+        language === 'en' ? 'Review recommended' : '建议检查'
+      );
+      expect(container.textContent).toContain(language === 'en' ? 'Effective version' : '生效版本');
+      expect(container.textContent).not.toContain(language === 'en' ? 'inactive' : '未生效');
+      const toggle = container.querySelector<HTMLButtonElement>(
+        '[data-testid=machine-sharing-toggle]'
+      )!;
+      expect(toggle.getAttribute('aria-checked')).toBe('true');
+      expect(toggle.disabled).toBe(false);
+      expect(container.textContent).toContain(language === 'en' ? 'Signing device' : '签名设备');
+      await clickSharing(language === 'en' ? 'Review and re-sign' : '检查并重新签名');
+      expect(container.textContent).toContain('v2');
+      expect(container.textContent).toContain('666666666666');
+      expect(container.textContent).toContain('retained-project');
+      expect(
+        container
+          .querySelector(
+            language === 'en'
+              ? '[aria-label="Share Lody with the team"]'
+              : '[aria-label="与团队共享 Lody"]'
+          )
+          ?.getAttribute('aria-checked')
+      ).toBe('true');
+    }
+  );
 
   it.each(['withdrawn', 'readmitted', 'pending'] as const)(
     'rechecks a stale re-sign surface before writing when the latest policy is %s',
@@ -532,7 +686,7 @@ describe('CloudPlatformProvider', () => {
           : latest === 'withdrawn'
             ? { ...policyView(), head: { revision: 2, digest: '88'.repeat(32) } }
             : { ...view, pendingRequest: { requestId: pendingId, change: pendingChange } };
-      await clickSharing('Re-sign with this device');
+      await clickSharing('Review and re-sign');
       expect(writes).toHaveLength(0);
       if (latest === 'pending') {
         expect(container.textContent).toContain('Retry change');
@@ -542,7 +696,7 @@ describe('CloudPlatformProvider', () => {
         ]);
         expect(container.textContent).toContain('v3');
       } else {
-        expect(container.textContent).not.toContain('Re-sign with this device');
+        expect(container.textContent).not.toContain('Review and re-sign');
         expect(
           container
             .querySelector('[aria-label="Share with the whole team"]')
@@ -967,5 +1121,316 @@ describe('cloud E2EE display directory ownership', () => {
     await expect(port.memberProfiles!({ workspaceId: 'workspace' })).rejects.toThrow(
       'e2ee_account_unavailable'
     );
+  });
+});
+
+describe('authoritative session access cloud port', () => {
+  it('updates ordinary owner grants without changing machine sharing and rejects nonowners', async () => {
+    let canManage = true;
+    let shared = false;
+    const port = createCloudSessionAccess({
+      assertScope: () => ({ encrypted: false, accountId: 'owner', token }),
+      client: {
+        query: async () =>
+          [
+            { machineId: 'private', canManage, readSharedSessionIds: shared ? ['root'] : [] },
+          ] as never,
+        mutation: async (_operation, args) => {
+          shared = (args as { sharedWithTeam: boolean }).sharedWithTeam;
+          return { success: true } as never;
+        },
+        subscribe: () => () => {},
+      },
+    });
+    const intent = {
+      workspaceId: 'workspace',
+      machineId: 'private',
+      sessionId: 'root',
+      level: 'read' as const,
+      requestId: 'request',
+    };
+    await port.set(intent);
+    expect(await port.read('workspace', 'private')).toEqual({
+      machineId: 'private',
+      canManage: true,
+      readSharedSessionIds: ['root'],
+    });
+    canManage = false;
+    await expect(port.set({ ...intent, level: null })).rejects.toThrow('session_access_not_owned');
+    expect((await port.list('workspace'))[0].readSharedSessionIds).toEqual(['root']);
+    canManage = true;
+    await port.set({ ...intent, level: null });
+    expect((await port.read('workspace', 'private')).readSharedSessionIds).toEqual([]);
+  });
+
+  it('treats E2EE versions only as hints and fences a changed account during policy reads', async () => {
+    let current = token;
+    let complete!: (value: import('@lody/platform').E2eeMachineSharingView) => void;
+    const runtime = {
+      readMachineSharing: () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const port = createCloudSessionAccess({
+      runtime,
+      assertScope: () => ({ encrypted: true, accountId: 'owner', token: current }),
+      client: {
+        query: async () =>
+          [{ machineId: 'private', generation: 'generation', revision: 42 }] as never,
+        mutation: async () => {
+          throw new Error('ordinary writes forbidden');
+        },
+        subscribe: () => () => {},
+      },
+    });
+    const read = port.read('workspace', 'private');
+    current = {};
+    complete({
+      machineId: 'private',
+      sessions: [{ sessionId: 'root', audience: 'team', level: 'read' }],
+      canManage: false,
+    } as import('@lody/platform').E2eeMachineSharingView);
+    await expect(read).rejects.toThrow('session_access_scope_changed');
+  });
+  const token = {};
+});
+
+describe('cloud authentication request lifecycle', () => {
+  const pending = defineCloudQuery<Record<string, never>, string[]>(
+    'cloudAccount',
+    'e2eeAutomaticPairing:pending'
+  );
+  const grant = defineCloudAction<Record<string, never>, string>(
+    'cloudAccount',
+    'promptShortcuts:getStreamToken'
+  );
+  const write = defineCloudMutation<Record<string, never>, string>('cloudAccount', 'test:write');
+  const publicQuery = definePublicCloudQuery<Record<string, never>, string[]>(
+    'cloudAccount',
+    'test:public'
+  );
+  const authError = () => new ConvexError({ kind: 'lody.auth', code: 'unauthenticated' });
+  let root: Root;
+  let container: HTMLDivElement;
+  let auth: AuthenticatedConvexContextValue;
+  let client: ReturnType<typeof useCloudPlatformClient>;
+  let action: (args: Record<string, never>) => Promise<string>;
+  let mutation: typeof action;
+  let result: unknown;
+  let reply: unknown;
+  let sent: string[];
+  let updates: Set<() => void>;
+  const recovery = vi.fn();
+  let original: typeof fixture.cloudClient;
+
+  function Probe() {
+    client = useCloudPlatformClient();
+    action = cloudPlatformApi.useAction(grant);
+    mutation = cloudPlatformApi.useMutation(write);
+    return null;
+  }
+  const render = () =>
+    act(() =>
+      root.render(
+        <AuthenticatedConvexContext.Provider value={auth}>
+          <Probe />
+        </AuthenticatedConvexContext.Provider>
+      )
+    );
+  beforeEach(() => {
+    recovery.mockReset();
+    auth = {
+      authSessionId: 'session-a',
+      isAuthenticated: true,
+      isLoading: false,
+      isRecovering: false,
+      confirmedUnauthenticated: false,
+      claimAutomaticCommand: () => true,
+      requestAuthRecovery: recovery,
+    };
+    sent = [];
+    updates = new Set();
+    result = ['paired'];
+    reply = 'token';
+    original = { ...fixture.cloudClient };
+    const execute = async (reference: FunctionReference<'action' | 'mutation' | 'query'>) => {
+      sent.push(getFunctionName(reference));
+      if (reply instanceof Error) throw reply;
+      return reply;
+    };
+    fixture.cloudClient.action = execute;
+    fixture.cloudClient.mutation = execute;
+    fixture.cloudClient.query = execute;
+    fixture.cloudClient.watchQuery = (reference) => ({
+      localQueryResult: () => {
+        if (result instanceof Error) throw result;
+        return result;
+      },
+      onUpdate: (changed) => {
+        sent.push(getFunctionName(reference));
+        updates.add(changed);
+        return () => {
+          updates.delete(changed);
+        };
+      },
+    });
+    container = document.createElement('div');
+    root = createRoot(container);
+    render();
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    Object.assign(fixture.cloudClient, original);
+    container.remove();
+  });
+
+  it('does not send protected startup requests before server-confirmed authentication', async () => {
+    auth = { ...auth, isAuthenticated: false, isLoading: true };
+    render();
+    const values: string[][] = [];
+    const close = client.subscribeValue(
+      pending,
+      {},
+      (value) => values.push(value),
+      () => {}
+    );
+    await expect(action({})).rejects.toMatchObject({ data: { code: 'unauthenticated' } });
+    await expect(client.query(pending, {})).rejects.toMatchObject({
+      data: { code: 'unauthenticated' },
+    });
+    expect(sent).toEqual([]);
+    auth = { ...auth, isAuthenticated: true, isLoading: false };
+    render();
+    expect(values).toEqual([['paired']]);
+    expect(updates.size).toBe(1);
+    close();
+  });
+
+  it('pauses failing inbox subscriptions and resumes the same owner after authentication recovers', async () => {
+    const identity = client;
+    const values: string[][] = [];
+    const failures: unknown[] = [];
+    const close = client.subscribeValue(
+      pending,
+      {},
+      (value) => values.push(value),
+      (error) => failures.push(error)
+    );
+    result = authError();
+    for (const update of [...updates]) update();
+    expect(updates.size).toBe(0);
+    expect(failures).toEqual([result]);
+    expect(recovery).toHaveBeenCalledTimes(1);
+    await expect(client.query(pending, {})).rejects.toMatchObject({
+      data: { code: 'unauthenticated' },
+    });
+    expect(sent).toEqual(['e2eeAutomaticPairing:pending']);
+    auth = { ...auth, isAuthenticated: false, isRecovering: true };
+    render();
+    auth = { ...auth, isAuthenticated: true, isRecovering: false };
+    render();
+    expect(client).toBe(identity);
+    expect(updates.size).toBe(1);
+    expect(recovery).toHaveBeenCalledTimes(1); // old cached rejection is not a fresh failure
+    result = ['recovered'];
+    for (const update of [...updates]) update();
+    expect(values).toEqual([['paired'], ['recovered']]);
+    close();
+    expect(updates.size).toBe(0);
+  });
+
+  it.each(['action', 'mutation'] as const)(
+    'reports rejected %s commands without replaying them during recovery',
+    async (kind) => {
+      const command = () => (kind === 'action' ? action({}) : mutation({}));
+      reply = authError();
+      await expect(command()).rejects.toBe(reply);
+      await expect(command()).rejects.toMatchObject({ data: { code: 'unauthenticated' } });
+      expect(sent).toHaveLength(1);
+      expect(recovery).toHaveBeenCalledTimes(1);
+      auth = { ...auth, isAuthenticated: false, isRecovering: true };
+      render();
+      auth = { ...auth, isAuthenticated: true, isRecovering: false };
+      render();
+      expect(sent).toHaveLength(1);
+      reply = 'fresh-token';
+      await expect(command()).resolves.toBe('fresh-token');
+    }
+  );
+
+  it('retires logout subscriptions while keeping intentionally public reads available', async () => {
+    const values: string[][] = [];
+    const close = client.subscribeValue(
+      pending,
+      {},
+      (value) => values.push(value),
+      () => {}
+    );
+    auth = { ...auth, isAuthenticated: false, confirmedUnauthenticated: true, authSessionId: null };
+    render();
+    expect(updates.size).toBe(0);
+    for (let i = 0; i < 10; i++)
+      await expect(client.query(pending, {})).rejects.toBeInstanceOf(ConvexError);
+    expect(sent).toEqual(['e2eeAutomaticPairing:pending']);
+    reply = ['public'];
+    await expect(client.query(publicQuery, {})).resolves.toEqual(['public']);
+    auth = {
+      ...auth,
+      isAuthenticated: true,
+      confirmedUnauthenticated: false,
+      authSessionId: 'session-b',
+    };
+    render();
+    expect(updates.size).toBe(0);
+    expect(values).toEqual([['paired']]);
+    close();
+  });
+
+  it('keeps subscriptions created during a userless refetch bound to their original session', () => {
+    auth = { ...auth, isAuthenticated: false, authSessionId: null };
+    render();
+    const values: string[][] = [];
+    const close = client.subscribeValue(
+      pending,
+      {},
+      (value) => values.push(value),
+      () => {}
+    );
+    auth = { ...auth, isAuthenticated: true, authSessionId: 'session-b' };
+    render();
+    expect(updates.size).toBe(0);
+    expect(values).toEqual([]);
+    expect(sent).toEqual([]);
+    close();
+  });
+
+  it.each(['account replacement', 'provider teardown'] as const)(
+    'does not let a late command failure restart auth after %s',
+    async (boundary) => {
+      let reject!: (error: Error) => void;
+      reply = new Promise<string>((_resolve, rejectRequest) => {
+        reject = rejectRequest;
+      });
+      const pendingCommand = action({});
+      if (boundary === 'account replacement') {
+        auth = { ...auth, authSessionId: 'session-b' };
+        render();
+      } else {
+        act(() => root.unmount());
+      }
+      const failure = authError();
+      reject(failure);
+      await expect(pendingCommand).rejects.toBe(failure);
+      expect(recovery).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not treat permission and server failures as authentication loss', async () => {
+    reply = new ConvexError({ code: 'forbidden' });
+    await expect(action({})).rejects.toBe(reply);
+    reply = 'allowed';
+    await expect(action({})).resolves.toBe('allowed');
+    expect(recovery).not.toHaveBeenCalled();
   });
 });

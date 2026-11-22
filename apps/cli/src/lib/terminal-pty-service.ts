@@ -1,3 +1,5 @@
+import { observeManagedProcessTree } from './managed-process-observation';
+import { nodeProcessLive } from '@lody/shared/node/process';
 import { toShared } from '@/platform/process-options';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -35,6 +37,8 @@ const OSC_TITLE_REGEX = new RegExp(`${ESC}\\](?:0|2);([^${BEL}${ESC}]*)(?:${BEL}
 const TERMINAL_ENV_BLOCKLIST = new Set([
   'ELECTRON_RUN_AS_NODE',
   'LODY_CLI_TOKEN',
+  // Human terminals must not inherit the daemon's Agent-only command restriction.
+  'LODY_AGENT_SESSION_ID',
   'LODY_ELECTRON_BOOTSTRAP',
   'LODY_ELECTRON_SESSION_TOKEN',
   'LODY_GIT_CRED_BROKER_STATE_FILE',
@@ -219,6 +223,8 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
         env: buildTerminalEnv(params.sessionId),
       });
 
+      if (process.platform !== 'win32')
+        observeManagedProcessTree(posixGroupTree(nodeProcessLive, terminal.pid));
       const record: TerminalRecord = {
         sessionId: params.sessionId,
         terminalId,

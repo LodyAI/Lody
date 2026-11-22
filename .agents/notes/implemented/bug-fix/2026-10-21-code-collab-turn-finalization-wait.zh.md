@@ -64,7 +64,7 @@ watcher、进程 facade 和发布的 Promise Repo。只换外层 timer/fiber 不
   旧策略不同。这解释失败等待变长，不能证明永久 pending。
 - #1672/#1677 接入 Flock 队列、compaction 修复。#1713 撤回 native consumer，保留新 SDK。
 - #1748 接入 CRDT 0.19.1、Client 0.12.1、Repo 0.23.3。
-  [独立读循环调查](../../proposed/bug-fix/2026-10-19-streams-read-loop-spin.md)涉及更广泛的 daemon
+  [独立读循环调查](../../implemented/bug-fix/2026-10-19-streams-read-loop-spin.md)涉及更广泛的 daemon
   故障；没有匹配构建、日志，不能归因于仍可响应的 daemon 中某 owner 队列卡住。合并不等于安装。
 
 ## 验证边界

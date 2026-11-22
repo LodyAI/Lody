@@ -977,7 +977,40 @@ export class LocalLoroDataPlaneServerLegacy {
       if (subscriber.latestJoinRequestId !== task.requestId) {
         return [];
       }
-      return yield* self.buildSyncFrames(connection, task.roomKey, task.peerId, task.requestId);
+      return yield* self
+        .buildSyncFrames(connection, task.roomKey, task.peerId, task.requestId)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : Effect.sync((): LocalLoroDataPlaneServerMessage[] => {
+                  const failure = new LocalLoroWriterLegacyFailure(cause);
+                  self.options.onError?.(failure, 'writer:join-reply');
+                  if (
+                    self.disposed ||
+                    self.disconnectedIds.has(connection.id) ||
+                    self.rooms.get(task.roomKey) !== entry ||
+                    entry.subscribers.get(task.peerId) !== subscriber ||
+                    subscriber.connection.id !== connection.id ||
+                    subscriber.latestJoinRequestId !== task.requestId
+                  ) {
+                    return [];
+                  }
+                  return [
+                    {
+                      type: 'error',
+                      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+                      workspaceId: self.options.workspaceId,
+                      code: 'data_plane_error',
+                      message: failure.message,
+                      peerId: task.peerId,
+                      requestId: task.requestId,
+                      room: entry.room,
+                    },
+                  ];
+                })
+          )
+        );
     });
   }
 

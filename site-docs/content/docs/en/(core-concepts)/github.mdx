@@ -88,23 +88,6 @@ the PR title, description, branch, CI, comments, and reviews without leaving Lod
 Draft PRs show a **Ready for review** action in the PR panel. After the PR is ready and mergeable,
 you can also merge it from Lody and delete the branch after merge when GitHub still has the branch.
 
-## Auto-Archive Finished PR Sessions
-
-In **Settings** -> **Preferences** -> **Auto-archive sessions**, enable rules for PR-linked sessions:
-
-- archive when the PR is merged
-- archive when the PR is closed
-
-These rules apply to sessions you own when this device observes a PR status transition; opening
-Lody with an already merged or closed PR does not retroactively archive its session.
-
-Auto-archive uses the same lifecycle as manual archive: the conversation remains in the archive
-list, while the owning machine can reclaim the Lody-managed worktree directory before permanent
-deletion. The local branch is kept, and pending non-ignored changes are backed up in a commit
-before removal. Ignored files, such as `.env` and build output, can be discarded. Save files you
-need outside the worktree before enabling these rules. See
-[Worktree retention and recovery](/docs/worktrees#automatic-cleanup) for the protection boundary.
-
 ## Commit and Push for PR Sessions
 
 For GitHub-backed sessions that are linked to a PR, Lody checks the workspace after each agent turn.

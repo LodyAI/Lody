@@ -189,7 +189,6 @@ export function getIosSimulatorHardware(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Controls a device family can take. Unavailable ones stay listed, disabled.
 
 export type IosSimulatorControlId =
@@ -199,6 +198,7 @@ export type IosSimulatorControlId =
   | 'lock'
   | 'rotate-left'
   | 'rotate-right'
+  | 'software-keyboard'
   | 'shake'
   | 'volume-up'
   | 'volume-down'
@@ -208,7 +208,8 @@ export type IosSimulatorControlId =
   | 'open-url';
 
 export function getIosSimulatorControlAvailability(
-  hardware: IosSimulatorHardware
+  hardware: IosSimulatorHardware,
+  keyboardToggleSupported = false
 ): Record<IosSimulatorControlId, boolean> {
   const handheld = hardware.family === 'iphone' || hardware.family === 'ipad';
   return {
@@ -218,6 +219,7 @@ export function getIosSimulatorControlAvailability(
     lock: handheld || hardware.family === 'watch',
     'rotate-left': handheld,
     'rotate-right': handheld,
+    'software-keyboard': handheld && keyboardToggleSupported,
     shake: handheld,
     'volume-up': handheld,
     'volume-down': handheld,
@@ -228,7 +230,6 @@ export function getIosSimulatorControlAvailability(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Orientation. The machine's stream turns with the device, so the screen is
 // never rotated here — only the exterior is, and the viewer's coordinates stay
 // its own.

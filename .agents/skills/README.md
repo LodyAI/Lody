@@ -34,9 +34,25 @@ archive procedure for [Agent Notes](../notes/AGENTS.md#supersession); the rules 
 in that file. `.claude/skills/archive-agent-notes` links to it. See the
 [decision note](../notes/implemented/process/2026-10-28-agent-note-memory-hygiene.md).
 
-`lody-cli` is authored in this repository. It is the operating guide for the `lody`
+`lody-cli` is authored in this repository; its canonical copy is
+[`skills/lody-cli`](../../skills/lody-cli/SKILL.md) at the repository root. It is the operating guide for the `lody`
 CLI: runtime prerequisites, sign-in recovery, work-context selection, selector and
 environment conventions, the schedule draft format, and confirmation-worthy commands.
 Built-in `--help` remains the flag authority.
-`.claude/skills/lody-cli` links to it. See the
+`.agents/skills/lody-cli` and `.claude/skills/lody-cli` link to it. See the
 [decision note](../notes/proposed/process/2026-10-21-lody-cli-skill.md).
+
+## Session execution verification
+
+[`verify-session-execution`](verify-session-execution/SKILL.md) covers one historically
+error-prone subsystem: Session Inbox delivery, admission, submission, reply waiting
+and continuation scheduling. [The explanation](../docs/app-state-machines.md) records
+the history-based selection, failure isolation, current statecharts and verification
+limits. The default verifier checks current code and catches deliberately broken
+variants; failed current properties remain nonzero. Dependencies and raw output stay
+outside the app workspace.
+
+`delete-comment` is authored in this repository. It is the audit procedure for
+the comment ratchet (`scripts/check-comment-ratchet.mjs`); the enforcement rules
+stay in that script and [scripts/AGENTS.md](../../scripts/AGENTS.md).
+`.claude/skills/delete-comment` links to it.

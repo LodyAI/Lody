@@ -47,6 +47,7 @@ import { writeTextToClipboard } from '@/lib/clipboard';
 import { getDownloadPageUrl } from '@/lib/lody-urls';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
+import { useMobileBackRevealClass } from './mobile-drill-page-layout';
 import { usePullToRefresh } from '@/hooks/use-pull-to-refresh';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { type MobileConversationItem } from './mobile-project-screen';
@@ -56,6 +57,7 @@ import {
   type MobileChatGroupBy,
   type MobileChatListSelectionLabels,
 } from './mobile-chat-list';
+import type { MobileStatusCommands } from './use-mobile-status-list';
 import {
   MobileConnectionStatus,
   type MobileConnectionStatusLabels,
@@ -353,9 +355,6 @@ export type MobileHomeScreenLabels = {
      renders an "全部对话" label above the flat list. */
   allLocalProjectsHeading?: string;
   allGitHubReposHeading?: string;
-  /** @deprecated Chat list no longer shows a section heading in the
-     active (non-archived) mode. Kept for call-site compatibility. */
-  allChatsHeading?: string;
   /** Heading rendered above the Chat tab's list when the archive
      toggle is on. Falls back to "归档对话" when not provided. */
   archivedChatsHeading?: string;
@@ -481,6 +480,14 @@ export type MobileHomeScreenProps = {
      Receives the next pinned state so the handler doesn't have to
      re-derive the current state. */
   onChatTogglePin?: (chatId: string, nextPinned: boolean) => void;
+  /** Status view writes for the Chat list (drag, row and section menus). */
+  chatStatusCommands?: MobileStatusCommands;
+  /** Whether this member may write Status view state and manage pin sections. */
+  chatStatusWritable?: boolean;
+  /** False when not even a pin can be written (an encrypted workspace's read role). */
+  chatStatusPreferable?: boolean;
+  /** Pinned rows the Chat list's scope hid, by pin section id (`""` = default). */
+  chatScopeHiddenCounts?: Record<string, number>;
   /** Archive a chat from the swipe-to-reveal drawer (or from the
      super-swipe). */
   onChatArchive?: (chatId: string) => void;
@@ -1310,6 +1317,10 @@ export function MobileHomeScreen({
   onGitHubRepositorySelect,
   onChatSelect,
   onChatTogglePin,
+  chatStatusCommands,
+  chatStatusWritable,
+  chatStatusPreferable,
+  chatScopeHiddenCounts,
   onChatArchive,
   onChatRestore,
   onChatPermanentDelete,
@@ -1376,15 +1387,8 @@ export function MobileHomeScreen({
   const normalizedQuery = normalizeForSearch(searchQuery.trim());
   // Split whole existing buckets, so openers and opened sessions stay in the
   // same list and a conversation is never repeated on the two panels.
-  const foldGroups = useMemo(() => {
-    if (selectedTab !== 'chat' || showArchived || !homeFold || normalizedQuery) return null;
-    const groups = groupChats(chats, chatGroupBy);
-    if (groups.length < 2) return null;
-    return { upper: groups[0]!.items, lower: groups.slice(1).flatMap((group) => group.items) };
-  }, [selectedTab, showArchived, homeFold, normalizedQuery, chats, chatGroupBy]);
-  const splitArchive = Boolean(
+  const splitChats = Boolean(
     selectedTab === 'chat' &&
-    showArchived &&
     homeFold &&
     !normalizedQuery &&
     groupChats(chats, chatGroupBy).length >= 2
@@ -1479,6 +1483,10 @@ export function MobileHomeScreen({
     };
   }, [wantStatusSlot]);
 
+  /* Home is the destination of a project or Settings Back: settle in under
+     the sliding-off page. */
+  const backRevealClass = useMobileBackRevealClass();
+
   /* Tab swipe was removed — conflicted with the row-level
      left-swipe-to-reveal-actions gesture on conversation rows. The
      dock tabbar at the bottom remains the only way to switch tabs. */
@@ -1497,7 +1505,12 @@ export function MobileHomeScreen({
          scroll region — keeps the vertical scrollbar contained to
          the list area instead of running through the chrome at the
          top. Mirrors the structure on MobileProjectScreen. */}
-      <div className="mobile-home-shell relative flex h-full w-full flex-col bg-background">
+      <div
+        className={cn(
+          'mobile-home-shell relative flex h-full w-full flex-col bg-background',
+          backRevealClass
+        )}
+      >
         {/* Sticky header: safe-area padding outside the chrome row so the
            status/pull pill can center on the same h-9 band as the
            workspace / search / trailing controls — not the full header
@@ -1649,38 +1662,16 @@ export function MobileHomeScreen({
           data-horizontal-fold-home-body
           className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          {homeFold && splitArchive ? (
+          {homeFold && splitChats && !showChatOnboarding ? (
             <>
               <div
                 ref={setArchiveUpper}
-                data-horizontal-fold-archive-upper
+                {...(showArchived
+                  ? { 'data-horizontal-fold-archive-upper': '' }
+                  : { 'data-horizontal-fold-upper-list': '' })}
                 className="min-h-0 overflow-y-auto"
                 style={{ flex: `0 0 ${homeFold.messageHeight}px` }}
               />
-              <div aria-hidden="true" style={{ flex: `0 0 ${homeFold.gapHeight}px` }} />
-            </>
-          ) : null}
-          {homeFold && foldGroups && !showChatOnboarding ? (
-            <>
-              <div
-                data-horizontal-fold-upper-list
-                className="min-h-0 overflow-y-auto"
-                style={{ flex: `0 0 ${homeFold.messageHeight}px` }}
-              >
-                <ChatsFlatView
-                  chats={foldGroups.upper}
-                  groupBy={chatGroupBy}
-                  labels={labels}
-                  query=""
-                  onSelect={onChatSelect}
-                  onTogglePin={onChatTogglePin}
-                  onArchive={onChatArchive}
-                  onRestore={onChatRestore}
-                  hasActiveFilters={hasActiveChatFilters}
-                  onClearFilters={onClearChatFilters}
-                  onPrivateHelp={() => setPrivateHelpOpen(true)}
-                />
-              </div>
               <div aria-hidden="true" style={{ flex: `0 0 ${homeFold.gapHeight}px` }} />
             </>
           ) : null}
@@ -1797,17 +1788,21 @@ export function MobileHomeScreen({
                   />
                 ) : (
                   <ChatsFlatView
-                    chats={foldGroups?.lower ?? chats}
+                    chats={chats}
                     groupBy={chatGroupBy}
                     labels={labels}
                     query={normalizedQuery}
                     onSelect={onChatSelect}
                     onTogglePin={onChatTogglePin}
+                    statusCommands={chatStatusCommands}
+                    statusWritable={chatStatusWritable}
+                    statusPreferable={chatStatusPreferable}
+                    scopeHiddenCounts={chatScopeHiddenCounts}
                     onArchive={onChatArchive}
                     onRestore={onChatRestore}
                     archived={showArchived}
                     splitTargets={
-                      splitArchive && archiveUpper && archiveLower
+                      splitChats && archiveUpper && archiveLower
                         ? { upper: archiveUpper, lower: archiveLower }
                         : undefined
                     }
@@ -2348,8 +2343,16 @@ function ChatsFlatView({
   firstGroupTrailing,
   onPrivateHelp,
   splitTargets,
+  statusCommands,
+  statusWritable,
+  statusPreferable,
+  scopeHiddenCounts,
 }: {
   chats: MobileConversationItem[];
+  statusCommands?: MobileStatusCommands;
+  statusWritable?: boolean;
+  statusPreferable?: boolean;
+  scopeHiddenCounts?: Record<string, number>;
   groupBy: MobileChatGroupBy;
   labels: MobileHomeScreenLabels;
   query: string;
@@ -2453,6 +2456,10 @@ function ChatsFlatView({
         privateHelpAriaLabel={labels.privateHelpAriaLabel}
         onPrivateHelp={onPrivateHelp}
         splitTargets={splitTargets}
+        statusCommands={statusCommands}
+        statusWritable={statusWritable}
+        statusPreferable={statusPreferable}
+        scopeHiddenCounts={scopeHiddenCounts}
       />
     </section>
   );

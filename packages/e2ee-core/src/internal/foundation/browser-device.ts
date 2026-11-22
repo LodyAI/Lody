@@ -18,6 +18,16 @@ export interface BrowserDevice extends DeviceSigner {
   readonly encryption: Readonly<CryptoKeyPair>;
   /** Stop new signing/HPKE immediately, await admitted HPKE settlement, then wipe the owned secrets. Idempotent. */
   readonly close: Effect.Effect<void>;
+  /**
+   * Hands a copy of the 32-byte Ed25519 seed to one native transport opener (the
+   * mobile iroh endpoint, whose EndpointId is this signing key) and wipes the copy
+   * after `open` settles. Purpose-limited: hosts pass only the native iroh opener;
+   * never return, log or retain it. Fails once the device is closed. Close waits
+   * for an admitted handoff before wiping the device's own secrets.
+   */
+  readonly withTransportSeed: <A>(
+    open: (seed: Uint8Array) => Promise<A>
+  ) => Effect.Effect<A, ContentError>;
 }
 
 type State = {
@@ -116,6 +126,33 @@ export const importBrowserDevice = Effect.fnUntraced(function* (input: {
               enc,
               encryption: Object.freeze({ privateKey: privateHandle, publicKey: publicHandle }),
               close,
+              withTransportSeed: <A>(open: (seed: Uint8Array) => Promise<A>) =>
+                Effect.suspend(() => {
+                  if (state.closed) return Effect.fail(fail('closed'));
+                  const copy = new Uint8Array(signing);
+                  let settle!: () => void;
+                  const settled = new Promise<void>((resolve) => {
+                    settle = resolve;
+                  });
+                  state.active.add(settled);
+                  // Uninterruptible: the native opener cannot be cancelled, so the wipe
+                  // and close's drain wait for its actual settlement, and a caller's
+                  // acquireRelease always receives the opened resource.
+                  return Effect.uninterruptible(
+                    Effect.tryPromise({
+                      try: () => open(copy),
+                      catch: () => fail('transport-open-failed'),
+                    })
+                  ).pipe(
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        copy.fill(0);
+                        state.active.delete(settled);
+                        settle();
+                      })
+                    )
+                  );
+                }),
               sign: (message: Uint8Array) =>
                 Effect.suspend(() => {
                   if (state.closed) return Effect.fail(fail('closed'));

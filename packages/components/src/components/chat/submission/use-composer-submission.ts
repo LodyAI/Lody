@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useState, type RefObject } from 'react';
 import { dismissComposerKeyboardAfterPaint } from './composer-keyboard-dismissal';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 
 interface Submission {
   isCurrent: () => boolean;
@@ -18,7 +19,7 @@ function createScope(key: string) {
  */
 export function useComposerSubmission(
   scopeKey: string,
-  inputRef: RefObject<HTMLTextAreaElement | null>
+  inputRef: RefObject<ComposerInputElement | null>
 ) {
   const [scope, setScope] = useState(() => createScope(scopeKey));
   if (scope.key !== scopeKey) setScope(createScope(scopeKey));

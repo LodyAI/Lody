@@ -21,7 +21,13 @@ import {
   type ClientCustodyScope,
   type ClientPairingKey,
 } from '@lody/e2ee-core/services';
-import type { E2eeContentToken, E2eeContentTokenRequest } from '@lody/cloud-api';
+import type {
+  E2eeContentToken,
+  E2eeContentTokenRequest,
+  E2eeDeviceAccess,
+  E2eeMemberOffer,
+  E2eeMemberReplies,
+} from '@lody/cloud-api';
 import type {
   E2eeMachineSharingView,
   E2eeMachineSharingWriteResult,
@@ -53,7 +59,21 @@ export type PersonalKeyPorts = Exclude<
   | KeyProtector
   | CandidateProtector
 >;
-/** Trusted platform implementation, with no default filesystem, account or network implementation. */
+/** A native dial-only iroh endpoint bound to this device's ledger key. Network
+ * waits never hold session locks; any failure means "use Streams RPC". */
+export interface PersonalIrohEndpoint {
+  hasConnection(endpointId: string): Promise<boolean>;
+  connectionPath?(endpointId: string): Promise<'direct' | 'relay' | 'none'>;
+  warm(endpointId: string, timeoutMs: number): Promise<void>;
+  call(
+    endpointId: string,
+    request: Uint8Array,
+    connectTimeoutMs: number
+  ): Promise<{ nextReply(): Promise<Uint8Array | null>; cancel(): void }>;
+  close(): Promise<void>;
+}
+
+/** Trusted platform implementation, with no default filesystem, account or network implementation.*/
 export class PersonalHostPlatform extends Context.Service<
   PersonalHostPlatform,
   {
@@ -83,6 +103,14 @@ export class PersonalHostPlatform extends Context.Service<
     evidence(
       binding: ClientCustodyBinding
     ): Layer.Layer<ClientApprovalEvidenceStore, unknown, DeviceIdentity | WorkspaceScope>;
+    /**
+     * Optional native iroh transport (mobile shells). `open` receives a copy of the
+     * device seed exactly once per session and must hand it straight to native code
+     * (it is wiped when `open` settles). Absence keeps encrypted Streams RPC.
+     */
+    iroh?: {
+      open(seed: Uint8Array): Promise<PersonalIrohEndpoint>;
+    };
     /** Optional closed product RPC support; absence is reported unsupported. */
     rpc?(
       binding: ClientCustodyBinding
@@ -93,6 +121,46 @@ export class PersonalHostPlatform extends Context.Service<
       credential: Uint8Array,
       request: Omit<E2eeContentTokenRequest, 'workspaceId' | 'credential' | 'cliToken'>
     ): Effect.Effect<E2eeContentToken, unknown>;
+    /** Optional device-authenticated member invitation relay. The session supplies its
+     * own credential; product callers never see it. Absence does not advertise team
+     * management. Replies are untrusted until the session verifies them. */
+    members?: {
+      createInvitation(
+        access: E2eeDeviceAccess,
+        input: { offer: E2eeMemberOffer; email?: string }
+      ): Effect.Effect<E2eeMemberReplies['createInvitation'], unknown>;
+      pending(access: E2eeDeviceAccess): Effect.Effect<E2eeMemberReplies['pending'], unknown>;
+      read(
+        access: E2eeDeviceAccess,
+        requestId: string
+      ): Effect.Effect<E2eeMemberReplies['read'], unknown>;
+      reject(
+        access: E2eeDeviceAccess,
+        requestId: string
+      ): Effect.Effect<E2eeMemberReplies['reject'], unknown>;
+      revoke(
+        access: E2eeDeviceAccess,
+        token: string
+      ): Effect.Effect<E2eeMemberReplies['revoke'], unknown>;
+      /** Joining side, authenticated by the account login only: the joining device has
+       * no admitted credential yet. Submission is retried with the retained original. */
+      submit?(input: {
+        token: string;
+        keyPackageHex: string;
+      }): Effect.Effect<E2eeMemberReplies['submit'], unknown>;
+      /** Relay state for this account's own request. `committed` is a hint; only the
+       * verified signed history admits the device. */
+      claim?(input: {
+        workspaceId: string;
+        requestId: string;
+      }): Effect.Effect<E2eeMemberReplies['claim'], unknown>;
+      /** Retire this account's earlier request before joining from another invitation.
+       * Only `cancelled` (terminal, expired or revoked) lets the old identity move on. */
+      retire?(input: {
+        token: string;
+        keyPackageHex: string;
+      }): Effect.Effect<E2eeMemberReplies['retire'], unknown>;
+    };
     /** Real optional policy host. Uses existing core policy verification/pins; absence does not advertise sharing. */
     machineSharing?(
       binding: ClientCustodyBinding,
@@ -107,6 +175,8 @@ export class PersonalHostPlatform extends Context.Service<
     >;
     /** Replacement requires actual quiescence of every owner of the old incarnation before its atomic switch. */
     drainOld?(binding: ClientCustodyBinding): Effect.Effect<void, unknown>;
+    /** Upper bound of each remote round held under a serial permit; see `boundedBy`. */
+    readonly deadlines?: import('./deadline').PersonalHostDeadlines;
   }
 >()('@lody/e2ee-client/Platform') {}
 

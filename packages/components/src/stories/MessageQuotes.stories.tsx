@@ -5,8 +5,10 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { applyTextRewrites, reanchorMessageTextSpansForTrim, type SessionId } from '@lody/shared';
+import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { MessageQuoteAction } from '@/components/ai-gui/message-quote-action';
+import { formatMessageQuoteExcerpt } from '@/components/ai-gui/message-quote-markdown';
 import {
   MessageRowView,
   SessionChatStreamView,
@@ -20,6 +22,12 @@ import {
   type PastedTextDraft,
 } from '@/lib/pasted-text-draft';
 import { SettingsStoryProviders } from './settings-story-shell';
+import {
+  type ComposerInputElement,
+  getComposerSelection,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 const styles = stylex.create({
   page: {
@@ -53,15 +61,99 @@ const initialItems: ChatStreamItem[] = Array.from({ length: 12 }, (_, index) => 
   },
 }));
 
-function QuoteHarness({ reject = false }: { reject?: boolean }) {
+function QuoteHarness({
+  reject = false,
+  initialValue = 'Explain this passage: ',
+  initialQuotes = [],
+  initialSentQuotes,
+  initiallySelected = false,
+}: {
+  reject?: boolean;
+  initialValue?: string;
+  initialQuotes?: string[];
+  initialSentQuotes?: string[];
+  initiallySelected?: boolean;
+}) {
   const [area, setArea] = useState<HTMLDivElement | null>(null);
-  const textarea = useRef<HTMLTextAreaElement>(null);
-  const [value, setValue] = useState('Explain this passage: ');
-  const [drafts, setDrafts] = useState<PastedTextDraft[]>([]);
-  const [items, setItems] = useState(initialItems);
+  const textarea = useRef<ComposerInputElement>(null);
+  const mentions = useRef<CombinedMentionTextareaHandle>(null);
+  const [initialDraft] = useState(() => {
+    let value = initialValue;
+    const drafts: PastedTextDraft[] = [];
+    for (const text of initialQuotes) {
+      const inserted = insertPastedTextDraft({
+        currentValue: value,
+        pastedText: text,
+        displayText: wrapPastedTextChipLabel(`[${formatMessageQuoteExcerpt(text)}]`),
+        selectionStart: value.length,
+        selectionEnd: value.length,
+        kind: 'message_quote',
+      });
+      if (!inserted) continue;
+      value = inserted.nextValue;
+      drafts.push(inserted.draft);
+    }
+    return { value, drafts };
+  });
+  const caretRef = useRef(initialDraft.value.length);
+  const [value, setValue] = useState(initialDraft.value);
+  const [drafts, setDrafts] = useState(initialDraft.drafts);
+  const [items, setItems] = useState<ChatStreamItem[]>(() => {
+    if (!initialSentQuotes?.length) return initialItems;
+    let sentValue = 'Sent quotes: ';
+    const sentDrafts: PastedTextDraft[] = [];
+    for (const text of initialSentQuotes) {
+      const inserted = insertPastedTextDraft({
+        currentValue: sentValue,
+        pastedText: text,
+        displayText: wrapPastedTextChipLabel(`[${formatMessageQuoteExcerpt(text)}]`),
+        selectionStart: sentValue.length,
+        selectionEnd: sentValue.length,
+        kind: 'message_quote',
+      });
+      if (!inserted) continue;
+      sentValue = `${inserted.nextValue} `;
+      sentDrafts.push(inserted.draft);
+    }
+    const expanded = applyTextRewrites(sentValue, buildPastedTextRewrites(sentDrafts, sentValue));
+    const trimmedText = expanded.text.trim();
+    const spans = reanchorMessageTextSpansForTrim(expanded.text, trimmedText, expanded.spans);
+    return [
+      ...initialItems,
+      {
+        type: 'message',
+        turnIndex: initialItems.length,
+        sessionId,
+        message: {
+          id: 'sent-initial',
+          role: 'user',
+          timestamp: '2026-11-01T00:00:00Z',
+          items: [{ type: 'text', text: trimmedText, spans }],
+        },
+      },
+    ];
+  });
   useEffect(() => {
     const input = textarea.current;
-    input?.setSelectionRange(input.value.length, input.value.length);
+    if (!input) return;
+    if (initiallySelected) input.focus({ preventScroll: true });
+    setComposerSelection(
+      input,
+      initiallySelected ? 0 : getComposerText(input).length,
+      getComposerText(input).length
+    );
+    const remember = () => {
+      caretRef.current = getComposerSelection(input).end;
+    };
+    const select = () => {
+      if (input.ownerDocument.activeElement === input) remember();
+    };
+    input.addEventListener('blur', remember);
+    input.ownerDocument.addEventListener('selectionchange', select);
+    return () => {
+      input.removeEventListener('blur', remember);
+      input.ownerDocument.removeEventListener('selectionchange', select);
+    };
   }, []);
   return (
     <div {...stylex.props(styles.page)}>
@@ -78,19 +170,25 @@ function QuoteHarness({ reject = false }: { reject?: boolean }) {
         root={area}
         enabled
         onQuote={(text) => {
-          const caret = textarea.current?.selectionEnd ?? value.length;
+          const caret = caretRef.current;
           const inserted = insertPastedTextDraft({
             currentValue: value,
             pastedText: text,
-            displayText: wrapPastedTextChipLabel(
-              `[Quote: ${text.replace(/\s+/g, ' ').slice(0, 32)}]`
-            ),
+            displayText: wrapPastedTextChipLabel(`[${formatMessageQuoteExcerpt(text)}]`),
             selectionStart: caret,
             selectionEnd: caret,
             kind: 'message_quote',
           });
           if (!inserted) return false;
-          setValue(inserted.nextValue);
+          if (
+            !mentions.current?.insertExternalMention({
+              text: inserted.draft.displayText,
+              id: inserted.draft.id,
+              at: inserted.draft.start,
+            })
+          )
+            return false;
+          caretRef.current = inserted.draft.end;
           setDrafts((current) =>
             getPastedTextDraftsAfterInsertion({
               drafts: current,
@@ -101,7 +199,7 @@ function QuoteHarness({ reject = false }: { reject?: boolean }) {
           );
           requestAnimationFrame(() => {
             textarea.current?.focus({ preventScroll: true });
-            textarea.current?.setSelectionRange(inserted.draft.end, inserted.draft.end);
+            setComposerSelection(textarea.current, inserted.draft.end, inserted.draft.end);
           });
           return true;
         }}
@@ -109,6 +207,9 @@ function QuoteHarness({ reject = false }: { reject?: boolean }) {
       <div {...stylex.props(styles.composer)}>
         <ChatComposer
           variant="session"
+          autoResize
+          maxRows={11}
+          mentionActionsRef={mentions}
           promptRows={2}
           draftKey="message-quotes"
           promptRef={textarea}
@@ -165,3 +266,69 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Inline: Story = { render: () => <QuoteHarness /> };
 export const Rejected: Story = { render: () => <QuoteHarness reject /> };
+
+export const CaretAndGrowth: Story = {
+  render: () => (
+    <QuoteHarness
+      initialValue={'Before the quote\n\nAfter the quote\n' + 'Existing draft line\n'.repeat(4)}
+    />
+  ),
+};
+export const ScrollableDraft: Story = {
+  render: () => <QuoteHarness initialValue={'Existing draft line\n'.repeat(18)} />,
+};
+
+export const MultipleQuotes: Story = {
+  render: () => (
+    <QuoteHarness
+      initialValue={'Existing draft line\n'}
+      initialQuotes={[
+        'Keep the reading position stable.',
+        'A quote keeps a snapshot of the selected passage.',
+        '多个引用之间留出间距，继续在正文中提问。',
+      ]}
+    />
+  ),
+};
+
+export const QuoteSelection: Story = {
+  render: () => (
+    <QuoteHarness initialValue="Before " initialQuotes={['Selecting text and scrolling']} />
+  ),
+};
+
+export const SelectedQuote: Story = {
+  render: () => (
+    <QuoteHarness
+      initialValue=""
+      initialQuotes={['Selecting text and scrolling']}
+      initiallySelected
+    />
+  ),
+};
+
+export const LineStartQuote: Story = {
+  render: () => (
+    <QuoteHarness
+      initialValue={'Previous line\n'}
+      initialQuotes={['A quote at the start of the next line']}
+    />
+  ),
+};
+
+const MARKDOWN_QUOTE_SAMPLES = [
+  '| Feature | Status |\n| --- | --- |\n| Table cell content | Ready |',
+  '2. Second numbered list item with extra explanation that should not cut words',
+  'Keep the reading position stable while selecting text and scrolling.',
+  'supercalifragilisticexpialidociouslongunbreakabletoken',
+];
+
+export const MarkdownAndTruncation: Story = {
+  render: () => (
+    <QuoteHarness
+      initialValue="Compare "
+      initialQuotes={MARKDOWN_QUOTE_SAMPLES}
+      initialSentQuotes={MARKDOWN_QUOTE_SAMPLES}
+    />
+  ),
+};

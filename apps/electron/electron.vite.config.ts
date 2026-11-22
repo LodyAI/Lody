@@ -1,3 +1,4 @@
+import cloudConfig from './electron.cloud.config'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import { resolve } from 'node:path'
@@ -66,7 +67,12 @@ function buildViteEnvDefine(env: Record<string, string>): Record<string, string>
   return define
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig((context) => {
+  const platform = process.env.VITE_LODY_PLATFORM?.trim() || 'local'
+  if (!['local', 'cloud'].includes(platform))
+    throw new Error(`Unsupported VITE_LODY_PLATFORM: ${platform}`)
+  if (platform === 'cloud') return cloudConfig(context)
+  const { mode } = context
   const buildMode = mode || OSS_BUILD_MODE
   if (buildMode !== OSS_BUILD_MODE) {
     throw new Error(`The public Electron workspace only supports --mode ${OSS_BUILD_MODE}`)

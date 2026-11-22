@@ -1,3 +1,4 @@
+import { getImportFence, isMissingHistoryUserTurn } from '@lody/shared';
 /**
  * Pure decision functions for session dispatch.
  *
@@ -26,8 +27,6 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 import type { SessionDispatchEntry } from './session-dispatch-history';
-
-// ── Snapshot types ──────────────────────────────────────────────────────────
 
 /** All state needed for a dispatch decision, gathered by the I/O shell. */
 export type SessionDispatchSnapshot = {
@@ -82,8 +81,6 @@ export function isActivationAwaitingHistory(
   const status = resolveSessionHistoryStatus(entry);
   return status !== 'handled' && status !== 'failed' && status !== 'canceled';
 }
-
-// ── Action types ────────────────────────────────────────────────────────────
 
 export type DispatchAction =
   | {
@@ -173,8 +170,6 @@ function isImportedAcpReplayUserTurn(entry: SessionDispatchEntry, meta: SessionM
   );
 }
 
-// ── Dispatch decision ───────────────────────────────────────────────────────
-
 /**
  * Given a snapshot of session state, determine what dispatch action to take.
  *
@@ -188,7 +183,9 @@ function isImportedAcpReplayUserTurn(entry: SessionDispatchEntry, meta: SessionM
  */
 export function resolveSessionDispatchAction(
   snapshot: SessionDispatchSnapshot,
-  machineId: MachineId
+  machineId: MachineId,
+  /** This daemon's workspace; input fenced by an import into it never runs. */
+  workspaceId?: string
 ): DispatchAction {
   const {
     meta,
@@ -199,7 +196,6 @@ export function resolveSessionDispatchAction(
     hasRewriteBarrier,
   } = snapshot;
 
-  // ── Step 1: Guard checks ──
   if (!meta || meta.machineId !== machineId) {
     return { type: 'noop', reason: 'not-owned' };
   }
@@ -219,7 +215,6 @@ export function resolveSessionDispatchAction(
     return { type: 'noop', reason: 'active-session' };
   }
 
-  // ── Step 2: Stale status recovery ──
   const statusType = meta.status?.type;
   if (
     statusType === 'running' ||
@@ -229,18 +224,14 @@ export function resolveSessionDispatchAction(
     return { type: 'reset-stale-status', statusType };
   }
 
-  // ── Step 3: Find dispatchable turn ──
-  const turn = findNextDispatchableUserTurn(history, meta);
+  const turn = findNextDispatchableUserTurn(history, meta, workspaceId);
   if (!turn) {
     return { type: 'no-dispatchable-turn' };
   }
 
-  // ── Step 4: Decide create vs continue ──
   const mode = hasReusableSession || resolveDispatchAcpSessionId(meta) ? 'continue' : 'create';
   return { type: 'dispatch', mode, turn };
 }
-
-// ── Cancel decision ─────────────────────────────────────────────────────────
 
 /**
  * Given cancel-related state, determine whether to send a cancel request.
@@ -285,8 +276,6 @@ export function resolveSessionCancelAction(
   return { type: 'cancel', turnId: lastCanceledTurn };
 }
 
-// ── Turn finding ────────────────────────────────────────────────────────────
-
 /**
  * Find the first user turn in history that needs to be dispatched.
  *
@@ -306,7 +295,7 @@ export function resolveSessionCancelAction(
  * 4. **Meta pointer: latestUserMsgId ≠ lastHandledUserMsgId**: Legacy dispatch
  *    mechanism.
  *
- * A turn matching `lastMissingHistoryUserMsgId` is excluded from every path:
+ * Every ID retained by `isMissingHistoryUserTurn` is excluded from every path:
  * recovery already surfaced its delivery failure, so a late payload must not be
  * resurrected by an unrelated activation. The exclusion is permanent for that
  * exact turn — the UI offers resending its content as a NEW message (new turn
@@ -316,8 +305,10 @@ export function resolveSessionCancelAction(
  */
 export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
   history: readonly T[],
-  meta: SessionMeta
+  meta: SessionMeta,
+  workspaceId?: string
 ): T | null {
+  const fenced = getImportFence(meta, workspaceId).turnIds;
   // Concurrent queue promotion and steering can insert the same turn twice.
   // Match readTurn/updateEntry: only the last stored copy owns that identity.
   const lastPositions = new Map(history.map((entry, index) => [entry.id, index]));
@@ -329,6 +320,8 @@ export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
     if (isImportedAcpReplayUserTurn(entry, meta)) {
       continue;
     }
+    // Input carried by a workspace bundle into this workspace is history, not work.
+    if (fenced.includes(entry.id)) continue;
     // Applied guidance is already consumed, including across a daemon restart.
     if (entry.inputConfig?._lodyDeliveryKind === 'steer') continue;
     // Recovery already surfaced a delivery failure for this exact activation.
@@ -336,7 +329,7 @@ export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
     // the failed turn when an unrelated signal opens the room later.
     // `settledActivationUserMsgId` needs no twin exclusion here: a settled turn
     // is terminal in history by construction, so no path below can return it.
-    if (entry.id === meta.lastMissingHistoryUserMsgId) {
+    if (isMissingHistoryUserTurn(meta, entry.id)) {
       continue;
     }
 
@@ -383,10 +376,25 @@ export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
   return null;
 }
 
-export function resolveDispatchTurnInput(entry: SessionHistoryInput): DispatchTurnInput {
-  const historyBlocks = historyItemsToInputBlocks(entry.items);
+/**
+ * The input a start runs. An encrypted row's signature covers its input config and
+ * never its displayed items, so its input comes from that config alone, exactly as
+ * the signer and verifier normalize it; another writer's items never become its body.
+ */
+export function resolveDispatchTurnInput(
+  entry: SessionHistoryInput,
+  options: { readonly signedInputOnly?: boolean } = {}
+): DispatchTurnInput {
   const configuredBlocks = normalizeSessionInputBlocks(entry.inputConfig?.inputBlocks, '');
   const fallbackBlocks = normalizeSessionInputBlocks(undefined, entry.inputConfig?.prompt ?? '');
+  if (options.signedInputOnly) {
+    const inputBlocks = configuredBlocks.length > 0 ? configuredBlocks : fallbackBlocks;
+    return {
+      inputBlocks,
+      prompt: entry.inputConfig?.prompt ?? extractPromptPreviewFromInputBlocks(inputBlocks),
+    };
+  }
+  const historyBlocks = historyItemsToInputBlocks(entry.items);
   const inputBlocks =
     configuredBlocks.length > 0
       ? configuredBlocks
@@ -401,3 +409,16 @@ export function resolveDispatchTurnInput(entry: SessionHistoryInput): DispatchTu
 }
 
 export { resolveResumableAcpSessionId, resolveDispatchAcpSessionId };
+
+/** A queued item (or its promotion) that a workspace import fenced off here. */
+export function isImportFencedQueueItem(
+  meta: Pick<SessionMeta, 'importFence'> | undefined,
+  workspaceId: string | undefined,
+  item: { $cid?: string; userTurnId?: string }
+): boolean {
+  const fence = getImportFence(meta, workspaceId);
+  return (
+    (item.$cid !== undefined && fence.queueItemIds.includes(item.$cid)) ||
+    (item.userTurnId !== undefined && fence.turnIds.includes(item.userTurnId))
+  );
+}

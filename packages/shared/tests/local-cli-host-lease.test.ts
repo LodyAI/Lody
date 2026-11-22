@@ -134,3 +134,58 @@ describe('local CLI host lease', () => {
     }
   );
 });
+
+it('a managed update requires the exact private host capability and keeps the lease while preparation is pending', async () => {
+  const { requestLocalCliHostUpgrade } = await import('../src/node/local-cli-host-lease');
+  const endpoint = await createEndpoint();
+  let releasePreparation: () => void = () => {};
+  let observedRequest: string | undefined;
+  const prepared = new Promise<void>((resolve) => {
+    releasePreparation = resolve;
+  });
+  const result = await acquireLocalCliHostLease({
+    endpoint,
+    instanceId: 'managed-service',
+    mode: 'daemon',
+    shutdownControl: {
+      token: 'private-host-capability',
+      onRequest: () => {},
+      onUpgrade: async (request) => {
+        observedRequest = request.requestId;
+        await prepared;
+      },
+    },
+  });
+  expect(result.status).toBe('acquired');
+  if (result.status !== 'acquired') return;
+  leases.push(result.lease);
+  const options = {
+    endpoint,
+    instanceId: 'managed-service',
+    expectedMode: 'daemon' as const,
+    requestId: 'upgrade-1',
+    targetVersion: '1.2.3',
+    upgrade: {
+      protocol: 1 as const,
+      channel: 'stable' as const,
+      switchPolicy: 'when-idle' as const,
+      confirmChannelChange: false,
+      confirmDowngrade: false,
+    },
+  };
+  expect(await requestLocalCliHostUpgrade({ ...options, token: 'wrong-token' })).toMatchObject({
+    ok: false,
+  });
+  expect(observedRequest).toBeUndefined();
+  const queued = requestLocalCliHostUpgrade({ ...options, token: 'private-host-capability' });
+  expect(await inspectLocalCliHost(endpoint)).toMatchObject({ instanceId: 'managed-service' });
+  const other = await acquireLocalCliHostLease({
+    endpoint,
+    instanceId: 'electron',
+    mode: 'electron',
+  });
+  expect(other.status).toBe('occupied');
+  releasePreparation();
+  expect(await queued).toMatchObject({ ok: true });
+  expect(observedRequest).toBe('upgrade-1');
+});

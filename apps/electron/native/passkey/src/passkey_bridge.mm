@@ -1,5 +1,9 @@
 // AuthenticationServices passkey ceremonies with PRF, for the recovery vault only.
-// This file compiles but has never run; see ../README.md.
+// Real-device ceremonies remain unverified; see ../README.md.
+#define __STDC_WANT_LIB_EXT1__ 1
+#include <string.h>
+#include <memory>
+
 #import <AppKit/AppKit.h>
 #import <AuthenticationServices/AuthenticationServices.h>
 #import <Security/SecRandom.h>
@@ -8,8 +12,8 @@
 #include <vector>
 
 API_AVAILABLE(macos(15.0))
-@interface LodyPasskeyCeremony
-    : NSObject <ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding>
+@interface LodyPasskeyCeremony : NSObject <ASAuthorizationControllerDelegate,
+                                           ASAuthorizationControllerPresentationContextProviding>
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) ASAuthorizationController *controller;
 @property(nonatomic, copy) void (^finish)(ASAuthorization *authorization, NSError *error);
@@ -33,6 +37,11 @@ API_AVAILABLE(macos(15.0))
 namespace {
 
 struct Outcome {
+  ~Outcome() {
+    // Unlike memset, memset_s must execute even immediately before deallocation.
+    if (!prfFirst.empty()) memset_s(prfFirst.data(), prfFirst.size(), 0, prfFirst.size());
+  }
+
   napi_deferred deferred;
   std::string errorCode;
   bool registration = false;
@@ -47,6 +56,7 @@ struct Outcome {
 };
 
 std::vector<uint8_t> Bytes(NSData *data) {
+  if (data.length == 0) return {};
   const uint8_t *start = static_cast<const uint8_t *>(data.bytes);
   return std::vector<uint8_t>(start, start + data.length);
 }
@@ -72,9 +82,11 @@ napi_value Boolean(napi_env env, bool value) {
 }
 
 void Settle(napi_env env, napi_value, void *, void *data) {
-  Outcome *outcome = static_cast<Outcome *>(data);
+  std::unique_ptr<Outcome> outcome(static_cast<Outcome *>(data));
+  // N-API also calls this during environment shutdown, without a usable env.
+  if (!env) return;
   napi_handle_scope scope;
-  napi_open_handle_scope(env, &scope);
+  if (napi_open_handle_scope(env, &scope) != napi_ok) return;
   if (!outcome->errorCode.empty()) {
     napi_value message, code, error;
     napi_create_string_utf8(env, outcome->errorCode.c_str(), NAPI_AUTO_LENGTH, &message);
@@ -97,55 +109,66 @@ void Settle(napi_env env, napi_value, void *, void *data) {
     }
     napi_resolve_deferred(env, outcome->deferred, result);
   }
-  if (!outcome->prfFirst.empty()) memset(outcome->prfFirst.data(), 0, outcome->prfFirst.size());
   napi_close_handle_scope(env, scope);
-  delete outcome;
 }
 
 napi_value Property(napi_env env, napi_value object, const char *key) {
   napi_value value = nullptr;
-  napi_get_named_property(env, object, key, &value);
+  if (!object || napi_get_named_property(env, object, key, &value) != napi_ok) return nullptr;
   return value;
 }
 
+// A nil result means invalid input or a pending JS exception. Callers stop before
+// passing it to AuthenticationServices; Run preserves exceptions from JS getters.
 NSData *DataOf(napi_env env, napi_value value) {
+  if (!value) return nil;
   void *data = nullptr;
   size_t length = 0;
-  bool isBuffer = false;
-  napi_is_buffer(env, value, &isBuffer);
-  if (isBuffer) {
-    napi_get_buffer_info(env, value, &data, &length);
-  } else {
-    napi_typedarray_type type;
-    napi_value array;
-    size_t offset;
-    napi_get_typedarray_info(env, value, &type, &length, &data, &array, &offset);
-  }
+  // Buffer is a Uint8Array too. Check the element type explicitly rather than
+  // treating an arbitrary typed array's element count as a byte count.
+  napi_typedarray_type type;
+  napi_value array;
+  size_t offset;
+  if (napi_get_typedarray_info(env, value, &type, &length, &data, &array, &offset) != napi_ok ||
+      type != napi_uint8_array)
+    return nil;
+  if (length > 0 && !data) return nil;
   return [NSData dataWithBytes:data length:length];
 }
 
 NSString *StringOf(napi_env env, napi_value value) {
+  if (!value) return nil;
   size_t length = 0;
-  napi_get_value_string_utf8(env, value, nullptr, 0, &length);
-  std::string text(length, '\0');
-  napi_get_value_string_utf8(env, value, text.data(), length + 1, &length);
-  return [NSString stringWithUTF8String:text.c_str()];
+  if (napi_get_value_string_utf8(env, value, nullptr, 0, &length) != napi_ok) return nil;
+  std::string text(length + 1, '\0');
+  if (napi_get_value_string_utf8(env, value, text.data(), text.size(), &length) != napi_ok)
+    return nil;
+  return [[NSString alloc] initWithBytes:text.data() length:length encoding:NSUTF8StringEncoding];
 }
 
 NSArray<NSData *> *DataArray(napi_env env, napi_value value) {
+  if (!value) return nil;
   uint32_t length = 0;
-  napi_get_array_length(env, value, &length);
+  if (napi_get_array_length(env, value, &length) != napi_ok) return nil;
   NSMutableArray<NSData *> *out = [NSMutableArray arrayWithCapacity:length];
   for (uint32_t index = 0; index < length; index++) {
     napi_value item;
-    napi_get_element(env, value, index, &item);
-    [out addObject:DataOf(env, item)];
+    if (napi_get_element(env, value, index, &item) != napi_ok) return nil;
+    NSData *data = DataOf(env, item);
+    if (!data) return nil;
+    [out addObject:data];
   }
   return out;
 }
 
-NSWindow *WindowOf(napi_env env, napi_value handle) {
-  NSData *data = DataOf(env, handle);
+napi_value InvalidInput(napi_env env) {
+  bool pending = false;
+  if (napi_is_exception_pending(env, &pending) == napi_ok && !pending)
+    napi_throw_type_error(env, nullptr, "Invalid passkey ceremony input");
+  return nullptr;
+}
+
+NSWindow *WindowOf(NSData *data) {
   if (data.length != sizeof(void *)) return nil;
   NSView *view = (__bridge NSView *)(*reinterpret_cast<void *const *>(data.bytes));
   return view.window;
@@ -160,10 +183,16 @@ NSData *Challenge() {
 API_AVAILABLE(macos(15.0))
 void Fill(Outcome *outcome, ASAuthorization *authorization) {
   id credential = authorization.credential;
-  if ([credential isKindOfClass:[ASAuthorizationPlatformPublicKeyCredentialRegistration class]]) {
+  if (outcome->registration &&
+      [credential isKindOfClass:[ASAuthorizationPlatformPublicKeyCredentialRegistration class]]) {
     ASAuthorizationPlatformPublicKeyCredentialRegistration *created = credential;
     outcome->credentialId = Bytes(created.credentialID);
     outcome->prfSupported = created.prf != nil && created.prf.isSupported;
+    return;
+  }
+  if (outcome->registration ||
+      ![credential isKindOfClass:[ASAuthorizationPlatformPublicKeyCredentialAssertion class]]) {
+    outcome->errorCode = "failed";
     return;
   }
   ASAuthorizationPlatformPublicKeyCredentialAssertion *assertion = credential;
@@ -184,33 +213,55 @@ void Fill(Outcome *outcome, ASAuthorization *authorization) {
 
 napi_value Run(napi_env env, napi_callback_info info, bool registration) {
   size_t argc = 1;
-  napi_value input, promise;
-  napi_get_cb_info(env, info, &argc, &input, nullptr, nullptr);
+  napi_value input = nullptr, promise;
+  if (napi_get_cb_info(env, info, &argc, &input, nullptr, nullptr) != napi_ok || argc != 1)
+    return InvalidInput(env);
+  // Validate all JS values before allocating an Outcome or touching a native window.
+  NSData *windowData = DataOf(env, Property(env, input, "window"));
+  if (!windowData) return InvalidInput(env);
+  NSString *rpId = StringOf(env, Property(env, input, "rpId"));
+  if (!rpId) return InvalidInput(env);
+  NSData *salt = DataOf(env, Property(env, input, "prfInput"));
+  if (!salt) return InvalidInput(env);
+  NSString *userName = nil;
+  NSData *userHandle = nil;
+  if (registration) {
+    userName = StringOf(env, Property(env, input, "userName"));
+    if (!userName) return InvalidInput(env);
+    userHandle = DataOf(env, Property(env, input, "userHandle"));
+    if (!userHandle) return InvalidInput(env);
+  }
+  NSArray<NSData *> *identifiers = DataArray(
+      env, Property(env, input, registration ? "excludeCredentialIds" : "allowCredentialIds"));
+  if (!identifiers) return InvalidInput(env);
   Outcome *outcome = new Outcome();
   outcome->registration = registration;
-  napi_create_promise(env, &outcome->deferred, &promise);
+  if (napi_create_promise(env, &outcome->deferred, &promise) != napi_ok) {
+    delete outcome;
+    return nullptr;
+  }
   auto reject = [&](const char *code) {
     outcome->errorCode = code;
     Settle(env, nullptr, nullptr, outcome);
     return promise;
   };
   if (@available(macOS 15.0, *)) {
-    NSWindow *window = WindowOf(env, Property(env, input, "window"));
+    NSWindow *window = WindowOf(windowData);
     NSData *challenge = Challenge();
     if (!window || !challenge) return reject("unavailable");
     ASAuthorizationPlatformPublicKeyCredentialProvider *provider =
         [[ASAuthorizationPlatformPublicKeyCredentialProvider alloc]
-            initWithRelyingPartyIdentifier:StringOf(env, Property(env, input, "rpId"))];
-    NSData *salt = DataOf(env, Property(env, input, "prfInput"));
+            initWithRelyingPartyIdentifier:rpId];
     ASAuthorizationRequest *request;
     if (registration) {
       ASAuthorizationPlatformPublicKeyCredentialRegistrationRequest *create =
           [provider createCredentialRegistrationRequestWithChallenge:challenge
-                                                                name:StringOf(env, Property(env, input, "userName"))
-                                                              userID:DataOf(env, Property(env, input, "userHandle"))];
-      create.userVerificationPreference = ASAuthorizationPublicKeyCredentialUserVerificationPreferenceRequired;
+                                                                name:userName
+                                                              userID:userHandle];
+      create.userVerificationPreference =
+          ASAuthorizationPublicKeyCredentialUserVerificationPreferenceRequired;
       create.prf = [ASAuthorizationPublicKeyCredentialPRFRegistrationInput checkForSupport];
-      NSArray<NSData *> *excluded = DataArray(env, Property(env, input, "excludeCredentialIds"));
+      NSArray<NSData *> *excluded = identifiers;
       if (excluded.count > 0) {
         // Overwriting a listed credential would orphan its wrap, so refuse rather than risk it.
         if (![create respondsToSelector:@selector(setExcludedCredentials:)])
@@ -225,28 +276,33 @@ napi_value Run(napi_env env, napi_callback_info info, bool registration) {
     } else {
       ASAuthorizationPlatformPublicKeyCredentialAssertionRequest *assert =
           [provider createCredentialAssertionRequestWithChallenge:challenge];
-      assert.userVerificationPreference = ASAuthorizationPublicKeyCredentialUserVerificationPreferenceRequired;
+      assert.userVerificationPreference =
+          ASAuthorizationPublicKeyCredentialUserVerificationPreferenceRequired;
       ASAuthorizationPublicKeyCredentialPRFAssertionInputValues *values =
-          [[ASAuthorizationPublicKeyCredentialPRFAssertionInputValues alloc] initWithSaltInput1:salt
-                                                                                     saltInput2:nil];
-      assert.prf = [[ASAuthorizationPublicKeyCredentialPRFAssertionInput alloc]
-                 initWithInputValues:values
-            perCredentialInputValues:nil];
+          [[ASAuthorizationPublicKeyCredentialPRFAssertionInputValues alloc]
+              initWithSaltInput1:salt
+                      saltInput2:nil];
+      assert.prf =
+          [[ASAuthorizationPublicKeyCredentialPRFAssertionInput alloc] initWithInputValues:values
+                                                                  perCredentialInputValues:nil];
       NSMutableArray *allowed = [NSMutableArray array];
-      for (NSData *identifier in DataArray(env, Property(env, input, "allowCredentialIds")))
+      for (NSData *identifier in identifiers)
         [allowed addObject:[[ASAuthorizationPlatformPublicKeyCredentialDescriptor alloc]
                                initWithCredentialID:identifier]];
       assert.allowedCredentials = allowed;
       request = assert;
     }
     napi_value name;
-    napi_create_string_utf8(env, "lody-passkey", NAPI_AUTO_LENGTH, &name);
+    if (napi_create_string_utf8(env, "lody-passkey", NAPI_AUTO_LENGTH, &name) != napi_ok)
+      return reject("failed");
     napi_threadsafe_function settle;
-    napi_create_threadsafe_function(env, nullptr, nullptr, name, 0, 1, nullptr, nullptr, nullptr,
-                                    [](napi_env callEnv, napi_value, void *, void *data) {
-                                      Settle(callEnv, nullptr, nullptr, data);
-                                    },
-                                    &settle);
+    if (napi_create_threadsafe_function(
+            env, nullptr, nullptr, name, 0, 1, nullptr, nullptr, nullptr,
+            [](napi_env callEnv, napi_value, void *, void *data) {
+              Settle(callEnv, nullptr, nullptr, data);
+            },
+            &settle) != napi_ok)
+      return reject("failed");
     LodyPasskeyCeremony *ceremony = [[LodyPasskeyCeremony alloc] init];
     ceremony.window = window;
     ceremony.controller =
@@ -262,7 +318,8 @@ napi_value Run(napi_env env, napi_callback_info info, bool registration) {
         Fill(outcome, authorization);
       }
       outcome->ceremony = nil;
-      napi_call_threadsafe_function(settle, outcome, napi_tsfn_nonblocking);
+      if (napi_call_threadsafe_function(settle, outcome, napi_tsfn_nonblocking) != napi_ok)
+        delete outcome;
       napi_release_threadsafe_function(settle, napi_tsfn_release);
     };
     [ceremony.controller performRequests];

@@ -83,7 +83,7 @@ const inspectionSchema = z
       .omit({ inputConfig: true })
       .extend({
         timestamp: z.string(),
-        cancellationReason: z.literal('user_stop').optional(),
+        cancellationReason: z.enum(['user_stop', 'machine_update']).optional(),
         finished: z.boolean().optional(),
         sendStatus: z.literal('timeout').optional(),
         acpTurnId: z.string().optional(),

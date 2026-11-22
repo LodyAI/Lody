@@ -21,6 +21,24 @@ const trimNonEmpty = (value?: string | null): string | undefined => {
   return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
 };
 
+/** Map a workspace-member profile to a commit identity, or a missing-email placeholder. */
+export const sessionUserProfileFromCloud = (
+  userId: string,
+  profile: CloudWorkspaceUserProfile
+): SessionUserProfile => {
+  const accountEmail = trimNonEmpty(profile.email);
+  // A stored missing-email placeholder is not a commit identity; a GitHub
+  // no-reply address is, and it keeps the commit attributed to the same
+  // GitHub account that opens the pull request.
+  const email =
+    (accountEmail && !isMissingEmail(accountEmail) ? accountEmail : undefined) ??
+    buildGitHubNoreplyEmail(profile.githubAccountId, profile.githubLogin) ??
+    accountEmail ??
+    buildMissingEmail('lody', userId);
+  const name = trimNonEmpty(profile.name) ?? trimNonEmpty(profile.githubLogin) ?? email;
+  return { id: userId, name, email };
+};
+
 /**
  * Resolves the requesting user's commit identity for a session turn.
  *
@@ -52,8 +70,9 @@ export class SessionUserResolver {
       };
     }
 
-    // The Session reads Git configuration in the actual worktree when binding
-    // the owner turn. Do not block that local path on a cloud profile query.
+    // Owner turns use the machine's Git configuration unless "Act as you" is
+    // approved; SessionManager then looks the account up itself. Do not block
+    // the local path on a cloud profile query.
     if (normalizedUserId === this.machineOwnerUserId) {
       return this.fallbackUser(normalizedUserId);
     }
@@ -99,17 +118,7 @@ export class SessionUserResolver {
     userId: string,
     profile: CloudWorkspaceUserProfile
   ): SessionUserProfile {
-    const accountEmail = trimNonEmpty(profile.email);
-    // A stored missing-email placeholder is not a commit identity; a GitHub
-    // no-reply address is, and it keeps the commit attributed to the same
-    // GitHub account that opens the pull request.
-    const email =
-      (accountEmail && !isMissingEmail(accountEmail) ? accountEmail : undefined) ??
-      buildGitHubNoreplyEmail(profile.githubAccountId, profile.githubLogin) ??
-      accountEmail ??
-      buildMissingEmail('lody', userId);
-    const name = trimNonEmpty(profile.name) ?? trimNonEmpty(profile.githubLogin) ?? email;
-    return { id: userId, name, email };
+    return sessionUserProfileFromCloud(userId, profile);
   }
 
   private fallbackUser(userId: string): SessionUserProfile {

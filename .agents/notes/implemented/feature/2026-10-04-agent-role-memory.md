@@ -47,6 +47,9 @@ interrupt every visit after that probe. Create keeps the existing settings edito
 dialog. The Role editor Memory group stays collapsed until expanded, then uses the
 same list, status copy, and install link.
 
+EverMe, an account-scoped provider added later, is recorded in
+[its own note](2026-11-03-everme-memory-provider.md).
+
 ## Validation
 
 Adapter tests cover missing/inactive services, malformed responses, literal argv

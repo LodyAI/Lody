@@ -86,6 +86,7 @@ export function SessionShikiTextViewer({
         {...stylex.props(styles.code, wordWrap && styles.wrap)}
         aria-label={path}
         style={{ color: result?.fg, backgroundColor: result?.bg }}
+        data-text-selectable
       >
         {lines.map((line, index) => (
           <Fragment key={index}>

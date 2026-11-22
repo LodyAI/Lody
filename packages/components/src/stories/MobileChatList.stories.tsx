@@ -8,6 +8,13 @@ import {
   type MobileChatListRowActions,
 } from '@/components/mobile/mobile-chat-list';
 import type { MobileConversationItem } from '@/components/mobile/mobile-project-screen';
+import type { MobileStatusCommands } from '@/components/mobile/use-mobile-status-list';
+import {
+  planStatusViewCommand,
+  type PinSection,
+  type StatusViewCommand,
+  type StatusViewState,
+} from '@lody/shared';
 
 const hour = 60 * 60 * 1000;
 const now = Date.now();
@@ -458,4 +465,193 @@ export const WithSwipeActions: Story = {
    confirm dialog; long-press still enters multi-select. */
 export const Archived: Story = {
   args: { groupBy: 'none', flatHeading: '归档对话', rowActions: {}, archived: true },
+};
+
+export const ReadOnlyRows: Story = {
+  args: {
+    groupBy: 'none',
+    chats: baseChats.map((chat, index) =>
+      index < 2 ? { ...chat, readOnly: true, owner: { id: 'teammate', name: 'Alex' } } : chat
+    ),
+  },
+};
+
+/**
+ * Status grouping fixtures. The story host runs the real shared planner and
+ * applies its writes; open at a phone viewport with touch emulation.
+ */
+const statusSections: PinSection[] = [
+  { id: 'review', name: 'Review', orderKey: '80' },
+  { id: 'ops', name: 'Ops', orderKey: '81' },
+];
+
+const statusChats: MobileConversationItem[] = [
+  { id: 's-pin', title: 'Release checklist', isPinned: true, orderKey: '80' },
+  {
+    id: 's-review-1',
+    title: 'Review the sync PR',
+    isPinned: true,
+    pinSectionId: 'review',
+    orderKey: '80',
+  },
+  {
+    id: 's-ops-1',
+    title: 'Rotate staging keys',
+    isPinned: true,
+    pinSectionId: 'ops',
+    orderKey: '80',
+  },
+  { id: 's-f1', title: 'Phone Status view', orderKey: '80', isWorking: true },
+  {
+    id: 's-f2',
+    title: 'Fix flaky upload test',
+    orderKey: '81',
+    hasUnreadMessages: true,
+    lastReadAt: now - 2 * hour,
+  },
+  { id: 's-f3', title: 'Draft release notes', orderKey: '82' },
+  { id: 's-woken', title: 'Check CI after the weekend', snoozedUntil: now - 10 * 60 * 1000 },
+  { id: 's-l1', title: 'Follow up with design', snoozedUntil: now + 3 * hour },
+  { id: 's-l2', title: 'Revisit pricing copy', snoozedUntil: now + 4 * 24 * hour },
+  { id: 's-done', title: 'Migrate settings page', settledAt: now - hour },
+  {
+    id: 's-quiet',
+    title: 'Old spike',
+    latestMessageAt: now - 9 * 24 * hour,
+    lastMessageAt: now - 9 * 24 * hour,
+  },
+].map((chat) => ({
+  kind: 'chat' as const,
+  latestMessageAt: now - hour,
+  lastMessageAt: now - hour,
+  lastReadAt: now,
+  ...chat,
+}));
+
+function toSession(chat: MobileConversationItem) {
+  return {
+    id: chat.id,
+    title: chat.title,
+    lastMessageAt: chat.lastMessageAt ?? null,
+    activityAt: chat.latestMessageAt ?? null,
+    lastReadAt: chat.lastReadAt ?? null,
+    isPinned: chat.isPinned === true,
+    pinSectionId: chat.pinSectionId ?? null,
+    orderKey: chat.orderKey ?? null,
+    snoozedUntil: chat.snoozedUntil ?? null,
+    settledAt: chat.settledAt ?? null,
+    focusRestoredAt: chat.focusRestoredAt ?? null,
+    openedById: chat.openedByRowSessionId ?? chat.openedBySessionId ?? null,
+    isWorking: chat.isWorking === true,
+    isWaitingPermission: chat.isWaitingPermission === true,
+    canManage: chat.readOnly !== true,
+    canPrefer: true,
+  };
+}
+
+function StatusStoryShell({
+  initialChats = statusChats,
+  initialSections = statusSections,
+  canManageSections = true,
+}: {
+  initialChats?: MobileConversationItem[];
+  initialSections?: PinSection[];
+  canManageSections?: boolean;
+}) {
+  const [host, setHost] = useState({ chats: initialChats, sections: initialSections });
+  const apply = (command: StatusViewCommand, state?: StatusViewState) =>
+    setHost((current) => {
+      const writes = planStatusViewCommand(
+        state ?? {
+          sessions: current.chats.map(toSession),
+          sections: current.sections,
+          sectionsLoaded: true,
+          canManageSections,
+          nowMs: Date.now(),
+        },
+        command,
+        { nowMs: Date.now(), randomByte: () => Math.floor(Math.random() * 256) }
+      );
+      let { chats, sections } = current;
+      for (const write of writes) {
+        if (write.type === 'session')
+          chats = chats.map((chat) =>
+            chat.id === write.sessionId
+              ? ({ ...chat, ...write.patch } as MobileConversationItem)
+              : chat
+          );
+        else if (write.type === 'putSection')
+          sections = [...sections.filter((s) => s.id !== write.section.id), write.section];
+        else sections = sections.filter((s) => s.id !== write.sectionId);
+      }
+      return { chats, sections };
+    });
+  const commands: MobileStatusCommands = {
+    run: async (command, state) => apply(command, state),
+    snooze: (sessionId, until) => apply({ type: 'snooze', sessionId, until, includeOpened: false }),
+    settle: (sessionId) => apply({ type: 'settle', sessionId, includeOpened: false }),
+    moveToFocus: (sessionId) => apply({ type: 'moveToFocus', sessionId, includeOpened: false }),
+    report: fn(),
+  };
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
+      <div
+        data-story-phone-scroll=""
+        className="h-dvh w-full overflow-y-auto bg-background pb-12 shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]"
+      >
+        <div className="px-5 pb-1 pt-6 text-xl font-semibold">Chat</div>
+        <MobileChatList
+          chats={host.chats}
+          groupBy="status"
+          capGroupPreviews
+          pinSections={host.sections}
+          statusWritable={canManageSections}
+          statusCommands={commands}
+          groupLabels={{ __pinned__: 'Pinned' }}
+          onSelect={fn()}
+          rowActions={{
+            onTogglePin: (sessionId, pinned) => apply({ type: 'setPinned', sessionId, pinned }),
+            onArchive: (id) =>
+              setHost((current) => ({
+                ...current,
+                chats: current.chats.filter((c) => c.id !== id),
+              })),
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export const Status: StoryObj<typeof StatusStoryShell> = {
+  render: (args) => <StatusStoryShell {...args} />,
+};
+
+export const StatusReadOnlyRows: StoryObj<typeof StatusStoryShell> = {
+  render: (args) => <StatusStoryShell {...args} />,
+  args: {
+    canManageSections: false,
+    initialChats: statusChats.map((chat, index) =>
+      index % 2 ? { ...chat, readOnly: true } : chat
+    ),
+  },
+};
+
+/** Taller than a phone: a flick scrolls, a dragged row scrolls the list at the edges. */
+export const StatusLongList: StoryObj<typeof StatusStoryShell> = {
+  render: (args) => <StatusStoryShell {...args} />,
+  args: {
+    initialChats: [
+      ...statusChats,
+      ...Array.from({ length: 24 }, (_, index) => ({
+        id: `s-extra-${index}`,
+        title: `Background task ${index + 1}`,
+        kind: 'chat' as const,
+        orderKey: `9${index.toString(16).padStart(2, '0')}`,
+        latestMessageAt: now - hour,
+        lastMessageAt: now - hour,
+        lastReadAt: now,
+      })),
+    ],
+  },
 };

@@ -43,6 +43,18 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
 - The Changes sidebar's Types view keeps the filename prominent and shows its
   parent workspace path beneath it, so similarly named files remain identifiable
   without relying on a hover-only title.
+  Opening the desktop list or mobile files-level changes sheet requests the complete
+  Branch manifest through the existing paged transport. This also applies to visible
+  split panels and reopening a list. Loading and failed/incomplete comparisons remain
+  explicit; the bounded file index only seeds the provider. File bodies stay deferred
+  until opened. The existing supported-file limit bounds manifest collection, and
+  older daemons retain their inline transport, whose `truncated` flag describes
+  deferred file bodies while its file list remains complete.
+  The legacy client combines the main and additional roots into one displayed
+  path set. Non-Git additional roots are omitted from the uncommitted scope.
+  A completed list supplies its text totals and file count to the composer. Unknown
+  line counts show a file count there. Shared session metadata retains its existing
+  publication path.
   Mobile change-stat presses open this same Types/Files list in
   `SessionMobileDiffDrawer`; selecting a canonical path enters the All Changes diff
   with the full path set and a fresh focus request. First-level browsing does not
@@ -57,6 +69,24 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   `codeCollabAllChangesScope`; non-Git and unborn worktrees report an explicit
   unavailable state
   ([decision](../notes/implemented/feature/2026-10-19-all-changes-diff-scope.md)).
+  Equal text does not establish that a Git file is unchanged: current-diff readers
+  also compare file state against that same repository and pinned base, preserving
+  mode-only changes. Binary placeholders carry no content identity. Git comparison
+  failures remain per-file retryable results instead of hiding the path as unchanged.
+  Historical turn diffs continue to use stored evidence exclusively.
+- Historical diff failures retain the requested turn on Web, Electron, and native
+  iOS/Android. The native runtime passes unavailable reasons/messages to its
+  existing notice UI instead of requesting the current workspace diff. A separate
+  current/All Changes request remains available; later workspace edits cannot
+  replace an unavailable turn. See the [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md).
+- The composer and session sidebar's `diffStats` describe the default workspace
+  comparison, including uncommitted edits, independently of PR association. Code
+  Collab summarizes the complete comparison before trimming the shared index and
+  publishes through `WorkspaceGitService.publishDiffStats`; Git branch/status
+  probes do not replace those totals. Turn summaries and their viewable before/after
+  contents come from the same stored Agent edit evidence. A turn without captured
+  edits has no new file card; terminal-only workspace changes still appear in
+  All Changes. The additive `allChange.files` counts complete changed paths independently of text-line availability. The composer shows text totals when positive and a file count for zero-line changes. See [statistics ownership](../notes/implemented/architecture/2026-11-14-workspace-diff-stat-ownership.md).
 - Diffs opened with a precise file focus open only that file by default; the other
   cards start collapsed and remain individually expandable. A base (All Changes)
   diff opened without a focus starts with every card collapsed, while a direct
@@ -203,14 +233,15 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
 - Markdown file viewers copy the latest complete source text (including unsaved
   editor changes) from the top toolbar. On mobile, source mode uses the native
   text surface instead of Monaco so long-press keeps the OS selection menu;
-  rendered Markdown must opt into native selection through
-  `data-native-selection-allow`.
+  rendered Markdown is selectable through `MarkdownRenderer`'s
+  `data-text-selectable` marker.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
   turn diff RPC: `packages/shared/src/code-collab.ts`.
 - Content-addressed diff transport is capability-gated by `codeCollabDiffBlobs` v1: paged manifests
   identify immutable Git/store/disk bytes and leave All Changes bodies deferred
   until visible. Reads assemble raw byte ranges, verify the full hash, then decode.
-  Remote large files start with bounded partial patches; Pierre's expand action
+  Whole-list manifests omit patches. Opening a large remote file requests its
+  single-file manifest and bounded partial patch; Pierre's expand action
   hydrates full files through the same verified cache. Ordinary remote blobs use
   bounded IndexedDB; protected/local blobs stay in memory. Opaque file generations
   invalidate individual entries even if line counts stay equal; comparison-base

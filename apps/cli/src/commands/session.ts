@@ -5,14 +5,15 @@ import {
   syncMcpCatalog,
   waitForMcpDefaultCatalog,
 } from '@/lib/workspace-mcp-store';
-import { getDaemonWorkspace, readEncryptedMachineAccess } from '@/lib/session-command-environment';
-import type { SessionSteerResponse } from '@lody/shared';
 import {
-  buildSessionGroupRenamePatch,
-  buildSessionTabRenamePatch,
-  normalizeMcpServerIdSelection,
-  resolveSessionConversationConfig,
-} from '@lody/shared';
+  getDaemonWorkspace,
+  readEncryptedMachineAccess,
+  resolveDaemonTarget,
+  type DaemonTargetResolution,
+} from '@/lib/session-command-environment';
+import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
+import type { SessionSteerResponse } from '@lody/shared';
+import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
 import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import {
   getMachineRoomId,
@@ -41,7 +42,10 @@ import type { MessageAuthor, AgentMessageAuthor } from '@lody/shared';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
   getDeclaredModelControls,
-  getModelEffortChoices,
+  getAcpModelEffortChoices,
+  getAcpModelFastSupport,
+  getAcpModelSpeedTiers,
+  withAcpConfigOptionsForModel,
   machineSupportsPreparedSessionInputProtocol,
   machineSupportsMemoryProviders,
   resolveNewSessionHistoryBackend,
@@ -97,6 +101,8 @@ import {
   hasAgentRunConfigSelection,
   ACP_CONFIG_OPTION_OFF_VALUE,
   ACP_CONFIG_OPTION_ON_VALUE,
+  ACP_FAST_MODE_VALUE_FAST,
+  ACP_FAST_MODE_VALUE_ULTRAFAST,
   isAcpFastModeConfigId,
   isAcpThoughtLevelConfigOption,
   resolveAgentRunConfigSelection,
@@ -196,26 +202,32 @@ export type DelegatedSessionRequester = {
 
 /** Delegation without provenance must never be recorded as human input. */
 /**
- * Encrypted workspaces: classify an Agent-delegated input before writing it. Owner
- * work is unchanged; a shared member's derivation returns the origin to record as
- * the signed `derivedFrom`, so the start re-authorizes that member. Anything the
- * daemon cannot verify is refused rather than written as machine-owned work.
+ * Classify encrypted delegation before writing. Same-machine inputs retain the
+ * signed human root and verified principal. Cross-machine Owner work keeps the
+ * machine-signed path; unverifiable origins refuse.
  */
 async function classifyDelegatedEncryptedInput(
   manager: LoroDocumentManager,
   delegatedRequester: DelegatedSessionRequester | undefined,
-  targetMachineId: string
-): Promise<{ sessionId: string; userTurnId: string } | undefined> {
+  targetMachineId: string,
+  userTurnId: string
+): Promise<
+  | { principal: 'owner' | 'member'; derivedFrom?: { sessionId: string; userTurnId: string } }
+  | undefined
+> {
   if (!delegatedRequester || !manager.isEncryptedWorkspace()) return undefined;
   const author = delegatedRequester.author;
   const daemon = getDaemonWorkspace();
   if (!author || !daemon?.classifyEncryptedDerivation || daemon.manager !== manager)
     throw new Error('e2ee_derivation_unavailable');
   const origin = { sessionId: author.sessionId, userTurnId: author.turnId };
-  return (await daemon.classifyEncryptedDerivation(origin, { machineId: targetMachineId })) ===
-    'member'
-    ? origin
-    : undefined;
+  const resolved = await daemon.classifyEncryptedDerivation(origin, {
+    machineId: targetMachineId,
+    userTurnId,
+  });
+  return resolved === 'owner'
+    ? { principal: 'owner' }
+    : { principal: resolved.principal, derivedFrom: resolved.origin };
 }
 
 const resolveSessionInputAuthor = (
@@ -351,7 +363,6 @@ type ListOptions = CommonOptions &
 
 type RenameOptions = CommonOptions & {
   title?: string;
-  group?: boolean;
 };
 
 type HistoryOptions = CommonOptions & {
@@ -450,9 +461,6 @@ type SessionActivityTimestampManager = {
     upsertDocMeta(roomId: string, meta: Partial<SessionMeta>): Promise<unknown>;
   };
 };
-
-// Re-export for backward compatibility with tests
-export { normalizeCliValue, selectWorkspaceSummary };
 
 export function resolvePromptCandidate(input: {
   prompt?: string;
@@ -1142,10 +1150,59 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   return history;
 }
 
+export class SessionManagementAccessDeniedError extends Error {
+  readonly code = 'SESSION_MANAGEMENT_DENIED';
+  readonly retryable = false;
+  constructor() {
+    super(
+      'This session requires machine and project editing access. Read-only access cannot manage it.'
+    );
+  }
+}
+
+/** Metadata management needs editing authority, not machine presence or session authorship. */
+export async function assertSessionManagementAccess(args: {
+  auth: AuthContext;
+  workspace: WorkspaceSummary;
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  delegatedRequester?: DelegatedSessionRequester;
+}): Promise<SessionMeta> {
+  const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
+  const { nativeOwnerAccess: nativeOwner } = await resolveDaemonTarget({
+    auth: args.auth,
+    manager: args.manager,
+    workspaceId: args.workspace.id as WorkspaceId,
+    machineId: session.machineId,
+    requesterUserId: resolveSessionRequester(args.auth, undefined, args.delegatedRequester).userId,
+  });
+  const access =
+    nativeOwner !== undefined
+      ? { allowed: nativeOwner }
+      : await readSessionMachineAccess({
+          auth: args.auth,
+          workspaceId: args.workspace.id as WorkspaceId,
+          machineId: session.machineId,
+          delegatedRequester: args.delegatedRequester,
+          localProjectId:
+            session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+        });
+  if (!access.allowed) throw new SessionManagementAccessDeniedError();
+  const current = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
+  if (
+    current.machineId !== session.machineId ||
+    (current.project?.kind === 'local' ? current.project.localProjectId : null) !==
+      (session.project?.kind === 'local' ? session.project.localProjectId : null)
+  )
+    throw new SessionManagementAccessDeniedError();
+  return current;
+}
+
 export async function runSessionOperationWithSyncedMetadata(
   manager: LoroDocumentManager,
   sessionId: SessionId,
-  operation: Extract<SessionOperation, 'archive' | 'restore' | 'delete'>
+  operation: Extract<SessionOperation, 'archive' | 'restore' | 'delete'>,
+  assertCanManage: (sessionId: SessionId) => Promise<unknown>
 ): Promise<SessionId[]> {
   const reason = `session.${operation}:${sessionId}`;
   await syncWorkspaceMetaForRead(manager, `${reason}:prewrite`);
@@ -1154,9 +1211,12 @@ export async function runSessionOperationWithSyncedMetadata(
   if (operation !== 'archive' && root.isArchived !== true) {
     throw new Error(`Session ${sessionId} is not archived.`);
   }
+  // Preflight the entire discovered set before any write or cleanup.
+  for (const target of targets) await assertCanManage(target.id);
   // Keep the root discoverable if deleting a child fails. Writes are not a
   // transaction; each owning machine observes state and reconciles resources.
   for (const target of operation === 'delete' ? [...targets].reverse() : targets) {
+    await assertCanManage(target.id);
     const roomId = getSessionRoomId(target.id);
     if (operation === 'delete') {
       await manager.repo.deleteDoc(roomId);
@@ -1181,6 +1241,16 @@ async function syncMachineFlockDocsForRead(
   const logger = getLogger('session');
   const results = await Promise.all(
     Array.from(new Set(machineIds)).map(async (machineId): Promise<MachineFlockFreshness> => {
+      const daemonTarget = await resolveDaemonTarget({ manager, workspaceId, machineId });
+      if (!daemonTarget.isLocalEnvironment && daemonTarget.sameReplica) {
+        return {
+          confirmed: false,
+          error: new FlockSyncUnavailableError({
+            message: `Machine Flock read used the local daemon replica without remote confirmation (${reason}:${machineId})`,
+            reason: 'local-replica-unconfirmed',
+          }),
+        };
+      }
       try {
         await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
           reason: `${reason}:${machineId}`,
@@ -1475,8 +1545,16 @@ export async function appendUserPromptHistory(args: {
   knownHistory?: readonly SessionHistory[];
   /** Offer the turn to a running turn: write `pending_apply` without activation. */
   steer?: boolean;
-  /** Encrypted shared-member derivation origin; part of the signed input. */
+  /** Encrypted same-machine derivation root; part of the signed input. */
   derivedFrom?: { sessionId: string; userTurnId: string };
+  /** Encrypted: this machine's signed intent for the input, written in the same commit. */
+  signMachineInput?: (input: {
+    sessionId: string;
+    targetMachineId: string;
+    userTurnId: string;
+    inputConfig: unknown;
+    derivedFrom?: unknown;
+  }) => Promise<string | undefined>;
 }): Promise<{
   id: string;
   timestamp: string;
@@ -1530,6 +1608,19 @@ export async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
+  if (args.signMachineInput && inputConfig) {
+    const meta = await sessionDoc.getMetaState();
+    const e2eeIntent = meta?.machineId
+      ? await args.signMachineInput({
+          sessionId: meta.id,
+          targetMachineId: meta.machineId,
+          userTurnId: historyId,
+          inputConfig,
+          ...(args.derivedFrom ? { derivedFrom: args.derivedFrom } : {}),
+        })
+      : undefined;
+    if (e2eeIntent) entry.e2eeIntent = e2eeIntent;
+  }
   if (args.steer) await backend.appendHistoryTurn(entry);
   else await backend.appendUserTurn(entry);
   return {
@@ -1932,10 +2023,14 @@ function validateModelDependentTurnConfigOptionValues(
   }
   const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
   const optionsById = new Map(
-    (capability.configOptions ?? []).map((option) => [option.id, option])
+    (withAcpConfigOptionsForModel(capability, targetModelId).configOptions ?? []).map((option) => [
+      option.id,
+      option,
+    ])
   );
-  const efforts = getModelEffortChoices(capability, targetModelId);
-  const declaredFast = getDeclaredModelControls(capability, targetModelId)?.fastMode;
+  const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const declaredSpeedTiers = getAcpModelSpeedTiers(capability, targetModelId);
+  const declaredFast = getAcpModelFastSupport(capability, targetModelId);
   for (const [id, value] of Object.entries(values)) {
     if (isTurnEffortEntry(optionsById, id)) {
       if (typeof value !== 'string') {
@@ -1958,12 +2053,48 @@ function validateModelDependentTurnConfigOptionValues(
       }
     } else if (isAcpFastModeConfigId(id)) {
       const option = optionsById.get(id);
+      const isNamedSpeedTier =
+        value === ACP_FAST_MODE_VALUE_FAST || value === ACP_FAST_MODE_VALUE_ULTRAFAST;
+      if (isNamedSpeedTier) {
+        if (declaredSpeedTiers !== undefined) {
+          if (!declaredSpeedTiers.includes(value)) {
+            assertMachineFlockCacheSufficient(
+              freshness,
+              `Speed tier ${value} is unavailable in the local replica for model ${targetModelId}.`,
+              { kind: 'ACP option', id }
+            );
+            throw new Error(
+              declaredSpeedTiers.length === 0
+                ? `Model ${targetModelId} does not offer fast mode.`
+                : `Invalid speed tier for model ${targetModelId}: ${value}. Allowed values: ${[ACP_CONFIG_OPTION_OFF_VALUE, ...declaredSpeedTiers].join(', ')}.`
+            );
+          }
+          validatedIds.add(id);
+          continue;
+        }
+        if (targetModelId !== probedModelId) {
+          validatedIds.add(id);
+          continue;
+        }
+      }
       if (option?.type === 'boolean' && typeof value !== 'boolean') {
         throw new Error(`Config option "${id}" expects a boolean value.`);
       }
       if (option?.type === 'select') {
-        if (typeof value !== 'string') {
+        if (typeof value !== 'string' && typeof value !== 'boolean') {
           throw new Error(`Config option "${id}" expects a select value.`);
+        }
+        if (typeof value === 'boolean') {
+          if (declaredFast === false && value === true) {
+            assertMachineFlockCacheSufficient(
+              freshness,
+              `Fast mode is unavailable in the local replica for model ${targetModelId}.`,
+              { kind: 'ACP option', id }
+            );
+            throw new Error(`Model ${targetModelId} does not offer fast mode.`);
+          }
+          validatedIds.add(id);
+          continue;
         }
         // A custom raw select value has no model-independent toggle meaning.
         // Leave its membership validation to the ordinary catalog validator.
@@ -2012,14 +2143,20 @@ export function filterCompatibleTurnConfigOptionValues(
     return undefined;
   }
   const optionsById = new Map(
-    (capability.configOptions ?? []).map((option) => [option.id, option])
+    (withAcpConfigOptionsForModel(capability, targetModelId).configOptions ?? []).map((option) => [
+      option.id,
+      option,
+    ])
   );
   const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
-  const efforts = getModelEffortChoices(capability, targetModelId);
-  const declared = getDeclaredModelControls(capability, targetModelId);
+  const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const speedTiers = getAcpModelSpeedTiers(capability, targetModelId);
+  const fastSupport = getAcpModelFastSupport(capability, targetModelId);
   // A different (or unknown) probe model cannot invalidate the target's
   // recorded controls. Without per-model data, preserve them for runtime.
-  const keepUnverified = targetModelId !== probedModelId || declared !== undefined;
+  const keepUnverified =
+    targetModelId !== probedModelId ||
+    getDeclaredModelControls(capability, targetModelId) !== undefined;
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
       if (targetModelId) {
@@ -2027,13 +2164,24 @@ export function filterCompatibleTurnConfigOptionValues(
           if (efforts !== undefined) return typeof value === 'string' && efforts.includes(value);
           if (keepUnverified) return typeof value === 'string';
         } else if (isAcpFastModeConfigId(id)) {
-          // A model declared without Fast has nothing to carry a Fast value to.
-          if (declared?.fastMode === false) return false;
+          if (speedTiers !== undefined) {
+            if (speedTiers.length === 0) return false;
+            if (value === ACP_FAST_MODE_VALUE_ULTRAFAST) {
+              return speedTiers.includes(ACP_FAST_MODE_VALUE_ULTRAFAST);
+            }
+            if (value === ACP_FAST_MODE_VALUE_FAST) {
+              return speedTiers.includes(ACP_FAST_MODE_VALUE_FAST);
+            }
+          }
+          // A model known without Fast has nothing to carry a Fast value to.
+          if (fastSupport === false) return false;
           if (keepUnverified) {
             return (
               typeof value === 'boolean' ||
               value === ACP_CONFIG_OPTION_ON_VALUE ||
-              value === ACP_CONFIG_OPTION_OFF_VALUE
+              value === ACP_CONFIG_OPTION_OFF_VALUE ||
+              value === ACP_FAST_MODE_VALUE_FAST ||
+              value === ACP_FAST_MODE_VALUE_ULTRAFAST
             );
           }
         }
@@ -2343,7 +2491,7 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
   );
   validateTurnConfigOptionValues(
     args.dispatchConfig.configOptionValues,
-    args.capability,
+    args.capability && withAcpConfigOptionsForModel(args.capability, targetModelId),
     validatedIds,
     freshness
   );
@@ -2503,16 +2651,22 @@ export async function ensureTargetMachineNotOffline(args: {
   machineId: MachineId;
   manager: Pick<LoroDocumentManager, 'getMachinePresenceView'>;
 }): Promise<MachinePresence> {
-  const environment = getSessionCommandEnvironment();
-  if (environment) {
-    if (
-      args.workspaceId !== environment.workspace.id ||
-      args.machineId !== environment.auth.machineId
-    )
+  const target = await resolveDaemonTarget({
+    auth: args.auth,
+    manager: args.manager,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+  });
+  if (target.isLocalEnvironment) {
+    if (!target.sameReplica) {
       throw new Error('Target machine is unavailable in this workspace');
+    }
     return 'online';
   }
   if (args.machineId === args.auth.machineId) {
+    if (target.sameReplica) {
+      return 'online';
+    }
     await ensureLocalRuntimeAvailable(args.machineId, args.workspaceId);
     return 'online';
   }
@@ -2600,6 +2754,7 @@ async function readResolvedSessionMachineAccess(args: {
   machineId: MachineId;
   requester: ResolvedSessionRequester;
   localProjectId?: string;
+  manager?: LoroDocumentManager;
 }): Promise<MachineAccessCheckResult> {
   const encrypted = await readEncryptedMachineAccess({
     machineId: args.machineId,
@@ -2616,6 +2771,19 @@ async function readResolvedSessionMachineAccess(args: {
       requesterUserId: args.requester.userId,
       localProjectId: args.localProjectId,
     });
+  }
+  const daemonManager = args.manager ?? getDaemonWorkspace()?.manager;
+  if (daemonManager) {
+    const { nativeOwnerAccess: nativeOwner } = await resolveDaemonTarget({
+      auth: args.auth,
+      manager: daemonManager,
+      workspaceId: args.workspaceId,
+      machineId: args.machineId,
+      requesterUserId: args.requester.userId,
+    });
+    if (nativeOwner !== undefined) {
+      return nativeOwner ? { allowed: true } : { allowed: false, reason: 'requester_not_member' };
+    }
   }
   const target = {
     token: args.auth.token,
@@ -2644,6 +2812,7 @@ async function assertMachineAccess(args: {
   machineId: MachineId;
   requester: ResolvedSessionRequester;
   localProjectId?: string;
+  manager?: LoroDocumentManager;
 }): Promise<void> {
   const access = await readResolvedSessionMachineAccess(args);
   if (!access.allowed) {
@@ -2653,6 +2822,7 @@ async function assertMachineAccess(args: {
 
 async function dispatchTurnFastPath(args: {
   auth: AuthContext;
+  manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   sessionId: SessionId;
@@ -2662,9 +2832,14 @@ async function dispatchTurnFastPath(args: {
   inputOrigin: 'human' | 'agent';
   inputConfig: SessionTurnInputConfig | undefined;
 }): Promise<void> {
-  const environment = getSessionCommandEnvironment();
-  if (environment) {
-    await environment.host.dispatchSession(
+  const { localHost } = await resolveDaemonTarget({
+    auth: args.auth,
+    manager: args.manager,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+  });
+  if (localHost) {
+    await localHost.dispatchSession(
       args.sessionId,
       args.inputConfig
         ? {
@@ -2713,8 +2888,24 @@ async function writeDispatchPointer(args: {
 }): Promise<void> {
   await args.manager.repo.upsertDocMeta(getSessionRoomId(args.sessionId), {
     latestUserMsgId: args.userTurnId,
-    lastMissingHistoryUserMsgId: undefined,
   } satisfies Partial<SessionMeta>);
+}
+
+async function persistDispatchedSessionWrite(args: {
+  sameReplica: boolean;
+  manager: LoroDocumentManager;
+  sessionDoc: SessionDocument;
+  reason: string;
+}): Promise<void> {
+  if (args.sameReplica) {
+    if (typeof args.manager.repo.flush === 'function') await args.manager.repo.flush();
+    return;
+  }
+  await confirmDispatchSyncedBestEffort({
+    manager: args.manager,
+    sessionDoc: args.sessionDoc,
+    reason: args.reason,
+  });
 }
 
 /**
@@ -3675,7 +3866,7 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
   ]);
   validateTurnConfigOptionValues(
     requested.config.configOptionValues,
-    capability,
+    capability && withAcpConfigOptionsForModel(capability, targetModelId),
     validatedConfigIds,
     freshness
   );
@@ -3912,13 +4103,16 @@ export async function prepareSessionInput(
     // the provenance fields no longer need a local intersection here.
   } satisfies SessionMeta;
 
-  const derivedFrom = await classifyDelegatedEncryptedInput(
+  const derivedInputId = options.userTurnId ?? uuidV4();
+  const derivation = await classifyDelegatedEncryptedInput(
     manager,
     options.delegatedRequester,
-    targetMachine.id
+    targetMachine.id,
+    derivedInputId
   );
+  const derivedFrom = derivation?.derivedFrom;
   const userTurn: SessionHistoryInput = {
-    id: options.userTurnId ?? uuidV4(),
+    id: derivedInputId,
     role: 'user',
     timestamp: meta.createdAt,
     ...(derivedFrom ? { derivedFrom } : {}),
@@ -4035,13 +4229,21 @@ export async function createSessionResult(
       sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await commitPreparedSessionDispatch(manager, prepared);
     dispatched = true;
-    await confirmDispatchSyncedBestEffort({
+    const daemonTarget = await resolveDaemonTarget({
+      auth,
+      manager,
+      workspaceId: workspace.id as WorkspaceId,
+      machineId: targetMachine.id,
+    });
+    await persistDispatchedSessionWrite({
+      sameReplica: daemonTarget.sameReplica,
       manager,
       sessionDoc,
       reason: `session.create:${sessionId}`,
     });
     await dispatchTurnFastPath({
       auth,
+      manager,
       workspaceId: workspace.id as WorkspaceId,
       machineId: targetMachine.id,
       sessionId,
@@ -4085,6 +4287,7 @@ export async function validateSessionChatTarget(args: {
   sessionId: SessionId;
   requesterUserIdOverride?: string;
   delegatedRequester?: DelegatedSessionRequester;
+  workspaceMetaPrewriteSatisfied?: boolean;
 }): Promise<SessionMeta> {
   const requester = resolveSessionRequester(
     args.auth,
@@ -4097,6 +4300,7 @@ export async function validateSessionChatTarget(args: {
     manager: args.manager,
     sessionId: args.sessionId,
     requester,
+    workspaceMetaPrewriteSatisfied: args.workspaceMetaPrewriteSatisfied,
   });
 }
 
@@ -4106,8 +4310,28 @@ async function validateSessionChatTargetForRequester(args: {
   manager: LoroDocumentManager;
   sessionId: SessionId;
   requester: ResolvedSessionRequester;
+  workspaceMetaPrewriteSatisfied?: boolean;
 }): Promise<SessionMeta> {
-  await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
+  let needsMetaSync = args.workspaceMetaPrewriteSatisfied !== true;
+  if (needsMetaSync) {
+    const localRecord = await args.manager.repo.getDocMeta(getSessionRoomId(args.sessionId));
+    if (localRecord?.meta && !isLoroRepoDocDeleted(localRecord)) {
+      const localMeta = localRecord.meta as SessionMeta;
+      const { authority } = await resolveDaemonTargetOrThrow({
+        auth: args.auth,
+        manager: args.manager,
+        workspaceId: args.workspace.id as WorkspaceId,
+        machineId: localMeta.machineId,
+        requesterUserId: args.requester.userId,
+      });
+      if (authority === 'local-daemon') {
+        needsMetaSync = false;
+      }
+    }
+  }
+  if (needsMetaSync) {
+    await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
+  }
   const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
   if (session.isArchived) {
     throw new Error(`Session ${args.sessionId} is archived. Restore it before chatting.`);
@@ -4118,6 +4342,7 @@ async function validateSessionChatTargetForRequester(args: {
     machineId: session.machineId,
     requester: args.requester,
     localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+    manager: args.manager,
   });
   await ensureTargetMachineNotOffline({
     auth: args.auth,
@@ -4178,6 +4403,8 @@ export async function sendSessionChatResult(
     bypassSessionQuota?: boolean;
     /** Agent chat: steer a running turn instead of queueing behind it. */
     steerActiveTurn?: boolean;
+    workspaceMetaPrewriteSatisfied?: boolean;
+    prevalidatedTarget?: SessionMeta;
   },
   delegatedRequester?: DelegatedSessionRequester,
   input?: { paths?: string[]; attachments?: SessionInputAttachment[] }
@@ -4192,19 +4419,28 @@ export async function sendSessionChatResult(
   const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
   const requesterUserId = requester.userId;
   const author = resolveSessionInputAuthor(requesterUserId, delegatedRequester);
-  const session = await validateSessionChatTargetForRequester({
-    auth,
-    workspace,
+  const session =
+    orchestration?.prevalidatedTarget ??
+    (await validateSessionChatTargetForRequester({
+      auth,
+      workspace,
+      manager,
+      sessionId,
+      requester,
+      workspaceMetaPrewriteSatisfied: orchestration?.workspaceMetaPrewriteSatisfied,
+    }));
+
+  const daemonTarget = await syncSessionDocUnlessLocalDaemon({
     manager,
     sessionId,
-    requester,
+    reason: `session.chat:${sessionId}:prewrite:doc`,
+    authorityContext: {
+      auth,
+      workspaceId: workspace.id as WorkspaceId,
+      machineId: session.machineId,
+      requesterUserId,
+    },
   });
-
-  await syncDocForRead(
-    manager,
-    getSessionRoomId(sessionId),
-    `session.chat:${sessionId}:prewrite:doc`
-  );
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   const quotaHistory = orchestration?.bypassSessionQuota
@@ -4283,23 +4519,30 @@ export async function sendSessionChatResult(
         : {}),
     }));
   const inputBlocks = buildCommandInputBlocks(prompt, attachments);
-  const environment = getSessionCommandEnvironment();
-  const derivedFrom = await classifyDelegatedEncryptedInput(
+  const localHost = daemonTarget.localHost;
+  const derivedInputId = orchestration?.userTurnId ?? uuidV4();
+  const derivation = await classifyDelegatedEncryptedInput(
     manager,
     delegatedRequester,
-    session.machineId
+    session.machineId,
+    derivedInputId
   );
+  const derivedFrom = derivation?.derivedFrom;
+  const maySteer = derivation?.principal !== 'member';
   const remoteMachine = session.machineId !== auth.machineId;
   // A shared member's derivation never steers another principal's running turn.
   const steerTurnId =
-    orchestration?.steerActiveTurn && !derivedFrom
+    orchestration?.steerActiveTurn && maySteer
       ? remoteMachine
         ? resolveActiveAssistantTurnId(historyForDefaults)
-        : environment?.host.readActiveTurnId(sessionId)
+        : localHost?.readActiveTurnId(sessionId)
       : undefined;
   const userTurn = await appendUserPromptHistory({
     steer: steerTurnId !== undefined,
     ...(derivedFrom ? { derivedFrom } : {}),
+    ...(manager.isEncryptedWorkspace()
+      ? { signMachineInput: (input) => manager.signMachineInput(input) }
+      : {}),
     inputBlocks,
     sessionDoc,
     prompt,
@@ -4323,7 +4566,7 @@ export async function sendSessionChatResult(
         chainDepth: orchestration?.chainDepth,
       }),
     },
-    preallocatedId: orchestration?.userTurnId,
+    preallocatedId: orchestration?.userTurnId ?? (derivation ? derivedInputId : undefined),
   });
   const userTurnId = userTurn.id;
   const result = {
@@ -4421,12 +4664,12 @@ export async function sendSessionChatResult(
     steerTurnId !== undefined &&
     userTurn.existingStatus === undefined &&
     !remoteMachine &&
-    environment &&
+    localHost &&
     userTurn.inputConfig
   ) {
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
-    const response = await environment.host.steerSession({
+    const response = await localHost.steerSession({
       sessionId,
       expectedTurnId: steerTurnId,
       userTurnId,
@@ -4439,7 +4682,7 @@ export async function sendSessionChatResult(
   // A busy target without an applied steer (including an unconfirmed remote one)
   // runs this input after the current turn. Retries keep their earlier outcome.
   const ordinaryDelivery: SessionChatDelivery | undefined =
-    !orchestration?.steerActiveTurn || derivedFrom || userTurn.existingStatus !== undefined
+    !orchestration?.steerActiveTurn || !maySteer || userTurn.existingStatus !== undefined
       ? undefined
       : steerTurnId === undefined
         ? 'dispatched'
@@ -4465,13 +4708,15 @@ export async function sendSessionChatResult(
     if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await writeDispatchPointer({ manager, sessionId, userTurnId });
     dispatched = true;
-    await confirmDispatchSyncedBestEffort({
+    await persistDispatchedSessionWrite({
+      sameReplica: daemonTarget.sameReplica,
       manager,
       sessionDoc,
       reason: `session.chat:${sessionId}:${userTurnId}`,
     });
     await dispatchTurnFastPath({
       auth,
+      manager,
       workspaceId: workspace.id as WorkspaceId,
       machineId: session.machineId,
       sessionId,
@@ -4500,7 +4745,6 @@ export async function sendSessionChatResult(
       await manager.repo
         .upsertDocMeta(getSessionRoomId(sessionId), {
           latestUserMsgId: undefined,
-          lastMissingHistoryUserMsgId: undefined,
         } satisfies Partial<SessionMeta>)
         .catch(() => undefined);
     }
@@ -5843,10 +6087,6 @@ const sessionRenameCommand = new Command('rename')
   .description('Rename a session')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--title <title>', 'New session title')
-  .option(
-    '--group',
-    "Rename the root session's conversation group in the sidebar instead of its tab"
-  )
   .option('--json', 'Print JSON output')
   .option('--debug', 'Enable debug output')
   .argument('[sessionId]', 'Session ID; falls back to LODY_SESSION_ID')
@@ -5872,22 +6112,16 @@ const sessionRenameCommand = new Command('rename')
           options.workspace
         );
         await withWorkspaceManager(auth, workspace, async (manager) => {
-          const meta = await resolveSessionMetaOrThrow(manager, sessionId);
-          if (options.group && meta.parentSessionId) {
-            throw new Error(
-              `Session ${sessionId} is a child tab; only a root session has a group title.`
-            );
-          }
-          await manager.repo.upsertDocMeta(
-            getSessionRoomId(sessionId),
-            options.group
-              ? buildSessionGroupRenamePatch(title)
-              : buildSessionTabRenamePatch(meta, title)
-          );
+          await syncWorkspaceMetaForRead(manager, `session.rename:${sessionId}:prewrite`);
+          await assertSessionManagementAccess({ auth, workspace, manager, sessionId });
+          await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+            title,
+            titleSource: 'user',
+          } satisfies Partial<SessionMeta>);
           await ensureWorkspaceMetaSynced(manager, `session.rename:${sessionId}`);
 
           if (options.json) {
-            printJson({ ok: true, sessionId, title, scope: options.group ? 'group' : 'tab' });
+            printJson({ ok: true, sessionId, title });
             return;
           }
 
@@ -5920,7 +6154,9 @@ const sessionArchiveCommand = new Command('archive')
         const childSessionIds = await runSessionOperationWithSyncedMetadata(
           manager,
           sessionId,
-          'archive'
+          'archive',
+          (targetId) =>
+            assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
         );
 
         if (options.json) {
@@ -5956,7 +6192,9 @@ const sessionRestoreCommand = new Command('restore')
         const childSessionIds = await runSessionOperationWithSyncedMetadata(
           manager,
           sessionId,
-          'restore'
+          'restore',
+          (targetId) =>
+            assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
         );
 
         if (options.json) {
@@ -5992,7 +6230,9 @@ const sessionDeleteCommand = new Command('delete')
         const childSessionIds = await runSessionOperationWithSyncedMetadata(
           manager,
           sessionId,
-          'delete'
+          'delete',
+          (targetId) =>
+            assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
         );
 
         if (options.json) {
@@ -6020,13 +6260,68 @@ export const sessionCommand = new Command('session')
   .addCommand(sessionRestoreCommand)
   .addCommand(sessionDeleteCommand);
 
+export type SessionDocReadAuthorityContext = {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+};
+
+async function resolveDaemonTargetOrThrow(args: {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  manager: LoroDocumentManager;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+}): Promise<DaemonTargetResolution> {
+  const resolved = await resolveDaemonTarget(args);
+  if (resolved.authority === 'denied') {
+    throw new Error(`Machine access denied for ${args.machineId}: workspace_access_revoked`);
+  }
+  return resolved;
+}
+
+async function syncSessionDocUnlessLocalDaemon(args: {
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  reason: string;
+  authorityContext?: SessionDocReadAuthorityContext;
+}): Promise<DaemonTargetResolution> {
+  if (!args.authorityContext) {
+    await syncDocForRead(args.manager, getSessionRoomId(args.sessionId), args.reason);
+    return {
+      sameReplica: false,
+      isLocalEnvironment: false,
+      authority: 'remote-or-unverified',
+      nativeOwnerAccess: undefined,
+    };
+  }
+  const resolved = await resolveDaemonTargetOrThrow({
+    auth: args.authorityContext.auth,
+    manager: args.manager,
+    workspaceId: args.authorityContext.workspaceId,
+    machineId: args.authorityContext.machineId,
+    requesterUserId: args.authorityContext.requesterUserId,
+  });
+  if (resolved.authority !== 'local-daemon') {
+    await syncDocForRead(args.manager, getSessionRoomId(args.sessionId), args.reason);
+  }
+  return resolved;
+}
+
 export async function readSessionMcpIdsForAuthoring(
   manager: LoroDocumentManager,
   sessionId: SessionId,
-  explicitIds?: readonly string[]
+  explicitIds?: readonly string[],
+  authorityContext?: SessionDocReadAuthorityContext
 ): Promise<string[]> {
   if (explicitIds !== undefined) return [...explicitIds];
-  await syncDocForRead(manager, getSessionRoomId(sessionId), 'session-mcp-selection');
+  await syncSessionDocUnlessLocalDaemon({
+    manager,
+    sessionId,
+    reason: 'session-mcp-selection',
+    authorityContext,
+  });
   const doc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(doc, await doc.getMetaState());
   return (

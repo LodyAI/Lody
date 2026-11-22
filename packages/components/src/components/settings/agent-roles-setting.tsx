@@ -38,7 +38,7 @@ import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
-import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
+import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import {
   AgentRoleEditorDialog,
@@ -174,6 +174,12 @@ export function AgentRolesSetting() {
   };
 
   const addLabel = t('settings.agentRoles.add');
+  const addButton = (
+    <Button size="small" variant="secondary" onClick={openAdd}>
+      <Plus {...stylex.props(catalog.icon)} />
+      {addLabel}
+    </Button>
+  );
 
   return (
     <div {...stylex.props(surface.container)}>
@@ -186,14 +192,11 @@ export function AgentRolesSetting() {
             {t('settings.agentRoles.syncing')}
           </span>
         ) : null}
-        <Button size="small" variant="secondary" onClick={openAdd}>
-          <Plus {...stylex.props(catalog.icon)} />
-          {addLabel}
-        </Button>
+        {rows.length > 0 ? addButton : null}
       </SettingsPageActions>
 
       {rows.length === 0 ? (
-        <SettingsEmptyList>{t('settings.agentRoles.empty')}</SettingsEmptyList>
+        <SettingsEmptyState title={t('settings.agentRoles.empty')} action={addButton} />
       ) : (
         // One provider: after the first machine note opens, the next opens at once.
         <Tooltip.Provider delay={250}>
@@ -308,8 +311,19 @@ export function AgentRoleRow({
   const [first] = targets;
   const summaries = targets.map((target) => ({
     text: buildAgentRoleRunConfigSummary(target.runConfig, target.selectorOptions).join(' · '),
-    identity: buildAgentRoleRunConfigSummary(target.runConfig).join(' · '),
-    agent: target.agentConfig?.name ?? '',
+    // Option key order is storage order, not meaning: sort before comparing.
+    identity: buildAgentRoleRunConfigSummary({
+      ...target.runConfig,
+      configOptionValues: Object.fromEntries(
+        Object.entries(target.runConfig.configOptionValues ?? {}).sort(([a], [b]) =>
+          a < b ? -1 : a > b ? 1 : 0
+        )
+      ),
+    }).join(' · '),
+    // Each machine names its own Provider; the kind of agent is what must match.
+    agent: target.agentConfig
+      ? `${target.agentConfig.cliType}:${target.agentConfig.agentType.toLowerCase()}`
+      : '',
   }));
   // Two machines running the Role the same way read as one line; when they
   // differ, the row says so instead of picking one to show.

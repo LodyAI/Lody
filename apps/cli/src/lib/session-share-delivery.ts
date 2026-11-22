@@ -109,7 +109,7 @@ export async function requestSessionShare(
     if (Date.now() >= deadline)
       return {
         ...result,
-        next: 'Call lody_session_share again with the same requestId, purpose and sessionIds to receive the result. No further user action is needed after approval.',
+        next: 'Call lody_session_manage action share again with the same requestId, purpose and sessionIds to receive the result. No further user action is needed after approval.',
       };
     await setTimeout(1000, undefined, { signal });
   }

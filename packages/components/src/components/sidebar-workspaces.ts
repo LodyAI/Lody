@@ -14,6 +14,8 @@ export type SidebarWorkspaceChoice = {
   slug?: string;
   name: string;
   logo?: string | null;
+  /** Server-listed display mode; only a display hint, never admission. */
+  contentMode?: string;
 };
 
 /** Display/navigation hints only. Native open still checks the account binding,
@@ -34,7 +36,7 @@ function cachedEncryptedChoices(accountId: string): SidebarWorkspaceChoice[] {
         descriptor.genesisHash !== pin
       )
         return [];
-      return [{ id: info.workspaceId, slug, name: info.workspaceName }];
+      return [{ id: info.workspaceId, slug, name: info.workspaceName, contentMode: 'e2ee' }];
     } catch {
       // An unreadable display hint cannot authorize a fallback or hide other
       // workspaces. Opening the affected workspace still checks its evidence.
@@ -53,7 +55,8 @@ export function useSidebarWorkspaceNavigation(input: {
   navigate: (slug: string) => void;
   close: () => void;
 }) {
-  const { encryptedAccountId, organizations, switchOrganization, setContext, navigate, close } = input;
+  const { encryptedAccountId, organizations, switchOrganization, setContext, navigate, close } =
+    input;
   const local = encryptedAccountId !== null && organizations === undefined;
   const accountId = useE2eeAccountId(local);
   const workspaces = useMemo(

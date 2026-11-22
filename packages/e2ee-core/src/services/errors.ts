@@ -28,11 +28,15 @@ export class LocalStoreError extends Schema.TaggedError<LocalStoreError>()('Loca
  *
  * This is a transport outcome, not a verdict: after an append fails the record
  * may or may not have been committed, so callers reconcile by reading back the
- * original bytes rather than re-signing.
+ * original bytes rather than re-signing. The explicit self-service-rate-limited
+ * reason is the sole pre-CAS refusal exception and carries the host's retryAt.
  *
  * @category Errors
  */
 export class LedgerLogError extends Schema.TaggedError<LedgerLogError>()('LedgerLogError', {
+  /** Only an explicit host refusal before CAS dispatch; never infer this from a timeout or generic HTTP 429. */
+  reason: Schema.optional(Schema.Literal('self-service-rate-limited')),
+  retryAt: Schema.optional(Schema.Number),
   cause: Schema.optional(Schema.Defect()),
 }) {}
 

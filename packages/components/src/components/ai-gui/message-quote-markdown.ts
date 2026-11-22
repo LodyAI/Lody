@@ -2,8 +2,81 @@ import { fromDom } from 'hast-util-from-dom';
 import { toMdast } from 'hast-util-to-mdast';
 import { gfmToMarkdown } from 'mdast-util-gfm';
 import { toMarkdown } from 'mdast-util-to-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
 
 const quoteText = '[data-message-quote-text]';
+const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath);
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const WORD_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'word' });
+
+const INLINE_CONTAINER_TYPES = new Set([
+  'paragraph',
+  'heading',
+  'strong',
+  'emphasis',
+  'delete',
+  'link',
+  'linkReference',
+  'tableCell',
+]);
+
+type MdastNode = {
+  type: string;
+  value?: string;
+  alt?: string | null;
+  children?: MdastNode[];
+};
+
+function extractPlainText(node: MdastNode): string {
+  if (
+    node.type === 'text' ||
+    node.type === 'inlineCode' ||
+    node.type === 'code' ||
+    node.type === 'inlineMath' ||
+    node.type === 'math'
+  ) {
+    return node.value ?? '';
+  }
+  if (node.type === 'image') return node.alt ?? '';
+  if (node.type === 'break') return ' ';
+  if (node.type === 'thematicBreak' || node.type === 'html') return '';
+  if (!node.children?.length) return '';
+  const separator = INLINE_CONTAINER_TYPES.has(node.type) ? '' : ' ';
+  return node.children.map(extractPlainText).filter(Boolean).join(separator);
+}
+
+function graphemeLength(text: string): number {
+  let count = 0;
+  for (const _ of GRAPHEME_SEGMENTER.segment(text)) count += 1;
+  return count;
+}
+
+/** Format a quoted Markdown snapshot into a plain-text chip excerpt without cutting words. */
+export function formatMessageQuoteExcerpt(markdown: string, maxLength = 32): string {
+  const tree = markdownParser.parse(markdown) as MdastNode;
+  const plain = extractPlainText(tree).replace(/\s+/g, ' ').trim();
+  const text = plain || markdown.replace(/\s+/g, ' ').trim();
+  if (!text || graphemeLength(text) <= maxLength) return text;
+
+  const budget = Math.max(1, maxLength - 3);
+  let fitted = '';
+  for (const { segment } of WORD_SEGMENTER.segment(text)) {
+    const candidate = fitted + segment;
+    if (graphemeLength(candidate.trimEnd()) <= budget) fitted = candidate;
+    else break;
+  }
+  const trimmed = fitted.trimEnd();
+  if (trimmed) return `${trimmed}...`;
+
+  const head = Array.from(GRAPHEME_SEGMENTER.segment(text), ({ segment }) => segment)
+    .slice(0, budget)
+    .join('')
+    .trimEnd();
+  return `${head}...`;
+}
 
 function element(node: Node): Element | null {
   return node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;

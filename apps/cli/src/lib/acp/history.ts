@@ -11,6 +11,7 @@ import type {
 import {
   getServerNow,
   sanitizeGoalObjective,
+  stripToolCallPayloadsForHistory,
   truncateTerminalOutputForHistory,
   ToolCallContentSchema,
   parseHistoryWrite,
@@ -61,9 +62,6 @@ const resolveBoundHistoryBackend = <T>(
   return bound;
 };
 
-// ---------------------------------------------------------------------------
-// Cross-call enrichment state
-// ---------------------------------------------------------------------------
 //
 // When notifications arrive one at a time (streamed mode), a completed update
 // may arrive in a separate `handleACPUpdateMessage()` call from the in-progress
@@ -102,9 +100,30 @@ type TerminalOutputAccumulator = {
 
 type TerminalOutputState = Map<string, TerminalOutputAccumulator>;
 
+/**
+ * Running non-terminal tool text, per toolCallId. ACP content is a snapshot that
+ * replaces the previous one, but every replaced CRDT write stays in the document
+ * history. Once a call has written its budget, later snapshots wait in memory and
+ * only the last one is stored when the call ends.
+ */
+type RunningToolTextAccumulator = {
+  written: number;
+  deferred?: AcpToolCallUpdateContent;
+};
+
+type RunningToolTextState = Map<string, RunningToolTextAccumulator>;
+
+type AcpToolCallUpdateContent = NonNullable<
+  Extract<AcpSessionNotification['update'], { sessionUpdate: 'tool_call_update' }>['content']
+>;
+
+/** Text a single running tool call may write to history before it is deferred. */
+const RUNNING_TOOL_TEXT_HISTORY_BUDGET = 64 * 1024;
+
 const enrichmentStateByDoc = new WeakMap<SessionDocument, EnrichmentState>();
 const subagentEnrichmentByDoc = new WeakMap<SessionDocument, Map<string, EnrichmentState>>();
 const terminalOutputStateByDoc = new WeakMap<SessionDocument, TerminalOutputState>();
+const runningToolTextStateByDoc = new WeakMap<SessionDocument, RunningToolTextState>();
 
 const getEnrichmentState = (doc: SessionDocument): EnrichmentState => {
   let state = enrichmentStateByDoc.get(doc);
@@ -120,6 +139,15 @@ const getTerminalOutputState = (doc: SessionDocument): TerminalOutputState => {
   if (!state) {
     state = new Map();
     terminalOutputStateByDoc.set(doc, state);
+  }
+  return state;
+};
+
+const getRunningToolTextState = (doc: SessionDocument): RunningToolTextState => {
+  let state = runningToolTextStateByDoc.get(doc);
+  if (!state) {
+    state = new Map();
+    runningToolTextStateByDoc.set(doc, state);
   }
   return state;
 };
@@ -238,8 +266,15 @@ export const handleACPUpdateMessage = async (
   }
   const terminalOutputState = getTerminalOutputState(doc);
   const terminalOutputSnapshot = cloneTerminalOutputState(terminalOutputState);
+  const runningToolTextState = getRunningToolTextState(doc);
+  const runningToolTextSnapshot = new Map(
+    [...runningToolTextState].map(([id, running]) => [id, { ...running }])
+  );
   const persistable = filterNotificationsForHistory(
-    compactTerminalNotificationsForHistory(enrichedBatch, terminalOutputState),
+    boundRunningToolTextForHistory(
+      compactTerminalNotificationsForHistory(enrichedBatch, terminalOutputState),
+      runningToolTextState
+    ),
     valid.operationIds
   );
   const persistableBatch = persistable.notifications;
@@ -392,6 +427,13 @@ export const handleACPUpdateMessage = async (
         ['completed', 'failed', 'cancelled'].includes(event.snapshot.state)
       ) {
         childStates.delete(JSON.stringify([event.sessionId, event.runId]));
+        const subagentScopePrefix = `${JSON.stringify(['subagent', event.sessionId, event.runId]).slice(0, -1)},`;
+        for (const key of terminalOutputState.keys()) {
+          if (key.startsWith(subagentScopePrefix)) terminalOutputState.delete(key);
+        }
+        for (const key of runningToolTextState.keys()) {
+          if (key.startsWith(subagentScopePrefix)) runningToolTextState.delete(key);
+        }
       }
     }
   } catch (error) {
@@ -399,6 +441,8 @@ export const handleACPUpdateMessage = async (
     // write. Restore it when that write fails so retrying the original terminal
     // notification can still emit the accumulated output.
     restoreTerminalOutputState(terminalOutputState, terminalOutputSnapshot);
+    runningToolTextState.clear();
+    for (const [id, running] of runningToolTextSnapshot) runningToolTextState.set(id, running);
     throw error;
   }
 
@@ -624,11 +668,6 @@ const describeValue = (value: unknown): string => {
   return typeof value;
 };
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Title-to-kind heuristic for agents that don't send `kind`
-// ---------------------------------------------------------------------------
-
 /** Tool kind values used in enrichment — superset of ACP ToolKind to cover internal kinds. */
 type EnrichmentToolKind =
   | 'read'
@@ -686,10 +725,6 @@ const normalizeToolKind = (kind: unknown): EnrichmentToolKind | undefined =>
     ? (kind as EnrichmentToolKind)
     : undefined;
 
-// ---------------------------------------------------------------------------
-// Content block helpers
-// ---------------------------------------------------------------------------
-
 type AcpContentLike = ReadonlyArray<{ type: string; content?: { type: string; text?: string } }>;
 
 /** Extract all non-empty text strings from ACP tool-call content blocks of type "content". */
@@ -722,10 +757,8 @@ const tryParseJsonFromContentBlocks = (content: AcpContentLike): Record<string, 
   return null;
 };
 
-// ---------------------------------------------------------------------------
 // Notification enrichment (single pass — replaces the former
 // `propagateToolCallState` + `enrichKimiToolData` two-pass pipeline)
-// ---------------------------------------------------------------------------
 
 /**
  * Enrich a batch of ACP notifications before history filtering.
@@ -959,9 +992,63 @@ const terminalOutputFromNotification = (
   };
 };
 
-const withoutTerminalSources = (message: AcpSessionNotification): AcpSessionNotification => {
-  if (message.update.sessionUpdate !== 'tool_call_update') return message;
-  const update = message.update;
+type ToolCallOrUpdate = Extract<
+  AcpSessionNotification['update'],
+  { sessionUpdate: 'tool_call' | 'tool_call_update' }
+>;
+
+type ScopedToolNotification = {
+  scopeKey: string;
+  update: ToolCallOrUpdate;
+  asMessage: AcpSessionNotification;
+  isSubagent: boolean;
+  rewrite: (nextUpdate: ToolCallOrUpdate) => AcpSessionNotification;
+};
+
+const unwrapScopedToolNotification = (
+  message: AcpSessionNotification
+): ScopedToolNotification | undefined => {
+  const { update } = message;
+  if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+    return {
+      scopeKey: JSON.stringify(['root', update.toolCallId]),
+      update,
+      asMessage: message,
+      isSubagent: false,
+      rewrite: (nextUpdate) => ({ ...message, update: nextUpdate }) as AcpSessionNotification,
+    };
+  }
+  if (update.sessionUpdate === 'subagent_event' && update.event.type === 'output') {
+    const event = update.event;
+    const childUpdate = event.update;
+    if (
+      childUpdate.sessionUpdate !== 'tool_call' &&
+      childUpdate.sessionUpdate !== 'tool_call_update'
+    ) {
+      return undefined;
+    }
+    return {
+      scopeKey: JSON.stringify(['subagent', event.sessionId, event.runId, childUpdate.toolCallId]),
+      update: childUpdate,
+      asMessage: { sessionId: event.sessionId, update: childUpdate } as AcpSessionNotification,
+      isSubagent: true,
+      rewrite: (nextUpdate) =>
+        ({
+          ...message,
+          update: {
+            ...update,
+            event: {
+              ...event,
+              update: nextUpdate,
+            },
+          },
+        }) as AcpSessionNotification,
+    };
+  }
+  return undefined;
+};
+
+const withoutTerminalSourcesFromToolUpdate = (update: ToolCallOrUpdate): ToolCallOrUpdate => {
   const meta = (update as Record<string, unknown>)._meta;
   const claudeCode =
     meta && typeof meta === 'object' && !Array.isArray(meta)
@@ -976,17 +1063,14 @@ const withoutTerminalSources = (message: AcpSessionNotification): AcpSessionNoti
       : meta;
 
   return {
-    ...message,
-    update: {
-      ...update,
-      rawOutput: undefined,
-      // A provider may put the same terminal snapshot in a fenced `content`
-      // block. Keep only structured diffs here; the command is derived from
-      // rawInput/enrichment and the output is materialized on completion.
-      content: update.content?.filter((content) => content.type === 'diff'),
-      ...(nextMeta === undefined ? {} : { _meta: nextMeta }),
-    },
-  } as AcpSessionNotification;
+    ...update,
+    rawOutput: undefined,
+    // A provider may put the same terminal snapshot in a fenced `content`
+    // block. Keep only structured diffs here; the command is derived from
+    // rawInput/enrichment and the output is materialized on completion.
+    content: update.content?.filter((content) => content.type === 'diff'),
+    ...(nextMeta === undefined ? {} : { _meta: nextMeta }),
+  } as ToolCallOrUpdate;
 };
 
 /**
@@ -999,13 +1083,16 @@ const compactTerminalNotificationsForHistory = (
   state: TerminalOutputState
 ): AcpSessionNotification[] =>
   batch.map((message) => {
-    if (message.update.sessionUpdate !== 'tool_call_update') return message;
+    const scoped = unwrapScopedToolNotification(message);
+    if (!scoped) return message;
 
-    const { toolCallId, status } = message.update;
-    const extracted = terminalOutputFromNotification(message);
+    const { scopeKey, update, asMessage, isSubagent, rewrite } = scoped;
+    const { status } = update;
+    const extracted =
+      terminalOutputFromNotification(asMessage) ?? runningExecuteTextOutput(asMessage);
     if (extracted) {
-      const previous = state.get(toolCallId);
-      state.set(toolCallId, {
+      const previous = state.get(scopeKey);
+      state.set(scopeKey, {
         output: appendTerminalTail(previous?.output ?? '', extracted.output),
         truncated: previous?.truncated === true || extracted.truncated,
         exitStatus: extracted.exitStatus ?? previous?.exitStatus,
@@ -1014,31 +1101,111 @@ const compactTerminalNotificationsForHistory = (
 
     const isTerminalStatus = status === 'completed' || status === 'failed';
     if (!isTerminalStatus) {
-      return extracted ? withoutTerminalSources(message) : message;
+      return extracted ? rewrite(withoutTerminalSourcesFromToolUpdate(update)) : message;
     }
 
-    const terminal = state.get(toolCallId);
-    state.delete(toolCallId);
+    const terminal = state.get(scopeKey);
+    state.delete(scopeKey);
     if (!terminal) return message;
 
-    const stripped = withoutTerminalSources(message);
-    if (stripped.update.sessionUpdate !== 'tool_call_update') return stripped;
-    return {
+    const stripped = withoutTerminalSourcesFromToolUpdate(update);
+    if (isSubagent) {
+      return rewrite({
+        ...stripped,
+        // `isLodySubagentOutput` only accepts ACP wire `content` blocks, so pass the
+        // compacted 1 KiB tail through `rawOutput` for `buildToolCallMessageForHistory`.
+        rawOutput: {
+          output: terminal.output,
+          truncated: terminal.truncated,
+          ...(terminal.exitStatus?.exitCode != null
+            ? { exit_code: terminal.exitStatus.exitCode }
+            : {}),
+        },
+      } as ToolCallOrUpdate);
+    }
+
+    return rewrite({
       ...stripped,
-      update: {
-        ...stripped.update,
-        content: [
-          ...(stripped.update.content ?? []),
-          {
-            type: 'terminal_output',
-            output: terminal.output,
-            stream: 'combined',
-            truncated: terminal.truncated,
-            exitStatus: terminal.exitStatus,
-          },
-        ],
-      },
-    } as AcpSessionNotification;
+      content: [
+        ...(stripped.content ?? []),
+        {
+          type: 'terminal_output',
+          output: terminal.output,
+          stream: 'combined',
+          truncated: terminal.truncated,
+          exitStatus: terminal.exitStatus,
+        },
+      ],
+    } as ToolCallOrUpdate);
+  });
+
+/**
+ * A running execute call's plain `content` text is a terminal snapshot even when
+ * no structured or fenced form identifies it. Completion updates keep their own
+ * path: enrichment turns their text into `rawOutput`.
+ */
+const runningExecuteTextOutput = (
+  message: AcpSessionNotification
+): TerminalOutputAccumulator | undefined => {
+  const update = message.update;
+  if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
+    return undefined;
+  }
+  if (update.status === 'completed' || update.status === 'failed') return undefined;
+  if (update.kind !== 'execute' || !Array.isArray(update.content)) return undefined;
+  const texts = extractTextFromContentBlocks(update.content);
+  if (texts.length === 0) return undefined;
+  return { output: texts.join('\n'), truncated: false };
+};
+
+const toolTextLength = (content: AcpToolCallUpdateContent): number =>
+  extractTextFromContentBlocks(content).reduce((total, text) => total + text.length, 0);
+
+const boundToolCallUpdateContentForMemory = (
+  content: AcpToolCallUpdateContent
+): AcpToolCallUpdateContent =>
+  content.flatMap((block) =>
+    block.type === 'terminal'
+      ? [block]
+      : (stripToolCallPayloadsForHistory([
+          block as unknown as Parameters<typeof stripToolCallPayloadsForHistory>[0][number],
+        ]) as unknown as AcpToolCallUpdateContent)
+  );
+
+/**
+ * Bounds how much replaced running-tool text a call can leave in the CRDT
+ * history. Read/edit payloads are stripped by the shared compactor, and
+ * execute output has already been reduced to a terminal tail above.
+ */
+const boundRunningToolTextForHistory = (
+  batch: AcpSessionNotification[],
+  state: RunningToolTextState
+): AcpSessionNotification[] =>
+  batch.map((message) => {
+    const scoped = unwrapScopedToolNotification(message);
+    if (!scoped) return message;
+    const { scopeKey, update, rewrite } = scoped;
+    if (update.status === 'completed' || update.status === 'failed') {
+      const running = state.get(scopeKey);
+      state.delete(scopeKey);
+      if (!running?.deferred || update.content !== undefined) return message;
+      return rewrite({ ...update, content: running.deferred } as ToolCallOrUpdate);
+    }
+    if (update.kind === 'read' || update.kind === 'edit' || !Array.isArray(update.content)) {
+      return message;
+    }
+    const length = toolTextLength(update.content);
+    if (length === 0) return message;
+    const running = state.get(scopeKey) ?? { written: 0 };
+    state.set(scopeKey, running);
+    if (!running.deferred && running.written + length <= RUNNING_TOOL_TEXT_HISTORY_BUDGET) {
+      running.written += length;
+      return message;
+    }
+    running.deferred = boundToolCallUpdateContentForMemory(update.content);
+    const withoutContent = { ...update };
+    delete withoutContent.content;
+    return rewrite(withoutContent as ToolCallOrUpdate);
   });
 
 const filterNotificationsForHistory = (

@@ -3,12 +3,9 @@
  * agent's `NewSessionResponse.configOptions` before they are cached for the UI
  * or applied in a live session.
  *
- * `acp-extension-claude` started exposing an `agent`-id config option, but the
- * client does not support it yet, so we filter it out for now instead of
- * surfacing an unhandled selector. Tracked as
- * BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED in
- * `docs/backward-compatibility.md`; remove the id from this set once the option
- * is supported.
+ * `acp-extension-claude` exposes an `agent`-id config option that the client
+ * does not support yet, so it is filtered out instead of surfacing an unhandled
+ * selector. Remove the id from this set once the option is supported.
  */
 export const FILTERED_ACP_CONFIG_OPTION_IDS: ReadonlySet<string> = new Set(['agent']);
 

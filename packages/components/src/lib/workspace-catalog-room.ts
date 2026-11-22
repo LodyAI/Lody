@@ -4,9 +4,11 @@ import {
   getWorkspaceFlockDocId,
   listWorkspaceAgentRoles,
   listWorkspaceMcpServers,
+  listWorkspacePinSections,
   listWorkspaceProjects,
   readWorkspaceFlockRowsFromFlock,
   type AgentRole,
+  type PinSection,
   type ProjectMcpDefault,
   type WorkspaceFlockEvent,
   type WorkspaceFlockRowMap,
@@ -28,6 +30,8 @@ export type WorkspaceCatalogSnapshot = {
   roles: AgentRole[];
   /** Multi-repository Project groups, sorted by name. */
   projects: WorkspaceProject[];
+  /** User pin sections in display order. */
+  pinSections: PinSection[];
   /** Explicit per-project default MCP selections, keyed by `getProjectMcpKey`. */
   projectMcpDefaults: Readonly<Record<string, ProjectMcpDefault>>;
   /**
@@ -49,6 +53,7 @@ export const EMPTY_WORKSPACE_CATALOG: WorkspaceCatalogSnapshot = Object.freeze({
   servers: Object.freeze([]) as unknown as WorkspaceMcpServerMeta[],
   roles: Object.freeze([]) as unknown as AgentRole[],
   projects: Object.freeze([]) as unknown as WorkspaceProject[],
+  pinSections: Object.freeze([]) as unknown as PinSection[],
   projectMcpDefaults: Object.freeze({}),
   loaded: false,
   failed: false,
@@ -115,6 +120,7 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
   const servers = reuseUnchanged(previous.servers, listWorkspaceMcpServers(rows));
   const roles = reuseUnchanged(previous.roles, listWorkspaceAgentRoles(rows));
   const projects = reuseUnchanged(previous.projects, listWorkspaceProjects(rows));
+  const pinSections = reuseUnchanged(previous.pinSections, listWorkspacePinSections(rows));
   const projectMcpDefaults = reuseUnchangedRecord(
     previous.projectMcpDefaults,
     getProjectMcpDefaults(rows)
@@ -123,6 +129,7 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
     servers === previous.servers &&
     roles === previous.roles &&
     projects === previous.projects &&
+    pinSections === previous.pinSections &&
     projectMcpDefaults === previous.projectMcpDefaults &&
     previous.loaded &&
     previous.synced === synced
@@ -133,6 +140,7 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
     servers,
     roles,
     projects,
+    pinSections,
     projectMcpDefaults,
     loaded: true,
     failed: false,

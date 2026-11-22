@@ -188,7 +188,7 @@ function Summary({
 
   return (
     <div {...withClassName(stylex.props(styles.summary, inRow && styles.summaryInRow), className)}>
-      {isLocal ? <Badge>{t('workspace.machines.thisDevice', 'This device')}</Badge> : null}
+      {isLocal ? <Badge>{t('workspace.machines.thisDevice', 'This machine')}</Badge> : null}
       {isPrivate ? (
         <Badge icon={<LockKeyhole aria-hidden {...stylex.props(styles.glyph)} />}>
           {t('workspace.machines.private', 'Private')}

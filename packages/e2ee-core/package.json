@@ -19,7 +19,7 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run --no-file-parallelism",
+    "test": "vitest run",
     "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts' 'scripts/**/*.ts'",
     "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts' 'scripts/**/*.ts'",
     "check:docs": "tsx scripts/check-public-docs.ts",
@@ -48,6 +48,6 @@
     "oxfmt": "^0.65.0",
     "tsx": "4.23.7",
     "typescript": "catalog:",
-    "vitest": "3.2.4"
+    "vitest": "catalog:"
   }
 }

@@ -12,7 +12,6 @@ const shortcut = (overrides: Partial<PromptShortcut> = {}): PromptShortcut => ({
   id: 'shortcut-1',
   workspaceId: 'workspace-1',
   ownerUserId: 'user-1',
-  visibility: 'private',
   name: 'Review PR',
   slug: 'review-pr',
   prompt: 'Review the current diff.',
@@ -53,7 +52,6 @@ describe('PromptShortcutForm command field', () => {
         <PromptShortcutForm
           initial={initial}
           options={{ projects: [], machines: [], providers: [] }}
-          canShare={false}
           saving={false}
           isNew={isNew}
           onSave={vi.fn(async () => {})}

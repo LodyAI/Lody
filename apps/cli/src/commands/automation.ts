@@ -5,10 +5,16 @@ import { printJson, runOneShotCommand, type CommonCommandOptions } from '@/lib/c
 import { sendAutomationCommand } from '@/automations/control/client';
 
 export const automationCommand = new Command('automation').description(
-  'Wait for a JavaScript condition and continue the registering Session.'
+  'Wait for a JavaScript condition or a Lody-run command and continue the registering Session.'
 );
+const collectEnv = (value: string, previous: Record<string, string> = {}) => {
+  const separator = value.indexOf('=');
+  if (separator <= 0) throw new Error(`Expected KEY=VALUE, got ${value}`);
+  return { ...previous, [value.slice(0, separator)]: value.slice(separator + 1) };
+};
 for (const action of [
   'register',
+  'run',
   'list',
   'show',
   'cancel',
@@ -23,6 +29,14 @@ for (const action of [
     .option('--debug', 'Debug logging');
   const hasId = ['show', 'cancel'].includes(action);
   if (hasId) command.argument('<id>');
+  if (action === 'run')
+    command
+      .description('Run a long command under Lody and resume the Session when it exits')
+      .argument('<command>', 'Executable; place it after -- when arguments start with -')
+      .argument('[args...]', 'Arguments, passed without a shell')
+      .option('--cwd <path>', 'Directory relative to the Session workdir')
+      .option('--env <KEY=VALUE>', 'Extra environment variable (repeatable)', collectEnv)
+      .option('--reason <text>', 'What the Session is waiting for');
   if (action === 'register')
     command
       .requiredOption('--file <path>', 'JavaScript condition function')
@@ -36,8 +50,10 @@ for (const action of [
       .option('--limit <count>', 'Maximum activities (1–100)', '50')
       .option('--before <cursor>', 'JSON nextCursor from the previous page');
   command.action(async (...values: unknown[]) => {
-    const options = values[hasId ? 1 : 0] as CommonCommandOptions & {
+    const options = values[action === 'run' ? 2 : hasId ? 1 : 0] as CommonCommandOptions & {
       file?: string;
+      cwd?: string;
+      env?: Record<string, string>;
       session?: string;
       reason?: string;
       interval?: string;
@@ -63,6 +79,15 @@ for (const action of [
                       : Date.parse(options.expiresAt),
                   }
                 : {}),
+            }
+          : {}),
+        ...(action === 'run'
+          ? {
+              command: values[0],
+              args: values[1],
+              cwd: options.cwd,
+              env: options.env,
+              reason: options.reason,
             }
           : {}),
         ...(action === 'configure' && file ? { settings: JSON.parse(file) } : {}),

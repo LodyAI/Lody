@@ -1,6 +1,6 @@
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
@@ -9,6 +9,15 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
+
+/**
+ * Desktop flyout and the mobile pushed panel. A real length, not
+ * `w-[min(20rem,calc(100vw-2rem))]`: that calc is invalid CSS (the minus needs
+ * spaces), so the declaration was dropped and the panel grew out to
+ * `--available-width` — a one-line description then stretched across the
+ * composer and the footnote landed on the model row.
+ */
+const MCP_PANEL_CLASS = 'w-80 max-w-[calc(100vw_-_2rem)]';
 
 /** Per-turn MCP selection, surfaced as a second level of the "+" menu. */
 export interface AttachmentAddMenuMcp {
@@ -70,6 +79,10 @@ export function AttachmentAddMenu({
   const [open, setOpen] = useState(false);
   // Mobile's pushed panel. Desktop uses a real submenu and stays on 'root'.
   const [view, setView] = useState<'root' | 'mcp'>('root');
+  // iOS dismisses the file picker as soon as the prompt regains focus (the
+  // keyboard returns instead), so choosing the picker skips the composer
+  // focus restore every other selection gets.
+  const filePickerOpenedRef = useRef(false);
   const triggerLabel = t('sessions.addAttachmentMenu', 'Add attachment');
 
   const mcpServers = mcp?.servers ?? [];
@@ -125,6 +138,7 @@ export function AttachmentAddMenu({
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
+        if (nextOpen) filePickerOpenedRef.current = false;
         // Always reopen at the root level; a stale pushed panel would hide the
         // upload actions behind a back row.
         if (!nextOpen) setView('root');
@@ -172,13 +186,14 @@ export function AttachmentAddMenu({
       <Menu.Content
         align="start"
         side="top"
+        finalFocus={() => !filePickerOpenedRef.current}
         /* Size to the widest item (`w-max`) so short attachment labels don't
            leave a wide blank gutter; a small floor keeps it from
-           collapsing too narrow. The pushed MCP panel needs room for server
-           names, so it takes its own floor and ceiling. */
+           collapsing too narrow. The pushed MCP panel keeps a fixed width so
+           a long server description wraps instead of stretching the composer. */
         className={cn(
           view === 'mcp'
-            ? 'w-[min(20rem,calc(100vw-2rem))]'
+            ? MCP_PANEL_CLASS
             : cn('w-max', isMobile ? 'min-w-[160px]' : 'min-w-[140px]')
         )}
       >
@@ -201,7 +216,10 @@ export function AttachmentAddMenu({
           <div key="root" className="animate-in fade-in-0 slide-in-from-left-2 duration-150">
             {onAddAttachment ? (
               <Menu.Item
-                onClick={onAddAttachment}
+                onClick={() => {
+                  filePickerOpenedRef.current = true;
+                  onAddAttachment();
+                }}
                 disabled={attachmentDisabled || !!attachmentFeatureReason}
                 title={attachmentFeatureReason}
                 className={itemClass}
@@ -234,7 +252,11 @@ export function AttachmentAddMenu({
                     <Menu.SubmenuTrigger className={itemClass} disabled={mcp.disabled} icon={Plug}>
                       {mcpLabel}
                     </Menu.SubmenuTrigger>
-                    <Menu.Content className="w-[min(20rem,calc(100vw-2rem))]">
+                    {/* `end` keeps the panel above the composer toolbar. The
+                        trigger is the last row of a menu that opens upward;
+                        `start` (the submenu default) hangs the description and
+                        the footnote down onto the model row. */}
+                    <Menu.Content align="end" sideOffset={8} className={MCP_PANEL_CLASS}>
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
                     </Menu.Content>
                   </Menu.Submenu>
@@ -280,11 +302,14 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
             closeOnClick={false}
             onCheckedChange={(checked) => toggle(server.id, checked === true)}
           >
-            <span className="flex min-w-0 flex-1 flex-col">
+            <span className="flex min-w-0 flex-1 flex-col whitespace-normal">
               <span className={cn('truncate', isMobile && 'text-[15px]')}>{server.name}</span>
               <span
                 className={cn(
-                  'truncate text-xs leading-snug text-muted-foreground',
+                  // The row label slot is nowrap. Override it so a sentence wraps
+                  // inside the panel instead of stretching the panel to the sentence.
+                  'line-clamp-2 whitespace-normal break-words text-xs leading-snug',
+                  'text-muted-foreground',
                   server.description ? undefined : 'font-mono'
                 )}
               >
@@ -295,9 +320,12 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
         );
       })}
       {mcp.existingSession ? (
-        <p className="select-none px-2.5 pb-1.5 pt-2 text-[11px] leading-snug text-muted-foreground">
-          {t('session.mcp.nextStartHint')}
-        </p>
+        <>
+          <Menu.Separator />
+          <p className="select-none px-2.5 pb-1.5 pt-1.5 text-[11px] leading-snug text-muted-foreground">
+            {t('session.mcp.nextStartHint')}
+          </p>
+        </>
       ) : null}
     </>
   );

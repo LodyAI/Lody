@@ -121,24 +121,17 @@ CLI 从已同步数据 dispatch（`apps/cli/src/session/session-dispatch-logic.t
 并直接取消暂存上传，不会询问。发送日志中上传后的计费资格复查已删除，输入框在
 发送时仍会检查。dispatch RPC 失败不会自动重试，CLI watcher 会从已同步历史中接手。
 
-## 旧数据迁移
+## 旧数据
 
-`lib/legacy-session-send-migration.ts` 在每个运行时首次元数据同步后运行一次，
-受 `navigator.locks` 保护，只读取当前账号和工作区：
-
-- 消息不存在的遗留记录作为普通本地发送写入。version 2 的 `committed` 记录绝不
-  重新追加，因为新副本可能只是尚未同步到它们。
-- dispatch 记录和从未发出的 guide 尽力写入执行指针并 dispatch；
-  `guideOffer: 'offered'` 的 guide 保持不动。
-- 含未就绪附件的记录通过 `console.warn` 提示后丢弃。
-- 处理完的记录会删除，失败的记录在下次启动时重试，数据库清空后删除。
-
-本变更发布几个版本后，删除该迁移以及对强制清除标记的读取。
+没有任何带 tag 的桌面版本发布过发送日志：它由 cf5c925bb 引入，在 v0.102.0
+之前已被删除。清除缓存时仍会删除残留的 `lody-session-send-v1` 数据库。一次性
+记录迁移和对 `force-cache` / `force-all` 清除标记的读取，已在约定的过渡期过后
+删除（[决定](2026-11-16-drop-pre-october-compatibility.zh.md)）；那段时间未打 tag 的构建若留下记录，会随数据库一起丢弃。
 
 ## 验证
 
 `packages/components/tests/` 下的行为测试覆盖本变更，包括
-`legacy-session-send-migration.test.ts`、`session-pending-sends-host.test.tsx`、
+`session-pending-sends-host.test.tsx`、
 `use-session-actions.test.ts`、`session-attachment-preparation.test.ts`、
 `session-pending-message-row.test.tsx`、`clear-local-cache.test.ts`、
 `runtime-provider.test.tsx` 和 `warm-window-lifecycle.test.ts`。发送日志、恢复与
@@ -149,7 +142,6 @@ CLI 从已同步数据 dispatch（`apps/cli/src/session/session-dispatch-logic.t
 - 附件完成前页面关闭、崩溃、重新加载或工作区运行时被销毁，暂存发送会丢失。
   浏览器可能不显示 `beforeunload` 提示（移动端尤其如此），切换工作区也不会询问。
 - 未执行打包设备或原生移动端验收。
-- 旧数据迁移只能重放旧版本保存的内容，上传未完成的记录会被丢弃。
 
 本决策替代[本地优先发送](2026-09-29-local-first-session-send.zh.md)、
 [延迟附件方案](../architecture/2026-09-14-deferred-attachment-send.zh.md)中与发送

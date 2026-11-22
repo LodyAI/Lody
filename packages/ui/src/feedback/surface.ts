@@ -41,7 +41,6 @@ const spin = stylex.keyframes({
 });
 
 export const feedbackSurface = stylex.create({
-  // ── The message ──────────────────────────────────────────────────────────
   /** The block: the mark, and the words beside it. */
   message: {
     display: 'flex',
@@ -196,7 +195,6 @@ export const feedbackSurface = stylex.create({
     outlineStyle: 'none',
   },
 
-  // ── The wait ─────────────────────────────────────────────────────────────
   progress: {
     display: 'flex',
     flexDirection: 'column',

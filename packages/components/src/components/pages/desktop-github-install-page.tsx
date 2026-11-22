@@ -1,9 +1,11 @@
+import { readGitHubInstallError } from '@/lib/github-installation-recovery';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Github } from 'lucide-react';
 
 import { Button } from '@lody/ui/button';
 import { SecondaryPage } from '@/components/pages/secondary-page';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** How long the deep link gets to open the app before the page offers the fallback. */
 const FALLBACK_DELAY_MS = 3000;
@@ -30,15 +32,18 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
   }, [deepLink]);
 
   const copyLink = async () => {
-    if (!deepLink || !navigator.clipboard?.writeText) return;
+    if (!deepLink) return;
     try {
-      await navigator.clipboard.writeText(deepLink);
+      await copyTextToClipboard(deepLink);
       setCopied(true);
     } catch {
       setCopied(false);
     }
   };
 
+  const installFailed = deepLink
+    ? readGitHubInstallError(new URL(deepLink).search) !== null
+    : false;
   const state = deepLink ? 'ask' : 'arrive';
   const openLabel = t('desktopGithubInstall.openButton', 'Open Lody Desktop');
 
@@ -49,10 +54,15 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
     },
     ask: {
       title: t('desktopGithubInstall.title', 'Continue in Lody Desktop'),
-      description: t(
-        'desktopGithubInstall.description',
-        'GitHub is installed. Finish connecting it in the app.'
-      ),
+      description: installFailed
+        ? t(
+            'desktopGithubInstall.failedDescription',
+            'The installation was not connected. Open Lody Desktop to review the error and retry.'
+          )
+        : t(
+            'desktopGithubInstall.description',
+            'GitHub is installed. Finish connecting it in the app.'
+          ),
     },
   }[state];
 
@@ -75,7 +85,7 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
         deepLink ? (
           <>
             {copyButton}
-            <Button render={<a href={deepLink} />} size="large">
+            <Button render={<a href={deepLink} aria-label={openLabel} />} size="large">
               {openLabel}
             </Button>
           </>

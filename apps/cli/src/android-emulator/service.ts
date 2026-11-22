@@ -1,7 +1,7 @@
 import { ANDROID_PREVIEW_VIEWER_GRACE_MS } from './preview-policy';
 import { DevicePreviewService, type DevicePreviewDependencies } from '../device-preview/service';
 import type { AndroidEmulatorRequest, AndroidEmulatorResponse } from '@lody/shared';
-import { listAndroidDevices, bootAndroidDevice } from './devices';
+import { listAndroidDevices, bootAndroidDevice, shutdownAndroidDevice } from './devices';
 import { ensureScrcpyServer } from './runtime';
 import { openAndroidConnection } from './connection';
 export class AndroidEmulatorService extends DevicePreviewService {
@@ -15,6 +15,7 @@ export class AndroidEmulatorService extends DevicePreviewService {
         list: listAndroidDevices,
         prepare: (signal) => ensureScrcpyServer(signal, deps.runtimeBaseUrl),
         boot: bootAndroidDevice,
+        shutdown: shutdownAndroidDevice,
         open: (runtime, device, signal, quality) =>
           openAndroidConnection(runtime, device.id, signal, quality),
         environmentMessage:

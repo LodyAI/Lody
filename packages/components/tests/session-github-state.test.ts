@@ -2,7 +2,11 @@ import { planPullRequestLifecycle } from '@lody/shared';
 import { describe, expect, it } from 'vitest';
 import type { SessionMeta, SessionId, SessionPullRequestMeta } from '@lody/shared';
 
-import { getPullRequestNumber, getPullRequestRepoFullName, getSessionGitHubState } from '../src/lib/session-github-state';
+import {
+  getPullRequestNumber,
+  getPullRequestRepoFullName,
+  getSessionGitHubState,
+} from '../src/lib/session-github-state';
 
 const createPullRequest = (
   overrides: Partial<SessionPullRequestMeta> = {}

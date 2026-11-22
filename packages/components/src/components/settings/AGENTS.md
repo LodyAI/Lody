@@ -6,8 +6,8 @@ Parent `AGENTS.md` files also apply.
 Settings owns the workspace catalog surfaces (Providers, MCP servers, Agent
 Roles). Before saving a catalog row, follow the durability rule in
 [shared source contracts](../../../../shared/src/AGENTS.md#workspace-mcp--roles).
-Lody Agent connections and Sorbet endpoints follow
-[Lody Agent setup](README.md#lody-agent-setup).
+Lody Agent connections, Sorbet endpoints and [the harness surface](../harness/AGENTS.md)
+follow [Lody Agent setup](README.md#lody-agent-setup).
 
 ## Layout and components
 
@@ -58,7 +58,8 @@ Lody Agent connections and Sorbet endpoints follow
   verification.
 - Keep three.js/R3F behind the lazy usage-calendar module so lightweight and SSR
   consumers never evaluate its renderer graph.
-- Charts follow [timeline rules](../../../../../specs/usage-timeline.md).
+- Hourly labels use device time. Calendar and day-detail keys use UTC
+  ([timeline rules](../../../../../specs/usage-timeline.md)).
   Cache bounded day snapshots per auth session/workspace/date for one hour;
   refresh expiry without blanking data. Keep auth/capability gates
   ([cache](../../../../../specs/usage-detail-cache.md)).
@@ -127,6 +128,11 @@ component details.
 
 ## Seat billing
 
+- Ordinary join approval refreshes the Better Auth member cache after commitment.
+  The existing owner-state subscription carries an optional roster version for
+  cross-device refresh. Cache or marker failure preserves approval; scope the
+  panel by account/workspace and retain changes arriving during a refresh.
+
 - Reuse `SeatCostNotice` in invitation and approval entry points. Approval must show
   the current cost and deferred collection policy before committing membership.
 - Removal/leave do not cancel accrued service fees. Deleted workspace invoices stay
@@ -134,3 +140,5 @@ component details.
   in personal Account settings; invoice details reuse `BillingInvoiceDetails`.
 
 - Billing telemetry: never infer payment from returns; exclude URLs, codes and raw errors.
+
+- GitHub installation: follow [authorization/recovery](README.md#github-installation).

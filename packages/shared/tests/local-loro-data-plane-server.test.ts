@@ -14,10 +14,16 @@ import {
 } from '../src/local-loro-data-plane-server';
 import {
   base64ToBytes,
+  createJsonLineSplitter,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
   type FlockVersionVector,
   type LocalLoroDataPlaneServerMessage,
 } from '../src/local-loro-data-plane';
+import {
+  PromptSuggestionStore,
+  readPromptSuggestion,
+  PROMPT_SUGGESTION_TTL_MS,
+} from '../src/prompt-suggestions';
 import { MemoryFlock } from './helpers/memory-flock';
 
 const WORKSPACE_ID = 'ws';
@@ -407,6 +413,61 @@ describe('prompt suggestion channel', () => {
       await server.disposeLegacy();
       store.destroy();
       receivedStore.destroy();
+    }
+  });
+
+  it('isolates machine/session identity and replaces text with explicit empty or failed results', () => {
+    const source = new PromptSuggestionStore();
+    const peer = new EphemeralStore(PROMPT_SUGGESTION_TTL_MS);
+    try {
+      source.publish('machine-a', {
+        sessionId: 'session-a',
+        result: { type: 'completed', text: '  hello\nworld ' },
+      });
+      source.publish('machine-a', {
+        sessionId: 'session-b',
+        result: { type: 'completed', text: 'other' },
+      });
+      peer.apply(source.encode());
+      expect(readPromptSuggestion(peer.getAllStates(), 'machine-a', 'session-a')).toBe(
+        '  hello\nworld '
+      );
+      expect(readPromptSuggestion(peer.getAllStates(), 'machine-b', 'session-a')).toBeNull();
+      for (const result of [
+        { type: 'completed', text: null },
+        { type: 'completed', text: '' },
+        { type: 'failed' },
+      ] as const) {
+        vi.advanceTimersByTime(1);
+        source.publish('machine-a', { sessionId: 'session-a', result });
+        peer.apply(source.encode());
+        expect(readPromptSuggestion(peer.getAllStates(), 'machine-a', 'session-a')).toBeNull();
+        expect(readPromptSuggestion(peer.getAllStates(), 'machine-a', 'session-b')).toBe('other');
+      }
+    } finally {
+      source.destroy();
+      peer.destroy();
+    }
+  });
+});
+
+describe('local data-plane UTF-8 chunk decoding', () => {
+  const UTF8_PATH = '01_CH3.5.5_软件研究_申报资料/CH3.5.5.1_软件描述文档.md';
+
+  it('reassembles a flock bundle frame split at every byte offset', () => {
+    const frame = `${JSON.stringify({ kind: 'flock-json', entries: { [UTF8_PATH]: { kind: 'file' } } })}\n`;
+    const bytes = new TextEncoder().encode(frame);
+
+    for (let offset = 1; offset < bytes.byteLength; offset += 1) {
+      const lines: string[] = [];
+      const splitLines = createJsonLineSplitter({ onLine: (line) => lines.push(line) });
+      splitLines(bytes.subarray(0, offset));
+      splitLines(bytes.subarray(offset));
+
+      expect(lines).toHaveLength(1);
+      const parsed = JSON.parse(lines[0] as string) as { entries: Record<string, unknown> };
+      expect(Object.keys(parsed.entries)).toEqual([UTF8_PATH]);
+      expect(lines[0]).not.toContain('\uFFFD');
     }
   });
 });

@@ -50,7 +50,7 @@ describe('CLI exception ingestion using the real SDK', () => {
   it('sends only the fixed error vocabulary, excluding original errors and extra fields', async () => {
     const { captureException, isErrorReportingEnabled } = await import('../src/instrument');
     expect(isErrorReportingEnabled()).toBe(true);
-    await captureException(new Error('PRIVATE_ATTACHMENT_NAME'), {
+    await captureException(new TypeError('PRIVATE_ATTACHMENT_NAME'), {
       component: 'PRIVATE_PATH',
       extra: { error_code: 'e2ee_feature_unavailable', nested: { path: 'PRIVATE_CODE' } },
     });
@@ -59,6 +59,10 @@ describe('CLI exception ingestion using the real SDK', () => {
     expect(wire).not.toContain('PRIVATE_');
     expect(wire).toContain('e2ee_feature_unavailable');
     expect(wire).toContain('$exception');
+    expect(wire).toContain('TypeError');
+    expect(wire).toContain(
+      'lody-redacted-v1:cli:cli:unknown:captureException:TypeError:e2ee_feature_unavailable'
+    );
     await captureException('OTHER_PRIVATE_ERROR', {
       extra: { error_code: 'PRIVATE_UNRECOGNIZED_CODE' },
     });
