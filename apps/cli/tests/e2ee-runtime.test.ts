@@ -13,7 +13,11 @@ import {
 import { getScheduleRoomId, type WorkspaceId } from '@lody/shared';
 import { LoroRepo } from 'loro-repo';
 import { LoroDocumentManager } from '../src/lib/loro/doc';
-import { CloudE2eeLedgerOutage, CloudE2eeMemberRemoved } from '../src/lib/cloud-e2ee-errors';
+import {
+  CloudE2eeDeviceRevoked,
+  CloudE2eeLedgerOutage,
+  CloudE2eeMemberRemoved,
+} from '../src/lib/cloud-e2ee-errors';
 import { randomUUID } from 'node:crypto';
 import { resetCliE2eeIdentity } from '../src/lib/e2ee/reset-identity';
 import { createHash } from 'node:crypto';
@@ -76,6 +80,7 @@ import { commitDocUpdates, createDocRoom } from '@lody/shared/node/native-docs';
 import {
   finishPendingNativeWipes,
   NATIVE_CONTENT_REMOTE_ID,
+  nativeLocalIdentities,
   nativePendingWipeMarker,
 } from '@lody/shared/node/native-encrypted-workspace';
 import { createLoroStreamUrl, getLoroStreamIdForDocId } from '@lody/shared';
@@ -213,9 +218,14 @@ describe('machine E2EE local runtime', () => {
     }
   });
 
-  it.each([{ hostDown: false }, { hostDown: true }])(
-    'seals daemon writes with the machine writer and, on member removal (host down: $hostDown), erases the identity and drops the namespace',
-    async ({ hostDown }) => {
+  it.each([
+    { hostDown: false, removal: 'member' },
+    { hostDown: true, removal: 'member' },
+    { hostDown: false, removal: 'revoked-shared' },
+    { hostDown: false, removal: 'revoked-last' },
+  ] as const)(
+    'seals daemon writes with the machine writer; on $removal removal (host down: $hostDown) the namespace goes only when no local identity stays current',
+    async ({ hostDown, removal }) => {
       const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-native-engine-'));
       vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
       const cleanups: (() => Promise<unknown>)[] = [];
@@ -283,7 +293,10 @@ describe('machine E2EE local runtime', () => {
               return page(fixture.records);
             },
             getContentToken: async () => {
-              if (removed) throw new CloudE2eeMemberRemoved();
+              if (removed)
+                throw removal === 'member'
+                  ? new CloudE2eeMemberRemoved()
+                  : new CloudE2eeDeviceRevoked();
               return {
                 token: 'synthetic-content-token',
                 bucketId,
@@ -341,6 +354,22 @@ describe('machine E2EE local runtime', () => {
         );
         expect(existsSync(namespaceFile)).toBe(true);
         const marker = nativePendingWipeMarker(dataDir, 'workspace');
+        const identities = nativeLocalIdentities(dataDir, 'workspace');
+        if (removal !== 'member') {
+          /** Desktop main's identity on this installation: the Owner's current personal device, or one the ledger does not hold. */
+          const personal =
+            removal === 'revoked-shared'
+              ? `personal:${fixture.sender}`
+              : `personal:${'ab'.repeat(32)}`;
+          await identities.record(personal);
+          removed = true;
+          await host.refresh();
+          await host.removalCleanup().catch(() => undefined);
+          expect(await identities.list()).toEqual(removal === 'revoked-shared' ? [personal] : []);
+          expect(existsSync(namespaceFile)).toBe(removal === 'revoked-shared');
+          expect(await marker.read()).toBe(false);
+          return;
+        }
         removed = true;
         if (hostDown) {
           hostBlocked = true;

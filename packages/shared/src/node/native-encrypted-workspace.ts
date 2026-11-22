@@ -1,9 +1,10 @@
-import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, rm, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createLodyWorkspaceRoutes, type RepoClient } from '@loro-dev/loro-repo-client';
 import { encryptedWorkspaceNamespace } from '../workspace-streams-content';
 import { forgetDeclaredDocRooms } from './native-docs';
 import { setNativeNamespaceEncryption, setNativeNamespaceWriter } from './native-repo';
+import { fileLocksLegacy } from './file-lock';
 
 /**
  * Connects one encrypted workspace's native namespace to its encrypted content
@@ -42,6 +43,8 @@ export interface NativeEncryptedWorkspaceOptions {
   /** Runs core's EngineKeyringSync for this device; idempotent. */
   readonly syncKeyring: () => Promise<{ readonly mayWrite: boolean }>;
   readonly pendingWipe: NativePendingWipe;
+  /** This installation's identities using the namespace; the attachment records its writer. */
+  readonly identities: NativeLocalIdentities;
   /**
    * The engine holds a room it cannot open yet: an unknown key or a writer the
    * installed ledger does not admit (a rotation or admission the Streams data
@@ -108,12 +111,90 @@ export function nativePendingWipeMarker(dataDir: string, workspaceId: string): N
 }
 
 /**
+ * The identities of this installation that use one workspace's namespace: each
+ * attaching process records its writer (`personal:<key>` or `machine:<key>`), in
+ * the engine's data directory beside the namespace. Entries are only candidates:
+ * whether one is still a current device is decided against a verified ledger.
+ */
+export interface NativeLocalIdentities {
+  record(writer: string): Promise<void>;
+  /** The recorded writers. */
+  list(): Promise<string[]>;
+  /**
+   * Device revocation, decided under a machine-wide lock: forgets `writer` and
+   * returns true (wipe) unless another recorded identity is current. `stillCurrent`
+   * answers from the caller's verified ledger. The lock serializes two processes'
+   * revocations, so the later one sees the earlier one's entry gone and wipes.
+   */
+  decideRevocation(
+    writer: string,
+    stillCurrent: (writers: readonly string[]) => Promise<boolean>
+  ): Promise<boolean>;
+  /** Forgets every identity (the namespace was dropped). */
+  clear(): Promise<void>;
+}
+
+/** The signing public key a native writer name carries (`<kind>:<hex key>`). */
+export const nativeWriterSigningKey = (writer: string) => writer.slice(writer.indexOf(':') + 1);
+
+export function nativeLocalIdentities(dataDir: string, workspaceId: string): NativeLocalIdentities {
+  const root = join(dataDir, 'identities');
+  const dir = join(root, Buffer.from(workspaceId).toString('hex'));
+  const file = (writer: string) => join(dir, `${Buffer.from(writer).toString('hex')}.json`);
+  const forget = (writer: string) =>
+    unlink(file(writer)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+  const list = async () => {
+    const names = await readdir(dir).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return [] as string[];
+      throw error;
+    });
+    return names
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => Buffer.from(name.slice(0, -'.json'.length), 'hex').toString())
+      .filter(Boolean);
+  };
+  return {
+    async record(writer) {
+      if ((await list()).includes(writer)) return;
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      const temporary = `${file(writer)}.${process.pid}.pending`;
+      const handle = await open(temporary, 'w', 0o600);
+      try {
+        await handle.writeFile(JSON.stringify({ writer }));
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await rename(temporary, file(writer));
+    },
+    list,
+    decideRevocation: (writer, stillCurrent) =>
+      fileLocksLegacy.withLock(
+        `native-revocation-${Buffer.from(workspaceId).toString('hex')}`,
+        async () => {
+          const others = (await list()).filter((other) => other !== writer);
+          const keep = others.length > 0 && (await stillCurrent(others));
+          await forget(writer);
+          return !keep;
+        },
+        { locksDir: join(root, 'locks') }
+      ),
+    clear: () => rm(dir, { recursive: true, force: true }),
+  };
+}
+
+/**
  * Removes the namespace now, or, when the host is unreachable (removal while it is
  * down), as soon as the connection is back. The marker is durable first, so a
  * process exit meanwhile leaves it to the next start's sweep.
  */
 export async function wipeNativeNamespace(
-  options: Pick<NativeEncryptedWorkspaceOptions, 'client' | 'workspaceId' | 'pendingWipe'>
+  options: Pick<
+    NativeEncryptedWorkspaceOptions,
+    'client' | 'workspaceId' | 'pendingWipe' | 'identities'
+  >
 ) {
   await options.pendingWipe.write();
   try {
@@ -142,7 +223,8 @@ export async function finishPendingNativeWipes(client: RepoClient, dataDir: stri
     const workspaceId = Buffer.from(name.slice(0, -'.json'.length), 'hex').toString();
     if (!workspaceId) continue;
     const pendingWipe = nativePendingWipeMarker(dataDir, workspaceId);
-    await finishNativeWipe({ client, workspaceId, pendingWipe }).catch(() => {});
+    const identities = nativeLocalIdentities(dataDir, workspaceId);
+    await finishNativeWipe({ client, workspaceId, pendingWipe, identities }).catch(() => {});
   }
 }
 
@@ -165,6 +247,14 @@ export interface NativeEncryptedWorkspace {
    * this installation keeps using the namespace, so nothing is dropped.
    */
   retireWriter(): Promise<void>;
+  /**
+   * After this device's recorded revocation: whether the namespace must be wiped
+   * because no other identity of this installation is current. Owner decision A
+   * (2026-11-22); see {@link NativeLocalIdentities.decideRevocation}.
+   */
+  decideRevocation(
+    stillCurrent: (writers: readonly string[]) => Promise<boolean>
+  ): Promise<boolean>;
   /** Stops reinstalling on reconnect. Keys stay: another process may share the namespace. */
   close(): void;
 }
@@ -207,16 +297,65 @@ async function serveTokens(
 /**
  * Finishes an interrupted wipe: also for a removed workspace that never attaches
  * again. Every step is idempotent; only a completed drop clears the marker.
+ * `dropNamespace` also drops the namespace's keyring, writer bindings and keyring
+ * participants, and any connection may send it; `keyringClear` is refused to a
+ * connection that never configured the namespace while another process still
+ * holds it, so it is not part of the wipe. The remote goes first: removing it after
+ * the drop would reopen an empty namespace.
  */
 export async function finishNativeWipe(
-  options: Pick<NativeEncryptedWorkspaceOptions, 'client' | 'workspaceId' | 'pendingWipe'>
+  options: Pick<
+    NativeEncryptedWorkspaceOptions,
+    'client' | 'workspaceId' | 'pendingWipe' | 'identities'
+  >
 ) {
   const { client, workspaceId } = options;
-  await client.keyringClear(workspaceId);
   await client.removeRemote(workspaceId, NATIVE_CONTENT_REMOTE_ID).catch(() => {});
   await client.dropNamespace(workspaceId);
   forgetDeclaredDocRooms(client, workspaceId);
+  await options.identities.clear();
   await options.pendingWipe.clear();
+}
+
+/**
+ * Removes one local identity from the namespace after its durable removal receipt.
+ * Member removal drops the namespace. Device revocation retires the identity's
+ * writer, and drops the namespace only when no other identity of this installation
+ * is current (owner decision A, 2026-11-22). The pending-wipe marker is written
+ * before the host is reached, so a drop the host cannot take now finishes on the
+ * next connection.
+ */
+export async function removeNativeLocalIdentity(options: {
+  readonly workspaceId: string;
+  readonly reason: 'member_removed' | 'device_revoked';
+  /** This process's attachment, when it has one. */
+  readonly handle?: NativeEncryptedWorkspace;
+  readonly dataDir: string;
+  readonly writer: string;
+  /** Whether any of `writers` is a current device in the caller's verified ledger. */
+  readonly stillCurrent: (writers: readonly string[]) => Promise<boolean>;
+  readonly connect: () => Promise<{ client: RepoClient }>;
+}) {
+  const { handle, workspaceId } = options;
+  const identities = nativeLocalIdentities(options.dataDir, workspaceId);
+  if (options.reason === 'device_revoked') {
+    const retired = handle?.retireWriter().then(
+      () => undefined,
+      (cause: unknown) => cause ?? new Error('native_retire_failed')
+    );
+    const wipe = await identities.decideRevocation(options.writer, options.stillCurrent);
+    const failure = await retired;
+    if (!wipe) {
+      handle?.close();
+      if (failure) throw failure;
+      return;
+    }
+  }
+  if (handle) return handle.wipe();
+  const pendingWipe = nativePendingWipeMarker(options.dataDir, workspaceId);
+  await pendingWipe.write();
+  const { client } = await options.connect();
+  await wipeNativeNamespace({ client, workspaceId, pendingWipe, identities });
 }
 
 /**
@@ -231,6 +370,7 @@ export async function attachNativeEncryptedWorkspace(
   if (await options.pendingWipe.read()) await finishNativeWipe(options);
   setNativeNamespaceEncryption(client, workspaceId, 'encrypted');
   setNativeNamespaceWriter(client, workspaceId, options.writer);
+  await options.identities.record(options.writer);
 
   let serial: Promise<unknown> = Promise.resolve();
   let closed = false;
@@ -310,6 +450,8 @@ export async function attachNativeEncryptedWorkspace(
         await client.keyringHoldSealing(workspaceId, options.writer);
         await client.keyringRemoveSigner(workspaceId, options.writer);
       }),
+    decideRevocation: (stillCurrent) =>
+      options.identities.decideRevocation(options.writer, stillCurrent),
     close: stopServing,
   };
 }
