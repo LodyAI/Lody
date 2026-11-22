@@ -218,10 +218,15 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
       const monitorReady = new Promise<void>((resolve) => {
         monitorRequested = resolve;
       });
+      let presenceRequested: () => void = () => {};
+      const presenceReady = new Promise<void>((resolve) => {
+        presenceRequested = resolve;
+      });
       const server = createStreamsServer(metaSnapshotWithA(), (url, method, init) => {
         const ephemeral = url.searchParams.get('ephemeral');
         if (ephemeral) seen.add(ephemeral);
         if (ephemeral === 'machine-monitor') monitorRequested();
+        if (ephemeral === 'presence') presenceRequested();
         if (ephemeral && method === 'GET') {
           let stopped = false;
           let stop = () => {};
@@ -295,7 +300,7 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
       try {
         const attaching = manager.attachRemoteStreamsTransport();
         await attaching;
-        if (attachCloudEphemeralSinks) await monitorReady;
+        if (attachCloudEphemeralSinks) await Promise.all([monitorReady, presenceReady]);
         expect((await syncMeta(cli)).ok).toBe(true);
         expect(cli.repo.getMeta().get(keyA)).toBe('A');
         expect(server.bootstraps()).toBe(1);
