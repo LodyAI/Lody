@@ -50,6 +50,8 @@ export type ResolvedCoordinatorAction = {
   readonly dedupKey: string;
   readonly liveState: CoordinatorActionLiveState;
   readonly displayLabel: string;
+  readonly wasChosen?: boolean;
+  readonly statusBadgeLabel?: string;
 };
 
 export const COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID = '__custom_feedback__';
@@ -60,6 +62,7 @@ export type ResolvedCoordinatorProactiveCard = {
   readonly summary?: string;
   readonly linkedTasks: readonly ProjectBoardRow[];
   readonly actions: readonly ResolvedCoordinatorAction[];
+  readonly chosenAction?: ResolvedCoordinatorAction;
   readonly customFeedbackSummary?: string;
 };
 
@@ -674,25 +677,44 @@ export function resolveCoordinatorProactiveCard(args: {
     if (seenDedupKeys.has(dedupKey)) continue;
     seenDedupKeys.add(dedupKey);
 
+    const resolution = resolutions[spec.id];
     const { liveState, displayLabel } = resolveSingleActionLiveStatus({
       spec,
       dedupKey,
-      resolution: resolutions[spec.id],
+      resolution,
       tasksById,
       translate,
     });
     if (liveState === 'dismissed') continue;
+
+    const wasChosen = resolution?.status === 'executed';
+    const statusBadgeLabel =
+      liveState === 'running'
+        ? translate('projectMode.board.working', 'In progress')
+        : liveState === 'completed'
+          ? displayLabel !== spec.label
+            ? displayLabel
+            : translate('projectMode.card.statusSelected', 'Selected')
+          : undefined;
 
     resolvedActions.push({
       spec,
       dedupKey,
       liveState,
       displayLabel,
+      wasChosen,
+      statusBadgeLabel,
     });
   }
 
   const customFeedback = resolutions[COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID];
   if (resolvedActions.length === 0 && !customFeedback) return null;
+
+  const chosenAction =
+    resolvedActions.find((item) => item.wasChosen) ??
+    (resolvedActions.length > 0 && resolvedActions.every((item) => item.liveState === 'completed')
+      ? resolvedActions[0]
+      : undefined);
 
   const linkedIds = extractBubbleLinkedSessionIds(entry);
   const linkedTasks: ProjectBoardRow[] = [];
@@ -709,6 +731,7 @@ export function resolveCoordinatorProactiveCard(args: {
     summary: normalizedCard?.summary,
     linkedTasks,
     actions: resolvedActions,
+    chosenAction,
     customFeedbackSummary:
       customFeedback?.status === 'executed' ? customFeedback.summary : undefined,
   };

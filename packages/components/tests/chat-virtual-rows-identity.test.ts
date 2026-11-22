@@ -1007,10 +1007,34 @@ describe('coordinator conversation bubbles and search', () => {
       kind: 'next_step',
       title: '下一步建议：修复 iOS 配置重新加载逻辑',
       linkedTasks: [taskPrReady, taskNoPrDirty],
+      chosenAction: undefined,
       actions: [
         expect.objectContaining({ liveState: 'ready', displayLabel: '让天才程序员修复并开 PR' }),
         expect.objectContaining({ liveState: 'ready', displayLabel: '合并 #42' }),
       ],
+    });
+
+    const chosenRunningCard = resolveCoordinatorProactiveCard({
+      entry: {
+        ...bubblePlusCardEntry,
+        actionResolutions: {
+          'card-fix-pr': { status: 'executed', resolvedAt: 3000 },
+        },
+      },
+      tasksById: new Map<string, ProjectBoardRow>([
+        ['task-pr', taskPrReady],
+        ['task-nopr', { ...taskNoPrDirty, bucket: 'working' }],
+      ]),
+      translate,
+    });
+    expect(chosenRunningCard?.chosenAction).toMatchObject({
+      liveState: 'running',
+      wasChosen: true,
+      statusBadgeLabel: 'In progress',
+      spec: expect.objectContaining({
+        id: 'card-fix-pr',
+        label: '让天才程序员修复并开 PR',
+      }),
     });
 
     const updatedCardEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {

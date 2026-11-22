@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import {
+  COORDINATOR_CLIENT_COMMANDS,
   hasWorkspaceChanges,
   type CoordinatorActionSpec,
   type CoordinatorCardKind,
@@ -12,6 +13,8 @@ import {
   ArrowRight,
   ArrowUp,
   Check,
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
   GitMerge,
   GitPullRequest,
@@ -21,7 +24,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import type {
@@ -30,6 +33,8 @@ import type {
 } from './coordinator-action-engine';
 import { formatTaskNumber } from './project-board';
 
+const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
+const COLLAPSE_EASE = 'cubic-bezier(0.2, 0, 0, 1)';
 const REGION_SUBTLE = `color-mix(in oklab, transparent, ${colors.label} 3.5%)`;
 const REGION_HOVER = `color-mix(in oklab, transparent, ${colors.label} 7%)`;
 const ACCENT_TINT = `color-mix(in oklab, transparent, ${colors.accent} 8%)`;
@@ -44,11 +49,9 @@ const styles = stylex.create({
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
-    gap: space[2],
     width: '100%',
     maxWidth: 640,
     minWidth: 0,
-    padding: space[3],
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.separator,
@@ -57,6 +60,146 @@ const styles = stylex.create({
     backgroundColor: colors.elevatedBackground,
     boxShadow: shadow.card,
     color: colors.label,
+    overflow: 'hidden',
+    transitionProperty: 'background-color, border-color, box-shadow',
+    transitionDuration: { default: '240ms', [REDUCED_MOTION]: '0ms' },
+    transitionTimingFunction: COLLAPSE_EASE,
+  },
+  cardCollapsed: {
+    backgroundColor: colors.wellBackground,
+    boxShadow: 'none',
+  },
+
+  collapseGrid: {
+    display: 'grid',
+    gridTemplateRows: '0fr',
+    opacity: 0,
+    transitionProperty: 'grid-template-rows, opacity',
+    transitionDuration: { default: '240ms', [REDUCED_MOTION]: '0ms' },
+    transitionTimingFunction: COLLAPSE_EASE,
+  },
+  collapseGridOpen: {
+    gridTemplateRows: '1fr',
+    opacity: 1,
+  },
+  collapseInner: {
+    minHeight: 0,
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+
+  collapsedBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    minWidth: 0,
+    paddingBlock: space[2],
+    paddingInline: space[3],
+  },
+  collapsedMain: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    flex: 1,
+    minWidth: 0,
+  },
+  collapsedStatusPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    height: 22,
+    paddingInline: space[2],
+    borderRadius: radius.full,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 600,
+    flexShrink: 0,
+  },
+  collapsedStatusRunning: {
+    backgroundColor: ACCENT_BADGE_BG,
+    color: colors.accent,
+  },
+  collapsedStatusCompleted: {
+    backgroundColor: SUCCESS_BADGE_BG,
+    color: colors.success,
+  },
+  collapsedTextGroup: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 6,
+    minWidth: 0,
+    flex: 1,
+    overflow: 'hidden',
+  },
+  collapsedActionTitle: {
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 600,
+    color: colors.label,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    flexShrink: 0,
+    maxWidth: '68%',
+  },
+  collapsedDot: {
+    color: colors.tertiaryLabel,
+    fontSize: text.footnoteSize,
+    flexShrink: 0,
+  },
+  collapsedCardTitle: {
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    minWidth: 0,
+  },
+  collapsedRight: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    flexShrink: 0,
+  },
+  compactTaskPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    height: 22,
+    paddingInline: space[1.5],
+    borderWidth: 0,
+    borderRadius: radius.full,
+    backgroundColor: { default: colors.elevatedBackground, ':hover': colors.hoverFill },
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontVariantNumeric: 'tabular-nums',
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  expandToggleBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: radius.small,
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    color: colors.tertiaryLabel,
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+
+  expandedContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    padding: space[3],
+    minWidth: 0,
   },
   metaRow: {
     display: 'flex',
@@ -291,6 +434,19 @@ const styles = stylex.create({
     fontWeight: 600,
     flexShrink: 0,
   },
+  optionStatePill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: 18,
+    paddingInline: 6,
+    borderRadius: radius.full,
+    backgroundColor: colors.wellBackground,
+    color: colors.secondaryLabel,
+    fontSize: '11px',
+    lineHeight: '16px',
+    fontWeight: 500,
+    flexShrink: 0,
+  },
   optionDescription: {
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
@@ -452,11 +608,22 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
   },
   spinner: {
-    width: 13,
-    height: 13,
+    width: 12,
+    height: 12,
     flexShrink: 0,
   },
 });
+
+type OptimisticCardChoice =
+  | { kind: 'action'; spec: CoordinatorActionSpec; phase: 'sending' | 'settled' }
+  | { kind: 'feedback'; text: string; phase: 'sending' | 'settled' };
+
+function shouldActionCollapseCard(spec: CoordinatorActionSpec): boolean {
+  if (spec.intent.kind === 'client_command') {
+    return spec.intent.command !== COORDINATOR_CLIENT_COMMANDS.panelOpen;
+  }
+  return spec.intent.mode !== 'prefill';
+}
 
 function ActionIcon({ icon, defaultKind }: { icon?: string; defaultKind?: string }) {
   switch (icon ?? defaultKind) {
@@ -506,7 +673,8 @@ function CardKindBadge({ kind }: { kind: CoordinatorCardKind }) {
 /**
  * Standalone, context-rich coordinator card displaying predicted next-step or
  * decision options, live child-task/diff/PR pills, and an inline custom-feedback
- * composer so the user rarely needs to open child conversations.
+ * composer. Immediately animates into a compact single-row receipt once the user
+ * chooses an option or submits custom feedback.
  */
 export function CoordinatorProactiveCard({
   card,
@@ -523,270 +691,519 @@ export function CoordinatorProactiveCard({
 }) {
   const { t } = useTranslation();
   const [inFlightId, setInFlightId] = useState<string | null>(null);
+  const [optimisticChoice, setOptimisticChoice] = useState<OptimisticCardChoice | null>(null);
+  const [manualExpanded, setManualExpanded] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (
+      optimisticChoice?.kind === 'action' &&
+      optimisticChoice.phase === 'settled' &&
+      card.chosenAction?.spec.id === optimisticChoice.spec.id
+    ) {
+      setOptimisticChoice(null);
+    } else if (
+      optimisticChoice?.kind === 'feedback' &&
+      optimisticChoice.phase === 'settled' &&
+      card.customFeedbackSummary
+    ) {
+      setOptimisticChoice(null);
+    }
+  }, [card.chosenAction, card.customFeedbackSummary, optimisticChoice]);
+
+  const activeSummary = (() => {
+    if (optimisticChoice?.kind === 'feedback') {
+      const isSending = optimisticChoice.phase === 'sending';
+      return {
+        isBusy: isSending,
+        statusLabel: isSending
+          ? t('projectMode.card.statusSending', 'Sending…')
+          : t('projectMode.card.statusFeedbackSent', 'Feedback sent'),
+        actionTitle: optimisticChoice.text,
+      };
+    }
+    if (optimisticChoice?.kind === 'action') {
+      const matched = card.actions.find((item) => item.spec.id === optimisticChoice.spec.id);
+      const isSending = optimisticChoice.phase === 'sending';
+      const isRunning = !isSending && matched?.liveState === 'running';
+      return {
+        isBusy: isSending || isRunning,
+        statusLabel: isSending
+          ? t('projectMode.card.statusSending', 'Sending…')
+          : isRunning
+            ? t('projectMode.board.working', 'In progress')
+            : (matched?.statusBadgeLabel ?? t('projectMode.card.statusSelected', 'Selected')),
+        actionTitle: optimisticChoice.spec.label,
+      };
+    }
+    if (card.chosenAction) {
+      const isRunning = card.chosenAction.liveState === 'running';
+      return {
+        isBusy: isRunning,
+        statusLabel: isRunning
+          ? t('projectMode.board.working', 'In progress')
+          : (card.chosenAction.statusBadgeLabel ??
+            t('projectMode.card.statusSelected', 'Selected')),
+        actionTitle: card.chosenAction.spec.label,
+      };
+    }
+    if (card.customFeedbackSummary) {
+      return {
+        isBusy: false,
+        statusLabel: t('projectMode.card.statusFeedbackSent', 'Feedback sent'),
+        actionTitle: card.customFeedbackSummary,
+      };
+    }
+    return null;
+  })();
+
+  const isCollapsed = activeSummary !== null && !manualExpanded;
+
+  const handleActionClick = (spec: CoordinatorActionSpec) => {
+    if (!onExecuteAction) return;
+    setInFlightId(spec.id);
+    const collapses = shouldActionCollapseCard(spec);
+    if (collapses) {
+      setManualExpanded(false);
+      setOptimisticChoice({ kind: 'action', spec, phase: 'sending' });
+    }
+    Promise.resolve(onExecuteAction(spec))
+      .then(() => {
+        if (collapses) {
+          setOptimisticChoice((prev) =>
+            prev?.kind === 'action' && prev.spec.id === spec.id
+              ? { ...prev, phase: 'settled' }
+              : prev
+          );
+        }
+      })
+      .catch(() => {
+        if (collapses) {
+          setOptimisticChoice((prev) =>
+            prev?.kind === 'action' && prev.spec.id === spec.id ? null : prev
+          );
+        }
+      })
+      .finally(() => {
+        setInFlightId((prev) => (prev === spec.id ? null : prev));
+      });
+  };
+
   const handleSendFeedback = async () => {
     const trimmed = feedbackText.trim();
     if (!trimmed || !onSubmitFeedback || submittingFeedback) return;
     setSubmittingFeedback(true);
+    setManualExpanded(false);
+    setOptimisticChoice({ kind: 'feedback', text: trimmed, phase: 'sending' });
     try {
       const ok = await onSubmitFeedback(trimmed);
       if (ok !== false) {
         setFeedbackText('');
         setFeedbackOpen(false);
+        setOptimisticChoice({ kind: 'feedback', text: trimmed, phase: 'settled' });
+      } else {
+        setOptimisticChoice(null);
       }
+    } catch {
+      setOptimisticChoice(null);
     } finally {
       setSubmittingFeedback(false);
     }
   };
 
   return (
-    <div {...stylex.props(styles.card)} data-coordinator-proactive-card="">
-      <div {...stylex.props(styles.metaRow)}>
-        <div {...stylex.props(styles.metaLeft)}>
-          <CardKindBadge kind={card.kind} />
-          {card.linkedTasks.map((task) => {
-            const num = formatTaskNumber(task.taskNumber);
-            const title =
-              task.session.title?.trim() || t('sessions.untitled', 'Untitled session');
-            const diff = task.session.diffStats?.allChange;
-            const showDiff = hasWorkspaceChanges(diff);
-            const pr = task.pullRequest;
-            return (
-              <span key={task.session.id} {...stylex.props(styles.taskChipGroup)}>
-                <button
-                  type="button"
-                  title={title}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenTask?.(task.session.id);
-                  }}
-                  {...stylex.props(styles.taskChip)}
-                >
-                  {num ? <span {...stylex.props(styles.taskNumber)}>{num}</span> : null}
-                  <span {...stylex.props(styles.taskTitle)}>{title}</span>
-                  {showDiff && diff ? (
-                    <>
-                      {diff.add > 0 ? (
-                        <span {...stylex.props(styles.diffAdd)}>+{diff.add}</span>
-                      ) : null}
-                      {diff.del > 0 ? (
-                        <span {...stylex.props(styles.diffDel)}>-{diff.del}</span>
-                      ) : null}
-                    </>
-                  ) : null}
-                </button>
-                {pr ? (
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (onOpenPr) {
-                        onOpenPr(task.session.id, pr);
-                      } else {
-                        onOpenTask?.(task.session.id);
-                      }
-                    }}
-                    {...stylex.props(styles.prChip)}
-                  >
-                    <GitPullRequest size={11} aria-hidden="true" />
-                    <span>{pr.number !== null ? `#${pr.number}` : 'PR'}</span>
-                  </button>
-                ) : null}
-              </span>
-            );
-          })}
-        </div>
-      </div>
-
-      <div {...stylex.props(styles.headerText)}>
-        <h4 {...stylex.props(styles.title)}>{card.title}</h4>
-        {card.summary ? <p {...stylex.props(styles.summary)}>{card.summary}</p> : null}
-      </div>
-
-      {card.actions.length > 0 ? (
-        <div {...stylex.props(styles.optionsList)} data-coordinator-action-bar="">
-          {card.actions.map((resolved) => {
-            const { spec, liveState, displayLabel } = resolved;
-            const isBusy = inFlightId === spec.id || liveState === 'running';
-            const isCompleted = liveState === 'completed';
-            const isDisabled = liveState === 'disabled' || !onExecuteAction;
-            const interactive =
-              !isBusy && !isCompleted && !isDisabled && inFlightId === null && !submittingFeedback;
-            const isPrimary = spec.tone === 'primary' && interactive;
-            const defaultIcon =
-              spec.intent.kind === 'session_dispatch'
-                ? 'play'
-                : spec.intent.kind === 'client_command'
-                  ? 'check'
-                  : 'sparkles';
-
-            return (
-              <button
-                key={spec.id}
-                type="button"
-                disabled={!interactive}
-                data-coordinator-action-id={spec.id}
-                data-coordinator-action-state={isBusy ? 'running' : liveState}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (!interactive || !onExecuteAction) return;
-                  setInFlightId(spec.id);
-                  Promise.resolve(onExecuteAction(spec))
-                    .catch(() => {})
-                    .finally(() => {
-                      setInFlightId((prev) => (prev === spec.id ? null : prev));
-                    });
-                }}
-                {...stylex.props(
-                  styles.optionCard,
-                  isPrimary && styles.optionCardPrimary,
-                  interactive && spec.tone === 'danger' && styles.optionCardDanger,
-                  isCompleted && styles.optionCardCompleted,
-                  isBusy && styles.optionCardRunning,
-                  liveState === 'disabled' && styles.optionCardDisabled
-                )}
-              >
+    <div
+      {...stylex.props(styles.card, isCollapsed && styles.cardCollapsed)}
+      data-coordinator-proactive-card=""
+      data-coordinator-card-collapsed={isCollapsed ? '' : undefined}
+    >
+      <div
+        aria-hidden={!isCollapsed}
+        inert={!isCollapsed}
+        {...stylex.props(styles.collapseGrid, isCollapsed && styles.collapseGridOpen)}
+      >
+        <div {...stylex.props(styles.collapseInner)}>
+          {activeSummary ? (
+            <div {...stylex.props(styles.collapsedBar)} data-coordinator-card-summary-bar="">
+              <div {...stylex.props(styles.collapsedMain)}>
                 <span
                   {...stylex.props(
-                    styles.optionLead,
-                    isPrimary && styles.optionLeadPrimary,
-                    isCompleted && styles.optionLeadCompleted
+                    styles.collapsedStatusPill,
+                    activeSummary.isBusy
+                      ? styles.collapsedStatusRunning
+                      : styles.collapsedStatusCompleted
                   )}
                 >
-                  {isBusy ? (
+                  {activeSummary.isBusy ? (
                     <Spinner {...stylex.props(styles.spinner)} />
-                  ) : isCompleted ? (
-                    <Check size={13} {...stylex.props(styles.iconCompleted)} aria-hidden="true" />
                   ) : (
-                    <ActionIcon icon={spec.icon} defaultKind={defaultIcon} />
+                    <Check size={12} {...stylex.props(styles.iconSlot)} aria-hidden="true" />
                   )}
+                  <span>{activeSummary.statusLabel}</span>
                 </span>
-                <span {...stylex.props(styles.optionBody)}>
-                  <span {...stylex.props(styles.optionTitleRow)}>
-                    <span {...stylex.props(styles.optionLabel)}>{displayLabel}</span>
-                    {spec.tone === 'primary' && liveState === 'ready' ? (
-                      <span {...stylex.props(styles.recommendedBadge)}>
-                        {t('projectMode.card.recommended', 'Recommended')}
-                      </span>
-                    ) : null}
-                  </span>
-                  {spec.description ? (
-                    <span {...stylex.props(styles.optionDescription)}>{spec.description}</span>
-                  ) : null}
-                </span>
-                {interactive ? (
+                <div {...stylex.props(styles.collapsedTextGroup)}>
                   <span
-                    {...stylex.props(styles.optionTrail, isPrimary && styles.optionTrailPrimary)}
-                    aria-hidden="true"
+                    title={activeSummary.actionTitle}
+                    {...stylex.props(styles.collapsedActionTitle)}
                   >
-                    <ArrowRight size={14} />
+                    {activeSummary.actionTitle}
                   </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {onSubmitFeedback || card.customFeedbackSummary ? (
-        <div {...stylex.props(styles.feedbackSection)}>
-          {card.customFeedbackSummary && !feedbackOpen ? (
-            <div {...stylex.props(styles.feedbackSubmittedRow)}>
-              <span {...stylex.props(styles.feedbackSubmittedText)}>
-                <Check size={13} {...stylex.props(styles.iconCompleted)} aria-hidden="true" />
-                <span>
-                  {t('projectMode.card.feedbackSent', 'Sent feedback: {{text}}', {
-                    text: card.customFeedbackSummary,
-                  })}
-                </span>
-              </span>
-              {onSubmitFeedback ? (
+                  <span {...stylex.props(styles.collapsedDot)} aria-hidden="true">
+                    ·
+                  </span>
+                  <span title={card.title} {...stylex.props(styles.collapsedCardTitle)}>
+                    {card.title}
+                  </span>
+                </div>
+              </div>
+              <div {...stylex.props(styles.collapsedRight)}>
+                {card.linkedTasks.slice(0, 2).map((task) => {
+                  const num = formatTaskNumber(task.taskNumber);
+                  const diff = task.session.diffStats?.allChange;
+                  const showDiff = hasWorkspaceChanges(diff);
+                  const pr = task.pullRequest;
+                  return (
+                    <span key={task.session.id} {...stylex.props(styles.collapsedRight)}>
+                      <button
+                        type="button"
+                        title={task.session.title}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenTask?.(task.session.id);
+                        }}
+                        {...stylex.props(styles.compactTaskPill)}
+                      >
+                        <span {...stylex.props(styles.taskNumber)}>
+                          {num ?? t('sessions.untitled', 'Task')}
+                        </span>
+                        {showDiff && diff && !pr ? (
+                          <>
+                            {diff.add > 0 ? (
+                              <span {...stylex.props(styles.diffAdd)}>+{diff.add}</span>
+                            ) : null}
+                            {diff.del > 0 ? (
+                              <span {...stylex.props(styles.diffDel)}>-{diff.del}</span>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </button>
+                      {pr ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (onOpenPr) {
+                              onOpenPr(task.session.id, pr);
+                            } else {
+                              onOpenTask?.(task.session.id);
+                            }
+                          }}
+                          {...stylex.props(styles.prChip)}
+                        >
+                          <GitPullRequest size={11} aria-hidden="true" />
+                          <span>{pr.number !== null ? `#${pr.number}` : 'PR'}</span>
+                        </button>
+                      ) : null}
+                    </span>
+                  );
+                })}
                 <button
                   type="button"
-                  onClick={() => {
-                    setFeedbackOpen(true);
-                    requestAnimationFrame(() => inputRef.current?.focus());
-                  }}
-                  {...stylex.props(styles.feedbackTrigger)}
+                  onClick={() => setManualExpanded(true)}
+                  title={t('projectMode.card.expandDetails', 'Show card details')}
+                  aria-label={t('projectMode.card.expandDetails', 'Show card details')}
+                  data-coordinator-card-expand=""
+                  {...stylex.props(styles.expandToggleBtn)}
                 >
-                  {t('projectMode.card.addMoreFeedback', 'Add more…')}
+                  <ChevronDown size={14} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        aria-hidden={isCollapsed}
+        inert={isCollapsed}
+        {...stylex.props(styles.collapseGrid, !isCollapsed && styles.collapseGridOpen)}
+      >
+        <div {...stylex.props(styles.collapseInner)}>
+          <div {...stylex.props(styles.expandedContent)}>
+            <div {...stylex.props(styles.metaRow)}>
+              <div {...stylex.props(styles.metaLeft)}>
+                <CardKindBadge kind={card.kind} />
+                {card.linkedTasks.map((task) => {
+                  const num = formatTaskNumber(task.taskNumber);
+                  const title =
+                    task.session.title?.trim() || t('sessions.untitled', 'Untitled session');
+                  const diff = task.session.diffStats?.allChange;
+                  const showDiff = hasWorkspaceChanges(diff);
+                  const pr = task.pullRequest;
+                  return (
+                    <span key={task.session.id} {...stylex.props(styles.taskChipGroup)}>
+                      <button
+                        type="button"
+                        title={title}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenTask?.(task.session.id);
+                        }}
+                        {...stylex.props(styles.taskChip)}
+                      >
+                        {num ? <span {...stylex.props(styles.taskNumber)}>{num}</span> : null}
+                        <span {...stylex.props(styles.taskTitle)}>{title}</span>
+                        {showDiff && diff ? (
+                          <>
+                            {diff.add > 0 ? (
+                              <span {...stylex.props(styles.diffAdd)}>+{diff.add}</span>
+                            ) : null}
+                            {diff.del > 0 ? (
+                              <span {...stylex.props(styles.diffDel)}>-{diff.del}</span>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </button>
+                      {pr ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (onOpenPr) {
+                              onOpenPr(task.session.id, pr);
+                            } else {
+                              onOpenTask?.(task.session.id);
+                            }
+                          }}
+                          {...stylex.props(styles.prChip)}
+                        >
+                          <GitPullRequest size={11} aria-hidden="true" />
+                          <span>{pr.number !== null ? `#${pr.number}` : 'PR'}</span>
+                        </button>
+                      ) : null}
+                    </span>
+                  );
+                })}
+              </div>
+              {activeSummary ? (
+                <button
+                  type="button"
+                  onClick={() => setManualExpanded(false)}
+                  title={t('projectMode.card.collapseDetails', 'Collapse card')}
+                  aria-label={t('projectMode.card.collapseDetails', 'Collapse card')}
+                  data-coordinator-card-collapse=""
+                  {...stylex.props(styles.expandToggleBtn)}
+                >
+                  <ChevronUp size={14} aria-hidden="true" />
                 </button>
               ) : null}
             </div>
-          ) : feedbackOpen ? (
-            <div {...stylex.props(styles.feedbackComposer)}>
-              <input
-                ref={inputRef}
-                type="text"
-                value={feedbackText}
-                disabled={submittingFeedback}
-                placeholder={t(
-                  'projectMode.card.feedbackPlaceholder',
-                  'Describe other instructions or adjustments…'
-                )}
-                onChange={(event) => setFeedbackText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (isImeComposingKeyboardEvent(event)) return;
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    void handleSendFeedback();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    setFeedbackOpen(false);
-                  }
-                }}
-                data-coordinator-card-feedback-input=""
-                {...stylex.props(styles.feedbackInput)}
-              />
-              <button
-                type="button"
-                onClick={() => setFeedbackOpen(false)}
-                disabled={submittingFeedback}
-                aria-label={t('common.cancel', 'Cancel')}
-                {...stylex.props(styles.feedbackCancelBtn)}
-              >
-                <X size={13} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                disabled={!feedbackText.trim() || submittingFeedback}
-                onClick={() => {
-                  void handleSendFeedback();
-                }}
-                aria-label={t('projectMode.card.sendFeedback', 'Send feedback')}
-                data-coordinator-card-feedback-send=""
-                {...stylex.props(
-                  styles.feedbackSendBtn,
-                  (!feedbackText.trim() || submittingFeedback) && styles.feedbackSendBtnDisabled
-                )}
-              >
-                {submittingFeedback ? (
-                  <Spinner {...stylex.props(styles.spinner)} />
-                ) : (
-                  <ArrowUp size={14} aria-hidden="true" />
-                )}
-              </button>
+
+            <div {...stylex.props(styles.headerText)}>
+              <h4 {...stylex.props(styles.title)}>{card.title}</h4>
+              {card.summary ? <p {...stylex.props(styles.summary)}>{card.summary}</p> : null}
             </div>
-          ) : onSubmitFeedback ? (
-            <button
-              type="button"
-              onClick={() => {
-                setFeedbackOpen(true);
-                requestAnimationFrame(() => inputRef.current?.focus());
-              }}
-              data-coordinator-card-feedback-toggle=""
-              {...stylex.props(styles.feedbackTrigger)}
-            >
-              <MessageSquarePlus size={13} aria-hidden="true" />
-              <span>{t('projectMode.card.otherFeedback', 'Give other feedback…')}</span>
-            </button>
-          ) : null}
+
+            {card.actions.length > 0 ? (
+              <div {...stylex.props(styles.optionsList)} data-coordinator-action-bar="">
+                {card.actions.map((resolved) => {
+                  const { spec, liveState, statusBadgeLabel } = resolved;
+                  const isBusy = inFlightId === spec.id || liveState === 'running';
+                  const isCompleted = liveState === 'completed';
+                  const isDisabled = liveState === 'disabled' || !onExecuteAction;
+                  const interactive =
+                    !isBusy &&
+                    !isCompleted &&
+                    !isDisabled &&
+                    inFlightId === null &&
+                    !submittingFeedback;
+                  const isPrimary = spec.tone === 'primary' && interactive;
+                  const defaultIcon =
+                    spec.intent.kind === 'session_dispatch'
+                      ? 'play'
+                      : spec.intent.kind === 'client_command'
+                        ? 'check'
+                        : 'sparkles';
+
+                  return (
+                    <button
+                      key={spec.id}
+                      type="button"
+                      disabled={!interactive}
+                      data-coordinator-action-id={spec.id}
+                      data-coordinator-action-state={isBusy ? 'running' : liveState}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (!interactive) return;
+                        handleActionClick(spec);
+                      }}
+                      {...stylex.props(
+                        styles.optionCard,
+                        isPrimary && styles.optionCardPrimary,
+                        interactive && spec.tone === 'danger' && styles.optionCardDanger,
+                        isCompleted && styles.optionCardCompleted,
+                        isBusy && styles.optionCardRunning,
+                        liveState === 'disabled' && styles.optionCardDisabled
+                      )}
+                    >
+                      <span
+                        {...stylex.props(
+                          styles.optionLead,
+                          isPrimary && styles.optionLeadPrimary,
+                          isCompleted && styles.optionLeadCompleted
+                        )}
+                      >
+                        {isBusy ? (
+                          <Spinner {...stylex.props(styles.spinner)} />
+                        ) : isCompleted ? (
+                          <Check
+                            size={13}
+                            {...stylex.props(styles.iconCompleted)}
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <ActionIcon icon={spec.icon} defaultKind={defaultIcon} />
+                        )}
+                      </span>
+                      <span {...stylex.props(styles.optionBody)}>
+                        <span {...stylex.props(styles.optionTitleRow)}>
+                          <span {...stylex.props(styles.optionLabel)}>{spec.label}</span>
+                          {spec.tone === 'primary' && liveState === 'ready' ? (
+                            <span {...stylex.props(styles.recommendedBadge)}>
+                              {t('projectMode.card.recommended', 'Recommended')}
+                            </span>
+                          ) : null}
+                          {statusBadgeLabel ? (
+                            <span {...stylex.props(styles.optionStatePill)}>
+                              {statusBadgeLabel}
+                            </span>
+                          ) : null}
+                        </span>
+                        {spec.description ? (
+                          <span {...stylex.props(styles.optionDescription)}>
+                            {spec.description}
+                          </span>
+                        ) : null}
+                      </span>
+                      {interactive ? (
+                        <span
+                          {...stylex.props(
+                            styles.optionTrail,
+                            isPrimary && styles.optionTrailPrimary
+                          )}
+                          aria-hidden="true"
+                        >
+                          <ArrowRight size={14} />
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {onSubmitFeedback || card.customFeedbackSummary ? (
+              <div {...stylex.props(styles.feedbackSection)}>
+                {card.customFeedbackSummary && !feedbackOpen ? (
+                  <div {...stylex.props(styles.feedbackSubmittedRow)}>
+                    <span {...stylex.props(styles.feedbackSubmittedText)}>
+                      <Check size={13} {...stylex.props(styles.iconCompleted)} aria-hidden="true" />
+                      <span>
+                        {t('projectMode.card.feedbackSent', 'Sent feedback: {{text}}', {
+                          text: card.customFeedbackSummary,
+                        })}
+                      </span>
+                    </span>
+                    {onSubmitFeedback ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFeedbackOpen(true);
+                          requestAnimationFrame(() => inputRef.current?.focus());
+                        }}
+                        {...stylex.props(styles.feedbackTrigger)}
+                      >
+                        {t('projectMode.card.addMoreFeedback', 'Add more…')}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : feedbackOpen ? (
+                  <div {...stylex.props(styles.feedbackComposer)}>
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={feedbackText}
+                      disabled={submittingFeedback}
+                      placeholder={t(
+                        'projectMode.card.feedbackPlaceholder',
+                        'Describe other instructions or adjustments…'
+                      )}
+                      onChange={(event) => setFeedbackText(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (isImeComposingKeyboardEvent(event)) return;
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          void handleSendFeedback();
+                        } else if (event.key === 'Escape') {
+                          event.preventDefault();
+                          setFeedbackOpen(false);
+                        }
+                      }}
+                      data-coordinator-card-feedback-input=""
+                      {...stylex.props(styles.feedbackInput)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFeedbackOpen(false)}
+                      disabled={submittingFeedback}
+                      aria-label={t('common.cancel', 'Cancel')}
+                      {...stylex.props(styles.feedbackCancelBtn)}
+                    >
+                      <X size={13} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!feedbackText.trim() || submittingFeedback}
+                      onClick={() => {
+                        void handleSendFeedback();
+                      }}
+                      aria-label={t('projectMode.card.sendFeedback', 'Send feedback')}
+                      data-coordinator-card-feedback-send=""
+                      {...stylex.props(
+                        styles.feedbackSendBtn,
+                        (!feedbackText.trim() || submittingFeedback) &&
+                          styles.feedbackSendBtnDisabled
+                      )}
+                    >
+                      {submittingFeedback ? (
+                        <Spinner {...stylex.props(styles.spinner)} />
+                      ) : (
+                        <ArrowUp size={14} aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                ) : onSubmitFeedback ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFeedbackOpen(true);
+                      requestAnimationFrame(() => inputRef.current?.focus());
+                    }}
+                    data-coordinator-card-feedback-toggle=""
+                    {...stylex.props(styles.feedbackTrigger)}
+                  >
+                    <MessageSquarePlus size={13} aria-hidden="true" />
+                    <span>{t('projectMode.card.otherFeedback', 'Give other feedback…')}</span>
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

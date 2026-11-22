@@ -415,6 +415,7 @@ export function useCoordinatorActionExecutor(options: {
           agentType: targetMeta.agentType,
           ...(targetMeta.acpSessionId ? { resume: targetMeta.acpSessionId } : {}),
         });
+        let persistedOnAccept = false;
         await addSessionHistory(
           targetSessionId,
           {
@@ -428,12 +429,23 @@ export function useCoordinatorActionExecutor(options: {
             fileDiff: [],
             inputConfig,
           },
-          { dispatch: true }
+          {
+            dispatch: true,
+            onAccepted: () => {
+              persistedOnAccept = true;
+              void persistActionResolution(turnId, bubbleId, action.id, {
+                status: 'executed',
+                resolvedAt: getServerNow(),
+              });
+            },
+          }
         );
-        await persistActionResolution(turnId, bubbleId, action.id, {
-          status: 'executed',
-          resolvedAt: getServerNow(),
-        });
+        if (!persistedOnAccept) {
+          await persistActionResolution(turnId, bubbleId, action.id, {
+            status: 'executed',
+            resolvedAt: getServerNow(),
+          });
+        }
         return;
       }
 
