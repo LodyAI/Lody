@@ -101,11 +101,13 @@ export function useMobileStatusActions() {
       const after = await rereadStatusFields(runtime, before.keys());
       const undo = planStatusUndo(before, after);
       if (undo.length === 0) return;
+      const toastId = `status-undo:${sessionId}`;
       toast(notice, {
-        id: `status-undo:${sessionId}`,
+        id: toastId,
         action: {
           label: t('common.undo', 'Undo'),
           onClick: () => {
+            toast.dismiss(toastId);
             void (async () => {
               for (const write of undo) {
                 await updateSessionMetadata(write.sessionId as SessionId, write.patch);

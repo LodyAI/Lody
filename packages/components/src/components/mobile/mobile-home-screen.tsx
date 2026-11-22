@@ -484,6 +484,10 @@ export type MobileHomeScreenProps = {
   chatStatusCommands?: MobileStatusCommands;
   /** Whether this member may write Status view state and manage pin sections. */
   chatStatusWritable?: boolean;
+  /** False when not even a pin can be written (an encrypted workspace's read role). */
+  chatStatusPreferable?: boolean;
+  /** Pinned rows the Chat list's scope hid, by pin section id (`""` = default). */
+  chatScopeHiddenCounts?: Record<string, number>;
   /** Archive a chat from the swipe-to-reveal drawer (or from the
      super-swipe). */
   onChatArchive?: (chatId: string) => void;
@@ -1315,6 +1319,8 @@ export function MobileHomeScreen({
   onChatTogglePin,
   chatStatusCommands,
   chatStatusWritable,
+  chatStatusPreferable,
+  chatScopeHiddenCounts,
   onChatArchive,
   onChatRestore,
   onChatPermanentDelete,
@@ -1381,15 +1387,8 @@ export function MobileHomeScreen({
   const normalizedQuery = normalizeForSearch(searchQuery.trim());
   // Split whole existing buckets, so openers and opened sessions stay in the
   // same list and a conversation is never repeated on the two panels.
-  const foldGroups = useMemo(() => {
-    if (selectedTab !== 'chat' || showArchived || !homeFold || normalizedQuery) return null;
-    const groups = groupChats(chats, chatGroupBy);
-    if (groups.length < 2) return null;
-    return { upper: groups[0]!.items, lower: groups.slice(1).flatMap((group) => group.items) };
-  }, [selectedTab, showArchived, homeFold, normalizedQuery, chats, chatGroupBy]);
-  const splitArchive = Boolean(
+  const splitChats = Boolean(
     selectedTab === 'chat' &&
-    showArchived &&
     homeFold &&
     !normalizedQuery &&
     groupChats(chats, chatGroupBy).length >= 2
@@ -1663,40 +1662,16 @@ export function MobileHomeScreen({
           data-horizontal-fold-home-body
           className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          {homeFold && splitArchive ? (
+          {homeFold && splitChats && !showChatOnboarding ? (
             <>
               <div
                 ref={setArchiveUpper}
-                data-horizontal-fold-archive-upper
+                {...(showArchived
+                  ? { 'data-horizontal-fold-archive-upper': '' }
+                  : { 'data-horizontal-fold-upper-list': '' })}
                 className="min-h-0 overflow-y-auto"
                 style={{ flex: `0 0 ${homeFold.messageHeight}px` }}
               />
-              <div aria-hidden="true" style={{ flex: `0 0 ${homeFold.gapHeight}px` }} />
-            </>
-          ) : null}
-          {homeFold && foldGroups && !showChatOnboarding ? (
-            <>
-              <div
-                data-horizontal-fold-upper-list
-                className="min-h-0 overflow-y-auto"
-                style={{ flex: `0 0 ${homeFold.messageHeight}px` }}
-              >
-                <ChatsFlatView
-                  chats={foldGroups.upper}
-                  groupBy={chatGroupBy}
-                  labels={labels}
-                  query=""
-                  onSelect={onChatSelect}
-                  onTogglePin={onChatTogglePin}
-                  statusCommands={chatStatusCommands}
-                  statusWritable={chatStatusWritable}
-                  onArchive={onChatArchive}
-                  onRestore={onChatRestore}
-                  hasActiveFilters={hasActiveChatFilters}
-                  onClearFilters={onClearChatFilters}
-                  onPrivateHelp={() => setPrivateHelpOpen(true)}
-                />
-              </div>
               <div aria-hidden="true" style={{ flex: `0 0 ${homeFold.gapHeight}px` }} />
             </>
           ) : null}
@@ -1813,7 +1788,7 @@ export function MobileHomeScreen({
                   />
                 ) : (
                   <ChatsFlatView
-                    chats={foldGroups?.lower ?? chats}
+                    chats={chats}
                     groupBy={chatGroupBy}
                     labels={labels}
                     query={normalizedQuery}
@@ -1821,11 +1796,13 @@ export function MobileHomeScreen({
                     onTogglePin={onChatTogglePin}
                     statusCommands={chatStatusCommands}
                     statusWritable={chatStatusWritable}
+                    statusPreferable={chatStatusPreferable}
+                    scopeHiddenCounts={chatScopeHiddenCounts}
                     onArchive={onChatArchive}
                     onRestore={onChatRestore}
                     archived={showArchived}
                     splitTargets={
-                      splitArchive && archiveUpper && archiveLower
+                      splitChats && archiveUpper && archiveLower
                         ? { upper: archiveUpper, lower: archiveLower }
                         : undefined
                     }
@@ -2368,10 +2345,14 @@ function ChatsFlatView({
   splitTargets,
   statusCommands,
   statusWritable,
+  statusPreferable,
+  scopeHiddenCounts,
 }: {
   chats: MobileConversationItem[];
   statusCommands?: MobileStatusCommands;
   statusWritable?: boolean;
+  statusPreferable?: boolean;
+  scopeHiddenCounts?: Record<string, number>;
   groupBy: MobileChatGroupBy;
   labels: MobileHomeScreenLabels;
   query: string;
@@ -2477,6 +2458,8 @@ function ChatsFlatView({
         splitTargets={splitTargets}
         statusCommands={statusCommands}
         statusWritable={statusWritable}
+        statusPreferable={statusPreferable}
+        scopeHiddenCounts={scopeHiddenCounts}
       />
     </section>
   );

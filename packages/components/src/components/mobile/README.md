@@ -43,20 +43,34 @@ Pinned area of every grouping render the shared `buildStatusViewLayout` from
 `@lody/shared`; nothing here sorts or classifies those rows.
 
 - `mobile-status-view.ts` maps list rows onto the shared layout input. A row's
-  `readOnly` (the session-management guard's predicate) becomes `canManage:
-false`, so status actions are not offered where the guard would refuse them;
-  pinning stays available through the preference path.
+  `readOnly` (the session-management guard's predicate) and a read-only member
+  (`useStatusViewWritable`) both mean `canManage: false`, so status actions,
+  swipes and drags are not offered where they would be refused. Pinning stays
+  available through the preference path, except in an encrypted workspace
+  without the write role, where no pin can be sealed either (`canPrefer: false`).
+- A row nested under its opener carries its own id (`data-status-row-id`) and
+  its opener's (`data-status-root-id`). Its menu and swipes act on it alone
+  (the Spec's opened-by rule); it has no order of its own, so it does not drag
+  and drops land relative to its opener.
 - `use-mobile-status-list.tsx` owns the surface state the shared contract leaves
   to each surface: the clock (re-render at `nextChangeAt`, each minute while
   Later countdowns show, and on foreground), the order frozen while a row is
   lifted, the dropped order held until the moved row's placement reads back or
   its write fails, and the row, section-picker, section-header, Later and
-  section-name sheets. Writes go through the injected `MobileStatusCommands`
+  section-name sheets, and the confirmation before a section is deleted. The
+  clock timer is capped at 2^31-1 ms: a longer delay fires at once in browsers.
+  Section menus show only in the Status grouping, where pins can be placed.
+  Writes go through the injected `MobileStatusCommands`
   (`runStatusViewCommand` plus `use-mobile-status-actions.ts`, which asks the
   shared sub-conversation question and offers Undo after Later and Settle).
 - `use-status-list-drag.ts`: holding a row still for 450 ms lifts it; releasing
   opens the action menu, moving drags it. Movement before the lift is a scroll
-  or a swipe. While a row is lifted, a non-passive `touchmove` listener on the
+  or a swipe; a second finger cancels the gesture, and a context-menu request
+  (right click, TalkBack, a menu key) opens the action menu. The drop slot follows
+  the finger; over a list that takes no drops it is cleared, and only in the
+  auto-scroll zones (which clear the floating tab bar) does it survive the
+  finger passing over padding. Pull-to-refresh stands down for a touch a lifted
+  row claimed. While a row is lifted, a non-passive `touchmove` listener on the
   list surface stops the WebView scrolling; the list scrolls itself at its
   edges. That listener must be registered at mount: one added at the lift is
   too late, because the browser commits to a pan at `touchstart` and cancels
@@ -67,8 +81,9 @@ false`, so status actions are not offered where the guard would refuse them;
   first gesture is a long press.
 - `MobileStatusSwipeRow`: a leading swipe pins or unpins; a trailing swipe gives
   Settle and Later on Focus and Later rows, Archive on Settled and pinned rows.
-- The fold layout's two panels are separate lists, so a drag cannot cross
-  between them.
+- On a fold, one list instance portals its first bucket into the upper panel
+  (`splitTargets`), so both panels share one layout, one drag and one planner
+  input.
 
 ## Sheets and session surfaces
 

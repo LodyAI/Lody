@@ -725,6 +725,8 @@ function WorkspaceChatLanding({
     targetSlug: workspaceSlug,
   });
   const statusViewWritable = useStatusViewWritable(workspaceRole);
+  /** An encrypted workspace's read role cannot seal a pin either; elsewhere pins are preferences. */
+  const statusViewPreferable = runtime?.contentMode === 'e2ee' ? statusViewWritable : true;
   const viewportIsMobile = useIsMobile();
   // An embedded landing is a desktop surface (Today has no mobile layout in v1).
   const isMobile = viewportIsMobile && !isEmbedded;
@@ -5071,6 +5073,7 @@ function WorkspaceChatLanding({
       activityCache.set(session.id, activity);
       return activity;
     };
+    const rowCap = chatViewMode === 'status' && !mobileHomeShowArchived ? undefined : 200;
     return sourceSessions
       .filter((session) => {
         if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId)) return false;
@@ -5088,7 +5091,7 @@ function WorkspaceChatLanding({
         const rightTime = getSessionActivity(right).latestMessageAt;
         return rightTime - leftTime;
       })
-      .slice(0, 200)
+      .slice(0, rowCap)
       .map<MobileConversationItem>((session) => {
         const prInfo = getLatestPullRequestInfo(session);
         const activity = getSessionActivity(session);
@@ -5213,6 +5216,7 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    chatViewMode,
     myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
@@ -5230,6 +5234,18 @@ function WorkspaceChatLanding({
     visibleLocalProjectMap,
     visibleSessions,
   ]);
+
+  /** Pinned rows My Tasks hid, by pin section, as the desktop Pinned area counts them. */
+  const mobileScopeHiddenCounts = useMemo(() => {
+    if (chatScope !== 'my' || mobileHomeShowArchived) return undefined;
+    const counts: Record<string, number> = {};
+    for (const session of visibleSessions) {
+      if (!session.isPinned || isSessionInMyScope(session, myAccountId)) continue;
+      const key = session.pinSectionId ?? '';
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return Object.keys(counts).length > 0 ? counts : undefined;
+  }, [chatScope, mobileHomeShowArchived, myAccountId, visibleSessions]);
 
   /* Pill bar config for the Chat tab. Multi-select pills model state
      as EXCLUDED sets: `selectedIds = (allOptionIds − excluded)` and
@@ -5772,7 +5788,9 @@ function WorkspaceChatLanding({
   const mobileStatusCommands = useMemo<MobileStatusCommands>(
     () => ({
       run: async (command, state) => {
-        await runStatusViewCommand(command, state);
+        const writes = await runStatusViewCommand(command, state);
+        if (command.type === 'move' && writes.length === 0)
+          throw new Error(t('sidebar.status.moveRefused'));
       },
       snooze: snoozeMobileStatus,
       settle: settleMobileStatus,
@@ -5785,6 +5803,7 @@ function WorkspaceChatLanding({
       runStatusViewCommand,
       settleMobileStatus,
       snoozeMobileStatus,
+      t,
     ]
   );
   const handleMobileChatTogglePin = useCallback(
@@ -7124,6 +7143,8 @@ function WorkspaceChatLanding({
           onChatTogglePin={handleMobileChatTogglePin}
           chatStatusCommands={mobileStatusCommands}
           chatStatusWritable={statusViewWritable}
+          chatStatusPreferable={statusViewPreferable}
+          chatScopeHiddenCounts={mobileScopeHiddenCounts}
           onChatArchive={handleMobileChatArchive}
           onChatRestore={handleMobileChatRestore}
           onChatPermanentDelete={handleMobileChatPermanentDelete}

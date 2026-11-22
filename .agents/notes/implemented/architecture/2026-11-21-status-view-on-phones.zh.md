@@ -163,8 +163,7 @@ type StatusViewCommand =
   （`apps/electron/src/main/services/e2ee-runtime.test.mjs`）；托管网关是否接受，从本仓库无法查看。
 - Android 在前台打开对话时把它标为已读，所以到期唤醒对话的未读状态在那里也会清除。
 - 放置和恢复都不会消耗唤醒，只有打开、发送或标记为已完成才会。在进行中排序时，被唤醒的行落地真实排序键，并把 `focusRestoredAt` 记为唤醒时间；恢复到进行中（从「稍后」「已完成」或置顶区拖入、移回进行中，以及跟随的 opened-by 子对话）时把 `focusRestoredAt` 记为当前时间，只清除仍在未来的稍后时间。无论哪种情况，已过期的 `snoozedUntil` 都会保留，所以这一行停在被放置的位置，并保持未读直到被阅读。不需要新字段：`focusRestoredAt` 只由这些放置和恢复写入，而稍后命令总把 `snoozedUntil` 设在未来，所以再次稍后的对话到期时会重新浮上来。早于这条规则的桌面版本（LodyAI/Lody#3077 之前）会把放置过的被唤醒行重新浮到最前面；两种数据都有效。
-- 已知的小缺口：iOS WebView 没有触感反馈，Chrome 在首次轻点之前拒绝震动；折叠屏的分栏之间不能拖拽；
-  手机 WebView 不显示被可见范围隐藏的 pin 行数；三个手机界面（WebView、Android、iOS）的长按菜单都在松手时打开；Android
+- 已知的小缺口：iOS WebView 没有触感反馈，Chrome 在首次轻点之前拒绝震动；三个手机界面（WebView、Android、iOS）的长按菜单都在松手时打开；Android
   只在连接时读取一次只读标记；iOS 首次安装时，只读成员在成员列表加载前能看到这些操作。
 
 ## 验证

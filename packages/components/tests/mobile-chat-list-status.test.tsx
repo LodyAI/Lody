@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useState, type ReactNode } from 'react';
+import { act, Profiler, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,7 @@ import type { MobileStatusCommands } from '../src/components/mobile/use-mobile-s
 import { LIFT_DELAY_MS } from '../src/components/mobile/use-status-list-drag';
 import { resolveCustomLaterTime } from '../src/components/mobile/mobile-later-sheet';
 import { planStatusUndo } from '../src/components/mobile/use-mobile-status-actions';
+import { toStatusViewSession } from '../src/components/mobile/mobile-status-view';
 import { initI18n } from '../src/i18n';
 
 /** The fake host runs the real shared planner and applies its writes to the rows. */
@@ -83,7 +84,20 @@ function apply(host: Host, state: StatusViewState, command: StatusViewCommand): 
   return { ...host, chats, sections };
 }
 
-function Harness({ initial, writable = true }: { initial: Host; writable?: boolean }) {
+type HarnessOptions = {
+  writable?: boolean;
+  preferable?: boolean;
+  groupBy?: 'status' | 'project';
+  scopeHiddenCounts?: Record<string, number>;
+};
+
+function Harness({
+  initial,
+  writable = true,
+  preferable = true,
+  groupBy = 'status',
+  scopeHiddenCounts,
+}: { initial: Host } & HarnessOptions) {
   const [host, update] = useState(initial);
   setHost = update;
   currentHost = host;
@@ -131,11 +145,13 @@ function Harness({ initial, writable = true }: { initial: Host; writable?: boole
   return (
     <MobileChatList
       chats={host.chats}
-      groupBy="status"
+      groupBy={groupBy}
       capGroupPreviews
       pinSections={host.sections}
       statusCommands={commands}
       statusWritable={writable}
+      statusPreferable={preferable}
+      scopeHiddenCounts={scopeHiddenCounts}
       rowActions={{
         onTogglePin: (id, pinned) =>
           update((current) =>
@@ -152,34 +168,15 @@ function Harness({ initial, writable = true }: { initial: Host; writable?: boole
 }
 
 function withSessions(state: StatusViewState, host: Host): StatusViewState {
-  return {
-    ...state,
-    sessions: host.chats.map((chat) => ({
-      id: chat.id,
-      title: chat.title,
-      lastMessageAt: chat.lastMessageAt ?? null,
-      activityAt: chat.latestMessageAt ?? null,
-      lastReadAt: chat.lastReadAt ?? null,
-      isPinned: chat.isPinned === true,
-      pinSectionId: chat.pinSectionId ?? null,
-      orderKey: chat.orderKey ?? null,
-      snoozedUntil: chat.snoozedUntil ?? null,
-      settledAt: chat.settledAt ?? null,
-      focusRestoredAt: chat.focusRestoredAt ?? null,
-      openedById: null,
-      isWorking: false,
-      isWaitingPermission: false,
-      canManage: chat.readOnly !== true,
-      canPrefer: true,
-    })),
-  };
+  return { ...state, sessions: host.chats.map((chat) => toStatusViewSession(chat)) };
 }
 
-function render(initial: Host, writable = true) {
+function render(initial: Host, options: HarnessOptions | boolean = {}) {
+  const resolved = typeof options === 'boolean' ? { writable: options } : options;
   act(() => {
     root.render(
       <Provider store={createStore()}>
-        <Harness initial={initial} writable={writable} />
+        <Harness initial={initial} {...resolved} />
       </Provider>
     );
   });
@@ -204,14 +201,20 @@ const clickSheet = (label: string) => {
 };
 const heading = (label: string) =>
   Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')).find(
-    (button) => button.textContent?.trim() === label
+    (button) => button.textContent?.trim().replace(/\d+$/, '') === label
   )!;
 const rowElement = (id: string) =>
   container.querySelector<HTMLElement>(`[data-status-row-id="${id}"]`)!;
 
-function pointer(type: string, target: Element, x: number, y: number) {
-  const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
-  Object.defineProperty(event, 'pointerId', { value: 1 });
+function pointer(type: string, target: Element, x: number, y: number, pointerId = 1) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+    button: 0,
+  });
+  Object.defineProperty(event, 'pointerId', { value: pointerId });
   act(() => {
     target.dispatchEvent(event);
   });
@@ -352,6 +355,180 @@ describe('phone Status grouping', () => {
     expect(sheetButtons()).toContain('Pin Session');
     for (const label of ['Later', 'Settle', 'Move down', 'Move to top'])
       expect(sheetButtons()).not.toContain(label);
+  });
+
+  it('acts on a nested opened conversation alone, never on its opener', () => {
+    render({
+      chats: [
+        item({ id: 'opener', orderKey: '80' }),
+        item({ id: 'child', openedBySessionId: 'opener', openedByRowSessionId: 'opener' }),
+      ],
+      sections: [],
+    });
+    expect(rowElement('child').getAttribute('data-status-root-id')).toBe('opener');
+    longPress('child');
+    expect(sheetButtons()).not.toContain('Move to top');
+    clickSheet('Settle');
+    act(() => heading('Settled').click());
+    expect(
+      container.querySelector('[data-status-area="settled"][data-status-row-id="child"]')
+    ).not.toBeNull();
+    expect(currentHost.chats.find((chat) => chat.id === 'opener')?.settledAt).toBeUndefined();
+  });
+
+  it('offers Later on a Later row so its wake-up can be moved', () => {
+    render({ chats: [item({ id: 'later', snoozedUntil: NOW + 3 * HOUR })], sections: [] });
+    act(() => heading('Later').click());
+    longPress('later');
+    expect(sheetButtons()).toEqual(expect.arrayContaining(['Move to Focus', 'Later', 'Settle']));
+  });
+
+  it('gives a read-only member no status swipes, and no pin where pins cannot land', () => {
+    render({ chats: [item({ id: 'row' })], sections: [] }, { writable: false });
+    const actionsOf = () =>
+      Array.from(
+        rowElement('row').querySelectorAll<HTMLButtonElement>('[data-status-swipe-action]')
+      ).map((button) => button.getAttribute('aria-label'));
+    expect(actionsOf()).toEqual(['Pin', 'Archive']);
+    render({ chats: [item({ id: 'row' })], sections: [] }, { writable: false, preferable: false });
+    expect(actionsOf()).toEqual(['Archive']);
+  });
+
+  it('does not spin on a wake-up past the timer limit, which browsers fire at once', () => {
+    const fakeSetTimeout = window.setTimeout;
+    vi.spyOn(window, 'setTimeout').mockImplementation(((handler: () => void, delay?: number) =>
+      fakeSetTimeout(handler, (delay ?? 0) > 2_147_483_647 ? 1 : delay)) as typeof setTimeout);
+    let commits = 0;
+    act(() => {
+      root.render(
+        <Provider store={createStore()}>
+          <Profiler id="list" onRender={() => (commits += 1)}>
+            <Harness
+              initial={{
+                chats: [item({ id: 'pinned', isPinned: true, snoozedUntil: NOW + 30 * DAY })],
+                sections: [],
+              }}
+              groupBy="project"
+            />
+          </Profiler>
+        </Provider>
+      );
+    });
+    const settled = commits;
+    for (let step = 0; step < 50; step += 1) act(() => vi.advanceTimersByTime(100));
+    expect(commits - settled).toBeLessThan(3);
+    vi.restoreAllMocks();
+  });
+
+  it('cancels a drop released away from any slot', () => {
+    render({
+      chats: [item({ id: 'focus-a', orderKey: '80' }), item({ id: 'old', settledAt: NOW })],
+      sections: [],
+    });
+    act(() => heading('Settled').click());
+    const focus = rowElement('focus-a');
+    focus.getBoundingClientRect = () => ({ top: 0, height: 40, bottom: 40 }) as DOMRect;
+    const dragged = rowElement('old');
+    let under: Element | null = focus;
+    document.elementFromPoint = () => under;
+    pointer('pointerdown', dragged, 10, 300);
+    act(() => vi.advanceTimersByTime(LIFT_DELAY_MS));
+    pointer('pointermove', dragged, 10, 5);
+    expect(container.querySelector('[data-status-drop-indicator]')).not.toBeNull();
+    under = dragged;
+    pointer('pointermove', dragged, 10, 300);
+    pointer('pointerup', dragged, 10, 300);
+    expect(
+      container.querySelector('[data-status-area="settled"][data-status-row-id="old"]')
+    ).not.toBeNull();
+  });
+
+  it('drags after a slow sideways start, and a second finger cancels the lift', () => {
+    render({
+      chats: [item({ id: 'a', orderKey: '80' }), item({ id: 'b', orderKey: '81' })],
+      sections: [],
+    });
+    const a = rowElement('a');
+    pointer('pointerdown', a, 10, 10);
+    act(() => vi.advanceTimersByTime(LIFT_DELAY_MS));
+    expect(a.style.boxShadow).not.toBe('');
+    pointer('pointerdown', a, 50, 10, 2);
+    expect(a.style.boxShadow).toBe('');
+    pointer('pointerup', a, 10, 10);
+    expect(sheetButtons()).toEqual([]);
+
+    document.elementFromPoint = () => rowElement('b');
+    pointer('pointerdown', a, 10, 10, 3);
+    act(() => vi.advanceTimersByTime(LIFT_DELAY_MS));
+    for (let x = 12; x <= 20; x += 2) pointer('pointermove', a, x, 10, 3);
+    expect(container.querySelector('[data-status-drop-indicator]')).not.toBeNull();
+    pointer('pointerup', a, 20, 10, 3);
+    expect(rowTitles()).toEqual(['b', 'a']);
+
+    const moved = rowElement('a');
+    document.elementFromPoint = () => rowElement('b');
+    rowElement('b').getBoundingClientRect = () => ({ top: 0, height: 40, bottom: 40 }) as DOMRect;
+    pointer('pointerdown', moved, 10, 60, 4);
+    act(() => vi.advanceTimersByTime(LIFT_DELAY_MS));
+    pointer('pointermove', moved, 10, 5, 4);
+    pointer('pointerup', moved, 10, 5, 4);
+    expect(rowTitles()).toEqual(['a', 'b']);
+  });
+
+  it('opens the row menu on a context-menu request instead of the platform menu', () => {
+    render({ chats: [item({ id: 'row' })], sections: [] });
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    act(() => {
+      rowElement('row').dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(true);
+    expect(sheetButtons()).toContain('Settle');
+  });
+
+  it('marks a woken conversation unread and counts the folded tiers', () => {
+    render({
+      chats: [
+        item({ id: 'woken', snoozedUntil: NOW - 60_000, lastReadAt: NOW - HOUR }),
+        item({ id: 'l1', snoozedUntil: NOW + HOUR }),
+        item({ id: 'l2', snoozedUntil: NOW + 2 * HOUR, lastReadAt: NOW - 2 * HOUR }),
+      ],
+      sections: [],
+    });
+    expect(
+      rowElement('woken').querySelector('[aria-label="Unread messages"], .bg-primary')
+    ).not.toBeNull();
+    const later = container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!;
+    expect(later.textContent).toContain('Later2');
+    expect(later.querySelector('[aria-label="Unread messages"]')).not.toBeNull();
+  });
+
+  it('asks before deleting a pin section and keeps section menus to the Status grouping', () => {
+    const host = {
+      chats: [item({ id: 'a', isPinned: true, pinSectionId: 'first', orderKey: '80' })],
+      sections: [{ id: 'first', name: 'First', orderKey: '80' }],
+    };
+    render(host);
+    act(() =>
+      container.querySelector<HTMLButtonElement>('[data-status-section-menu="first"]')!.click()
+    );
+    clickSheet('Delete Section');
+    expect(currentHost.sections).toHaveLength(1);
+    const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).filter(
+      (button) => button.textContent?.trim() === 'Delete Section'
+    );
+    act(() => confirm.at(-1)!.click());
+    expect(currentHost.sections).toHaveLength(0);
+
+    render(host, { groupBy: 'project' });
+    expect(container.querySelector('[data-status-section-menu]')).toBeNull();
+  });
+
+  it('shows how many pinned rows the scope hid', () => {
+    render(
+      { chats: [item({ id: 'mine', isPinned: true })], sections: [] },
+      { scopeHiddenCounts: { '': 2 } }
+    );
+    expect(text()).toContain('2 sessions hidden');
   });
 
   it('reorders pin sections from the section header menu', () => {

@@ -16,6 +16,7 @@ import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+import { getEffectiveSessionActivitySummary } from './session-list-rows';
 import { MobileLaterSheet } from '../mobile/mobile-later-sheet';
 import {
   useCanManageSessionStatus,
@@ -4942,20 +4943,6 @@ const SessionDetail = ({
   const mobileStatusActions = useMobileStatusActions();
   const canManageActiveStatus = useCanManageSessionStatus(activeSession);
   const [mobileLaterSheetOpen, setMobileLaterSheetOpen] = useState(false);
-  const activeStatusTier =
-    activeSession && !activeSession.isArchived && !activeSession.isPinned
-      ? statusViewTier(
-          {
-            activityAt: activeSession.lastMessageAt ?? null,
-            isWorking: activeSessionLiveStatus != null,
-            isWaitingPermission: activeSessionLiveStatus?.type === 'requestPermission',
-            snoozedUntil: activeSession.snoozedUntil ?? null,
-            settledAt: activeSession.settledAt ?? null,
-            focusRestoredAt: activeSession.focusRestoredAt ?? null,
-          },
-          getServerNow()
-        )
-      : null;
 
   // Drafts and pending children can resolve to the parent for display only.
   const canRenameCurrentSession =
@@ -5449,6 +5436,29 @@ const SessionDetail = ({
     [conversationSessionIds]
   );
   const conversationLiveStatusMap = useAtomValue(conversationLiveStatusAtom);
+  /** The conversation's tier, from the same Tab roll-up the home list classifies with. */
+  const activeStatusTier = useMemo(() => {
+    if (!activeSession || activeSession.isArchived || activeSession.isPinned) return null;
+    const live = new Map<string, SessionStatus>();
+    for (const [id, status] of Object.entries(conversationLiveStatusMap))
+      if (status) live.set(id, status);
+    const activity = getEffectiveSessionActivitySummary(
+      activeSession,
+      new Map([[activeSession.id, [...visibleChildSessions, ...visibleSideSessions]]]),
+      live
+    );
+    return statusViewTier(
+      {
+        activityAt: activity.latestMessageAt,
+        isWorking: activity.isWorking,
+        isWaitingPermission: activity.isWaitingPermission,
+        snoozedUntil: activeSession.snoozedUntil ?? null,
+        settledAt: activeSession.settledAt ?? null,
+        focusRestoredAt: activeSession.focusRestoredAt ?? null,
+      },
+      getServerNow()
+    );
+  }, [activeSession, conversationLiveStatusMap, visibleChildSessions, visibleSideSessions]);
 
   const mobileConversations = useMemo<ConversationTabEntry[]>(() => {
     const conversationTabActive = effectiveActiveViewerTabId == null;
@@ -6241,22 +6251,19 @@ const SessionDetail = ({
       }
       if (activeStatusTier && canManageActiveStatus) {
         const statusSessionId = activeSession.id;
-        if (activeStatusTier !== 'later') {
-          mobileMenuActions.push({
-            id: 'later',
-            icon: <Clock {...stylex.props(detailStyles.icon14)} />,
-            label: t('sessions.contextMenu.snooze', 'Later'),
-            onClick: () => setMobileLaterSheetOpen(true),
-            separatorBefore: true,
-          });
-        }
+        mobileMenuActions.push({
+          id: 'later',
+          icon: <Clock {...stylex.props(detailStyles.icon14)} />,
+          label: t('sessions.contextMenu.snooze', 'Later'),
+          onClick: () => setMobileLaterSheetOpen(true),
+          separatorBefore: true,
+        });
         if (activeStatusTier !== 'settled') {
           mobileMenuActions.push({
             id: 'settle',
             icon: <CircleCheck {...stylex.props(detailStyles.icon14)} />,
             label: t('sessions.contextMenu.settle', 'Settle'),
             onClick: () => mobileStatusActions.settle(statusSessionId),
-            separatorBefore: activeStatusTier === 'later',
           });
         }
         if (activeStatusTier !== 'focus') {

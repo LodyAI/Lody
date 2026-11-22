@@ -161,6 +161,8 @@ export type MobileChatCardStatus = {
   dropBeforeId?: string | null | undefined;
   /** Rows the person may Later / Settle / move to Focus. */
   canManage: (chatId: string) => boolean;
+  /** Rows the person may pin or unpin. */
+  canPrefer: (chatId: string) => boolean;
   onLater: (chatId: string) => void;
   onSettle: (chatId: string) => void;
   /** True while a long press holds a row; swipes stand down. */
@@ -671,7 +673,8 @@ export function MobileChatListCard({
               className="overflow-hidden bg-background"
               {...(status
                 ? {
-                    'data-status-row-id': rootId,
+                    'data-status-row-id': conversation.id,
+                    'data-status-root-id': rootId,
                     'data-status-area': status.area,
                     'data-status-section': status.sectionId ?? '',
                     style: STATUS_ROW_TOUCH_STYLE,
@@ -685,7 +688,7 @@ export function MobileChatListCard({
                   isLocked={status.isLocked}
                   isPinned={conversation.isPinned ?? false}
                   onTogglePin={
-                    rowActions?.onTogglePin
+                    rowActions?.onTogglePin && status.canPrefer(conversation.id)
                       ? () => rowActions.onTogglePin!(conversation.id, !conversation.isPinned)
                       : undefined
                   }
@@ -864,6 +867,8 @@ export type MobileChatBucket = {
   pinSectionId?: string | null;
   /** Status grouping: the tier this bucket shows. */
   tier?: StatusViewTier;
+  /** Pinned-area bucket: pinned rows the list's scope hid. */
+  hiddenCount?: number;
 };
 
 const bucketIdOfSection = (sectionId: string | null) =>
@@ -903,7 +908,8 @@ export function groupChats(
   const itemsOf = (rows: readonly StatusViewRow[]) =>
     flattenStatusViewRows(rows).flatMap((row) => {
       const item = byId.get(row.id);
-      return item ? [item] : [];
+      if (!item) return [];
+      return [row.unread && !item.hasUnreadMessages ? { ...item, hasUnreadMessages: true } : item];
     });
 
   const ordered: MobileChatBucket[] = [];
@@ -911,12 +917,13 @@ export function groupChats(
   for (const section of layout.pinned) {
     const items = itemsOf(section.rows);
     for (const item of items) pinnedIds.add(item.id);
-    if (items.length === 0 && section.sectionId === null) continue;
+    if (items.length === 0 && section.sectionId === null && section.hiddenCount === 0) continue;
     ordered.push({
       id: bucketIdOfSection(section.sectionId),
       items,
       ...(section.name != null ? { label: section.name } : {}),
       pinSectionId: section.sectionId,
+      ...(section.hiddenCount > 0 ? { hiddenCount: section.hiddenCount } : {}),
     });
   }
 
@@ -1202,6 +1209,8 @@ export function MobileChatList({
   pinSections: pinSectionsOverride,
   statusCommands,
   statusWritable = true,
+  statusPreferable = true,
+  scopeHiddenCounts,
 }: {
   chats: MobileConversationItem[];
   /** Status view writes (drag, row menu, section header menu). Omit for a read-only list. */
@@ -1211,6 +1220,10 @@ export function MobileChatList({
    * order, pin sections); read-only members only pin (`useStatusViewWritable`).
    */
   statusWritable?: boolean;
+  /** False when not even a pin can be written (an encrypted workspace's read role). */
+  statusPreferable?: boolean;
+  /** Pinned rows the list's scope hid, by pin section id (`""` = default). */
+  scopeHiddenCounts?: Record<string, number>;
   /** Pin sections to split pinned rows by; defaults to the workspace catalog's. */
   pinSections?: readonly PinSection[];
   groupBy?: MobileChatGroupBy;
@@ -1285,6 +1298,8 @@ export function MobileChatList({
     sections: pinSections,
     sectionsLoaded: pinSectionsLoaded,
     writable: statusWritable,
+    preferable: statusPreferable,
+    scopeHiddenCounts,
     statusMode,
     commands: archived ? undefined : statusCommands,
     rowActions,
@@ -1465,7 +1480,7 @@ export function MobileChatList({
       isBucketExpanded(group.id, group.tier) ? group.items.map((item) => item.id) : []
     )
   );
-  const cards = groups.map(({ id, items, label, tier, pinSectionId }, index) => {
+  const cards = groups.map(({ id, items, label, tier, pinSectionId, hiddenCount }, index) => {
     const expanded = isBucketExpanded(id, tier);
     const isPinnedBucket = pinSectionId !== undefined;
     const dropTarget = statusList.dropTarget;
@@ -1482,7 +1497,8 @@ export function MobileChatList({
                   dropTarget.to.sectionId === pinSectionId))
                 ? dropTarget.beforeId
                 : undefined,
-            canManage: (chatId) => !items.find((item) => item.id === chatId)?.readOnly,
+            canManage: statusList.canManage,
+            canPrefer: statusList.canPrefer,
             onLater: statusList.openLater,
             onSettle: statusCommands.settle,
             isLocked: statusList.drag.isLifted,
@@ -1587,6 +1603,22 @@ export function MobileChatList({
       (labeledItem.kind === 'local' ||
         (labeledItem.kind !== 'github' && !labeledItem.projectAvatarUrl));
 
+    const tierHeading =
+      tier === 'later' || tier === 'settled' ? (
+        <>
+          {heading}
+          <span {...stylex.props(statusStyles.count)}>{items.length}</span>
+          {!expanded && items.some((item) => item.hasUnreadMessages) ? (
+            <span
+              role="img"
+              aria-label={t('sessions.unreadMessages', 'Unread messages')}
+              {...stylex.props(statusStyles.unreadDot)}
+            />
+          ) : null}
+        </>
+      ) : (
+        heading
+      );
     let groupedHeadingNode: ReactNode;
     if (isPinnedBucketId(id) || tier || groupBy === 'date' || groupBy === 'none') {
       groupedHeadingNode = (
@@ -1596,7 +1628,7 @@ export function MobileChatList({
           compactTop={compactTop}
           trailing={trailing}
         >
-          {heading}
+          {tierHeading}
         </CollapsibleSectionHeading>
       );
     } else if (id === NO_PROJECT_BUCKET_ID) {
@@ -1643,10 +1675,24 @@ export function MobileChatList({
     return (
       <Fragment key={id}>
         {dropHeaderAttrs ? (
-          <div {...dropHeaderAttrs}>{groupedHeadingNode}</div>
+          <div
+            {...dropHeaderAttrs}
+            {...stylex.props(
+              !expanded && cardStatus?.dropBeforeId !== undefined && statusStyles.dropHeader
+            )}
+          >
+            {groupedHeadingNode}
+          </div>
         ) : (
           groupedHeadingNode
         )}
+        {hiddenCount ? (
+          <div {...stylex.props(statusStyles.hiddenCount)}>
+            {t('sidebar.pinSections.hiddenByScope', '{{count}} sessions hidden', {
+              count: hiddenCount,
+            })}
+          </div>
+        ) : null}
         {expanded ? (
           <MobileChatListCard
             chats={items}
@@ -1792,6 +1838,30 @@ function SelectionToolbar({
 }
 
 const statusStyles = stylex.create({
+  count: {
+    marginInlineStart: space[1.5],
+    fontWeight: 400,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  unreadDot: {
+    display: 'inline-block',
+    width: 6,
+    height: 6,
+    marginInlineStart: space[1.5],
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+    verticalAlign: 'middle',
+  },
+  dropHeader: {
+    backgroundColor: colors.selectedFill,
+    borderRadius: radius.medium,
+  },
+  hiddenCount: {
+    paddingInline: space[4],
+    paddingBottom: space[2],
+    fontSize: 13,
+    color: colors.secondaryLabel,
+  },
   trailingCluster: { display: 'flex', alignItems: 'center', gap: space[1] },
   dropIndicator: {
     height: 2,
