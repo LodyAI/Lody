@@ -2,7 +2,7 @@ import { useSessionOwnerAccess } from './use-session-owner-access';
 import { useSessionManagementGuard } from './use-session-management-guard';
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
 import type {
@@ -26,7 +26,6 @@ import {
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
-  getSessionCancelRequestMarker,
   machineFlockKeys,
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
@@ -42,13 +41,14 @@ import {
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
   OPERATION_INBOX_PROTOCOL_VERSION,
-  buildPinnedSectionLayout,
-  planNewPinPlacement,
-  type PinPlacementWrite,
-  type PinnedSessionPlacement,
+  planStatusViewCommand,
+  type StatusViewCommand,
+  type StatusViewState,
+  type StatusViewWrite,
+  getSessionCancelRequestMarker,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 // Default import: `debug` is CJS. Named `{ debug }` breaks Vite 8 / TanStack
 // module-runner interop used by site-docs SSR (UNEXPECTED named-export error).
 import debug from 'debug';
@@ -75,6 +75,8 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
 import { roostHistoryFeatureEnabledAtom } from '@/atoms/settings';
+import { statusViewPatchToMeta, statusViewSessionsFromMetas } from '@/lib/status-view-state';
+import { deleteWorkspacePinSection, writeWorkspacePinSection } from '@/lib/workspace-catalog-write';
 import {
   createSessionSubmission,
   type CreateSessionResult,
@@ -295,17 +297,42 @@ export type SessionActions = {
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
-  /** Write planned pin placements (section and order) for pinned conversations. */
-  applySessionPinPlacements: (writes: readonly PinPlacementWrite[]) => Promise<void>;
+  /**
+   * Plan a Status view or pin-section command with the shared planner and
+   * write the result. `state` is what the caller's list shows (order, presence,
+   * permissions); opened sub-conversations and the target's own metadata are
+   * read from the Repo. Every affected Session passes the guard before any write.
+   */
+  runStatusViewCommand: (
+    command: StatusViewCommand,
+    state?: StatusViewState
+  ) => Promise<StatusViewWrite[]>;
+  /** Snooze a session until `snoozedUntil` (epoch ms) in the Status view's Later section. */
+  snoozeSession: (
+    sessionId: SessionId,
+    snoozedUntil: number,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
+  /** Mark a session as settled in the Status view's Settled section. */
+  settleSession: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
+  /** Restore a snoozed or settled session back to Focus. */
+  moveSessionToFocus: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
 };
 
-const toPinnedSessionPlacement = (meta: SessionMeta): PinnedSessionPlacement => ({
-  id: meta.id,
-  pinSectionId: meta.pinSectionId ?? null,
-  pinOrderKey: meta.pinOrderKey ?? null,
-  recency:
-    meta.lastMessageAt ??
-    (typeof meta.createdAt === 'number' ? meta.createdAt : Date.parse(meta.createdAt ?? '') || 0),
+const randomByte = () => Math.floor(Math.random() * 256);
+
+const emptyStatusViewState = (): StatusViewState => ({
+  sessions: [],
+  sections: [],
+  sectionsLoaded: false,
+  canManageSections: true,
+  nowMs: getServerNow(),
 });
 
 const extractSessionStatus = (value: unknown): Session['status'] | undefined => {
@@ -480,6 +507,20 @@ export function useSessionActions(): SessionActions {
         publishSessionMeta: setDocMetaByRoomId,
         readSessionMeta: (sessionId) =>
           store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)],
+        // Key below every existing orderKey so a new top-level conversation
+        // lands at the top of Status Focus; child Sessions get none (they
+        // render nested under their opener row).
+        planNewSessionOrderKey: () => {
+          const write = planStatusViewCommand(
+            {
+              ...emptyStatusViewState(),
+              related: statusViewSessionsFromMetas(Object.values(store.get(sessionMetaCacheAtom))),
+            },
+            { type: 'newSessionOrder', sessionId: '' },
+            { nowMs: getServerNow(), randomByte }
+          )[0];
+          return write?.type === 'session' ? write.patch.orderKey : undefined;
+        },
         onRpcDelivered: (sessionId, turnId) =>
           store.set(rpcDeliveredTurnsAtom, (previous) =>
             addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, turnId))
@@ -530,7 +571,7 @@ export function useSessionActions(): SessionActions {
       patch: {
         isPinned?: boolean;
         pinSectionId?: string | undefined;
-        pinOrderKey?: string | undefined;
+        orderKey?: string | undefined;
         lastReadAt?: number;
       }
     ) => {
@@ -607,12 +648,17 @@ export function useSessionActions(): SessionActions {
             log('session cancel rpc threw for %s/%s: %o', sessionId, turnId, error);
           });
       }
-      if (cancelId) {
+      if (!interrupt) {
+        // Keep the observed drafts paused before publishing the durable Stop
+        // marker. The immediate RPC above must not wait for a store read.
         await runtime.sendResources.withSessionStore(sessionId, (sessionStore) => {
           sessionStore.setState((draft: SessionDocDraft) => {
-            draft.cancelRequest = { id: cancelId, turnId };
+            for (const item of draft.mq ?? []) item.paused = true;
+            if (cancelId) draft.cancelRequest = { id: cancelId, turnId };
           });
         });
+      }
+      if (cancelId) {
         await runtime.repo.flush();
       }
       await updateSessionMetadata(sessionId, {
@@ -665,6 +711,7 @@ export function useSessionActions(): SessionActions {
         { lastMessageAt: now, lastReadAt: now },
         assertCanManageSessions
       );
+      await runStatusViewCommandRef.current({ type: 'touchOnSend', sessionId });
     },
     [runtime, assertCanManageSessions]
   );
@@ -722,7 +769,13 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const readAt = getFiniteTimestamp(lastMessageAt) ?? getServerNow();
+      const now = getServerNow();
+      const baseReadAt = getFiniteTimestamp(lastMessageAt) ?? now;
+      const roomId = getSessionRoomId(sessionId);
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const snoozedUntil = getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : 0;
+      const readAt = Math.max(baseReadAt, expiredSnoozeAt);
       await assertReadablePreferences([sessionId]);
       await touchSessionActivityMeta(
         runtime,
@@ -730,8 +783,26 @@ export function useSessionActions(): SessionActions {
         { lastReadAt: readAt },
         assertReadablePreferences
       );
+      const rootId = cachedMeta?.parentSessionId;
+      const rootMeta = rootId
+        ? (store.get(sessionMetaCacheAtom)[getSessionRoomId(rootId)] as SessionMeta | undefined)
+        : undefined;
+      const rootSnoozedUntil = getFiniteTimestamp(rootMeta?.snoozedUntil);
+      if (
+        rootId &&
+        rootSnoozedUntil !== null &&
+        rootSnoozedUntil <= now &&
+        rootSnoozedUntil > readAt
+      ) {
+        await touchSessionActivityMeta(
+          runtime,
+          rootId,
+          { lastReadAt: rootSnoozedUntil },
+          assertReadablePreferences
+        );
+      }
     },
-    [runtime, assertReadablePreferences]
+    [runtime, store, assertReadablePreferences]
   );
 
   const markSessionUnread = useCallback(
@@ -750,13 +821,21 @@ export function useSessionActions(): SessionActions {
       const lastMessageAt =
         getFiniteTimestamp(repoMeta?.lastMessageAt) ??
         getFiniteTimestamp(cachedMeta?.lastMessageAt);
-      if (lastMessageAt === null) return;
+      const now = getServerNow();
+      const snoozedUntil =
+        getFiniteTimestamp(repoMeta?.snoozedUntil) ?? getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : null;
+      const effectiveLastMessageAt =
+        lastMessageAt !== null && expiredSnoozeAt !== null
+          ? Math.max(lastMessageAt, expiredSnoozeAt)
+          : (lastMessageAt ?? expiredSnoozeAt);
+      if (effectiveLastMessageAt === null) return;
 
-      // Unread is the durable comparison `lastMessageAt > lastReadAt`. Move
-      // only this receipt behind the latest known message; do not touch the
+      // Unread is the durable comparison `effectiveLastMessageAt > lastReadAt`. Move
+      // only this receipt behind the latest known activity; do not touch the
       // activity timestamp, which would reorder the sidebar.
       await updateSessionPreference(sessionId, {
-        lastReadAt: lastMessageAt - 1,
+        lastReadAt: effectiveLastMessageAt - 1,
       } as Partial<SessionMeta>);
     },
     [runtime, store, updateSessionPreference]
@@ -1025,57 +1104,155 @@ export function useSessionActions(): SessionActions {
     [runtime, store, deleteArchivedSessionMeta, assertCanManageSessions]
   );
 
-  const setSessionPinned = useCallback(
-    async (sessionId: SessionId, isPinned: boolean) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
+  const readSessionMetas = useCallback(
+    async (sessionId: SessionId, includeOpened: boolean): Promise<SessionMeta[]> => {
+      if (!runtime) throw new Error('Runtime not ready');
+      if (includeOpened) {
+        const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
+        if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+          throw new Error('Workspace changed during session operation');
+        }
+        return tree;
       }
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
-      if (isLoroRepoDocDeleted(existing)) return;
-      if (!isPinned) {
-        // Unpinning forgets the place; pinning again starts at the top of the default section.
-        await updateSessionPreference(sessionId, {
-          isPinned: false,
-          pinSectionId: undefined,
-          pinOrderKey: undefined,
-        });
-        return;
-      }
-      const defaultSectionPins = Object.values(store.get(sessionMetaCacheAtom)).filter(
-        (meta) =>
-          meta.isPinned === true && !meta.isArchived && !meta.pinSectionId && meta.id !== sessionId
-      );
-      const { pinOrderKey } = planNewPinPlacement(
-        buildPinnedSectionLayout(
-          defaultSectionPins.map(toPinnedSessionPlacement),
-          [],
-          (placement) => placement
-        )
-      );
-      await updateSessionPreference(sessionId, {
-        isPinned: true,
-        pinSectionId: undefined,
-        pinOrderKey,
-      });
+      if (isLoroRepoDocDeleted(existing)) return [];
+      const meta =
+        (existing?.meta as SessionMeta | undefined) ??
+        (store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined);
+      return meta ? [{ ...meta, id: sessionId }] : [];
     },
-    [runtime, store, updateSessionPreference]
+    [runtime, store]
   );
 
-  const applySessionPinPlacements = useCallback(
-    async (writes: readonly PinPlacementWrite[]) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
+  /** Every affected Session passes its guard before the first write. */
+  const applyStatusViewWrites = useCallback(
+    async (writes: readonly StatusViewWrite[]) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const managed: SessionId[] = [];
+      const preferred: SessionId[] = [];
       for (const write of writes) {
-        await updateSessionPreference(write.sessionId as SessionId, {
-          isPinned: true,
-          pinSectionId: write.pinSectionId,
-          pinOrderKey: write.pinOrderKey,
-        });
+        if (write.type !== 'session') continue;
+        (write.access === 'manage' ? managed : preferred).push(write.sessionId as SessionId);
+      }
+      if (managed.length > 0) await assertCanManageSessions(managed);
+      if (preferred.length > 0) await assertReadablePreferences(preferred);
+      for (const write of writes) {
+        if (write.type === 'session') {
+          await runtime.writer.upsertDocMeta(
+            getSessionRoomId(write.sessionId as SessionId),
+            statusViewPatchToMeta(write.patch) as RepoDocMetaPatch
+          );
+        } else if (write.type === 'putSection') {
+          await writeWorkspacePinSection(runtime, write.section);
+        } else {
+          await deleteWorkspacePinSection(runtime, write.sectionId);
+        }
       }
     },
-    [runtime, updateSessionPreference]
+    [runtime, assertCanManageSessions, assertReadablePreferences]
+  );
+
+  const runStatusViewCommand = useCallback(
+    async (requested: StatusViewCommand, state?: StatusViewState) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      let command = requested;
+      const base = state ?? emptyStatusViewState();
+      const listed = new Set(base.sessions.map((session) => session.id));
+      let reached: SessionMeta[] = [];
+      switch (command.type) {
+        case 'snooze':
+        case 'settle':
+        case 'moveToFocus':
+          reached = await readSessionMetas(command.sessionId as SessionId, command.includeOpened);
+          break;
+        case 'move':
+          // A row dropped into Focus brings its opened sub-conversations along.
+          reached = await readSessionMetas(
+            command.sessionId as SessionId,
+            command.to.area === 'focus'
+          );
+          break;
+        case 'touchOnSend': {
+          reached = await readSessionMetas(command.sessionId as SessionId, false);
+          const rootId = reached[0]?.parentSessionId;
+          if (rootId) {
+            command = { type: 'touchOnSend', sessionId: rootId };
+            reached = await readSessionMetas(rootId, false);
+          }
+          break;
+        }
+        case 'setPinned': {
+          const pinnedId = command.sessionId;
+          const target = await readSessionMetas(pinnedId as SessionId, false);
+          if (target.length === 0) return [];
+          // The new pin's key is planned against every pin in the default section.
+          reached = [
+            ...Object.values(store.get(sessionMetaCacheAtom)).filter(
+              (meta) => meta.isArchived !== true && meta.id !== pinnedId
+            ),
+            ...target,
+          ];
+          break;
+        }
+        default:
+          break;
+      }
+      const related = statusViewSessionsFromMetas(reached, {
+        keepArchivedId: 'sessionId' in command ? command.sessionId : undefined,
+      }).filter((session) => !listed.has(session.id));
+      const writes = planStatusViewCommand(
+        { ...base, related: [...(base.related ?? []), ...related] },
+        command,
+        { nowMs: getServerNow(), randomByte }
+      );
+      await applyStatusViewWrites(writes);
+      return writes;
+    },
+    [runtime, store, readSessionMetas, applyStatusViewWrites]
+  );
+  const runStatusViewCommandRef = useRef(runStatusViewCommand);
+  runStatusViewCommandRef.current = runStatusViewCommand;
+
+  const setSessionPinned = useCallback(
+    async (sessionId: SessionId, pinned: boolean) => {
+      await runStatusViewCommand({ type: 'setPinned', sessionId, pinned });
+    },
+    [runStatusViewCommand]
+  );
+
+  const snoozeSession = useCallback(
+    async (sessionId: SessionId, until: number, options?: { includeOpenedSessions?: boolean }) => {
+      await runStatusViewCommand({
+        type: 'snooze',
+        sessionId,
+        until,
+        includeOpened: options?.includeOpenedSessions === true,
+      });
+    },
+    [runStatusViewCommand]
+  );
+
+  const settleSession = useCallback(
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
+      await runStatusViewCommand({
+        type: 'settle',
+        sessionId,
+        includeOpened: options?.includeOpenedSessions === true,
+      });
+    },
+    [runStatusViewCommand]
+  );
+
+  const moveSessionToFocus = useCallback(
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
+      await runStatusViewCommand({
+        type: 'moveToFocus',
+        sessionId,
+        includeOpened: options?.includeOpenedSessions === true,
+      });
+    },
+    [runStatusViewCommand]
   );
 
   return {
@@ -1100,6 +1277,9 @@ export function useSessionActions(): SessionActions {
     restoreSession,
     deleteArchivedSession,
     setSessionPinned,
-    applySessionPinPlacements,
+    runStatusViewCommand,
+    snoozeSession,
+    settleSession,
+    moveSessionToFocus,
   };
 }

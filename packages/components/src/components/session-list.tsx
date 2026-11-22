@@ -30,7 +30,7 @@ import {
   GripVertical,
   Link2,
   LockKeyhole,
-  Mail,
+  MailOpen,
   Pencil,
   Pin,
   PinOff,
@@ -67,7 +67,7 @@ import type {
 import {
   ONLY_CHATS_KEY,
   sidebarCollapsedOpenedBySessionsAtom,
-  sidebarShowFullListAtom,
+  sidebarRevealedRowsAtom,
   toggleSidebarCollapsedOpenedBySessionAtom,
 } from '@/atoms/focus-layer';
 import { sidebarShowBranchNamesAtom } from '@/atoms/sidebar-state';
@@ -89,6 +89,7 @@ import {
   SessionPrIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SessionMergeablePill,
@@ -118,6 +119,7 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type { PrStatus };
 
@@ -169,6 +171,8 @@ export type SessionListRow = {
   isWaitingPermission: boolean;
   /** The latest turn ended in failure (`hasFailedLatestTurn`), child Tabs rolled in. */
   hasFailedTurn?: boolean;
+  /** Auto delivery stopped for this conversation's PR and needs the person. */
+  deliveryStalled?: boolean;
   isPinned?: boolean;
   isWorktree?: boolean;
   externalHistoryProvider?: LocalProjectHistoryProvider | null;
@@ -318,28 +322,29 @@ const EMPTY_TREE_NODES: OpenedBySessionTreeNode<SessionListRow>[] = [];
 
 /**
  * Rows a group renders, in render order, with their "opened by" tree geometry.
- * The preview cap counts TOP-LEVEL rows only, so a collapsed preview never
- * splits an opener from the Sessions it opened.
+ * The cap counts TOP-LEVEL rows only, so a preview never splits an opener from
+ * the Sessions it opened. `revealedRows` is how many extra roots "Show more"
+ * has uncovered beyond {@link MAX_VISIBLE_SESSIONS}.
  */
 export function getVisibleSessionGroupTree(
   group: SessionRowGroup,
-  whetherShowFullList: boolean,
+  revealedRows: number,
   collapsedOpenedBySessionIds?: Record<string, boolean>
 ): OpenedBySessionTreeNode<SessionListRow>[] {
   return buildOpenedBySessionTree(group.sessions, {
     ...SESSION_ROW_OPENED_BY_TREE_ACCESSORS,
     isCollapsed: (openerId) => collapsedOpenedBySessionIds?.[openerId] === true,
     rootRank: sessionRowRootRank,
-    ...(whetherShowFullList ? {} : { maxRoots: MAX_VISIBLE_SESSIONS }),
+    maxRoots: MAX_VISIBLE_SESSIONS + revealedRows,
   });
 }
 
 export function getVisibleSessionGroupRows(
   group: SessionRowGroup,
-  whetherShowFullList: boolean,
+  revealedRows: number,
   collapsedOpenedBySessionIds?: Record<string, boolean>
 ): SessionListRow[] {
-  return getVisibleSessionGroupTree(group, whetherShowFullList, collapsedOpenedBySessionIds).map(
+  return getVisibleSessionGroupTree(group, revealedRows, collapsedOpenedBySessionIds).map(
     (node) => node.item
   );
 }
@@ -511,15 +516,15 @@ export function buildGroups(
   return ordered;
 }
 
-function reconcileShowFullListByGroups(
-  current: Record<string, boolean>,
+function reconcileRevealedRowsByGroups(
+  current: Record<string, number>,
   groups: SessionRowGroup[]
-): Record<string, boolean> {
-  let next: Record<string, boolean> | null = null;
+): Record<string, number> {
+  let next: Record<string, number> | null = null;
 
   for (const group of groups) {
-    const previousValue = current[group.key] ?? false;
-    const nextValue = group.collapsed ? false : previousValue;
+    const previousValue = current[group.key] ?? 0;
+    const nextValue = group.collapsed ? 0 : previousValue;
 
     if (current[group.key] !== nextValue) {
       next ??= { ...current };
@@ -593,7 +598,8 @@ type SessionGroupSectionProps = {
   group: SessionRowGroup;
   selectedSessionId?: string | null;
   activeGroupKey?: string | null;
-  whetherShowFullList: boolean;
+  /** Extra top-level rows revealed beyond {@link MAX_VISIBLE_SESSIONS}. */
+  revealedRows: number;
   onSelectSession?: (sessionId: string) => void;
   onNavigateSessionTab?: (sessionId: string, tabSessionId: string) => void;
   onToggleRepoCollapsed?: (repoFullName: string) => void;
@@ -618,7 +624,10 @@ type SessionGroupSectionProps = {
   onNew?: (repoFullName?: string) => void;
   onNavigateToNewSession?: (repoFullName?: string) => void;
   onOpenPullRequest?: (request: SessionListPullRequestOpen) => void;
-  onToggleFullList?: (groupKey: string) => void;
+  /** Reveals one more page of top-level rows in this group. */
+  onShowMore?: (groupKey: string) => void;
+  /** Collapses this group back to its preview rows. */
+  onShowLess?: (groupKey: string) => void;
   /** Opener session ids whose opened Sessions are hidden. */
   collapsedOpenedBySessionIds: Record<string, boolean>;
   onToggleOpenedBySessions?: (openerSessionId: string) => void;
@@ -857,7 +866,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
     : undefined;
   // Mobile keeps swipe-to-archive as the only row gesture; the context
   // menu (and its ⋯ button) is desktop-only. Computed before the row so
-  // the leading slot can show the ⋯ affordance.
+  // the end slot can reveal the ⋯ affordance.
   const canGoToOpener = Boolean(openerSessionId && isSelectable);
   const baseOpenedByTreeSlot = buildSessionRowOpenedByTreeSlot(
     node,
@@ -1134,11 +1143,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         {/* On a two-line row the leading and end slots sit in a box one title line
             tall, so they stay on the title line; otherwise the box disappears. */}
         <div className={showMetaLine ? lineBoxClassName : 'contents'}>
-          <SessionRowLeadingSlot
-            showMenuButton={hasMenuActions}
-            menuLabel={moreActionsLabel}
-            openedByTree={openedByTreeSlot}
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTreeSlot} />
         </div>
         <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
           <div
@@ -1178,6 +1183,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         <div className={showMetaLine ? lineBoxClassName : 'contents'}>
           <SidebarRowEndSlot
             sessionId={session.sessionId}
+            selected={showSelectedState}
             isWaitingPermission={session.isWaitingPermission}
             isWorking={session.isWorking}
             hasUnreadMessages={session.hasUnreadMessages}
@@ -1210,6 +1216,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                 </span>
               ) : undefined
             }
+            menu={hasMenuActions ? <SessionRowMenuButton label={moreActionsLabel} /> : undefined}
             archive={
               showInlineArchive ? (
                 <SidebarRowArchiveButton
@@ -1246,7 +1253,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={Mail}
+            icon={MailOpen}
             onClick={() => {
               onMarkSessionUnread?.(session.sessionId);
             }}
@@ -1282,7 +1289,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
           <ContextMenu.Item
             icon={GitBranch}
             onClick={() => {
-              void navigator.clipboard.writeText(session.branchName).catch(() => {});
+              void copyTextToClipboard(session.branchName).catch(() => {});
             }}
           >
             {contextMenuLabels.copyBranch}
@@ -1639,7 +1646,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
   group,
   selectedSessionId,
   activeGroupKey,
-  whetherShowFullList,
+  revealedRows,
   onSelectSession,
   onNavigateSessionTab,
   onToggleRepoCollapsed,
@@ -1660,7 +1667,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
   onNew,
   onNavigateToNewSession,
   onOpenPullRequest,
-  onToggleFullList,
+  onShowMore,
+  onShowLess,
   collapsedOpenedBySessionIds,
   onToggleOpenedBySessions,
   getSessionHref,
@@ -1724,32 +1732,30 @@ const SessionGroupSection = memo(function SessionGroupSection({
     onNavigateToNewSession?.(group.repoFullName ?? undefined);
   };
 
-  // whetherShowFullList keeps each group in a compact preview by default (latest N),
-  // and only reveals the full list after the user explicitly expands it. The cap
-  // counts TOP-LEVEL rows, so an opener never gets separated from the Sessions
-  // it opened.
-  //
   // `group` is a fresh object on every sidebar data change (live status, new
   // message), so without a memo these O(n) resolutions would re-run at
   // agent-activity frequency just to show five rows. A collapsed group renders
   // nothing, so it skips them entirely.
-  const { canToggleFullList, visibleNodes, showTreeGutter } = useMemo(() => {
+  const { canRevealRows, hasMoreRows, visibleNodes, showTreeGutter } = useMemo(() => {
     if (group.collapsed) {
-      return { canToggleFullList: false, visibleNodes: EMPTY_TREE_NODES, showTreeGutter: false };
+      return {
+        canRevealRows: false,
+        hasMoreRows: false,
+        visibleNodes: EMPTY_TREE_NODES,
+        showTreeGutter: false,
+      };
     }
-    const nodes = getVisibleSessionGroupTree(
-      group,
-      whetherShowFullList,
-      collapsedOpenedBySessionIds
-    );
+    const nodes = getVisibleSessionGroupTree(group, revealedRows, collapsedOpenedBySessionIds);
+    const rootCount = countOpenedByTreeRoots(group.sessions, SESSION_ROW_OPENED_BY_TREE_ACCESSORS);
     return {
-      canToggleFullList: sessionGroupOverflowsPreview(group),
+      canRevealRows: rootCount > MAX_VISIBLE_SESSIONS,
+      hasMoreRows: rootCount > MAX_VISIBLE_SESSIONS + revealedRows,
       visibleNodes: nodes,
       // Only a group that actually contains an MCP-opened Session enables the
       // tree wrapper. Within it, unrelated top-level rows keep flat geometry.
       showTreeGutter: hasOpenedByTreeNesting(nodes),
     };
-  }, [collapsedOpenedBySessionIds, group, whetherShowFullList]);
+  }, [collapsedOpenedBySessionIds, group, revealedRows]);
   // A folded group still says whether anything inside it needs the user.
   const sendStates = useAtomValue(sessionSendStatesAtom);
   const collapsedActivity = useMemo(
@@ -1761,9 +1767,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
         : null,
     [group.collapsed, group.sessions, sendStates]
   );
-  const toggleListLabel = whetherShowFullList
-    ? t('sessions.showLess', 'Show less')
-    : t('sessions.showAll', 'Show all ({{count}})', { count: group.sessions.length });
+  const showMoreLabel = t('sessions.showMore', 'Show more');
+  const showLessLabel = t('sessions.showLess', 'Show less');
   const resolvedTrailingContent = trailingContent ?? (group.collapsed ? null : dragHandle);
   // A repo ("loro-dev/loro") is a second-level row like a project: 14px
   // regular in the sidebar row color with a 16px avatar and a hover fill.
@@ -2033,7 +2038,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
               contextMenuLabels={contextMenuLabels}
             />
           ))}
-          {canToggleFullList && (
+          {canRevealRows && hasMoreRows && (
             <button
               type="button"
               data-id={`show-more:${group.key}`}
@@ -2047,11 +2052,31 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
               )}
-              aria-label={toggleListLabel}
-              onClick={() => onToggleFullList?.(group.key)}
+              aria-label={showMoreLabel}
+              onClick={() => onShowMore?.(group.key)}
             >
               <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
-              <span>{toggleListLabel}</span>
+              <span>{showMoreLabel}</span>
+            </button>
+          )}
+          {canRevealRows && revealedRows > 0 && (
+            <button
+              type="button"
+              data-id={`show-less:${group.key}`}
+              data-scope-item="row"
+              data-sidebar-show-less={group.key}
+              className={cn(
+                SIDEBAR_CAPTION_TEXT_CLASS,
+                'flex h-[26px] select-none items-center gap-2 rounded-md px-2 text-left text-sidebar-foreground-muted/80',
+                'transition-colors',
+                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+              )}
+              aria-label={showLessLabel}
+              onClick={() => onShowLess?.(group.key)}
+            >
+              <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
+              <span>{showLessLabel}</span>
             </button>
           )}
         </div>
@@ -2266,8 +2291,7 @@ export const SessionList = memo(function SessionList({
     () => buildGroups(sessions, repos, chatsCollapsed, chatsGroupLabel, projectGroups),
     [sessions, repos, chatsCollapsed, chatsGroupLabel, projectGroups]
   );
-  const [whetherShowFullListByGroup, setWhetherShowFullListByGroup] =
-    useAtom(sidebarShowFullListAtom);
+  const [revealedRowsByGroup, setRevealedRowsByGroup] = useAtom(sidebarRevealedRowsAtom);
   const collapsedOpenedBySessionIds = useAtomValue(sidebarCollapsedOpenedBySessionsAtom);
   const handleToggleOpenedBySessions = useSetAtom(toggleSidebarCollapsedOpenedBySessionAtom);
   const handleSelect = onSelect ?? onSelectSession;
@@ -2301,25 +2325,33 @@ export const SessionList = memo(function SessionList({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const handleToggleFullList = useCallback(
+  const handleShowMore = useCallback(
     (groupKey: string) => {
-      setWhetherShowFullListByGroup((prev) => {
-        return { ...prev, [groupKey]: !prev[groupKey] };
+      setRevealedRowsByGroup((prev) => {
+        return { ...prev, [groupKey]: (prev[groupKey] ?? 0) + MAX_VISIBLE_SESSIONS };
       });
     },
-    [setWhetherShowFullListByGroup]
+    [setRevealedRowsByGroup]
+  );
+  const handleShowLess = useCallback(
+    (groupKey: string) => {
+      setRevealedRowsByGroup((prev) => {
+        return { ...prev, [groupKey]: 0 };
+      });
+    },
+    [setRevealedRowsByGroup]
   );
 
-  const resolvedShowFullListByGroup = useMemo(
-    () => reconcileShowFullListByGroups(whetherShowFullListByGroup, groups),
-    [whetherShowFullListByGroup, groups]
+  const resolvedRevealedRowsByGroup = useMemo(
+    () => reconcileRevealedRowsByGroups(revealedRowsByGroup, groups),
+    [revealedRowsByGroup, groups]
   );
 
   useLayoutEffect(() => {
-    setWhetherShowFullListByGroup((prev) => {
-      return reconcileShowFullListByGroups(prev, groups);
+    setRevealedRowsByGroup((prev) => {
+      return reconcileRevealedRowsByGroups(prev, groups);
     });
-  }, [groups, setWhetherShowFullListByGroup]);
+  }, [groups, setRevealedRowsByGroup]);
 
   if (isLoading && sessions.length === 0) {
     return (
@@ -2390,7 +2422,7 @@ export const SessionList = memo(function SessionList({
         <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
           <div className={cn('flex flex-col', className)}>
             {groups.map((group, groupIndex) => {
-              const whetherShowFullList = resolvedShowFullListByGroup[group.key] ?? false;
+              const revealedRows = resolvedRevealedRowsByGroup[group.key] ?? 0;
               const groupHeaderAction = groupIndex === 0 ? headerAction : undefined;
               if (group.kind === 'repo' && group.repoFullName) {
                 return (
@@ -2401,7 +2433,7 @@ export const SessionList = memo(function SessionList({
                     headerAction={groupHeaderAction}
                     selectedSessionId={selectedSessionId}
                     activeGroupKey={activeGroupKey}
-                    whetherShowFullList={whetherShowFullList}
+                    revealedRows={revealedRows}
                     onSelectSession={handleSelect}
                     onNavigateSessionTab={onNavigateSessionTab}
                     onToggleRepoCollapsed={onToggleRepoCollapsed}
@@ -2417,7 +2449,8 @@ export const SessionList = memo(function SessionList({
                     onNew={onNew}
                     onNavigateToNewSession={onNavigateToNewSession}
                     onOpenPullRequest={onOpenPullRequest}
-                    onToggleFullList={handleToggleFullList}
+                    onShowMore={handleShowMore}
+                    onShowLess={handleShowLess}
                     collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
                     onToggleOpenedBySessions={handleToggleOpenedBySessions}
                     getSessionHref={getSessionHref}
@@ -2447,7 +2480,7 @@ export const SessionList = memo(function SessionList({
                   headerAction={groupHeaderAction}
                   selectedSessionId={selectedSessionId}
                   activeGroupKey={activeGroupKey}
-                  whetherShowFullList={whetherShowFullList}
+                  revealedRows={revealedRows}
                   onSelectSession={handleSelect}
                   onNavigateSessionTab={onNavigateSessionTab}
                   onToggleRepoCollapsed={onToggleRepoCollapsed}
@@ -2461,7 +2494,8 @@ export const SessionList = memo(function SessionList({
                   onNew={onNew}
                   onNavigateToNewSession={onNavigateToNewSession}
                   onOpenPullRequest={onOpenPullRequest}
-                  onToggleFullList={handleToggleFullList}
+                  onShowMore={handleShowMore}
+                  onShowLess={handleShowLess}
                   collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
                   onToggleOpenedBySessions={handleToggleOpenedBySessions}
                   getSessionHref={getSessionHref}

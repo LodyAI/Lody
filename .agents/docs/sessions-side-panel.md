@@ -21,7 +21,7 @@ synchronous merge endpoint. Local PR summary access still opens GitHub externall
   All Changes UI lives here via
   `session-changes-sidebar.tsx` (story: `SessionChangesSidebar.stories.tsx`). Desktop file/diff
   viewers never split the conversation surface: opt-in Files, All Changes, Browser, conditional PR,
-  and file/conversation-diff/turn-diff tabs all live in the right panel under
+  and file/attachment/conversation-diff/turn-diff tabs all live in the right panel under
   `session-side-panel-tab-bar.tsx`, and every tab is closeable. Functional panels start from an empty
   state, are added through its launcher or `+` menu, return to that menu when closed, and persist
   their open order/current selection per parent session in frontend local storage. Closing the active

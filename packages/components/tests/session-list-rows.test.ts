@@ -209,6 +209,24 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
   });
 });
 
+test('marks only the row whose Auto delivery stopped', () => {
+  const at = { updatedAt: 1, prUrl: 'https://github.com/example/api/pull/7' };
+  const stalled = makeSession({
+    id: 'stalled',
+    autoDelivery: { ...at, state: 'stalled', reason: 'ci_limit' },
+  });
+  const waiting = makeSession({ id: 'waiting', autoDelivery: { ...at, state: 'ci' } });
+  const rows = buildSessionListRows([stalled, waiting], {
+    scope: 'my',
+    currentUserId: 'user-1',
+    defaultTitle: 'Untitled',
+  });
+  expect(Object.fromEntries(rows.map((row) => [row.sessionId, row.deliveryStalled]))).toEqual({
+    stalled: true,
+    waiting: false,
+  });
+});
+
 describe('buildSessionListRows repo + PR mapping', () => {
   test("shows a Project group's default-repository PR, matching the Info Bar", () => {
     const api = 'https://github.com/example/api/pull/7';

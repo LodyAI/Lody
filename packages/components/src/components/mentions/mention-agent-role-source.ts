@@ -4,9 +4,8 @@ import {
   bindAgentRoleTarget,
   formatAgentRoleMentionValue,
   getAgentRoleEmoji,
-  getAgentRoleMentionSlug,
+  getAgentRoleTargetMentionSlug,
   getAgentRoleTargets,
-  normalizeAgentRoleMentionSlug,
   type AgentRole,
   type AgentRoleAvailability,
   type MachineId,
@@ -67,10 +66,6 @@ export type AgentRoleMentionItem = {
   machine?: Pick<MachineViewMeta, 'acpCapabilities' | 'name'> | null;
 };
 
-// ---------------------------------------------------------------------------
-// Candidates
-// ---------------------------------------------------------------------------
-
 /** Available matches precede disabled matches, even when the latter score higher. */
 export const selectAgentRoleMentionCandidates = (
   items: readonly AgentRoleMentionItem[],
@@ -85,10 +80,6 @@ export const selectAgentRoleMentionCandidates = (
     );
   return [...rank(true), ...rank(false)].slice(0, limit);
 };
-
-// ---------------------------------------------------------------------------
-// Items
-// ---------------------------------------------------------------------------
 
 /**
  * One item per machine a Role runs on. A single-target Role is one item, named
@@ -125,10 +116,12 @@ export const buildAgentRoleMentionItems = (
         return [
           {
             // `@Reviewer-MacBook`: the separator dot is for reading, not typing.
-            slug: multi
-              ? normalizeAgentRoleMentionSlug(target.alias || `${role.name} ${machineName}`) ||
-                getAgentRoleMentionSlug(role)
-              : getAgentRoleMentionSlug(role),
+            slug: getAgentRoleTargetMentionSlug({
+              roleName: role.name,
+              alias: target.alias,
+              machineName,
+              multiTarget: multi,
+            }),
             value: formatAgentRoleMentionValue(role.id, multi ? target.machineId : undefined),
             label,
             role: bound,
@@ -176,10 +169,6 @@ export function useAgentRoleMentionItems(
     );
   }, [agentConfigs, machines, preferredMachineId, resolve, roles]);
 }
-
-// ---------------------------------------------------------------------------
-// Text: hydration and before-send expansion
-// ---------------------------------------------------------------------------
 
 /**
  * The reference the current agent receives in place of the chip. It names the

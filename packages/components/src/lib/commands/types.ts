@@ -23,6 +23,13 @@ export type KeyBinding = {
   /** Restrict this binding to specific runtimes. Undefined = all runtimes. */
   runtimes?: Runtime[];
   /**
+   * The product surface a binding activates on (e.g. `composer`): the declarative
+   * projection of a `when` focus guard, so `COMMAND_SHORTCUTS` can statically reject
+   * bindings whose activation zones overlap. `when` stays the executable guard;
+   * a binding without a surface counts as everywhere.
+   */
+  surface?: 'composer';
+  /**
    * Optional keyboard-only predicate. Programmatic command execution and user overrides do not
    * inherit this guard, so a restrictive default binding can coexist with a globally available
    * command.
@@ -63,7 +70,7 @@ export type Command = {
    * Optional default key bindings. Strings are shorthand for `{ key }` with default options.
    * Multiple bindings invoke the same command (useful for platform alternatives).
    */
-  keybindings?: (string | KeyBinding)[];
+  keybindings?: ReadonlyArray<string | KeyBinding>;
   /**
    * Optional context predicate evaluated at execution time. If it returns false, the binding
    * does not fire and `execute()` returns false. Use `when` for static commands whose

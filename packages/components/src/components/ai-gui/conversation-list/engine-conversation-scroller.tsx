@@ -332,7 +332,7 @@ export function EngineConversationScroller({
           : pending.button.nextElementSibling;
       const detail =
         pending.button.dataset.conversationDisclosure === 'group'
-          ? (body?.querySelector('[data-native-selection-allow]') ?? body)
+          ? (body?.querySelector('[data-text-selectable]') ?? body)
           : (body?.firstElementChild ?? body);
       if (!detail) return;
       pendingDisclosureReveal.current = null;

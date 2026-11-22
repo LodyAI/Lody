@@ -1,3 +1,4 @@
+import { prepareReplacement } from '@lody/shared/history-writer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -30,7 +31,6 @@ import { NodeLodyHistory, type HistoryIdentity } from '@loro-dev/roost/lody-hist
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   applyNotificationOnHistory,
-  prepareReplacement,
   SessionHistoryReadResponseSchema,
   SessionHistoryWriteResponseSchema,
   getMachineRoomId,

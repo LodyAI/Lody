@@ -13,6 +13,7 @@ import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import { registerDaemonAutostart } from './daemon-autostart';
 import { buildDaemonStartPassthroughArgs } from './daemon-start-options';
 import { formatDaemonBackendStatus, type DaemonStatusPalette } from './daemon-status-format';
+import { releaseScopedMallocArenaLimit, withDaemonMallocArenaLimit } from '@/utils/malloc-arena';
 import {
   DAEMON_RUNNER_READY_TIMEOUT_MS,
   interpretDaemonRunnerLaunchOutcome,
@@ -252,6 +253,26 @@ describe('daemon runner launch cleanup', () => {
     });
     await vi.advanceTimersByTimeAsync(20);
     expect(await stopped).toBe(false);
+  });
+});
+
+describe('daemon child allocator limit', () => {
+  it('caps glibc arenas for daemon Node children without passing the cap to what they launch', () => {
+    const childEnv = { ...withDaemonMallocArenaLimit({ PATH: '/bin' }, 'linux') };
+    expect(childEnv.MALLOC_ARENA_MAX).toBe('2');
+
+    releaseScopedMallocArenaLimit(childEnv);
+    expect(childEnv).toEqual({ PATH: '/bin' });
+  });
+
+  it('keeps a caller-chosen limit for the child and everything it launches', () => {
+    const childEnv = { ...withDaemonMallocArenaLimit({ MALLOC_ARENA_MAX: '4' }, 'linux') };
+    releaseScopedMallocArenaLimit(childEnv);
+    expect(childEnv).toEqual({ MALLOC_ARENA_MAX: '4' });
+  });
+
+  it('leaves non-glibc platforms untouched', () => {
+    expect(withDaemonMallocArenaLimit({ PATH: '/bin' }, 'darwin')).toEqual({ PATH: '/bin' });
   });
 });
 

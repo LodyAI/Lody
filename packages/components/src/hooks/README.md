@@ -109,16 +109,20 @@ reports its own list. See the [command ownership decision](../../../../.agents/n
 
 ## Avatar sources
 
-`use-stable-avatar-src.ts` keeps the initial remote URL on a cold mount while
-filling the byte cache, then asks `lib/avatar-cache.ts` to preload and asynchronously
-decode that local blob for a return visit. Only avatars used by this hook are
+`use-stable-avatar-src.ts` resolves cached avatars from `lib/avatar-cache.ts`
+(URL-keyed memory map backed by IndexedDB `lody:avatar-image-cache` with
+CacheStorage migration/fallback and a synchronous `lody:avatar-cache-index`
+key set). On a new page or Electron `file://` window, persisted URLs hold off
+emitting a remote image request while the local blob resolves in milliseconds;
+truly cold URLs paint immediately while filling the cache, and active workspace
+members warm their cached blobs when the directory loads. Only used avatars are
 decoded; startup restoration does not decode the entire persistent cache. The
 cache entry retains the off-DOM image for the same lifetime as its blob URL.
 Source changes select the current URL synchronously, including delayed profile
 arrival and image removal, while background callbacks remain tied to their source.
-First paint and cache reads never await decoding. Fully cold images and missing
+First paint and cache reads never await decoding. Fully cold images and genuinely absent
 profile data can still show a fallback. Evidence and limits:
-[avatar continuity](../../../../.agents/notes/proposed/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
+[avatar continuity](../../../../.agents/notes/implemented/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
 
 ## Cloud query recovery
 
@@ -408,8 +412,23 @@ The directory query key includes the expected account, which the server compares
 with its authenticated user before any directory read. This prevents an old-account
 SDK cache from being accepted under a new account.
 
-Same-account/workspace labels survive optional-query failures. The sharing panel
+Same-account/workspace labels survive optional-query failures, component remounts,
+and cold page reloads through `lib/workspace-sender-identity.ts` (`clear-local-cache.ts`
+clears both display caches). `useWorkspaceSenderProfile` resolves human message
+senders from live `auth:getUserById`, then the same-scope retained sender profile,
+member directory, and matching current user, so virtualized scroll and send-to-history
+handoff do not drop sender names or avatars while queries reconnect; explicit `null`
+responses clear deleted accounts. The sharing panel
 shows a local retry using the query owner's bounded retry budget, shared across all
 mounted consumers; no polling or second watch owner is added. Account, workspace or
 API changes discard retained labels. Team/public sharing and grant writes keep their
 independent permission checks even while labels are unavailable.
+
+## Local project script loading
+
+`useLocalProjectsAdmin(worktreeProjectKey)` keeps project listing and sharing independent
+of script reads. The default `null` key issues no script RPC. Desktop passes the
+project key while its Worktree tab is visible; mobile passes it when the script
+sheet or inline editor opens. Each visited project refreshes setup and cleanup once
+per hook mount, retaining persisted values during background refresh and on refresh
+failure. Offline remote projects remain unprobed.

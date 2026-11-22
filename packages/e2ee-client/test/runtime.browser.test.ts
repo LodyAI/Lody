@@ -1,3 +1,5 @@
+import { readScheduleAuthorization } from '@lody/shared/schedule-authorization';
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import { chromium, webkit, type BrowserContext, type Page } from '@playwright/test';
@@ -8,9 +10,7 @@ import {
   decodeE2eeIntentRecord,
   E2EE_INTENT_KIND,
   getScheduleRoomId,
-  readScheduleAuthorization,
   scheduleDeclarationSubject,
-  ScheduleRepository,
   type ScheduleRepositoryPort,
   type WorkspaceId,
 } from '@lody/shared';

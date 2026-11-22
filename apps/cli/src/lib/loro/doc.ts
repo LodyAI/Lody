@@ -1,3 +1,5 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
+import { createSessionControlPlaneMirror } from '@lody/shared/session-control-plane';
 import { Cause, Effect } from 'effect';
 import { isDeepStrictEqual } from 'node:util';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
@@ -16,8 +18,6 @@ import {
   AgentType,
   CliType,
   collectOnlineMachineIdsFromPresence,
-  createHistoryWriter,
-  createSessionControlPlaneMirror,
   SessionControlPlaneMirror,
   SessionControlPlaneState,
   SessionStatusFactory,
@@ -141,6 +141,8 @@ import {
   createCliSqliteRepoStore,
   hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
+  createCliIncompleteRecoveryStore,
+  ProcessDocumentRemoteCursorStore,
   type DocumentCursorScope,
 } from './sqlite-repo-store';
 import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-binding';
@@ -418,6 +420,7 @@ export interface LoroDocumentManagerOptions {
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
   remoteStreamsAttached?: boolean;
+  attachCloudEphemeralSinks?: boolean;
   encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
     | 'content'
@@ -600,6 +603,7 @@ export class LoroDocumentManager {
     logger: Logger,
     options: {
       attachRemoteOnCreate?: boolean;
+      attachCloudEphemeralSinks?: boolean;
       /** Daemon-only reader lease; one-shot commands retain explicit sync ownership. */
       keepWorkspaceCatalogJoined?: boolean;
       /**
@@ -658,6 +662,11 @@ export class LoroDocumentManager {
       `[${workspaceId}] Initializing local-first Loro repo: storageDb=${cliSqliteRepoStore.dbPath}`
     );
 
+    const documentRemoteCursorStore = createDocumentRemoteCursorStore(
+      cliSqliteRepoStore,
+      options.documentCursorScope ?? 'process',
+      options.encryptedWorkspace?.bucketId()
+    );
     let repo: LoroRepo | null = null;
     let presenceRuntime: CliPresenceRuntimeLegacy | null = null;
     let manager: LoroDocumentManager | null = null;
@@ -730,11 +739,9 @@ export class LoroDocumentManager {
         promptSuggestions,
         localLoroDataPlaneServer,
         sqliteRepoStore: cliSqliteRepoStore,
-        documentRemoteCursorStore: createDocumentRemoteCursorStore(
-          cliSqliteRepoStore,
-          options.documentCursorScope ?? 'process'
-        ),
+        documentRemoteCursorStore,
         remoteStreamsAttached: false,
+        attachCloudEphemeralSinks: options.attachCloudEphemeralSinks,
         streamsTokens: options.streamsTokens ?? null,
         encryptedWorkspace: options.encryptedWorkspace,
         cloudBilling: options.cloudBilling ?? null,
@@ -815,6 +822,8 @@ export class LoroDocumentManager {
     return manager;
   }
 
+  private readonly attachCloudEphemeralSinks: boolean;
+
   constructor(options: LoroDocumentManagerOptions) {
     this.repo = options.repo;
     this.workspaceId = options.workspaceId;
@@ -824,6 +833,7 @@ export class LoroDocumentManager {
     this.sqliteRepoStore = options.sqliteRepoStore ?? null;
     this.documentRemoteCursorStore = options.documentRemoteCursorStore ?? null;
     this.remoteStreamsAttached = options.remoteStreamsAttached ?? false;
+    this.attachCloudEphemeralSinks = options.attachCloudEphemeralSinks ?? true;
     this.streamsTokens = options.streamsTokens ?? null;
     this.encryptedWorkspace = options.encryptedWorkspace;
     this.cloudBilling = options.cloudBilling ?? null;
@@ -932,6 +942,12 @@ export class LoroDocumentManager {
     if (this.encryptedWorkspace) await streamsTokens.legacy.getToken();
     const streamsTransport = await createCliStreamsTransport({
       incompleteRecoveryScope: this.incompleteRecoveryScope,
+      incompleteRecoveryStore: createCliIncompleteRecoveryStore(
+        this.sqliteRepoStore,
+        this.documentRemoteCursorStore instanceof ProcessDocumentRemoteCursorStore
+          ? 'process'
+          : 'shared-durable'
+      ),
       content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
       bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
@@ -966,34 +982,40 @@ export class LoroDocumentManager {
     );
 
     try {
-      await this.repo.addTransport('streams', streamsTransport.adapter, { ephemeral: true });
+      await this.repo.addTransport('streams', streamsTransport.adapter, {
+        ephemeral: this.attachCloudEphemeralSinks,
+      });
       this.remoteStreamsStatusUnsubscribe = detachStreamsTransportStatusListener;
       // The presence runtime already exists (created at repo init and producing
       // presence locally); attaching the cloud Streams sink additionally mirrors
       // it to the cloud presence stream.
-      const presenceAttach = this.presenceRuntime.attachStreams({
-        streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-        auth: streamsTokens.native.createAuthCallback(),
-        shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
-        ...(this.encryptedWorkspace ? { bucketId: this.encryptedWorkspace.bucketId() } : {}),
-      });
-      if (this.encryptedWorkspace) {
-        // Liveness failure remains unknown and cannot roll back protected document sync.
-        await presenceAttach.catch(() => {
-          this.logger.warn(`[${this.workspaceId}] Presence unavailable; machine status is unknown`);
-        });
-      } else {
-        await presenceAttach;
-        this.promptSuggestions?.attachStreams({
+      if (this.attachCloudEphemeralSinks) {
+        const presenceAttach = this.presenceRuntime.attachStreams({
           streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-          auth: streamsTransport.tokenProvider.createAuthCallback(),
+          auth: streamsTokens.native.createAuthCallback(),
           shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+          ...(this.encryptedWorkspace ? { bucketId: this.encryptedWorkspace.bucketId() } : {}),
         });
-        this.machineMonitorRuntime?.attachStreams({
-          streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-          auth: streamsTransport.tokenProvider.createAuthCallback(),
-          shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
-        });
+        if (this.encryptedWorkspace) {
+          // Liveness failure remains unknown and cannot roll back protected document sync.
+          await presenceAttach.catch(() => {
+            this.logger.warn(
+              `[${this.workspaceId}] Presence unavailable; machine status is unknown`
+            );
+          });
+        } else {
+          await presenceAttach;
+          this.promptSuggestions?.attachStreams({
+            streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+            auth: streamsTransport.tokenProvider.createAuthCallback(),
+            shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+          });
+          this.machineMonitorRuntime?.attachStreams({
+            streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+            auth: streamsTransport.tokenProvider.createAuthCallback(),
+            shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+          });
+        }
       }
       this.remoteStreamsAttached = true;
       this.remoteStreamsGeneration += 1;
@@ -3276,6 +3298,30 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
   ): Promise<boolean> {
+    return this.enqueueAcpRuntimeConfigPatch(() => basedOnUserTurnId, patch);
+  }
+
+  /**
+   * Applies a patch observed outside any turn to the snapshot of the same ACP session, at
+   * that snapshot's own user turn. Without such a snapshot the next turn's run-config
+   * capture carries the value, so nothing is written.
+   */
+  applyAcpRuntimeConfigPatchToCurrentSnapshot(
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
+    return this.enqueueAcpRuntimeConfigPatch(
+      (current) =>
+        current?.acpSessionId === patch.acpSessionId ? current.basedOnUserTurnId : undefined,
+      patch
+    );
+  }
+
+  private enqueueAcpRuntimeConfigPatch(
+    resolveBasedOnUserTurnId: (
+      current: SessionAcpRuntimeConfigSnapshot | undefined
+    ) => string | undefined,
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
     const next = this.acpRuntimeConfigPatchSerial.then(async () => {
       if (!this.mirror) {
         throw new Error('SessionDocument not initialized');
@@ -3309,12 +3355,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
       const state = this.mirror?.getState();
       if (!state) throw new Error('SessionDocument not initialized');
+      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
+      const basedOnUserTurnId = resolveBasedOnUserTurnId(current);
+      if (basedOnUserTurnId === undefined) return false;
       const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
       if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
         return false;
       }
 
-      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
       const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
       if (currentTurnIndex > incomingTurnIndex) {
         return false;
@@ -3858,7 +3906,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       return null;
     }
 
-    const first = queue[0];
+    const first = queue.find((item) => !item.paused);
     if (first?.isEditing) {
       // The editing client may never get a chance to clear `isEditing` (hard close,
       // crash, killed tab). Treat `editingStartedAt` as a lease; once it expires we
@@ -3872,6 +3920,17 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     }
 
     return first ?? null;
+  }
+
+  async pauseMessageQueueItems(cids: readonly string[]): Promise<void> {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    const targets = new Set(cids);
+    this.mirror.setState((prev) => {
+      for (const item of (prev.mq ?? []) as MessageQueueItem[]) {
+        if (targets.has(item.$cid)) item.paused = true;
+      }
+      return prev;
+    });
   }
 
   async popMessageQueue(): Promise<MessageQueueItem | null> {

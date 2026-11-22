@@ -1,4 +1,3 @@
-import { formatNotification, resolveNotificationPresentation } from '@lody/shared/notifications';
 import { LegacyElectronSessionNotifier } from './legacy-electron-session-notifier';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { machineMetaCacheAtom } from '@/atoms/doc-meta';
@@ -88,11 +87,17 @@ export function ElectronSessionCompletionNotifier() {
         await getIpcServices()?.notifications.showSessionCompletion({
           sessionId,
           workspaceSlug: latest.workspaceSlug ?? undefined,
-          ...formatNotification(
-            notification.outcome,
-            notification.presentation ?? resolveNotificationPresentation(session, []),
-            (key) => t(key)
-          ),
+          // Notification formatting pulls the session PR/schema helpers, which
+          // reach loro-mirror through @lody/shared/schema. Load it on the show
+          // path so the boot chunk stays free of the loro graph.
+          ...(await import('@lody/shared/notifications').then(
+            ({ formatNotification, resolveNotificationPresentation }) =>
+              formatNotification(
+                notification.outcome,
+                notification.presentation ?? resolveNotificationPresentation(session, []),
+                (key) => t(key)
+              )
+          )),
           allowWhileForeground: true,
         });
       },

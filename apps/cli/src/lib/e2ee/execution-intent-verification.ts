@@ -1,9 +1,5 @@
-import {
-  decodeE2eeIntentRecord,
-  E2EE_INTENT_KIND,
-  ScheduleAuthorizationRequestSchema,
-  turnExecutionDigest,
-} from '@lody/shared';
+import { ScheduleAuthorizationRequestSchema } from '@lody/shared/schedule-authorization';
+import { decodeE2eeIntentRecord, E2EE_INTENT_KIND, turnExecutionDigest } from '@lody/shared';
 import { Effect, Result } from 'effect';
 import { isContainer, type LoroDoc, type LoroMap } from 'loro-crdt';
 import { z } from 'zod';

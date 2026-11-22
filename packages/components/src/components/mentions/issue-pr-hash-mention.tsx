@@ -1,11 +1,12 @@
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
 import { CircleDot, Github, GitPullRequest } from 'lucide-react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import { githubFetchIssuesAndPRs, type GitHubIssueOrPR } from '@lody/shared';
 import type { IssuePRMention } from '@lody/shared';
 
+import { CloudCapabilityUnavailableError } from '@lody/platform';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { normalizeGithubFetchErrorCode } from '@/components/mentions/mention-analytics';
@@ -14,15 +15,15 @@ import {
   useMentionHydration,
   type HydratedMentions,
 } from '@/components/mentions/mention-hydration';
-import { withGitHubTokenRetry } from '@/lib/github-token';
+import {
+  GitHubClientTokenError,
+  subscribeGitHubWorkspaceInvalidation,
+  withGitHubTokenRetry,
+} from '@/lib/github-token';
 import { cn } from '@/lib/utils';
 import { useMentionContext } from '@/ui/mention';
 import { getComposerCaretRect, getComposerRangeRects } from '@/ui/mention/composer-input';
 import { Popover } from '@lody/ui/popover';
-
-// ============================================================================
-// Types
-// ============================================================================
 
 type IssueOrPR = {
   number: number;
@@ -62,7 +63,7 @@ export type IssuePrKnownItem = {
 
 export type IssuePrMentionData = {
   entry: RepoIssuesAndPRsResult | null;
-  status: 'idle' | 'loading' | 'ready' | 'refreshing' | 'error';
+  status: 'idle' | 'loading' | 'ready' | 'refreshing' | 'unavailable' | 'error';
   error?: string;
 };
 
@@ -71,10 +72,6 @@ type UseRepoIssuesAndPRsResult = IssuePrMentionData & {
   refresh: (options?: { force?: boolean }) => Promise<void>;
 };
 
-// ============================================================================
-// Cache + Fetch
-// ============================================================================
-
 const MAX_ISSUE_PR_SUGGESTIONS = 50;
 
 const ISSUE_PR_DB_NAME = 'lody:repo-issues-prs';
@@ -82,7 +79,25 @@ const DB_VERSION = 1;
 
 const issuePrMemoryCache = new Map<string, RepoIssuesAndPRsResult>();
 const issuePrInFlightRequests = new Map<string, Promise<RepoIssuesAndPRsResult>>();
+const issuePrUnavailableKeys = new Set<string>();
 const issuePrCacheListeners = new Map<string, Set<(entry: RepoIssuesAndPRsResult) => void>>();
+
+subscribeGitHubWorkspaceInvalidation((workspaceId) => {
+  const prefix = `${workspaceId}:`;
+  for (const key of issuePrUnavailableKeys) {
+    if (key.startsWith(prefix)) issuePrUnavailableKeys.delete(key);
+  }
+});
+
+export function isUnlinkedIssuePrRepoError(err: unknown): boolean {
+  if (err instanceof CloudCapabilityUnavailableError) return true;
+  return (
+    err instanceof GitHubClientTokenError &&
+    (err.code === 'repo_not_linked' ||
+      err.code === 'installation_not_found' ||
+      err.code === 'repo_not_authorized')
+  );
+}
 
 /**
  * How long a completed fetch stays authoritative.
@@ -104,11 +119,8 @@ function isIssuePrEntryFresh(entry: RepoIssuesAndPRsResult, now: number) {
 export function __resetIssuePrFetchFreshnessForTests() {
   issuePrMemoryCache.clear();
   issuePrInFlightRequests.clear();
+  issuePrUnavailableKeys.clear();
 }
-
-// ============================================================================
-// Analytics
-// ============================================================================
 
 function fnv1a32(value: string) {
   let hash = 0x811c9dc5;
@@ -202,15 +214,12 @@ function subscribeIssuePrCache(key: string, listener: (entry: RepoIssuesAndPRsRe
 }
 
 function publishIssuePrCacheEntry(key: string, entry: RepoIssuesAndPRsResult) {
+  issuePrUnavailableKeys.delete(key);
   issuePrMemoryCache.set(key, entry);
   void idbSet(ISSUE_PR_DB_NAME, key, entry);
   const listeners = issuePrCacheListeners.get(key);
   listeners?.forEach((listener) => listener(entry));
 }
-
-// ============================================================================
-// Mention Utils
-// ============================================================================
 
 export function buildItemSuggestions(items: IssueOrPR[]): ItemSuggestion[] {
   return items.map((item) => {
@@ -380,10 +389,6 @@ export function extractIssuePRMentionsFromText(
   return mentions;
 }
 
-// ============================================================================
-// Data Hook
-// ============================================================================
-
 function toRepoIssuesAndPRsResult(
   repoFullName: string,
   items: GitHubIssueOrPR[]
@@ -427,6 +432,14 @@ export function useRepoIssuesAndPRs(
         setData((prev) => (prev.entry === cached ? prev : { entry: cached, status: 'ready' }));
         return;
       }
+      if (!options?.force && !cached && issuePrUnavailableKeys.has(key)) {
+        setData((prev) =>
+          prev.status === 'unavailable' && prev.entry === null
+            ? prev
+            : { entry: null, status: 'unavailable' }
+        );
+        return;
+      }
 
       setData((prev) => ({
         entry: prev.entry,
@@ -440,6 +453,13 @@ export function useRepoIssuesAndPRs(
           const entry = await existingRequest;
           setData({ entry, status: 'ready' });
         } catch (err) {
+          if (isUnlinkedIssuePrRepoError(err)) {
+            issuePrUnavailableKeys.add(key);
+            setData((prev) =>
+              prev.entry ? { entry: prev.entry, status: 'ready' } : { entry: null, status: 'unavailable' }
+            );
+            return;
+          }
           const message = toErrorMessage(err);
           setData((prev) => {
             if (prev.entry) {
@@ -484,6 +504,13 @@ export function useRepoIssuesAndPRs(
       try {
         await request;
       } catch (err) {
+        if (isUnlinkedIssuePrRepoError(err)) {
+          issuePrUnavailableKeys.add(key);
+          setData((prev) =>
+            prev.entry ? { entry: prev.entry, status: 'ready' } : { entry: null, status: 'unavailable' }
+          );
+          return;
+        }
         const message = toErrorMessage(err);
         setData((prev) => ({
           entry: prev.entry,
@@ -522,12 +549,20 @@ export function useRepoIssuesAndPRs(
       if (cancelled) return;
       setData({ entry, status: 'ready' });
     });
+    const unsubscribeInvalidation = subscribeGitHubWorkspaceInvalidation((invalidatedId) => {
+      if (cancelled || invalidatedId !== workspaceIdValue) return;
+      setData((prev) =>
+        prev.status === 'unavailable' ? { entry: null, status: 'loading' } : prev
+      );
+    });
 
     async function run() {
       const mem = issuePrMemoryCache.get(key);
 
       if (mem) {
         setData({ entry: mem, status: 'ready' });
+      } else if (issuePrUnavailableKeys.has(key)) {
+        setData({ entry: null, status: 'unavailable' });
       } else {
         setData((prev) => ({ ...prev, status: 'loading' }));
         const persisted = await idbGet<RepoIssuesAndPRsResult>(ISSUE_PR_DB_NAME, key);
@@ -547,6 +582,7 @@ export function useRepoIssuesAndPRs(
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubscribeInvalidation();
     };
   }, [isPublic, postHog, refresh, repoFullName, workspaceId]);
 
@@ -577,10 +613,6 @@ export function useKnownIssuePrItems(repoFullName?: string, isPublic?: boolean) 
   return { knownItems, issuePrData, status: issuePrData.status, error: issuePrData.error };
 }
 
-// ============================================================================
-// Hydrator
-// ============================================================================
-
 export function IssuePrMentionHydrator({
   text,
   knownItems,
@@ -599,10 +631,6 @@ export function IssuePrMentionHydrator({
 
   return null;
 }
-
-// ============================================================================
-// UI Components
-// ============================================================================
 
 function getItemIconMeta(type: 'issue' | 'pr') {
   if (type === 'pr') {

@@ -12,20 +12,17 @@ const modelSchema = z.object({
     .min(1)
     .max(256)
     .regex(/^[^\s\p{Cc}]+$/u),
-  display_name: z.string().max(256).optional(),
+  // Model metadata is Magpie's relay of each vendor's own answer, with no closed
+  // vocabulary or count. Only types are checked here, and the 2 MiB response limit
+  // bounds size; a runtime with a closed vocabulary filters in its config builder.
+  display_name: z.string().optional(),
   reasoning: z.boolean().optional(),
-  supported_reasoning_levels: z
-    .array(
-      z.object({
-        effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
-      })
-    )
-    .max(8)
-    .optional(),
-  context_window: z.number().int().positive().max(100_000_000).optional(),
-  max_output_tokens: z.number().int().positive().max(100_000_000).optional(),
+  supported_reasoning_levels: z.array(z.object({ effort: z.string() })).optional(),
+  // Safe integers only: larger numbers would render as invalid TOML exponents.
+  context_window: z.number().int().positive().optional(),
+  max_output_tokens: z.number().int().positive().optional(),
   // Capability metadata is extended information, not an OpenAI list requirement.
-  modalities: z.object({ input: z.array(z.string().max(32)).max(8).optional() }).optional(),
+  modalities: z.object({ input: z.array(z.string()).optional() }).optional(),
 });
 const catalogSchema = z.object({ data: z.array(z.unknown()).min(1).max(2048) });
 export type MagpieModel = z.infer<typeof modelSchema>;
@@ -141,7 +138,7 @@ export function buildMagpieKimiConfig(gateway: string, models: readonly MagpieMo
     ...models.flatMap((m) => {
       const efforts = (m.supported_reasoning_levels ?? [])
         .map((l) => l.effort)
-        .filter((e) => e !== 'none');
+        .filter((e) => e !== '' && e !== 'none');
       return [
         `[models.${quoted(`magpie/${m.id}`)}]`,
         'provider = "magpie"',
@@ -162,6 +159,11 @@ export function buildMagpieKimiConfig(gateway: string, models: readonly MagpieMo
   ].join('\n');
 }
 
+// Grok's effort picker knows only its own ladder; vendor words the catalog
+// relays (light, deep, disabled, ultra, …) are dropped rather than written
+// into its config.
+const grokEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
 export function buildMagpieGrokConfig(gateway: string, models: readonly MagpieModel[]): string {
   return [
     '[models]',
@@ -173,21 +175,22 @@ export function buildMagpieGrokConfig(gateway: string, models: readonly MagpieMo
     `image_description = ${quoted(`magpie/${models.find(acceptsImageInput)?.id ?? models[0]!.id}`)}`,
     '[features]',
     'campaigns = false',
-    ...models.flatMap((m) => [
-      `[model.${quoted(`magpie/${m.id}`)}]`,
-      `model = ${quoted(m.id)}`,
-      `name = ${quoted(m.display_name ?? m.id)}`,
-      `base_url = ${quoted(`${gateway}/v1`)}`,
-      `api_key = ${quoted(MAGPIE_TOKEN)}`,
-      'api_backend = "chat_completions"',
-      `context_window = ${m.context_window ?? 128000}`,
-      `max_completion_tokens = ${m.max_output_tokens ?? 8192}`,
-      ...(m.supported_reasoning_levels?.length
-        ? [
-            `reasoning_efforts = ${stringArray(m.supported_reasoning_levels.map((l) => l.effort).filter((e) => e !== 'ultra'))}`,
-          ]
-        : []),
-    ]),
+    ...models.flatMap((m) => {
+      const efforts = (m.supported_reasoning_levels ?? [])
+        .map((l) => l.effort)
+        .filter((e) => grokEfforts.includes(e));
+      return [
+        `[model.${quoted(`magpie/${m.id}`)}]`,
+        `model = ${quoted(m.id)}`,
+        `name = ${quoted(m.display_name ?? m.id)}`,
+        `base_url = ${quoted(`${gateway}/v1`)}`,
+        `api_key = ${quoted(MAGPIE_TOKEN)}`,
+        'api_backend = "chat_completions"',
+        `context_window = ${m.context_window ?? 128000}`,
+        `max_completion_tokens = ${m.max_output_tokens ?? 8192}`,
+        ...(efforts.length ? [`reasoning_efforts = ${stringArray(efforts)}`] : []),
+      ];
+    }),
     '',
   ].join('\n');
 }

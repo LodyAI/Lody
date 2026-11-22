@@ -1,5 +1,11 @@
+import { StreamsClient } from '@loro-dev/streams-client';
+import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
 import * as httpTransport from '../src/utils/http-transport';
-import { CloudE2eeDeviceRevoked, isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
+import {
+  CloudE2eeDeviceRevoked,
+  isCloudE2eeMemberRemoved,
+  isCloudE2eeDeviceRevoked,
+} from '../src/lib/cloud-e2ee-errors';
 import { Effect, Exit, Scope } from 'effect';
 import type { Logger } from '../src/utils/logger';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -28,6 +34,50 @@ import {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+it('blocks StreamsClient HTTP on credential denial and resumes authenticated reads after rotation', async () => {
+  let credential: string | null = null;
+  const issuerCredentials: Array<string | null> = [];
+  const gatewayCredentials: Array<string | null> = [];
+  const provider = createLoroStreamsTokenProviderLegacy({
+    endpoint: 'https://fixture.convex.cloud/api/loro-streams/token',
+    workspaceId: 'workspace',
+    authToken: () => credential,
+    storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    fetchImpl: async (_url, init) => {
+      const auth = new Headers(init?.headers).get('Authorization');
+      issuerCredentials.push(auth);
+      return auth === 'Bearer denied'
+        ? new Response(null, { status: 401 })
+        : Response.json({ token: 'valid-jwt', expiresIn: 900 });
+    },
+  });
+  const client = new StreamsClient({
+    url: 'https://streams.example.com/ds/bucket/stream',
+    auth: provider.createAuthCallback(),
+    retry: { maxAttempts: 0 },
+    fetch: async (_url, init) => {
+      gatewayCredentials.push(new Headers(init?.headers).get('Authorization'));
+      return new Response(null, {
+        headers: { 'Content-Type': 'application/octet-stream', 'Stream-Next-Offset': '0' },
+      });
+    },
+  });
+  try {
+    expect((await client.head()).ok).toBe(false);
+    expect(issuerCredentials).toEqual([]);
+    credential = 'denied';
+    expect((await client.head()).ok).toBe(false);
+    expect((await client.head()).ok).toBe(false);
+    expect(issuerCredentials).toEqual(['Bearer denied']);
+    expect(gatewayCredentials).toEqual([]);
+    credential = 'valid';
+    expect((await client.head()).ok).toBe(true);
+    expect(gatewayCredentials).toEqual(['Bearer valid-jwt']);
+  } finally {
+    await provider.close();
+  }
 });
 
 it('preserves the client retry key and separate server ID through the real HTTP result parser', async () => {
@@ -1357,7 +1407,11 @@ describe('CLI E2EE Round 2 optimizations', () => {
         const call =
           testCase.status === 560
             ? e2ee.getHistory({ workspaceId: 'ws', credential: 'cred' })
-            : e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: freshSlot });
+            : e2ee.mailboxCall('status', {
+                workspaceId: 'ws',
+                credential: 'cred',
+                slot: freshSlot,
+              });
         if (typeof testCase.expectedError === 'function') {
           await expect(call).rejects.toBeInstanceOf(testCase.expectedError as never);
         } else {

@@ -1,5 +1,9 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
+import { inlinePackageManifestPlugin } from '../scripts/inline-package-manifest.mjs';
 import createViteConfig from '../vite.config';
 
 const viteConfig = createViteConfig({ command: 'build', mode: 'test' });
@@ -40,6 +44,7 @@ describe('CLI vite config', () => {
       ['1', '', 'nightly', false],
     ] as const) {
       vi.resetModules();
+      vi.stubEnv('LODY_PLATFORM', 'local');
       vi.stubEnv('LODY_E2E_DAEMON_LOSS_BUILD', enabled);
       vi.stubEnv('LODY_ENV', environment);
       vi.stubEnv('LODY_RELEASE_CHANNEL', channel);
@@ -51,6 +56,47 @@ describe('CLI vite config', () => {
       } finally {
         vi.unstubAllEnvs();
       }
+    }
+  });
+
+  it('inlines ../package.json reads from bundled vendor modules so dist/chunks never fails with ENOENT', () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-cli-manifest-'));
+    try {
+      const pkgDir = path.join(tmpRoot, 'node_modules', '@sorbetai', 'control');
+      const distDir = path.join(pkgDir, 'dist');
+      fs.mkdirSync(distDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pkgDir, 'package.json'),
+        JSON.stringify({ name: '@sorbetai/control', version: '0.1.0-alpha.20', private: false })
+      );
+      const plugin = inlinePackageManifestPlugin();
+      const source =
+        'const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));';
+      const transformed = plugin.transform.call(
+        {
+          error: (msg: string) => {
+            throw new Error(msg);
+          },
+        },
+        source,
+        path.join(distDir, 'control.js')
+      );
+      expect(transformed?.code).toBe(
+        'const manifest = JSON.parse("{\\"name\\":\\"@sorbetai/control\\",\\"version\\":\\"0.1.0-alpha.20\\"}");'
+      );
+      expect(() =>
+        plugin.renderChunk.call(
+          {
+            error: (msg: string) => {
+              throw new Error(msg);
+            },
+          },
+          source,
+          { fileName: 'chunks/vendor-@sorbetai-control-abc.js' }
+        )
+      ).toThrow(/unresolved readFileSync/);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 });

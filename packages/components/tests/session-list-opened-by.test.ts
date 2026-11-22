@@ -98,7 +98,7 @@ describe('session group opened-by tree', () => {
       makeRow({ sessionId: 'opener' }),
       makeRow({ sessionId: 'opened', openedBySessionId: 'opener' }),
     ];
-    const visible = getVisibleSessionGroupRows(buildRepoGroup(rows), false).map(
+    const visible = getVisibleSessionGroupRows(buildRepoGroup(rows), 0).map(
       (row) => row.sessionId
     );
     expect(visible).toHaveLength(MAX_VISIBLE_SESSIONS);
@@ -143,7 +143,8 @@ describe('SessionList opened-by rendering', () => {
   function renderList(
     sessions: SessionListRow[],
     collapsed: Record<string, boolean> = {},
-    showBranchNames = false
+    showBranchNames = false,
+    extraProps: Record<string, unknown> = {}
   ) {
     const store = createStore();
     store.set(sidebarCollapsedOpenedBySessionsAtom, collapsed);
@@ -162,6 +163,7 @@ describe('SessionList opened-by rendering', () => {
             sessions,
             repos: [{ repoFullName: REPO, collapsed: false }],
             onSelectSession,
+            ...extraProps,
           })
         )
       );
@@ -188,6 +190,38 @@ describe('SessionList opened-by rendering', () => {
     for (const id of ['child', 'grandchild', 'great-grandchild']) {
       expect(indentOf(id)).toBe('child');
     }
+  });
+
+  it('reveals the ⋯ menu in the end slot before Archive, leaving the leading slot to the tree', () => {
+    renderList(makeOpenerGroupRows(), {}, false, { onArchiveSession: () => undefined });
+
+    for (const id of ['opener', 'opened-1', 'unrelated']) {
+      const row = container?.querySelector(`[data-sidebar-session-id="${id}"]`);
+      const leading = row?.querySelector('[data-session-row-leading-slot]');
+      const endSlot = row?.querySelector('[data-session-row-end-slot]');
+      const menu = endSlot?.querySelector<HTMLButtonElement>('button[aria-label="More actions"]');
+      const archive = endSlot?.querySelector<HTMLButtonElement>(
+        'button[aria-label="Archive session"]'
+      );
+      expect(leading?.querySelector('[aria-label="More actions"]')).toBeNull();
+      expect(menu).toBeInstanceOf(HTMLButtonElement);
+      expect(archive).toBeInstanceOf(HTMLButtonElement);
+      expect(menu!.compareDocumentPosition(archive!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING
+      );
+    }
+
+    // The opener's disclosure is the leading slot's only control.
+    const openerLeading = container
+      ?.querySelector('[data-sidebar-session-id="opener"]')
+      ?.querySelector('[data-session-row-leading-slot]');
+    expect(openerLeading?.querySelectorAll('button')).toHaveLength(1);
+    expect(openerLeading?.querySelector('[data-session-opened-by-toggle]')).not.toBeNull();
+    // A child keeps both connectors there instead.
+    const childLeading = container
+      ?.querySelector('[data-sidebar-session-id="opened-1"]')
+      ?.querySelector('[data-session-row-leading-slot]');
+    expect(childLeading?.querySelectorAll('[data-session-tree-connector]')).toHaveLength(2);
   });
 
   it('lets the disclosure toggle own keyboard activation without navigating', () => {
@@ -354,7 +388,7 @@ describe('Workspace placement under openers across groups', () => {
     const [group] = buildGroups(placed.repoSessions, [], false);
     expect(group?.repoFullName).toBe(REPO);
     expect(
-      getVisibleSessionGroupTree(group!, true).map((node) => `${node.id}@${node.depth}`)
+      getVisibleSessionGroupTree(group!, 1000).map((node) => `${node.id}@${node.depth}`)
     ).toEqual(['repo-opener@0', 'local-child@1']);
   });
 

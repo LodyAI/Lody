@@ -1,6 +1,6 @@
 import { createWorkspaceStreamsTransportAdapter } from '@lody/shared/workspace-streams-persistence';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
-import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
+import type { IncompleteRecoveryStore, RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import {
@@ -35,6 +35,7 @@ export type WorkspaceStreamsTransportOptions = {
   recoverFlockCheckpointsOnTimeout?: boolean;
   /** Runtime-owned budget identity; never contains or shares a replica cursor. */
   incompleteRecoveryScope?: object;
+  incompleteRecoveryStore?: IncompleteRecoveryStore;
   workspaceId: WorkspaceId;
   /**
    * LoroDoc room cursors only. Meta and named Flock progress is replica-bound:
@@ -102,6 +103,7 @@ export const createWorkspaceStreamsTransport = (
     (persistence) =>
       new StreamsTransportAdapter({
         incompleteRecoveryScope: options.incompleteRecoveryScope,
+        incompleteRecoveryStore: options.incompleteRecoveryStore,
         diagnostics: (event) => {
           const diagnostic = getLoroSyncDiagnostic(event);
           if (diagnostic) {

@@ -3574,6 +3574,24 @@ describe('LoroStreamsMachineRpcServer', () => {
       state: { git: false as const },
     }));
 
+    const listLocalProjectBranches = vi.fn(async () => ({
+      type: 'local-project/list-branches_response' as const,
+      machineId,
+      workspaceId,
+      localProjectId,
+      success: true as const,
+      observedAtMs: 456,
+      result: {
+        git: true as const,
+        currentBranch: 'main',
+        defaultBranch: 'main',
+        pinnedBranches: ['main'],
+        branches: ['main'],
+        truncated: false,
+        totalCount: 1,
+      },
+    }));
+
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
       workspaceId,
@@ -3582,6 +3600,7 @@ describe('LoroStreamsMachineRpcServer', () => {
       getMachineStatus: vi.fn(),
       refreshMachineAcpCapabilities: vi.fn(),
       getLocalProjectGitState,
+      listLocalProjectBranches,
     });
 
     fake.pushBatch({
@@ -3601,6 +3620,23 @@ describe('LoroStreamsMachineRpcServer', () => {
             requestedByUserId: 'user-1',
           },
         },
+        {
+          jsonrpc: '2.0',
+          id: 'req-local-branches',
+          method: 'local-project/list-branches',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          params: {
+            localProjectId: 'local-project-1',
+            requestedByUserId: 'user-1',
+            query: 'ma',
+            limit: 10,
+          },
+        },
       ],
       nextOffset: '5',
       cursor: 'cursor-5',
@@ -3610,12 +3646,19 @@ describe('LoroStreamsMachineRpcServer', () => {
     await server.start();
 
     await vi.waitFor(() => {
-      expect(fake.appended).toHaveLength(1);
+      expect(fake.appended).toHaveLength(2);
     });
 
     expect(getLocalProjectGitState).toHaveBeenCalledWith({
       localProjectId,
       requestedByUserId: 'user-1',
+    });
+    expect(listLocalProjectBranches).toHaveBeenCalledWith({
+      localProjectId,
+      requestedByUserId: 'user-1',
+      query: 'ma',
+      limit: 10,
+      cursor: undefined,
     });
     expect(fake.appended[0]?.value).toEqual(
       expect.objectContaining({
@@ -3626,6 +3669,18 @@ describe('LoroStreamsMachineRpcServer', () => {
           type: 'local-project/git-state_response',
           success: true,
           state: { git: false },
+        }),
+      })
+    );
+    expect(fake.appended[1]?.value).toEqual(
+      expect.objectContaining({
+        jsonrpc: '2.0',
+        id: 'req-local-branches',
+        method: 'local-project/list-branches',
+        result: expect.objectContaining({
+          type: 'local-project/list-branches_response',
+          success: true,
+          result: expect.objectContaining({ git: true, branches: ['main'] }),
         }),
       })
     );

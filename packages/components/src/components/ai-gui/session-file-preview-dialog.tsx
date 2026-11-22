@@ -7,13 +7,15 @@ import { Spinner } from '@lody/ui/spinner';
 import type { SessionFilePayload } from '@lody/shared';
 import { Dialog } from '@/ui/dialog';
 import { Drawer } from '@lody/ui/drawer';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
 import { ReadOnlyHtmlPreview } from '../sessions/read-only-html-preview';
 import { formatFileSize, isHtmlSessionFile } from '@/lib/session-file-presentation';
 import { MarkdownRenderer } from './markdown-renderer';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const isMarkdownFile = (fileName: string): boolean => {
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
@@ -25,12 +27,22 @@ export type SessionFilePreviewStatus =
   | { kind: 'error'; message: string }
   | { kind: 'loaded'; text: string; truncated: boolean };
 
+/**
+ * Where the preview is mounted:
+ * - `pane`: a desktop side-panel tab. The name and actions are one toolbar under
+ *   the tab strip and the body fills the panel, with no card, frame or close.
+ * - `dialog`: a centred desktop Dialog, for hosts without a side panel.
+ * - `sheet`: the mobile bottom Drawer.
+ */
+export type SessionFilePreviewVariant = 'pane' | 'dialog' | 'sheet';
+
 export type SessionFilePreviewPanelProps = {
-  mobileSheet?: boolean;
+  variant?: SessionFilePreviewVariant;
   file: SessionFilePayload;
   status: SessionFilePreviewStatus;
   onDownload?: (file: SessionFilePayload) => void;
   isDownloading?: boolean;
+  className?: string;
 };
 
 /**
@@ -44,7 +56,8 @@ export function SessionFilePreviewPanel({
   status,
   onDownload,
   isDownloading = false,
-  mobileSheet = false,
+  variant = 'dialog',
+  className,
 }: SessionFilePreviewPanelProps) {
   const { t } = useTranslation();
   const html = isHtmlSessionFile(file);
@@ -65,16 +78,161 @@ export function SessionFilePreviewPanel({
   const handleCopy = () => {
     if (!rawText) return;
     // Always copy the raw source, regardless of rendered/raw view.
-    void navigator.clipboard?.writeText(rawText).then(
+    void copyTextToClipboard(rawText).then(
       () => setCopied(true),
       () => toast.error(t('sessions.fileCopyFailed', 'Failed to copy file content'))
     );
   };
 
+  const pane = variant === 'pane';
+  const mobileSheet = variant === 'sheet';
   const renderMarkdown = markdown && !showRaw;
   const renderHtml = canPreviewHtml && !showRaw;
   const Title = mobileSheet ? Drawer.Title : Dialog.Title;
   const Close = mobileSheet ? Drawer.Close : Dialog.Close;
+
+  const actions = (
+    <>
+      {canPreviewHtml ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          icon
+          aria-pressed={renderHtml}
+          aria-label={
+            renderHtml
+              ? t('sessions.fileViewer.preview.hide', 'Hide preview')
+              : t('sessions.fileViewer.preview.show', 'Preview')
+          }
+          onClick={() => setShowRaw((raw) => !raw)}
+        >
+          {renderHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
+        </Button>
+      ) : null}
+      {markdown ? (
+        <Tabs.Root
+          value={showRaw ? 'raw' : 'rendered'}
+          onValueChange={(value) => setShowRaw(value === 'raw')}
+          className="mr-1"
+        >
+          <Tabs.List size="small">
+            <Tabs.Tab value="rendered">{t('sessions.filePreviewRendered', 'Rendered')}</Tabs.Tab>
+            <Tabs.Tab value="raw">{t('sessions.filePreviewRaw', 'Raw')}</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      ) : null}
+      <Button
+        type="button"
+        variant="ghost"
+        size="small"
+        icon
+        onClick={handleCopy}
+        disabled={status.kind !== 'loaded'}
+        aria-label={t('common.copy', 'Copy')}
+      >
+        {copied ? <Check className="size-4 text-emerald-500" /> : <Copy className="size-4" />}
+      </Button>
+      {onDownload && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          icon
+          onClick={() => onDownload?.(file)}
+          disabled={isDownloading}
+          aria-label={t('sessions.fileDownload', 'Download')}
+        >
+          {isDownloading ? <Spinner className="size-4" /> : <Download className="size-4" />}
+        </Button>
+      )}
+    </>
+  );
+
+  const truncatedNotice =
+    status.kind === 'loaded' && status.truncated ? (
+      <div
+        className={
+          pane
+            ? stylex.props(styles.paneNotice).className
+            : 'mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'
+        }
+      >
+        <span className="flex items-center gap-2">
+          <FileWarning className="size-4 shrink-0" aria-hidden="true" />
+          {t(
+            'sessions.filePreviewTruncated',
+            'Preview shows only the start of this file. Download the full file to see everything.'
+          )}
+        </span>
+        {onDownload && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="small"
+            className="shrink-0"
+            onClick={() => onDownload?.(file)}
+            disabled={isDownloading}
+          >
+            {t('sessions.fileDownloadFull', 'Download full file')}
+          </Button>
+        )}
+      </div>
+    ) : null;
+
+  const content =
+    status.kind === 'loading' ? (
+      <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+        <Spinner className="size-4" />
+        {t('sessions.filePreviewLoading', 'Loading preview…')}
+      </div>
+    ) : status.kind === 'error' ? (
+      <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted-foreground">
+        <FileWarning className="size-6 text-muted-foreground/60" aria-hidden="true" />
+        <span>{status.message}</span>
+        {onDownload && (
+          <Button type="button" variant="secondary" size="small" onClick={() => onDownload?.(file)}>
+            {t('sessions.fileDownload', 'Download')}
+          </Button>
+        )}
+      </div>
+    ) : renderHtml ? (
+      <div
+        {...stylex.props(
+          styles.htmlPreview,
+          mobileSheet && styles.fillHtmlPreview,
+          pane && styles.fillHtmlPreview
+        )}
+      >
+        <ReadOnlyHtmlPreview text={status.text} />
+      </div>
+    ) : renderMarkdown ? (
+      <div {...stylex.props(pane ? styles.paneMarkdown : styles.markdown)}>
+        <MarkdownRenderer text={status.text} size="default" />
+      </div>
+    ) : pane ? (
+      <pre {...stylex.props(styles.paneRaw)}>{status.text}</pre>
+    ) : (
+      <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-3 font-mono text-[13px] leading-relaxed text-foreground">
+        {status.text}
+      </pre>
+    );
+
+  if (pane) {
+    return (
+      <div className={[stylex.props(styles.pane).className, className].filter(Boolean).join(' ')}>
+        <div {...stylex.props(styles.paneToolbar)}>
+          <span {...stylex.props(styles.paneName)} title={file.fileName}>
+            {file.fileName}
+          </span>
+          <span {...stylex.props(styles.paneSize)}>{formatFileSize(file.sizeBytes)}</span>
+          <div {...stylex.props(styles.paneActions)}>{actions}</div>
+        </div>
+        {truncatedNotice}
+        <div {...stylex.props(styles.paneBody, renderHtml && styles.paneBodyFill)}>{content}</div>
+      </div>
+    );
+  }
 
   return (
     // `min-w-0` is load-bearing: this panel is a grid child of Dialog.Content
@@ -91,61 +249,7 @@ export function SessionFilePreviewPanel({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {canPreviewHtml ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="small"
-              icon
-              aria-pressed={renderHtml}
-              aria-label={
-                renderHtml
-                  ? t('sessions.fileViewer.preview.hide', 'Hide preview')
-                  : t('sessions.fileViewer.preview.show', 'Preview')
-              }
-              onClick={() => setShowRaw((raw) => !raw)}
-            >
-              {renderHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
-            </Button>
-          ) : null}
-          {markdown ? (
-            <Tabs.Root
-              value={showRaw ? 'raw' : 'rendered'}
-              onValueChange={(value) => setShowRaw(value === 'raw')}
-              className="mr-1"
-            >
-              <Tabs.List size="small">
-                <Tabs.Tab value="rendered">
-                  {t('sessions.filePreviewRendered', 'Rendered')}
-                </Tabs.Tab>
-                <Tabs.Tab value="raw">{t('sessions.filePreviewRaw', 'Raw')}</Tabs.Tab>
-              </Tabs.List>
-            </Tabs.Root>
-          ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="small"
-            icon
-            onClick={handleCopy}
-            disabled={status.kind !== 'loaded'}
-            aria-label={t('common.copy', 'Copy')}
-          >
-            {copied ? <Check className="size-4 text-emerald-500" /> : <Copy className="size-4" />}
-          </Button>
-          {onDownload && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="small"
-              icon
-              onClick={() => onDownload?.(file)}
-              disabled={isDownloading}
-              aria-label={t('sessions.fileDownload', 'Download')}
-            >
-              {isDownloading ? <Spinner className="size-4" /> : <Download className="size-4" />}
-            </Button>
-          )}
+          {actions}
           {/* Divider separates content actions (copy/download) from the window
               action (close), and the close sits inline in the same row instead
               of floating in the corner over the buttons. */}
@@ -166,77 +270,25 @@ export function SessionFilePreviewPanel({
         </div>
       </div>
 
-      {status.kind === 'loaded' && status.truncated ? (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-          <span className="flex items-center gap-2">
-            <FileWarning className="size-4 shrink-0" aria-hidden="true" />
-            {t(
-              'sessions.filePreviewTruncated',
-              'Preview shows only the start of this file. Download the full file to see everything.'
-            )}
-          </span>
-          {onDownload && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="small"
-              className="shrink-0"
-              onClick={() => onDownload?.(file)}
-              disabled={isDownloading}
-            >
-              {t('sessions.fileDownloadFull', 'Download full file')}
-            </Button>
-          )}
-        </div>
-      ) : null}
+      {truncatedNotice}
 
       {/* Desktop caps the body to its content; the mobile sheet fills its
           remaining height and scrolls below the fixed header. */}
-      <div {...stylex.props(styles.body, mobileSheet && styles.sheetBody)}>
-        {status.kind === 'loading' ? (
-          <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-            <Spinner className="size-4" />
-            {t('sessions.filePreviewLoading', 'Loading preview…')}
-          </div>
-        ) : status.kind === 'error' ? (
-          <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted-foreground">
-            <FileWarning className="size-6 text-muted-foreground/60" aria-hidden="true" />
-            <span>{status.message}</span>
-            {onDownload && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="small"
-                onClick={() => onDownload?.(file)}
-              >
-                {t('sessions.fileDownload', 'Download')}
-              </Button>
-            )}
-          </div>
-        ) : renderHtml ? (
-          <div {...stylex.props(styles.htmlPreview, mobileSheet && styles.sheetHtmlPreview)}>
-            <ReadOnlyHtmlPreview text={status.text} />
-          </div>
-        ) : renderMarkdown ? (
-          <div className="px-0.5 pb-1">
-            <MarkdownRenderer text={status.text} size="default" />
-          </div>
-        ) : (
-          <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-3 font-mono text-[13px] leading-relaxed text-foreground">
-            {status.text}
-          </pre>
-        )}
-      </div>
+      <div {...stylex.props(styles.body, mobileSheet && styles.sheetBody)}>{content}</div>
     </div>
   );
 }
 
-export type SessionFilePreviewDialogProps = SessionFilePreviewPanelProps & {
+export type SessionFilePreviewDialogProps = Omit<SessionFilePreviewPanelProps, 'variant'> & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
 
-/** Mobile bottom sheet / desktop dialog around the shared preview panel. */
+/**
+ * Mobile bottom sheet, or a desktop Dialog for hosts that have no session side
+ * panel (history readers). A desktop Session opens attachments as a side-panel
+ * tab instead (`SessionFileAttachmentPane`).
+ */
 export function SessionFilePreviewDialog({
   open,
   onOpenChange,
@@ -256,7 +308,7 @@ export function SessionFilePreviewDialog({
             overflow: 'hidden',
           }}
         >
-          <SessionFilePreviewPanel key={panelKey} {...panelProps} mobileSheet />
+          <SessionFilePreviewPanel key={panelKey} {...panelProps} variant="sheet" />
         </Drawer.Content>
       </Drawer.Root>
     );
@@ -264,7 +316,7 @@ export function SessionFilePreviewDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Content closeButton={false} width="48rem">
-        <SessionFilePreviewPanel key={panelKey} {...panelProps} />
+        <SessionFilePreviewPanel key={panelKey} {...panelProps} variant="dialog" />
       </Dialog.Content>
     </Dialog.Root>
   );
@@ -277,6 +329,85 @@ const styles = stylex.create({
   },
   body: { marginTop: space[3], maxHeight: '55vh', minWidth: 0, overflowY: 'auto' },
   sheetBody: { flex: 1, minHeight: 0, maxHeight: 'none', overscrollBehavior: 'contain' },
-  sheetHtmlPreview: { height: '100%' },
+  fillHtmlPreview: { flexGrow: 1, width: '100%', height: '100%' },
   htmlPreview: { display: 'flex', height: '55vh', minWidth: 0, overflow: 'hidden' },
+  markdown: { paddingInline: '2px', paddingBottom: space[1] },
+  pane: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+    minWidth: 0,
+    backgroundColor: colors.background,
+  },
+  /* The tab strip above already draws the panel's only edge; this bar is the
+     same surface, so it carries no border, fill or radius of its own. */
+  paneToolbar: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: space[2],
+    minWidth: 0,
+    minHeight: `calc(${control.medium} + ${space[2]})`,
+    paddingInlineStart: space[3],
+    paddingInlineEnd: space[1.5],
+  },
+  paneName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  paneSize: {
+    flexShrink: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  paneActions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: space[1],
+    marginInlineStart: 'auto',
+  },
+  paneNotice: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: space[3],
+    paddingBlock: space[2],
+    paddingInline: space[3],
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.label,
+    backgroundColor: `color-mix(in srgb, ${colors.warning} 12%, transparent)`,
+  },
+  paneBody: { flex: 1, minHeight: 0, minWidth: 0, overflowY: 'auto' },
+  paneBodyFill: { display: 'flex', overflow: 'hidden' },
+  paneMarkdown: {
+    width: '100%',
+    maxWidth: '48rem',
+    marginInline: 'auto',
+    paddingBlock: space[2],
+    paddingInline: space[4],
+    userSelect: 'text',
+  },
+  paneRaw: {
+    margin: 0,
+    paddingBlock: space[2],
+    paddingInline: space[3],
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '13px',
+    lineHeight: 1.6,
+    color: colors.label,
+  },
 });

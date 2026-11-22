@@ -183,6 +183,7 @@ describe('SessionDispatchWatcher', () => {
     meta?: Partial<SessionMeta>;
     history?: SessionHistoryInput[];
     queue?: MessageQueueItem[];
+    canceledTurnIds?: readonly string[];
   }) => {
     let meta: SessionMeta = {
       id: options.sessionId,
@@ -220,6 +221,8 @@ describe('SessionDispatchWatcher', () => {
       workspaceId: 'workspace-1' as WorkspaceId,
       workspaceDocument: { repo } as unknown as LoroDocumentManager,
       executionService: {
+        isInboxInputCanceled: (_sid: SessionId, turnId: string) =>
+          options.canceledTurnIds?.includes(turnId) ?? false,
         tryAcquireSessionRewriteConflictLease: vi.fn(() => () => {}),
       } as unknown as SessionExecutionService,
       canUseMachine: createAllowMachineAccess(),
@@ -237,6 +240,16 @@ describe('SessionDispatchWatcher', () => {
       doc,
       meta: () => meta,
       updateMeta: (patch: Partial<SessionMeta>) => upsertDocMeta(doc.roomId, patch),
+      promote: () =>
+        (
+          watcher as unknown as {
+            promoteNextQueuedMessage: (
+              doc: SessionDocument,
+              meta: SessionMeta,
+              history: SessionHistoryInput[]
+            ) => Promise<SessionHistoryInput | null>;
+          }
+        ).promoteNextQueuedMessage(doc, meta, []),
       recover,
       dispose: () => doc.mirror.dispose(),
     };
@@ -267,6 +280,40 @@ describe('SessionDispatchWatcher', () => {
     userTurnId: turnId,
     state,
     updatedAt: 1,
+  });
+
+  it('repairs missing Stop pause markers and keeps stopped drafts when later queue work runs', async () => {
+    const f = await createQueueRecoveryFixture({
+      sessionId: 'retained-stop-queue' as SessionId,
+      queue: ['B', 'C', 'D', 'E', 'F', 'G'].map(createQueueItem),
+      canceledTurnIds: ['B', 'C', 'D', 'E', 'F'],
+    });
+    try {
+      expect(await f.promote()).toMatchObject({ id: 'G' });
+      expect((await f.doc.getMessageQueue()).map((row) => [row.userTurnId, row.paused])).toEqual(
+        ['B', 'C', 'D', 'E', 'F'].map((id) => [id, true])
+      );
+      expect((await f.doc.sessionData.history.readAll()).map((row) => row.id)).toEqual(['G']);
+      expect(await f.promote()).toBeNull();
+    } finally {
+      f.dispose();
+    }
+  });
+
+  it('retains a paused draft when Stop interrupts its partially committed promotion', async () => {
+    const f = await createQueueRecoveryFixture({
+      sessionId: 'paused-promotion' as SessionId,
+      queue: [{ ...createQueueItem('B'), paused: true }],
+      history: [createPendingUserTurn('B', 'queued B')],
+      meta: { queuePromotionLedger: { 'queue:B': createQueueReceipt('B', 'activation_published') }, latestUserMsgId: 'B' },
+    });
+    try {
+      await f.recover(f.doc, f.meta());
+      expect(await f.doc.getMessageQueue()).toEqual([expect.objectContaining({ userTurnId: 'B', paused: true })]);
+      expect((await f.doc.sessionData.history.readAll()).find((entry) => entry.id === 'B')?.status).toBe('canceled');
+      expect(f.meta().queuePromotionLedger?.['queue:B']?.state).toBe('queue_consumed');
+      expect(await f.promote()).toBeNull();
+    } finally { f.dispose(); }
   });
 
   it('processes pending user turns for an idle owned session', async () => {

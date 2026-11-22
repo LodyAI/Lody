@@ -2233,7 +2233,7 @@ export function SessionConversationStoryHarness({
                         // `--conversation-top-inset` var set on the frame below.
                         <BaseHeader
                           hideMenuButton
-                          className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+                          className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/90 backdrop-blur-xl"
                           style={{ height: '3rem' }}
                           leading={<MobileSessionHeaderBackButton onBack={action} />}
                           title={mobileTitleNode}

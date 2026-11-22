@@ -1,10 +1,12 @@
-import type {
-  AutomationContinuation,
-  AutomationRuleDraft,
-  AutomationSettings,
+import {
+  autoDeliverOptionsSchema,
+  type AutomationContinuation,
+  type AutomationRuleDraft,
+  type AutomationSettings,
 } from '@lody/shared/automations';
 import type { Delivery } from '../storage/ledger';
 import { automationIdentity, type AutomationLedger } from '../storage/ledger';
+import { DELIVERY_EVENT_TYPE } from './delivery';
 
 /** Product behavior lives here. User programs only report a condition result. */
 export function internalPolicy({ rule, event }: Delivery): AutomationContinuation[] {
@@ -35,6 +37,28 @@ export function internalPolicy({ rule, event }: Delivery): AutomationContinuatio
             parameters: {
               target: { kind: 'existing', sessionId, onUnavailable: 'blocked' },
               input: { kind: 'pending_work', ref: event.data.workId },
+              ifBusy: 'enqueue',
+            },
+          },
+        },
+      ];
+    case 'auto-deliver':
+      if (event.type !== DELIVERY_EVENT_TYPE || typeof event.data.step !== 'string') return [];
+      // Each request waits until the Session group is idle, and is dropped once the
+      // pull request has moved past the state that prompted it.
+      return [
+        {
+          key: event.id,
+          condition: { kind: 'session.group.settled', parameters: { rootId: sessionId } },
+          guard: {
+            kind: 'session.delivery.current',
+            parameters: { sessionId, eventId: event.id },
+          },
+          action: {
+            kind: 'agent.invoke',
+            parameters: {
+              target: { kind: 'existing', sessionId, onUnavailable: 'blocked' },
+              input: { kind: 'delivery', ref: event.data.step, values: event.data },
               ifBusy: 'enqueue',
             },
           },
@@ -93,6 +117,11 @@ const policies = {
     event: 'session.turn.finalized',
     action: 'session.compact',
   },
+  autoDeliver: {
+    policy: 'auto-deliver',
+    event: DELIVERY_EVENT_TYPE,
+    action: 'agent.invoke',
+  },
 } as const;
 
 export function configureSessionPolicies(
@@ -128,7 +157,9 @@ export function configureSessionPolicies(
       },
       budget: {
         maxActionsPerEvent: 1,
-        maxInvocationsPerCorrelation: 8,
+        // One Auto delivery enablement shares a correlation: one Create PR, bounded
+        // repairs and one merge request per head.
+        maxInvocationsPerCorrelation: policy.policy === 'auto-deliver' ? 16 : 8,
         maxPendingActions: 128,
         maxDepth: 8,
       },
@@ -138,14 +169,9 @@ export function configureSessionPolicies(
 }
 
 /** Preserve an enabled recovery setting created before overload observations existed. */
-export function upgradeCapacityPolicies(
-  ledger: AutomationLedger,
-  userId: string,
-  now: number
-): void {
+export function upgradeCapacityPolicies(ledger: AutomationLedger, now: number): void {
   for (const rule of ledger.rules()) {
     if (
-      rule.ownerUserId === userId &&
       rule.ownerMachineId === ledger.machineId &&
       rule.handler.kind === 'policy' &&
       rule.handler.policy === 'recover-capacity' &&
@@ -155,7 +181,7 @@ export function upgradeCapacityPolicies(
       configureSessionPolicies(
         ledger,
         rule.scope.sessionId,
-        userId,
+        rule.ownerUserId,
         { recoverCapacity: rule.enabled },
         now
       );
@@ -181,6 +207,9 @@ export function sessionPolicySettings(
         typeof leadTimeMs === 'number'
       )
         result.compactWhenIdle = { contextTokens, cacheTtlMs, leadTimeMs };
+    } else if (key === 'autoDeliver') {
+      const parsed = autoDeliverOptionsSchema.safeParse(rule.handler.options);
+      result.autoDeliver = parsed.success ? parsed.data : false;
     } else result[key] = true;
   }
   return result;

@@ -3,7 +3,6 @@ import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import React, { useEffect } from 'react';
 import { Select } from '@lody/ui/select';
-import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { languageAtom } from '../atoms/settings';
 import type { SupportedLanguage } from '@lody/shared';
@@ -12,7 +11,15 @@ import { withPush } from '@/lib/push-notifications';
 import en from '../../../../locales/en.json';
 import lang_en from '../../../../locales/modules/lang/en.json';
 import lang_zhCN from '../../../../locales/modules/lang/zh_CN.json';
-import zhCN from '../../../../locales/zh_CN.json';
+
+/* `en` is the fallback language, so its bundle stays eager. `zh_CN` (~500KB)
+   loads on demand: `ensureLanguageResources` fetches it before init when the
+   detected/stored language is Chinese, and before any later language switch,
+   so `i18n.changeLanguage` always sees a real bundle — never the en fallback. */
+async function loadZhCNBundle(): Promise<Record<string, unknown>> {
+  const module = await import('../../../../locales/zh_CN.json');
+  return { ...module.default, ...notificationMessages.zh };
+}
 
 export const resources = {
   en: {
@@ -20,10 +27,36 @@ export const resources = {
     lang: lang_en,
   },
   zh_CN: {
-    translation: { ...zhCN, ...notificationMessages.zh },
+    translation: {},
     lang: lang_zhCN,
   },
 };
+
+const loadedLanguages = new Set<string>(['en']);
+const languageLoadPromises = new Map<string, Promise<void>>();
+
+export function ensureLanguageResources(language: string): Promise<void> {
+  if (loadedLanguages.has(language)) {
+    return Promise.resolve();
+  }
+  let pending = languageLoadPromises.get(language);
+  if (!pending) {
+    pending = (async () => {
+      // Only zh_CN is deferred today; extend the switch when locales grow.
+      const bundle = language === 'zh_CN' ? await loadZhCNBundle() : {};
+      if (i18next.isInitialized) {
+        i18next.addResourceBundle(language, defaultNS, bundle, true, true);
+      } else {
+        resources[language as SupportedLanguage].translation = bundle;
+      }
+      loadedLanguages.add(language);
+    })();
+    languageLoadPromises.set(language, pending);
+    // A failed fetch must not poison the map — a retry re-issues the import.
+    pending.catch(() => languageLoadPromises.delete(language));
+  }
+  return pending;
+}
 
 export const defaultNS = 'translation';
 export const fallbackLanguage = 'en';
@@ -114,31 +147,48 @@ export function detectBrowserLanguage(): SupportedLanguage | null {
 
 export const initI18n = async (language: string) => {
   const nextLanguage = coerceSupportedLanguage(language) ?? fallbackLanguage;
+  // Pull the locale bundle before init — with `initImmediate: false` the init
+  // itself is synchronous, so this is the only async gap. In tests that mock
+  // react-i18next without initReactI18next, the .use() chain throws — degrade
+  // to a skipped init instead of surfacing an unhandled rejection.
+  try {
+    await ensureLanguageResources(nextLanguage);
+  } catch (error) {
+    console.warn(`Failed to load i18n resources for ${nextLanguage}:`, error);
+  }
 
   if (!initializationPromise) {
-    initializationPromise = i18next
-      .use(initReactI18next)
-      .init({
-        // The first call happens at module bootstrap with the stored/detected
-        // preference. Initializing directly in that language avoids committing
-        // one English frame before AppInitializer's effect can reconcile it.
-        lng: nextLanguage,
-        fallbackLng: fallbackLanguage,
-        defaultNS,
-        ns: [defaultNS],
-        keySeparator: false,
-        debug: import.meta.env.DEV && import.meta.env.MODE !== 'test',
-        resources,
-        backend: [],
-        interpolation: {
-          escapeValue: false,
-        },
-        react: {
-          useSuspense: false,
-        },
-        initImmediate: false,
-      })
-      .then(() => undefined);
+    try {
+      initializationPromise = i18next
+        .use(initReactI18next)
+        .init({
+          // The first call happens at module bootstrap with the stored/detected
+          // preference. Initializing directly in that language avoids committing
+          // one English frame before AppInitializer's effect can reconcile it.
+          lng: nextLanguage,
+          fallbackLng: fallbackLanguage,
+          defaultNS,
+          ns: [defaultNS],
+          keySeparator: false,
+          debug: import.meta.env.DEV && import.meta.env.MODE !== 'test',
+          resources,
+          backend: [],
+          interpolation: {
+            escapeValue: false,
+          },
+          react: {
+            useSuspense: false,
+          },
+          initImmediate: false,
+        })
+        .then(() => undefined);
+    } catch (error) {
+      // `use`/`init` throws synchronously when the react-i18next plugin is a
+      // partial mock in tests — keep the promise resolved so callers and the
+      // floating bootstrap call don't surface an unhandled rejection.
+      console.warn('i18n init failed:', error);
+      initializationPromise = Promise.resolve();
+    }
   }
 
   await initializationPromise;
@@ -147,8 +197,18 @@ export const initI18n = async (language: string) => {
     return;
   }
 
-  await i18next.changeLanguage(nextLanguage);
+  try {
+    await i18next.changeLanguage(nextLanguage);
+  } catch (error) {
+    console.warn(`i18n changeLanguage(${nextLanguage}) failed:`, error);
+  }
 };
+
+/* Direct `i18n.changeLanguage` calls skip the lazy-bundle fetch and would fall
+   back to English for zh_CN — every language switch must go through this. */
+export async function setAppLanguage(language: string): Promise<void> {
+  await initI18n(language);
+}
 
 export const currentSupportedLanguages = Object.keys(resources);
 export const languageCodeToName = Object.fromEntries(
@@ -165,7 +225,6 @@ const languageOptions = currentSupportedLanguages.map((lang) => ({
 }));
 
 export const LanguageSelector = ({ triggerClassName }: { triggerClassName?: string }) => {
-  const { i18n } = useTranslation();
   const [language, setLanguage] = useAtom(languageAtom);
   return (
     <Select.Root
@@ -175,7 +234,7 @@ export const LanguageSelector = ({ triggerClassName }: { triggerClassName?: stri
       onValueChange={(value) => {
         if (value == null) return;
         setLanguage(value);
-        void i18n.changeLanguage(value);
+        void setAppLanguage(value);
         if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) {
           return;
         }
@@ -202,8 +261,6 @@ export const LanguageSelector = ({ triggerClassName }: { triggerClassName?: stri
 
 // sub window language change
 export const LanguageProvider = ({ children }: { children: React.ReactNode }) => {
-  const { i18n } = useTranslation();
-
   useEffect(() => {
     const handler = (e: StorageEvent) => {
       if (e.key === LANGUAGE_STORAGE_KEY) {
@@ -211,14 +268,14 @@ export const LanguageProvider = ({ children }: { children: React.ReactNode }) =>
         if (!nextLanguage) {
           return;
         }
-        void i18n.changeLanguage(nextLanguage);
+        void setAppLanguage(nextLanguage);
       }
     };
     window.addEventListener('storage', handler);
     return () => {
       window.removeEventListener('storage', handler);
     };
-  }, [i18n]);
+  }, []);
   return children;
 };
 

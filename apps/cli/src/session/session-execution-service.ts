@@ -169,6 +169,8 @@ import {
 import { findProgressMessageId } from '@lody/shared/session-data';
 import { Cause, Clock, Data, Effect, Exit, Fiber, Random, Scope } from 'effect';
 import { createHash, randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { join as joinPath } from 'node:path';
 import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
 import {
   getACPErrorUserMessage,
@@ -912,6 +914,7 @@ type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefres
     | 'magpieGatewayUrl'
     | 'env'
     | 'codexAuth'
+    | 'sessionDefaults'
   >;
 
 const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary => {
@@ -1835,8 +1838,6 @@ export class SessionExecutionService {
           ...this.baseSessionAnalyticsProps(sessionId),
           turn_id: turnId,
           ...(typeof totalTurnMs === 'number' ? { total_turn_ms: totalTurnMs } : {}),
-          // TODO(analytics): permission_wait_ms is accumulated in MessageHandler's
-          // SessionTransientStore (state.permissionWaitMs); plumb it here to populate it.
           pr_detected: prDetected,
           diff_file_count: diffFileCount,
           ...(analytics?.dispatchMode ? { dispatch_mode: analytics.dispatchMode } : {}),
@@ -8419,6 +8420,14 @@ export class SessionExecutionService {
                   (id) => self.deps.sessionManager.resolveLocalProjectRootPath(id)
                 )
               : undefined;
+            // A file stat, not a git process: `.git` is a directory in a clone and a file in
+            // a worktree. Failure only omits the PR-link sentence.
+            const gitRepository =
+              project?.kind === 'github' ||
+              (await stat(joinPath(session.getWorkdir(), '.git')).then(
+                () => true,
+                () => false
+              ));
             const sessionInputBlocks = resolveSessionExecutionInputBlocks({
               ...agentConfig,
               prompt: buildPrompt(
@@ -8430,6 +8439,9 @@ export class SessionExecutionService {
                   branchToRename,
                   projectRun,
                   projectFileRoots,
+                  gitRepository,
+                  // The same fact that puts the shim on PATH: managed broker credentials.
+                  managedGhShim: session.getGitHubCredentials().mode === 'managed',
                 }
               ),
             });
@@ -8754,6 +8766,35 @@ export class SessionExecutionService {
     ];
   }
 
+  private async pauseQueuedDrafts(sessionId: SessionId): Promise<void> {
+    // Stop must not wait for a document join or a stalled preparation read.
+    // The renderer also pauses its drafts before publishing the durable Stop marker.
+    const doc = this.deps.workspaceDocument.sessions?.get(sessionId);
+    if (!doc) return;
+    const queue = await doc.getMessageQueue();
+    const cids = queue.filter((item) => !item.paused).map((item) => item.$cid);
+    if (cids.length) await doc.pauseMessageQueueItems(cids);
+  }
+
+  private async retainStoppedQueue(sessionId: SessionId): Promise<void> {
+    try {
+      const doc = this.deps.workspaceDocument.sessions?.get(sessionId);
+      if (!doc) return;
+      const queue = await doc.getMessageQueue();
+      const stopped = queue.filter(
+        (item) =>
+          !item.paused &&
+          this.isInboxInputCanceled(sessionId, item.userTurnId?.trim() || `queued-${item.$cid}`)
+      );
+      if (stopped.length) await doc.pauseMessageQueueItems(stopped.map((item) => item.$cid));
+    } catch (error) {
+      // SQLite already prevents dispatch; the watcher repairs the display marker.
+      this.deps.logger.warn(
+        `[${sessionId}] Could not retain stopped queue: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
   private liveTurnId(sessionId: SessionId): string | undefined {
     return (
       this.deps.getActiveTurnId(sessionId) ??
@@ -8881,6 +8922,7 @@ export class SessionExecutionService {
           message.cancelId
         );
         if (paused) {
+          await this.retainStoppedQueue(sessionId);
           const successor = this.turnRuntimeBySession.get(sessionId);
           if (successor?.inboxOwner?.input?.inputId === `inbox:${target.executionId}`)
             return this.cancelSession({ ...message, turnId: successor.turnId }, options);
@@ -8890,6 +8932,8 @@ export class SessionExecutionService {
       // Stop always ends the turn the user sees: with no execution here, the
       // unfinished entry is closed instead of ignored.
       if (await this.closeDeadAssistantTurn(sessionId, { turnId, requireSettledUserTurn: false })) {
+        if (options.pauseInbox !== false && message.pauseInbox !== false)
+          await this.pauseQueuedDrafts(sessionId);
         this.refreshCodeCollabSharedStateAfterTurn(sessionId);
       } else {
         this.deps.logger.debug(
@@ -8902,6 +8946,15 @@ export class SessionExecutionService {
     }
 
     const stoppedRuntime = this.turnRuntimeBySession.get(sessionId);
+    // Legacy and degraded hosts still retain ordinary queued drafts on Stop.
+    // Interrupt-and-send and Edit & Resend opt out explicitly.
+    if (
+      (!this.operationInbox || !pauseInbox) &&
+      options.pauseInbox !== false &&
+      message.pauseInbox !== false
+    ) {
+      await this.pauseQueuedDrafts(sessionId);
+    }
     if (this.operationInbox && stoppedRuntime?.invocation?.requesterUserId && pauseInbox) {
       const scope = {
         workspaceId: this.deps.workspaceId,
@@ -8917,6 +8970,7 @@ export class SessionExecutionService {
           message.cancelId
         );
         if (!paused) return { success: false, error: 'Execution changed before Stop.' };
+        await this.retainStoppedQueue(sessionId);
         const successor = this.turnRuntimeBySession.get(sessionId);
         if (
           successor &&
@@ -9454,6 +9508,7 @@ export class SessionExecutionService {
         magpieGatewayUrl: config.magpieGatewayUrl,
         env: config.env,
         codexAuth: config.codexAuth,
+        sessionDefaults: config.sessionDefaults,
       },
       options
     );
@@ -9684,6 +9739,7 @@ export class SessionExecutionService {
         {
           agentConfigId: message.configId,
           magpieGatewayUrl: message.magpieGatewayUrl,
+          sessionDefaults: message.sessionDefaults,
           signal: options.signal,
           codexProfile: codexProfile ? { profile: codexProfile } : undefined,
           onManagedRuntimeProgress: (event) => {
@@ -10206,6 +10262,7 @@ const fingerprintAcpLaunchInputs = (inputs: {
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
   magpieGatewayUrl?: string;
+  sessionDefaults?: AgentConfigMeta['sessionDefaults'];
 }): string =>
   createHash('sha256')
     .update(
@@ -10219,6 +10276,8 @@ const fingerprintAcpLaunchInputs = (inputs: {
         inputs.magpieGatewayUrl
       )
     )
+    // The probe applies these, so a cached probe taken under other defaults is stale.
+    .update(`\x00${JSON.stringify(inputs.sessionDefaults ?? null)}`)
     .digest('hex');
 
 const computeAcpRefreshDedupeKey = (

@@ -82,6 +82,18 @@ for (const filePath of jsFiles) {
 
   scanLiteralImports(filePath, source, violations);
   scanVariableImports(filePath, source, packageVariables, violations);
+  if (
+    path.relative(distDir, filePath).replaceAll('\\', '/').startsWith('chunks/') &&
+    /new URL\(\s*['"]\.\.\/package\.json['"]\s*,\s*import\.meta\.url\s*\)/.test(source)
+  ) {
+    violations.push({
+      filePath,
+      line: 1,
+      column: 1,
+      kind: 'nested chunk relative manifest read',
+      specifier: '../package.json (resolves to nonexistent dist/package.json)',
+    });
+  }
 }
 
 if (violations.length > 0) {

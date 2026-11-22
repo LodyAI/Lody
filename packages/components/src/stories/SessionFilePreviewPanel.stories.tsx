@@ -8,6 +8,7 @@ import {
 } from '@/components/ai-gui/session-file-preview-dialog';
 import { Dialog } from '@/ui/dialog';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import { SessionSidePanelTabBar } from '@/components/sessions/session-side-panel-tab-bar';
 
 const file = (overrides: Partial<SessionFilePayload>): SessionFilePayload => ({
   type: 'file',
@@ -221,4 +222,59 @@ export const MobileTextAttachment: Story = {
     file: file({ fileName: 'notes.txt' }),
     status: loaded(PLAIN_TEXT),
   },
+};
+
+/* The desktop composition: an attachment opens as a side-panel tab. The name and
+   actions sit directly under the tab strip and the body fills the panel. */
+const sidePanel = (args: React.ComponentProps<typeof SessionFilePreviewPanel>) => (
+  <div className="flex h-[560px] w-[640px] flex-col overflow-hidden bg-background text-foreground">
+    <SessionSidePanelTabBar
+      tabs={[
+        {
+          id: `attachment:${args.file.fileId}`,
+          label: args.file.fileName,
+          kind: 'file',
+          filePath: args.file.fileName,
+          closeable: true,
+        },
+      ]}
+      activeTabId={`attachment:${args.file.fileId}`}
+      onTabSelect={() => {}}
+      onTabClose={() => {}}
+      closeTabLabel={(label) => `Close ${label}`}
+    />
+    <div className="min-h-0 flex-1">
+      <SessionFilePreviewPanel {...args} variant="pane" />
+    </div>
+  </div>
+);
+
+export const SidePanelMarkdown: Story = {
+  args: MarkdownRendered.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelHtml: Story = {
+  args: HtmlAttachment.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelPlainText: Story = {
+  args: PlainText.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelTruncated: Story = {
+  args: Truncated.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelError: Story = {
+  args: Error.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
 };

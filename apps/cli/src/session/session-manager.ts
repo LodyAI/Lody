@@ -78,6 +78,7 @@ import {
   type ManagedRuntimeProgressEvent,
 } from '@/agent/managed-agent-runtime';
 import { buildGitHubCloneUrl, deriveRepoIdFromGitHubRepo, redactUrlAuth } from '@/utils/github';
+import { createSessionPullRequestLinks } from '@/lib/session-pr-links';
 import {
   GitCredentialBroker,
   LODY_GIT_CRED_BROKER_STATE_FILE_ENV,
@@ -1094,7 +1095,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!tokenManager) return { preferMachineIdentity, personalIdentityEnabled: false };
     const context = sessionId ?? 'git-identity';
     const policy = await resolveGitIdentityPolicyLegacy(
-      () => tokenManager.getCredentialPolicy({ requesterUserId, machineId: this.machineId }),
+      (attemptSignal) =>
+        tokenManager.getCredentialPolicy(
+          { requesterUserId, machineId: this.machineId },
+          attemptSignal
+        ),
       this.logger,
       context,
       signal
@@ -1356,11 +1361,26 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       return null;
     }
     if (!this.gitCredentialBroker) {
+      const pullRequestLinks = createSessionPullRequestLinks({
+        store: this.workspaceDocument.repo,
+        machineId: this.machineId,
+      });
       this.gitCredentialBroker = new GitCredentialBroker({
         tokenManager,
         workspaceId: this.workspaceId,
         logger: this.logger,
         ownerUserId: this.cloudPort.identity.userId ?? undefined,
+        // The broker's own workspace and this machine: a context token from
+        // another workspace never resolves here.
+        reportPullRequest: async (context, url) => {
+          if (context.machineId !== this.machineId)
+            return { linked: false, reason: 'not_this_machine' };
+          const result = await pullRequestLinks.link(context.sessionId, url, 'shim');
+          this.logger.debug(
+            `[Lody GitHub] PR report for session ${context.sessionId}: ${result.linked ? 'linked' : 'reason' in result ? result.reason : 'unlinked'}`
+          );
+          return result;
+        },
       });
     }
     try {

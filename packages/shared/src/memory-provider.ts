@@ -19,6 +19,11 @@ export const MemoryCreateInputSchema = z
   })
   .strict();
 export type MemoryCreateInput = z.infer<typeof MemoryCreateInputSchema>;
+/**
+ * One batch per request so a "connect everything" click stays a single call:
+ * looping on the client would race the inventory refresh between installs.
+ */
+export const MemoryAgentTargetsSchema = z.array(z.string().trim().min(1).max(100)).min(1).max(50);
 export const MemoryProviderRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('list'), providerId: z.string().min(1).max(100) }).strict(),
   z
@@ -26,6 +31,24 @@ export const MemoryProviderRequestSchema = z.discriminatedUnion('action', [
       action: z.enum(['create', 'update']),
       providerId: z.string().min(1).max(100),
       input: MemoryCreateInputSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.enum(['connect', 'disconnect']),
+      providerId: z.string().min(1).max(100),
+      targets: MemoryAgentTargetsSchema,
+    })
+    .strict(),
+  // `signIn` opens a flow, `signInPoll` asks whether the browser finished it;
+  // `install` puts the provider on the machine, `installPoll` watches it land.
+  // `connectPoll` watches the job a `connect` or `disconnect` left running.
+  // None carries a device code: the flow belongs to the machine that started
+  // it, so the secret half never has to cross back through the UI.
+  z
+    .object({
+      action: z.enum(['signIn', 'signInPoll', 'install', 'installPoll', 'connectPoll']),
+      providerId: z.string().min(1).max(100),
     })
     .strict(),
 ]);
@@ -37,15 +60,154 @@ export const MemoryIdentitySchema = z.object({
   role: z.string().optional(),
 });
 export type MemoryIdentity = z.infer<typeof MemoryIdentitySchema>;
+
+/**
+ * How much a connected agent gains. `hook` agents let the provider run on every
+ * turn, so recall and capture are automatic; `mcp` agents only receive the
+ * provider's tools, which the model has to call on purpose.
+ */
+export const MemoryAgentIntegrationSchema = z.enum(['hook', 'mcp']);
+export type MemoryAgentIntegration = z.infer<typeof MemoryAgentIntegrationSchema>;
+
+/**
+ * Why a row is inert, or how its last attempt ended. A code rather than a
+ * sentence: the daemon has no locale, so only the UI can phrase these.
+ */
+export const MemoryAgentNoticeSchema = z.enum([
+  'absent_on_machine',
+  'cloud_disconnected',
+  'connect_failed',
+  'disconnect_failed',
+]);
+export type MemoryAgentNotice = z.infer<typeof MemoryAgentNoticeSchema>;
+
+/** A local agent a provider can attach itself to. Still no memory contents. */
+export const MemoryAgentSchema = z
+  .object({
+    /** Lody's own agentType, so rows stay labelled the way the rest of Lody is. */
+    id: z.string().min(1),
+    /**
+     * Other agentTypes Lody may report for the same harness. The panel lists
+     * the machine's own agent configs, so it has to recognise a config saved
+     * under an alias as the row it already has rather than a second agent.
+     */
+    aliases: z.array(z.string().min(1)).max(10).optional(),
+    displayName: z.string(),
+    integration: MemoryAgentIntegrationSchema,
+    /** The provider covers this agent at all. */
+    supported: z.boolean(),
+    /** Supported, present on this machine, and the provider is ready to act. */
+    connectable: z.boolean(),
+    connected: z.boolean(),
+    notice: MemoryAgentNoticeSchema.optional(),
+  })
+  .strict();
+export type MemoryAgent = z.infer<typeof MemoryAgentSchema>;
+
+/**
+ * Where a browser sign-in has got to. `pending` carries the half the user has
+ * to see — a page to open and a code to read back — and nothing else: a device
+ * flow's own code stays on the machine that started it.
+ */
+export const MemorySignInSchema = z
+  .object({
+    status: z.enum(['pending', 'approved', 'expired']),
+    /** The page the user approves on. Opened externally, so http(s) only. */
+    verificationUrl: z
+      .string()
+      .url()
+      .max(2048)
+      .refine((value) => {
+        const protocol = new URL(value).protocol;
+        return protocol === 'https:' || protocol === 'http:';
+      }, 'verificationUrl must use http or https')
+      .optional(),
+    /** Shown and copyable, for the browser that opened on the wrong page. */
+    userCode: z.string().trim().min(1).max(128).optional(),
+    expiresInSec: z.number().int().positive().max(86_400).optional(),
+  })
+  .strict();
+export type MemorySignIn = z.infer<typeof MemorySignInSchema>;
+
+/**
+ * Where putting a provider on this machine has got to. Fetching a binary
+ * outlasts the request that asked for it, so the job reports back across
+ * several replies instead of holding one open.
+ */
+/**
+ * Why an install failed, when the package manager said so in a way the user
+ * can act on. Lody cannot raise its own permissions, and a machine with no npm
+ * cannot take this path at all, so both are named rather than folded into a
+ * plain failure.
+ */
+export const MemoryInstallFailureSchema = z.enum(['npm_missing', 'permission']);
+export type MemoryInstallFailure = z.infer<typeof MemoryInstallFailureSchema>;
+export const MemoryInstallSchema = z
+  .object({
+    status: z.enum(['running', 'done', 'failed']),
+    /**
+     * What a running install is fetching: the provider itself, or first the
+     * runtime it is installed with when the machine had none that worked.
+     */
+    step: z.enum(['runtime', 'provider']).optional(),
+    /** Only a failed install whose cause was recognised carries this. */
+    failure: MemoryInstallFailureSchema.optional(),
+  })
+  .strict();
+export type MemoryInstall = z.infer<typeof MemoryInstallSchema>;
+
+/**
+ * Where a connect or disconnect has got to. Each EverCLI call may take its
+ * full budget, so a batch outlasts any one reply; the job runs on the machine
+ * and the panel asks after it instead of holding a request open.
+ */
+export const MemoryAgentsJobSchema = z
+  .object({ status: z.enum(['running', 'done', 'failed']) })
+  .strict();
+export type MemoryAgentsJob = z.infer<typeof MemoryAgentsJobSchema>;
+
 export const MemoryProviderResponseSchema = z
   .object({
     type: z.literal('machine/memory'),
     status: z.enum(['ready', 'not_installed', 'not_running', 'error']),
     memories: z.array(MemoryIdentitySchema),
+    /** Only agent-connect providers report this; identity providers omit it. */
+    agents: z.array(MemoryAgentSchema).optional(),
+    /**
+     * Who this machine is signed in as. The panel does not show it today —
+     * every provider there describes itself in one line, and an account
+     * prefixed to one of them broke the symmetry that lets the two be
+     * compared — but a confirmation that uploads history has to name it.
+     */
+    account: z.string().trim().min(1).max(320).optional(),
+    /** Only answers to `signIn` and `signInPoll` carry this. */
+    signIn: MemorySignInSchema.optional(),
+    /** Only answers to `install` and `installPoll` carry this. */
+    install: MemoryInstallSchema.optional(),
+    /** Only answers to `connect`, `disconnect` and `connectPoll` carry this. */
+    agentsJob: MemoryAgentsJobSchema.optional(),
     error: z.string().optional(),
   })
   .strict();
 export type MemoryProviderResponse = z.infer<typeof MemoryProviderResponseSchema>;
+
+/**
+ * What a provider can do beyond listing identities. The three are independent:
+ * a provider may be installable long before Lody can sign in to it, and a
+ * hosted one may be signed in to without ever being installed.
+ */
+type MemoryProviderCapabilities = {
+  /**
+   * Attaches to the agents already on a machine instead of managing named
+   * identities: one account holds one memory, and connecting an agent only
+   * decides who may reach it. It renders an agent list, never an identity editor.
+   */
+  readonly connectsAgents: boolean;
+  /** Lody drives its sign-in, so a first-time user never has to leave for a terminal. */
+  readonly signsIn: boolean;
+  /** Lody can fetch it onto the machine rather than only link to it. */
+  readonly installs: boolean;
+};
 
 /** UI metadata only. Commands and environment mapping belong to the daemon adapter. */
 export const MEMORY_PROVIDERS = [
@@ -54,8 +216,46 @@ export const MEMORY_PROVIDERS = [
     name: 'Nowledge Mem',
     installUrl: 'https://mem.nowledge.co/en',
     createFields: ['name', 'id', 'description', 'role'],
+    connectsAgents: false,
+    signsIn: false,
+    installs: false,
+  },
+  {
+    id: 'everme',
+    name: 'EverMe',
+    installUrl: 'https://evermind.ai/everme',
+    createFields: [],
+    connectsAgents: true,
+    signsIn: true,
+    installs: true,
   },
 ] as const;
+
+const hasCapability = (
+  providerId: string,
+  capability: keyof MemoryProviderCapabilities
+): boolean => {
+  const provider: MemoryProviderCapabilities | undefined = MEMORY_PROVIDERS.find(
+    (entry) => entry.id === providerId
+  );
+  return provider?.[capability] ?? false;
+};
+export const isAgentConnectProvider = (providerId: string): boolean =>
+  hasCapability(providerId, 'connectsAgents');
+export const providerSignsIn = (providerId: string): boolean =>
+  hasCapability(providerId, 'signsIn');
+export const providerInstalls = (providerId: string): boolean =>
+  hasCapability(providerId, 'installs');
+
+/**
+ * Providers set up only from the machine itself. Each reaches one person's
+ * account — signing it in, fetching its CLI, attaching that machine's agents
+ * to it — so a request relayed from another device would bind this machine to
+ * whoever sent it. Settings never sends these for another machine, and the
+ * daemon refuses them on every channel but its own local one.
+ */
+export const isLocalOnlyMemoryProvider = (providerId: string): boolean =>
+  isAgentConnectProvider(providerId) || providerSignsIn(providerId) || providerInstalls(providerId);
 
 /** Lody's machine-scoped association; the provider continues to own memory contents. */
 export const MemoryAssociationSchema = MemoryBindingSchema.extend({

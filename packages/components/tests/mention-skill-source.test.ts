@@ -4,9 +4,11 @@ import {
   buildSkillMentionItems,
   buildSkillMentionRewrites,
   getAllowedSkillMentionDirs,
+  hasProjectSkillSource,
   mergeMentionSkillState,
   selectSkillMentionCandidates,
 } from '../src/components/mentions/mention-skill-source';
+import { resolveLinkedWorkspaceGitHubRepo } from '../src/lib/session-repo';
 
 /** What the send path does with these rewrites, so the test asserts that. */
 const expandInText = (
@@ -114,6 +116,46 @@ describe('selectSkillMentionCandidates', () => {
     expect(tokens).toContain('claude-only');
     expect(tokens).toContain('global-only');
     expect(tokens).not.toContain('qwen-only');
+  });
+
+  it('offers Antigravity its config, workspace and built-in skills but not other providers', () => {
+    const groups: ProjectSkillGroup[] = [
+      ...GROUPS,
+      {
+        scope: 'project',
+        dir: '.agent/skills',
+        truncated: false,
+        skills: [
+          skill({ name: 'workspace-agy', relativePath: '.agent/skills/workspace-agy/SKILL.md' }),
+        ],
+      },
+      {
+        scope: 'global',
+        dir: '~/.gemini/config/skills',
+        truncated: false,
+        skills: [
+          skill({ name: 'pr-writer', relativePath: '~/.gemini/config/skills/pr-writer/SKILL.md' }),
+        ],
+      },
+      {
+        scope: 'system',
+        dir: '~/.gemini/antigravity-cli/builtin/skills',
+        truncated: false,
+        skills: [
+          skill({
+            name: 'browser',
+            relativePath: '~/.gemini/antigravity-cli/builtin/skills/browser/SKILL.md',
+          }),
+        ],
+      },
+    ];
+    const allowed = getAllowedSkillMentionDirs({ cliType: 'builtin', agentType: 'antigravity' });
+    const tokens = selectSkillMentionCandidates(buildSkillMentionItems(groups), '', allowed).map(
+      (item) => item.token
+    );
+    expect(tokens.sort()).toEqual(
+      ['browser', 'code-review', 'deep-research', 'pr-writer', 'workspace-agy'].sort()
+    );
   });
 
   it('includes global skill subdirectories under the selected provider root only', () => {
@@ -238,5 +280,52 @@ describe('system scope skills', () => {
     ]);
 
     expect(items.map((item) => item.scope)).toEqual(['project', 'global', 'system']);
+  });
+});
+
+describe('hasProjectSkillSource and resolveLinkedWorkspaceGitHubRepo', () => {
+  it('treats a Code Collab provider backed by a local project as a local skill source without GitHub', () => {
+    expect(
+      hasProjectSkillSource({
+        kind: 'provider',
+        localProject: {
+          workspaceId: 'ws-1' as never,
+          machineId: 'machine-1' as never,
+          localProjectId: 'local-1' as never,
+        },
+      })
+    ).toBe(true);
+    expect(
+      hasProjectSkillSource({
+        kind: 'provider',
+        localProject: {
+          machineId: 'machine-1' as never,
+          localProjectId: 'local-1' as never,
+        },
+      })
+    ).toBe(false);
+    expect(
+      hasProjectSkillSource({
+        kind: 'provider',
+        githubRepoFullName: 'lodyai/lody',
+      })
+    ).toBe(true);
+  });
+
+  it('resolves workspace-linked GitHub repositories case-insensitively and rejects unlinked remotes', () => {
+    const repositories = [
+      { fullName: 'LodyAI/Lody', private: true },
+      { repoFullName: 'LodyAI/Docs', private: false },
+    ];
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/lody', repositories)).toEqual({
+      fullName: 'LodyAI/Lody',
+      isPublic: false,
+    });
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/docs', repositories)).toEqual({
+      fullName: 'LodyAI/Docs',
+      isPublic: true,
+    });
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/unlinked', repositories)).toBeNull();
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/lody', undefined)).toBeNull();
   });
 });

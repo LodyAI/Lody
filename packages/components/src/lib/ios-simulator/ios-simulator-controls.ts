@@ -55,7 +55,6 @@ export function getIosSimulatorScreenshotFileName(deviceName: string, at: Date):
   return `${safeName} ${stamp}.png`;
 }
 
-// ---------------------------------------------------------------------------
 // Screenshot handshake with the viewer page.
 
 export const IOS_SIMULATOR_VIEWER_CAPTURE = 'lody:ios-simulator:capture';

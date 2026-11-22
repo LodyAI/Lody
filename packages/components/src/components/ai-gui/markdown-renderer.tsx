@@ -1859,6 +1859,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       <div
         ref={containerRef}
         data-search-block-id={searchBlockId}
+        data-text-selectable
         {...withClassName(
           stylex.props(markdownStyles.root, (compact || muted) && markdownStyles.muted),
           cn(MARKDOWN_BASE_CLASSNAME, className)

@@ -1,12 +1,21 @@
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Kbd } from '@lody/ui/kbd';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
+import {
+  commands,
+  composerScopedKeybindings,
+  formatKeyBinding,
+  getCommandKeybindings,
+  useCommand,
+  useCommands,
+} from '@/lib/commands';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 
@@ -46,6 +55,9 @@ export interface AttachmentAddMenuProps {
   scheduleDisabledReason?: string;
   /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
+  /** Register the `session.openAddMenu` command only while this surface owns
+   *  the composer's shortcuts (hidden retained panes pass `false`). */
+  commandsEnabled?: boolean;
 }
 
 /**
@@ -72,6 +84,7 @@ export function AttachmentAddMenu({
   onScheduleSend,
   scheduleDisabledReason,
   mcp,
+  commandsEnabled = true,
 }: AttachmentAddMenuProps) {
   const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
   const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
@@ -79,11 +92,37 @@ export function AttachmentAddMenu({
   const [open, setOpen] = useState(false);
   // Mobile's pushed panel. Desktop uses a real submenu and stays on 'root'.
   const [view, setView] = useState<'root' | 'mcp'>('root');
+  // iOS dismisses the file picker as soon as the prompt regains focus (the
+  // keyboard returns instead), so choosing the picker skips the composer
+  // focus restore every other selection gets.
+  const filePickerOpenedRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const triggerLabel = t('sessions.addAttachmentMenu', 'Add attachment');
 
   const mcpServers = mcp?.servers ?? [];
   const hasMcp = mcpServers.length > 0;
-  if (!onAddAttachment && !hasMcp && !onScheduleSend) {
+  const hasMenuContent = Boolean(onAddAttachment || hasMcp || onScheduleSend);
+
+  useCommands();
+  const openAddMenuKey = commands.getKeybindingsFor('session.openAddMenu')[0];
+
+  useCommand(
+    {
+      id: 'session.openAddMenu',
+      titleKey: 'commands.session.openAddMenu',
+      title: t('commands.session.openAddMenu', 'Open Composer + Menu'),
+      category: 'Session',
+      keybindings: composerScopedKeybindings(
+        getCommandKeybindings('session.openAddMenu'),
+        () => triggerRef.current
+      ),
+      when: () => hasMenuContent && !disabled,
+      run: () => setOpen(true),
+    },
+    commandsEnabled
+  );
+
+  if (!hasMenuContent) {
     return null;
   }
 
@@ -134,53 +173,67 @@ export function AttachmentAddMenu({
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
+        if (nextOpen) filePickerOpenedRef.current = false;
         // Always reopen at the root level; a stale pushed panel would hide the
         // upload actions behind a back row.
         if (!nextOpen) setView('root');
       }}
     >
-      <Menu.Trigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            icon
-            disabled={disabled}
-            aria-label={triggerLabel}
-            className={cn(
-              triggerSize,
-              isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
-              // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-              // `bg-accent`/`bg-muted`) because those equal the background in the
-              // dark theme and paint nothing.
-              'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-            )}
-          >
-            <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
-          </Button>
-        }
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          icon
-          disabled={disabled}
-          aria-label={triggerLabel}
-          className={cn(
-            triggerSize,
-            isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
-            // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-            // `bg-accent`/`bg-muted`) because those equal the background in the
-            // dark theme and paint nothing.
-            'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-          )}
-        >
-          <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
-        </Button>
-      </Menu.Trigger>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          delay={500}
+          render={
+            <Menu.Trigger
+              ref={triggerRef}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon
+                  disabled={disabled}
+                  aria-label={triggerLabel}
+                  className={cn(
+                    triggerSize,
+                    isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
+                    // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+                    // `bg-accent`/`bg-muted`) because those equal the background in the
+                    // dark theme and paint nothing.
+                    'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+                  )}
+                >
+                  <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+                </Button>
+              }
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                icon
+                disabled={disabled}
+                aria-label={triggerLabel}
+                className={cn(
+                  triggerSize,
+                  isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
+                  // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+                  // `bg-accent`/`bg-muted`) because those equal the background in the
+                  // dark theme and paint nothing.
+                  'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+                )}
+              >
+                <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+              </Button>
+            </Menu.Trigger>
+          }
+        />
+        <Tooltip.Content side="top" className="flex items-center gap-1.5">
+          <span>{triggerLabel}</span>
+          {openAddMenuKey ? <Kbd>{formatKeyBinding(openAddMenuKey)}</Kbd> : null}
+        </Tooltip.Content>
+      </Tooltip.Root>
       <Menu.Content
         align="start"
         side="top"
+        finalFocus={() => !filePickerOpenedRef.current}
         /* Size to the widest item (`w-max`) so short attachment labels don't
            leave a wide blank gutter; a small floor keeps it from
            collapsing too narrow. The pushed MCP panel keeps a fixed width so
@@ -210,7 +263,10 @@ export function AttachmentAddMenu({
           <div key="root" className="animate-in fade-in-0 slide-in-from-left-2 duration-150">
             {onAddAttachment ? (
               <Menu.Item
-                onClick={onAddAttachment}
+                onClick={() => {
+                  filePickerOpenedRef.current = true;
+                  onAddAttachment();
+                }}
                 disabled={attachmentDisabled || !!attachmentFeatureReason}
                 title={attachmentFeatureReason}
                 className={itemClass}
@@ -247,11 +303,7 @@ export function AttachmentAddMenu({
                         trigger is the last row of a menu that opens upward;
                         `start` (the submenu default) hangs the description and
                         the footnote down onto the model row. */}
-                    <Menu.Content
-                      align="end"
-                      sideOffset={8}
-                      className={MCP_PANEL_CLASS}
-                    >
+                    <Menu.Content align="end" sideOffset={8} className={MCP_PANEL_CLASS}>
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
                     </Menu.Content>
                   </Menu.Submenu>

@@ -13,7 +13,7 @@ export {
   createConversationViewFromHistory,
   type CreateConversationViewFromHistoryOptions,
 } from './create-conversation-view-from-history';
-export { createHistoryWriter, type HistoryWriter } from '@lody/shared';
+export { createHistoryWriter, type HistoryWriter } from '@lody/shared/history-writer';
 export {
   collectConversationConfigSources,
   collectHydratedRange,

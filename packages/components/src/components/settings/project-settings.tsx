@@ -104,6 +104,7 @@ import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { useAppCapability } from '@/lib/app-platform';
 import { getVisibleLocalProjectHistoryFailures } from '@/lib/local-project-history-catalog';
 import { settingsType as type } from './type.stylex';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type ProjectSettingsRow = {
   key: string;
@@ -205,6 +206,7 @@ export type ProjectSettingsViewProps = {
     provider: LocalProjectHistoryProvider,
     selectedIds: string[]
   ) => void;
+  onWorktreeProjectViewChange?: (projectKey: string | null) => void;
   onWorktreeSetupChange?: (
     row: ProjectSettingsRow,
     config: WorktreeSetupScriptConfig
@@ -963,6 +965,7 @@ export function ProjectSettingsComponent({
     setAddLocalProjectMachineId(machineId ?? null);
     setAddLocalProjectDialogOpen(true);
   }, []);
+  const [worktreeProjectKey, setWorktreeProjectKey] = useState<string | null>(null);
   /* All state + handlers live in `useLocalProjectsAdmin` so the mobile
      per-project surface (`MobileLocalProjectSettings`) can drive the
      same data model without duplicating mutations / catalog state. */
@@ -976,7 +979,7 @@ export function ProjectSettingsComponent({
     onHistorySelectionChange,
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
-  } = useLocalProjectsAdmin();
+  } = useLocalProjectsAdmin(worktreeProjectKey);
   const { workspaceReposWithStatus, workspaceReposLoading } = useSettingsDataCache();
   const {
     setupSavingByKey: githubSetupSavingByKey,
@@ -1085,6 +1088,7 @@ export function ProjectSettingsComponent({
         onImportHistory={onImportHistory}
         onResolveHistoryConflict={onResolveHistoryConflict}
         onHistorySelectionChange={onHistorySelectionChange}
+        onWorktreeProjectViewChange={setWorktreeProjectKey}
         onWorktreeSetupChange={onWorktreeSetupChange}
         onWorktreeCleanupChange={onWorktreeCleanupChange}
         onGithubWorktreeSetupChange={onGithubWorktreeSetupChange}
@@ -1128,6 +1132,7 @@ function ProjectSettingsDesktop({
   onImportHistory,
   onResolveHistoryConflict,
   onHistorySelectionChange,
+  onWorktreeProjectViewChange,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
@@ -1220,6 +1225,7 @@ function ProjectSettingsDesktop({
     onImportHistory,
     onResolveHistoryConflict,
     onHistorySelectionChange,
+    onWorktreeProjectViewChange,
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
     onGithubWorktreeSetupChange,
@@ -1279,10 +1285,12 @@ function ProjectSettingsDesktop({
         {isAnyLoading && totalCount === 0 ? (
           <div {...stylex.props(styles.loading)}>
             <Spinner size="small" />
-            {t('workspace.projects.loading', 'Loading projects')}
+            {t('workspace.projects.loading', 'Loading local projects')}
           </div>
         ) : totalCount === 0 && machineEntries.length === 0 ? (
-          <SettingsEmptyList>{t('workspace.projects.empty', 'No projects yet')}</SettingsEmptyList>
+          <SettingsEmptyList>
+            {t('workspace.projects.empty', 'No local projects yet')}
+          </SettingsEmptyList>
         ) : (
           /* Every source at once, each a section: its name above, its projects
              as the ruled rows of one card. Nothing is hidden behind a picked
@@ -1348,7 +1356,7 @@ function ProjectSettingsDesktop({
                 title={t('workspace.projects.anyMachineTitle', 'Any machine')}
                 description={t(
                   'workspace.projects.anyMachineHint',
-                  'Projects of several repositories, run wherever a copy is'
+                  'Projects of several repositories; conversations run wherever a copy is available.'
                 )}
                 boxed
               >
@@ -1600,6 +1608,7 @@ function ProjectWindow({
   onImportHistory,
   onResolveHistoryConflict,
   onHistorySelectionChange,
+  onWorktreeProjectViewChange,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
@@ -1637,6 +1646,11 @@ function ProjectWindow({
   const localRow = selection.kind === 'local' ? selection.row : null;
   const githubRow = selection.kind === 'github' ? selection.row : null;
   const [page, setPage] = useState<ProjectWindowPage>('general');
+  const viewedWorktreeProjectKey = page === 'worktree' ? (localRow?.key ?? null) : null;
+  useEffect(() => {
+    onWorktreeProjectViewChange?.(viewedWorktreeProjectKey);
+    return () => onWorktreeProjectViewChange?.(null);
+  }, [onWorktreeProjectViewChange, viewedWorktreeProjectKey]);
 
   const machineReachable = localRow
     ? (localMachineId != null && localRow.machineId === localMachineId) ||
@@ -2589,8 +2603,7 @@ function isUnreachableMachineError(message: string | null | undefined): boolean 
 }
 
 function copyProjectPath(path: string, t: TFunction) {
-  void navigator.clipboard
-    .writeText(path)
+  void copyTextToClipboard(path)
     .then(() => toast.success(t('sessions.pathCopied', 'Path copied to clipboard')))
     .catch(() => toast.error(t('sessions.copyFailed', 'Unable to copy')));
 }
@@ -2603,7 +2616,7 @@ function revealProjectPath(path: string, t: TFunction) {
   }
   void services.app.revealLocalPath(path).then((result) => {
     if (!result.revealed) {
-      toast.error(t('sessions.fileActions.revealFailed', 'Unable to show this folder'));
+      toast.error(t('sessions.fileActions.revealFailed', 'Could not reveal that file.'));
     }
   });
 }
@@ -2632,7 +2645,7 @@ function ProjectShareControl({
       : t('workspace.projects.private', 'Private to you');
   const scopeDescription = t(
     'workspace.projects.shareScopeDescription',
-    'Sharing a project also shares its device, which teammates need to open and continue conversations.'
+    'Sharing a project also shares its machine, which teammates need to open and continue conversations.'
   );
 
   if (!teamSharingAvailable) {
@@ -2676,6 +2689,7 @@ export type ProjectRowProps = {
     provider: LocalProjectHistoryProvider,
     selectedIds: string[]
   ) => void;
+  onWorktreeProjectViewChange?: (projectKey: string | null) => void;
   onWorktreeSetupChange?: (
     row: ProjectSettingsRow,
     config: WorktreeSetupScriptConfig

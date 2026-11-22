@@ -226,7 +226,7 @@ describe('MessageHandler machine registration', () => {
         magpieImport: 1,
         dshProviderIsolation: 1,
         terminalNotifications: 1,
-        memoryProviders: 1,
+        memoryProviders: 2,
         sessionHistory: 4,
         sessionHistoryIncremental: 1,
         sessionHistoryInspection: 2,
@@ -247,13 +247,17 @@ describe('MessageHandler machine registration', () => {
           ? { e2eeAcpInteraction: 1, e2eeSessionFork: 1, e2eeSessionEditAndResend: 1 }
           : {}),
         previewControl: 1,
+        previewStopProcess: 1,
         androidEmulator: 1,
         androidEmulatorQuality: 1,
+        androidEmulatorShutdown: 1,
         iosSimulator: 1,
         iosSimulatorControls: 2,
         iosSimulatorExterior: 1,
+        iosSimulatorShutdown: 1,
         localProjectRemoval: 1,
         localProjectCreateDirectory: 1,
+        localProjectBranchListing: 1,
         localProjectHistoryProvider: 1,
         localFileResources: 1,
         fileDownload: 1,
@@ -274,6 +278,8 @@ describe('MessageHandler machine registration', () => {
         sessionDirectoryListing: 1,
         bugReportClientLog: 1,
         sessionLiveActivity: 1,
+        localProjectFileSearch: 1,
+        localProjectSkillsFingerprint: 1,
       });
 
       await handler.cleanup();

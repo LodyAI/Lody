@@ -195,11 +195,11 @@
       "state": "active",
       "priority": "P1",
       "runtime": "simulator",
-      "title": "New-tab and digit shortcuts drive the conversation tab strip",
+      "title": "New-tab and shifted-punctuation shortcuts drive the conversation strip; sidebar digits do not select drafts",
       "owner": "desktop-shortcuts",
       "feature": "src/features/shortcuts.feature",
       "fixture": "ui-created-session-and-scripted-acp",
-      "fingerprint": "176e7647a641125f6b04a5d22cee689ea3421f2ae8bbf5fc57f53716899c63b1",
+      "fingerprint": "f5f0e9466df960092d1dc99711851c1be8e534a988395ded231511fc4f9d66ea",
       "ownerPaths": [
         "packages/components/src/lib/commands/",
         "packages/components/src/components/sessions/session-detail.tsx",
@@ -220,18 +220,25 @@
           }
         },
         {
-          "id": "shortcut.switchSessionTabByDigit",
+          "id": "shortcut.jumpToSidebarSession",
           "args": {
-            "positions": [1, 8, 2, "last"]
+            "positions": [1, 8, 9]
+          }
+        },
+        {
+          "id": "shortcut.cycleSessionTabs",
+          "args": {
+            "bindings": ["Mod+Shift+,", "Mod+Shift+."],
+            "positions": [2, 1, 3, 1]
           }
         }
       ],
       "checkpoints": [
         "Mod+t opens each new draft tab in the conversation strip",
-        "Mod+1 activates the parent conversation tab from a draft tab",
-        "a digit beyond the open tab count leaves the active tab unchanged",
-        "Mod+2 activates the second conversation tab by position",
-        "Mod+9 activates the last conversation tab"
+        "Sidebar Mod+1 leaves the current conversation draft selected",
+        "Sidebar digits without a matching session leave the selected draft unchanged",
+        "Mod+Shift+, moves backward through conversation tabs and wraps to the last tab",
+        "Mod+Shift+. wraps from the last conversation tab to the first"
       ],
       "cleanup": [
         "draft tabs live only inside the disposable run directory",

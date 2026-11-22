@@ -1439,7 +1439,6 @@ export class SessionDispatchWatcher {
       await this.deps.reconcileLocalImages?.(sessionId, sessionDoc, meta.latestUserMsgId);
       ensureActive();
 
-      // ── Gather snapshot ──
       const snapshot = {
         meta,
         history: [] as SessionHistoryInput[], // deferred — only needed after guard checks
@@ -1452,7 +1451,6 @@ export class SessionDispatchWatcher {
         this.deps.workspaceId
       );
 
-      // ── Handle guard/stale-status results (no history needed) ──
       if (guardAction.type === 'noop') {
         outcome = `guard-noop-${guardAction.reason}`;
         if (guardAction.reason === 'release-blocked') {
@@ -1492,7 +1490,6 @@ export class SessionDispatchWatcher {
         // Fall through to turn-finding below (status is now idle)
       }
 
-      // ── Find dispatchable turn (with bounded history sync wait) ──
       const nextUserTurn = await traceAsync(
         this.deps.logger,
         'dispatch.find_or_await_turn',
@@ -1515,7 +1512,6 @@ export class SessionDispatchWatcher {
         }
         return;
       }
-      // ── Re-read state and re-evaluate before dispatching ──
       // The wait above can take up to 5 minutes. Session state may have changed
       // (archived, reassigned, another path created a session, etc.).
       const freshMeta = await traceAsync(
@@ -2475,6 +2471,24 @@ export class SessionDispatchWatcher {
             ? (read.turn as SessionHistoryInput)
             : undefined;
 
+        if (queuedItem?.paused) {
+          // Stop can arrive between history acceptance and queue removal.
+          // Close the old input, retaining the draft for an explicit new send.
+          if (existingEntry)
+            await backend.applyHistoryAction({
+              kind: 'user-status',
+              turnId: record.userTurnId,
+              status: 'canceled',
+              onlyAwaitingStart: true,
+            });
+          await backend.setQueuePromotionRecord(operationId, {
+            ...record,
+            state: 'queue_consumed',
+            updatedAt: Date.now(),
+          });
+          continue;
+        }
+
         const latestMeta = await backend.getMetaState();
         if (!latestMeta) continue;
 
@@ -2586,7 +2600,21 @@ export class SessionDispatchWatcher {
     }
     try {
       const backend = await createSessionBackend(sessionDoc, meta);
-      const queuedItem = await backend.peekReadyMessageQueue();
+      let queuedItem = await backend.peekReadyMessageQueue();
+      // Stop retires execution eligibility, not the user's queued draft. Repair
+      // missing display markers after a crash before selecting later input.
+      while (
+        queuedItem &&
+        this.deps.executionService.isInboxInputCanceled?.(
+          meta.id,
+          queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`
+        )
+      ) {
+        const cid = queuedItem.$cid;
+        await sessionDoc.pauseMessageQueueItems([cid]);
+        queuedItem = await backend.peekReadyMessageQueue();
+        if (queuedItem?.$cid === cid) return null;
+      }
       if (!queuedItem) {
         return null;
       }
@@ -2594,30 +2622,6 @@ export class SessionDispatchWatcher {
       if (isImportFencedQueueItem(meta, this.deps.workspaceId, queuedItem)) return null;
 
       const queuedTurnId = queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`;
-      if (this.deps.executionService.isInboxInputCanceled?.(meta.id, queuedTurnId)) {
-        const canceled = this.buildQueuedMessageEntry(
-          queuedItem,
-          meta,
-          queuedTurnId,
-          queuedItem.timestamp
-        );
-        if (canceled) {
-          await backend.applyHistoryAction({
-            kind: 'upsert-turn',
-            turn: {
-              ...canceled,
-              status: 'canceled',
-              read: true,
-              cancellationReason: this.deps.executionService.getInboxInputCancellationReason?.(
-                meta.id,
-                queuedTurnId
-              ),
-            },
-          });
-          await backend.removeMessageQueueItem(queuedItem.$cid);
-        }
-        return null;
-      }
       const operationId = backend.getQueueOperationId(queuedItem);
       // The queue can acquire a different head after the dispatch observation.
       // Refresh its exact identity and completion evidence before promotion.
@@ -3276,6 +3280,11 @@ export class SessionDispatchWatcher {
       await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
       const backend = await createSessionBackend(sessionDoc, meta);
       await this.recoverIncompleteQueuePromotions(sessionDoc, meta);
+      const pausedQueueIds = new Set(
+        (await backend.getMessageQueue())
+          .filter((item) => item.paused)
+          .map((item) => item.userTurnId?.trim() || `queued-${item.$cid}`)
+      );
       const queued = await backend.peekReadyMessageQueue();
       let preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
       const requestedIds = () =>
@@ -3288,6 +3297,7 @@ export class SessionDispatchWatcher {
           queued ? queued.userTurnId?.trim() || `queued-${queued.$cid}` : undefined,
           ...Object.keys(meta.steerTurnStatuses ?? {}),
           ...(this.rpcTurnStash.get(meta.id)?.keys() ?? []),
+          ...pausedQueueIds,
         ].filter((id): id is string => typeof id === 'string' && id.length > 0);
       const select = (entries: readonly SessionDispatchEntry[]): string | undefined => {
         if (!preferred)
@@ -3364,7 +3374,8 @@ export class SessionDispatchWatcher {
         if (
           entry.role === 'user' &&
           ['pending', 'seen', 'prepared', 'pending_apply'].includes(entry.status ?? '') &&
-          this.deps.executionService.isInboxInputCanceled?.(meta.id, entry.id)
+          (pausedQueueIds.has(entry.id) ||
+            this.deps.executionService.isInboxInputCanceled?.(meta.id, entry.id))
         ) {
           await backend.applyHistoryAction({
             kind: 'user-status',

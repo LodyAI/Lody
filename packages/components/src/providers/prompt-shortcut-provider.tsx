@@ -17,13 +17,10 @@ import {
   type ReactNode,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { LoroRepo } from 'loro-repo';
-import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
-import {
-  LocalShortcutStore,
+import type { LoroRepo } from 'loro-repo';
+import type {
   PromptShortcutRuntime,
-  PromptShortcutSync,
-  type ShortcutRuntimeSnapshot,
+  ShortcutRuntimeSnapshot,
 } from '@lody/shared/prompt-shortcuts';
 import { getShortcutResourceStreamId } from '@lody/shared/prompt-shortcuts/access';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
@@ -52,6 +49,20 @@ const emptySnapshot = () => EMPTY;
 // StrictMode and a quick workspace return must finish the previous writer's
 // durable writes before reopening the same IndexedDB as a new replica.
 const closingDatabases = new Map<string, Promise<void>>();
+
+/**
+ * Hands settings an already-open runtime. Storybook renders the real Prompts page
+ * through this; the product always mounts `PromptShortcutProvider`.
+ */
+export function PromptShortcutRuntimeProvider({
+  runtime,
+  children,
+}: {
+  runtime: PromptShortcutRuntime;
+  children: ReactNode;
+}) {
+  return <Context.Provider value={{ runtime }}>{children}</Context.Provider>;
+}
 
 export function usePromptShortcuts() {
   const { runtime, error, retry, disabled } = useContext(Context);
@@ -216,6 +227,17 @@ export function PromptShortcutProvider({
     });
     const opening = (async () => {
       await previousClose;
+      check();
+      // This provider file is statically reachable from the boot chunk (the
+      // mention textarea imports usePromptShortcuts), so loro-repo and the
+      // shortcut Streams stack load only once a workspace/user pair actually
+      // needs the shortcut store.
+      const [{ LoroRepo }, { IndexedDBStorageAdaptor }, shortcuts] = await Promise.all([
+        import('loro-repo'),
+        import('loro-repo/storage/indexeddb'),
+        import('@lody/shared/prompt-shortcuts'),
+      ]);
+      const { LocalShortcutStore, PromptShortcutRuntime, PromptShortcutSync } = shortcuts;
       check();
       repo = await LoroRepo.create({
         storageAdapter: new IndexedDBStorageAdaptor({

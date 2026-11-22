@@ -416,10 +416,6 @@ export function selectMentionMenuViewForTrigger(
   };
 }
 
-// ============================================================================
-// Candidate builders
-// ============================================================================
-
 /** Cut a ranked list down before it is mapped into candidate objects. */
 function applyLimit<T>(ranked: T[], limit: number | undefined): T[] {
   return limit === undefined || ranked.length <= limit ? ranked : ranked.slice(0, limit);
@@ -678,10 +674,6 @@ export function buildCommandCandidates(
   ).map(({ item, rank }) => toCommandCandidate(item, rank));
 }
 
-// ============================================================================
-// Hook
-// ============================================================================
-
 type SourceState = {
   enabled: boolean;
   status?: MentionCategoryStatus;
@@ -867,7 +859,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         id: 'prompt_shortcut',
         namespace: 'shortcut',
         directTrigger: '/',
-        label: t('mention.category.promptShortcut.label', 'Prompt Shortcuts'),
+        label: t('mention.category.promptShortcut.label', 'Prompts'),
         icon: 'prompt_shortcut',
         ...sourceCategoryFields('promptShortcut', promptShortcut),
         getCandidates: promptShortcut.getCandidates,

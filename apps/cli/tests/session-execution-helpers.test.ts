@@ -13,6 +13,34 @@ describe('session execution prompt helpers', () => {
     );
   });
 
+  describe('approved PR-link sentence', () => {
+    const tail = 'lody_help itself is exempt.';
+    const build = (options: { gitRepository?: boolean; managedGhShim?: boolean }) =>
+      buildPrompt('fix it', undefined, undefined, undefined, options);
+
+    it('excludes gh pr create, which already links, when the managed gh shim is on PATH', () => {
+      expect(
+        build({ gitRepository: true, managedGhShim: true }).endsWith(
+          `${tail} A pull or merge request this Session opened without gh pr create is linked to it with lody_session_manage action pr_link.`
+        )
+      ).toBe(true);
+    });
+
+    it('covers every pull or merge request when the Session has no gh shim', () => {
+      expect(
+        build({ gitRepository: true, managedGhShim: false }).endsWith(
+          `${tail} A pull or merge request this Session opens is linked to it with lody_session_manage action pr_link.`
+        )
+      ).toBe(true);
+    });
+
+    it('adds no sentence when the working directory is not a git repository', () => {
+      for (const managedGhShim of [true, false])
+        expect(build({ gitRepository: false, managedGhShim })).not.toContain('pr_link');
+      expect(buildPrompt('fix it')).not.toContain('pr_link');
+    });
+  });
+
   it('injects the frozen project group instructions and ordered member directories', () => {
     const projectRun = SessionProjectRunSchema.parse({
       id: 'd835a1ee-4f85-4e15-9dca-2bca912e36bf',

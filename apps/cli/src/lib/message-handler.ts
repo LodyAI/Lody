@@ -6,6 +6,7 @@ import {
   sessionHistoryWriteIntentDigest,
   SessionHistoryReadResponseSchema,
   isContainedSession,
+  withAgentSessionDefaults,
 } from '@lody/shared';
 import { setTimeout as backfillWait } from 'node:timers/promises';
 import {
@@ -22,6 +23,7 @@ import {
 } from './session-local-attachments';
 import type {
   SorbetCustomProvider,
+  SorbetCustomProviderEdit,
   SorbetCustomProviderInput,
 } from '@lody/shared/local-machine-rpc';
 import { AndroidEmulatorService } from '@/android-emulator/service';
@@ -71,7 +73,10 @@ import {
   type ValidatedUploadFile,
   type UploadedSessionFile,
 } from './session-attachment-transfer';
-import { handleMemoryProviderRequest } from './memory-providers';
+import {
+  handleMemoryProviderRequest,
+  handleRelayedMemoryProviderRequest,
+} from './memory-providers';
 import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
@@ -91,6 +96,7 @@ import {
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
   type LocalProjectGitStateRpcResponse,
+  type LocalProjectListBranchesRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
   HistoryWriteError,
@@ -320,7 +326,7 @@ import {
   clearThreadGoalFromHistory,
 } from '@/lib/acp/history';
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
-import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
+import { getAcpRuntimeConfigPatch, mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning, NativeAgentWork } from '@/agent/agent-client';
 import { SessionActivePresenceControllerLegacy } from './loro/session-active-presence-legacy';
@@ -362,6 +368,7 @@ import {
   SessionEditAndResendService,
   type SessionEditAndResendInput,
 } from '@/session/session-edit-and-resend-service';
+import { TARGET_CATCH_UP_TIMEOUT_MS } from '@/orchestration/coordinator-ports';
 import { LodyOperationCoordinator } from '@/orchestration/operation-coordinator';
 import {
   createLocalSessionCommandEnvironment,
@@ -418,6 +425,7 @@ import {
 } from '@/lib/code-collab/code-collab-v2-diff-evidence';
 import {
   readMachineLocalProjects,
+  reconcileMissingLocalProjectGitSummaries,
   removeMachineLocalProject,
   isLocalProjectReferenced,
   resolveWorkspaceLocalProject,
@@ -426,6 +434,7 @@ import {
   resolveWorkspaceLocalProjectWithSyncOnMiss,
   isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
+  updateMachineLocalProjectGitSummaryFields,
   upsertMachineLocalProject,
   readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
@@ -483,6 +492,7 @@ type LocalProjectFileRpcRequest = Extract<
   {
     type:
       | 'local-project/list-files'
+      | 'local-project/search-files'
       | 'local-project/list-dir'
       | 'local-project/list-skills'
       | 'local-project/read-file';
@@ -513,6 +523,7 @@ function isLocalProjectFileRpcRequest(
 ): request is LocalProjectFileRpcRequest {
   return (
     request.type === 'local-project/list-files' ||
+    request.type === 'local-project/search-files' ||
     request.type === 'local-project/list-dir' ||
     request.type === 'local-project/list-skills' ||
     request.type === 'local-project/read-file'
@@ -586,13 +597,18 @@ type MachineCommandSnapshot = {
 function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
   deleteLocalProject: boolean;
   providerSetup: boolean;
+  localProject: boolean;
 } {
   let deleteLocalProject = false;
   let providerSetup = false;
+  let localProject = false;
   for (const event of events) {
     const parsed = parseMachineFlockKey(event.key);
     if (parsed?.kind === 'deleteLocalProjectCommand') {
       deleteLocalProject = true;
+    }
+    if (parsed?.kind === 'localProject') {
+      localProject = true;
     }
     if (
       parsed?.kind === 'providerSetup' ||
@@ -602,7 +618,7 @@ function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
       providerSetup = true;
     }
   }
-  return { deleteLocalProject, providerSetup };
+  return { deleteLocalProject, providerSetup, localProject };
 }
 
 function buildMachineCommandSnapshot(
@@ -663,11 +679,29 @@ export interface MessageHandlerConfig {
       provider: SorbetCustomProviderInput,
       signal?: AbortSignal
     ) => Promise<SorbetCustomProvider>;
+    updateProvider: (
+      configId: AgentConfigId,
+      providerId: string,
+      provider: SorbetCustomProviderEdit,
+      signal?: AbortSignal
+    ) => Promise<SorbetCustomProvider>;
     deleteProvider: (
       configId: AgentConfigId,
       providerId: string,
       signal?: AbortSignal
     ) => Promise<void>;
+    refreshProviders: (
+      configId: AgentConfigId,
+      providerId?: string,
+      signal?: AbortSignal
+    ) => Promise<void>;
+    listModels: (
+      configId: AgentConfigId,
+      providerId?: string,
+      signal?: AbortSignal
+    ) => Promise<
+      Array<{ selector: string; providerId: string; modelId: string; displayName: string }>
+    >;
   };
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
@@ -952,8 +986,9 @@ export class MessageHandler {
     expiresAt: number,
     signal: AbortSignal
   ) {
-    // Scoped history uses the feature receiver's exact-session authorization.
-    if (input.method === 'session/history-read') throw new Error('e2ee_query_method');
+    // Scoped history and branch queries require the feature receiver's authorization.
+    if (input.method === 'session/history-read' || input.method === 'local-project/list-branches')
+      throw new Error('e2ee_query_method');
     if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
     return this.encryptedQueryServer.readQuery(input, expiresAt, signal);
   }
@@ -1888,6 +1923,33 @@ export class MessageHandler {
     await backend.appendHistoryTurn(systemNotice);
   }
 
+  /**
+   * Settings > Lody Agent stores per-machine session defaults on the Provider.
+   * A request that names a value keeps it; the defaults only fill what it left
+   * out, e.g. a session created from the CLI or MCP without a run config.
+   */
+  private async withProviderSessionDefaults(
+    config: AcpSessionRunConfig,
+    sessionDoc: SessionDocument
+  ): Promise<AcpSessionRunConfig> {
+    if (config.agentType !== 'sorbet') return config;
+    try {
+      const agentConfigId = (await sessionDoc.getMetaState())?.agentConfigId;
+      if (!agentConfigId) return config;
+      const provider = await this.workspaceDocument.getAgentConfigById(
+        agentConfigId,
+        this.machineId
+      );
+      return withAgentSessionDefaults(config, provider?.sessionDefaults);
+    } catch (error) {
+      // Defaults are a convenience: an unreadable Provider row must not stop the turn.
+      this.logger.debug(
+        `[${sessionDoc.sessionId}] Session defaults unavailable: ${formatErrorMessage(error)}`
+      );
+      return config;
+    }
+  }
+
   private async applyAcpModeAndModel(
     session: {
       sessionId: SessionId;
@@ -1903,7 +1965,7 @@ export class MessageHandler {
   ): Promise<void> {
     const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
       session,
-      config,
+      config: await this.withProviderSessionDefaults(config, context.sessionDoc),
       logger: this.logger,
       signal: context.signal,
     });
@@ -1914,7 +1976,17 @@ export class MessageHandler {
         await this.awaitTurnHistoryGate(session.sessionId);
         if (context.signal?.aborted) return;
         const backend = await this.getSessionBackend(context.sessionDoc);
-        await backend.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
+        // Read commands at write time: one advertised after the run config was applied found
+        // no snapshot for this ACP session yet, so this write is the one that must carry it.
+        const availableCommands = session.agentClient?.getAvailableCommandsForSession(
+          runtimeConfigPatch.acpSessionId
+        );
+        await backend.applyAcpRuntimeConfigPatch(
+          basedOnUserTurnId,
+          availableCommands === undefined
+            ? runtimeConfigPatch
+            : { ...runtimeConfigPatch, availableCommands }
+        );
       };
       void persistRuntimeConfig().catch((error) => {
         this.logger.warn(
@@ -2926,6 +2998,21 @@ export class MessageHandler {
 
     try {
       const state = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
+      void updateMachineLocalProjectGitSummaryFields(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        args.localProjectId,
+        state.git
+          ? {
+              git: true,
+              defaultBranch: state.defaultBranch,
+              currentBranch: state.currentBranch,
+              githubRepoFullName: state.githubRepoFullName,
+            }
+          : { git: false },
+        this.workspaceDocument
+      ).catch(() => undefined);
       return {
         type: 'local-project/git-state_response',
         machineId: this.machineId,
@@ -2937,6 +3024,111 @@ export class MessageHandler {
       };
     } catch (error) {
       return failure('git_state_failed', formatErrorMessage(error));
+    }
+  }
+
+  private async listLocalProjectBranchesForRpc(args: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+    query?: string;
+    limit?: number;
+    cursor?: string;
+  }): Promise<LocalProjectListBranchesRpcResponse> {
+    const failure = (error: string, message: string): LocalProjectListBranchesRpcResponse => ({
+      type: 'local-project/list-branches_response',
+      machineId: this.machineId,
+      workspaceId: this.workspaceId,
+      localProjectId: args.localProjectId,
+      success: false,
+      error,
+      message,
+    });
+
+    let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
+    try {
+      access = await this.verifyRequesterMachineAccess({
+        workspaceId: this.workspaceId,
+        machineId: this.machineId,
+        requesterUserId: args.requestedByUserId,
+        localProjectId: args.localProjectId,
+      });
+    } catch (error) {
+      return failure('access_check_failed', formatErrorMessage(error));
+    }
+
+    if (!access.allowed) {
+      return failure('access_denied', access.reason);
+    }
+
+    const isEncrypted = Boolean(this.encryptedQueryServer);
+    let rootPath: string | null = null;
+    if (isEncrypted) {
+      const peeked = this.workspaceDocument.peekLocalProjectRootPath(
+        this.machineId,
+        args.localProjectId
+      );
+      if (peeked !== null) {
+        try {
+          rootPath =
+            localProjectsLegacy.createLocalProjectId(peeked) === args.localProjectId
+              ? peeked
+              : null;
+        } catch {
+          rootPath = null;
+        }
+      }
+    } else {
+      rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        args.localProjectId,
+        {
+          requestSync: () =>
+            this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
+              reason: 'local-project-list-branches-resolve',
+              timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
+            }),
+        }
+      );
+    }
+    if (!rootPath) {
+      return failure('local_project_not_found', `Local project not found: ${args.localProjectId}`);
+    }
+
+    try {
+      const result = await localProjectsLegacy.listLocalProjectBranchesAtRootPath(rootPath, {
+        query: args.query,
+        limit: args.limit,
+        cursor: args.cursor,
+      });
+      if (!isEncrypted) {
+        void updateMachineLocalProjectGitSummaryFields(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          args.localProjectId,
+          result.git
+            ? {
+                git: true,
+                defaultBranch: result.defaultBranch,
+                currentBranch: result.currentBranch,
+              }
+            : { git: false },
+          this.workspaceDocument
+        ).catch(() => undefined);
+      }
+      return {
+        type: 'local-project/list-branches_response',
+        machineId: this.machineId,
+        workspaceId: this.workspaceId,
+        localProjectId: args.localProjectId,
+        success: true,
+        result,
+        observedAtMs: getServerNow(),
+      };
+    } catch (error) {
+      return failure('list_branches_failed', formatErrorMessage(error));
     }
   }
 
@@ -2997,6 +3189,27 @@ export class MessageHandler {
       );
       return { outcome: 'indeterminate', cause, error: message };
     }
+  }
+
+  private async verifyAutomationEditAccess(
+    sessionId: SessionId,
+    userId: string
+  ): Promise<'yes' | 'no' | 'unknown'> {
+    if (userId === this.userId) return 'yes';
+    let localProjectId: string | undefined;
+    try {
+      const meta = (await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId)))
+        ?.meta as SessionMeta | undefined;
+      if (meta?.project?.kind === 'local') localProjectId = meta.project.localProjectId;
+    } catch {
+      return 'unknown';
+    }
+    const access = await this.verifyMachineAccess({
+      sessionId,
+      requesterUserId: userId,
+      ...(localProjectId ? { localProjectId } : {}),
+    });
+    return access.outcome === 'allowed' ? 'yes' : access.outcome === 'denied' ? 'no' : 'unknown';
   }
 
   private async verifySessionMachineAccess(
@@ -3926,7 +4139,7 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             agentType,
           }),
-        memoryProvider: handleMemoryProviderRequest,
+        memoryProvider: handleRelayedMemoryProviderRequest,
         listMachinePiExtensions: async ({ configId }) =>
           await this.executionService.listMachinePiExtensions(configId),
         installMachineAcpBinary: async ({ agentType, onAcpBinaryProgress }) =>
@@ -4161,7 +4374,7 @@ export class MessageHandler {
           await this.previewService.authorizeRemoteControl(
             request.sessionId,
             request.requestedByUserId,
-            { action: 'revoke' },
+            { action: 'revoke', ...(request.stopProcess ? { stopProcess: true } : {}) },
             proof
           );
           return this.previewService.revokePreview({
@@ -4185,6 +4398,20 @@ export class MessageHandler {
           await this.getLocalProjectGitStateForRpc({
             localProjectId,
             requestedByUserId,
+          }),
+        listLocalProjectBranches: async ({
+          localProjectId,
+          requestedByUserId,
+          query,
+          limit,
+          cursor,
+        }) =>
+          await this.listLocalProjectBranchesForRpc({
+            localProjectId,
+            requestedByUserId,
+            query,
+            limit,
+            cursor,
           }),
         dispatchLocalProjectControl: async (request) =>
           await this.dispatchLocalProjectControlViaRpc(request),
@@ -4319,13 +4546,16 @@ export class MessageHandler {
       dispatchWatcher: this.sessionDispatchWatcher,
       userResolver: this.sessionUserResolver,
       logger: this.logger,
-      ...(this.cloudPort.kind === 'local'
-        ? {
-            confirmTargetReadable: async () => {
-              await this.workspaceDocument.repo.flush();
-            },
-          }
-        : {}),
+      confirmTargetReadable: async (docId, reason, targetMachineId) => {
+        if (this.cloudPort.kind === 'local' || targetMachineId === this.machineId) {
+          await this.workspaceDocument.repo.flush();
+          return;
+        }
+        await this.workspaceDocument.syncRemoteDocOrThrow(docId, {
+          reason,
+          timeoutMs: TARGET_CATCH_UP_TIMEOUT_MS,
+        });
+      },
       materializeTarget: async (operation, item, index) =>
         await this.withDaemonCommandScope(() =>
           this.materializeOperationTarget(operation, item, index)
@@ -4620,6 +4850,19 @@ export class MessageHandler {
     authoritative = true
   ): void {
     if (!impact || impact.deleteLocalProject) void this.processDeleteLocalProjectRequests();
+    if (!impact || impact.localProject) {
+      void reconcileMissingLocalProjectGitSummaries(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        this.workspaceDocument,
+        { verifyProjectIdentity: Boolean(this.encryptedQueryServer) }
+      ).catch((error: unknown) => {
+        this.logger.debug(
+          `[machine-flock] Failed to reconcile local project Git summaries (${this.getMachineFlockLogContext()}): ${formatErrorMessage(error)}`
+        );
+      });
+    }
     // A stale local setup row must not outrun a remote cancellation, so provider
     // setup drains only once the command room has established remote authority.
     if ((!impact || impact.providerSetup) && authoritative) {
@@ -5359,6 +5602,11 @@ export class MessageHandler {
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
     if (target) this.recordLiveActivity(sessionId, update);
+    if (!target && update.update.sessionUpdate === 'available_commands_update') {
+      // Standard agents advertise commands right after session/new, before any assistant entry.
+      this.persistOutOfTurnAvailableCommands(sessionId, update);
+      return;
+    }
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -5393,6 +5641,23 @@ export class MessageHandler {
       target,
     });
     this.scheduleFlushACPUpdates(sessionId);
+  }
+
+  private persistOutOfTurnAvailableCommands(
+    sessionId: SessionId,
+    notification: AcpSessionNotification
+  ): void {
+    const patch = getAcpRuntimeConfigPatch(notification);
+    if (!patch) return;
+    void (async () => {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      await backend.applyAcpRuntimeConfigPatchToCurrentSnapshot(patch);
+    })().catch((error: unknown) => {
+      this.logger.debug(
+        `[${sessionId}] Failed to persist out-of-turn ACP commands: ${formatErrorMessage(error)}`
+      );
+    });
   }
 
   private clearScheduledACPFlush(sessionId: SessionId): void {
@@ -7566,6 +7831,21 @@ export class MessageHandler {
    * its authenticated command behavior; only the local platform adds the local host.
    */
   private withDaemonCommandScope<T>(run: () => T): T {
+    const localSessionHost: import('./session-command-environment').DaemonLocalSessionHost = {
+      readActiveTurnId: (sessionId) =>
+        this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
+      steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
+      dispatchSession: async (sessionId, input) => {
+        if (input?.inputOrigin === 'human')
+          await this.executionService.acceptInboxHumanInput({
+            sessionId,
+            inputId: input.inputId,
+            userId: input.userId,
+            config: input.config,
+          });
+        void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
+      },
+    };
     if (this.cloudPort.kind !== 'local')
       return runWithDaemonWorkspace(
         {
@@ -7574,6 +7854,10 @@ export class MessageHandler {
           machineId: this.machineId,
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
+          host: localSessionHost,
+          wakeOperations: () => {
+            void this.operationCoordinator.wake('mcp-handoff');
+          },
           ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
           ...(this.encryptedExecution
             ? {
@@ -7625,20 +7909,8 @@ export class MessageHandler {
               { pendingInput: 'preserve', prePromptSession: 'discard', pauseInbox: false }
             );
           },
-          readActiveTurnId: (sessionId) =>
-            this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
           withdrawQueuedInput: async (args) => await this.withdrawQueuedInput(args),
-          steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
-          dispatchSession: async (sessionId, input) => {
-            if (input?.inputOrigin === 'human')
-              await this.executionService.acceptInboxHumanInput({
-                sessionId,
-                inputId: input.inputId,
-                userId: input.userId,
-                config: input.config,
-              });
-            void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
-          },
+          ...localSessionHost,
         },
       }),
       run
@@ -7920,11 +8192,29 @@ export class MessageHandler {
           throw new Error('Project group probe scope mismatch');
         return this.probeProjectLocalMember(request.params.localProjectId as LocalProjectId);
       }
+      case 'local-project/list-branches': {
+        if (
+          request.machineId !== this.machineId ||
+          request.workspaceId !== this.workspaceId ||
+          request.ownerSessionId
+        )
+          throw new Error('Local project branch list scope mismatch');
+        return this.listLocalProjectBranchesForRpc({
+          localProjectId: request.params.localProjectId as LocalProjectId,
+          requestedByUserId: request.params.requestedByUserId,
+          query: request.params.query,
+          limit: request.params.limit,
+          cursor: request.params.cursor,
+        });
+      }
       case 'sorbet/credentials-list':
       case 'sorbet/credentials-logout':
       case 'sorbet/providers-list':
       case 'sorbet/providers-create':
-      case 'sorbet/providers-delete': {
+      case 'sorbet/providers-update':
+      case 'sorbet/providers-delete':
+      case 'sorbet/providers-refresh':
+      case 'sorbet/models-list': {
         if (
           request.workspaceId !== this.workspaceId ||
           request.machineId !== this.machineId ||
@@ -7973,8 +8263,41 @@ export class MessageHandler {
               ),
             });
           }
-          await this.sorbetCredentials.deleteProvider(configId, request.params.providerId, signal);
-          return { type: 'sorbet/providers-delete' };
+          if (request.method === 'sorbet/providers-update') {
+            return SorbetProvidersResultSchema.parse({
+              type: 'sorbet/providers-update',
+              provider: await this.sorbetCredentials.updateProvider(
+                configId,
+                request.params.providerId,
+                request.params.provider,
+                signal
+              ),
+            });
+          }
+          if (request.method === 'sorbet/providers-delete') {
+            await this.sorbetCredentials.deleteProvider(
+              configId,
+              request.params.providerId,
+              signal
+            );
+            return { type: 'sorbet/providers-delete' };
+          }
+          if (request.method === 'sorbet/providers-refresh') {
+            await this.sorbetCredentials.refreshProviders(
+              configId,
+              request.params.providerId,
+              signal
+            );
+            return { type: 'sorbet/providers-refresh' };
+          }
+          return SorbetProvidersResultSchema.parse({
+            type: 'sorbet/models-list',
+            models: await this.sorbetCredentials.listModels(
+              configId,
+              request.params.providerId,
+              signal
+            ),
+          });
         } catch {
           throw new Error('Sorbet provider operation failed');
         }
@@ -9361,7 +9684,7 @@ export class MessageHandler {
       return;
     }
 
-    // This channel is agent-facing (MCP lody_upload_files): paths MUST stay
+    // This channel is agent-facing (MCP lody_upload, kind=files): paths MUST stay
     // inside the session workspace, or the tool would let a prompt-injected
     // agent exfiltrate arbitrary host files past its own read-approval gate.
     const workspaceRoot = this.resolveSessionWorkspaceRoot(sessionId);
@@ -11690,6 +12013,17 @@ export class MessageHandler {
         };
       }
 
+      if (request.type === 'local-project/search-files') {
+        return {
+          ok: true,
+          type: 'local-project/search-files',
+          result: await this.localProjectControlService.searchProjectFiles(rootPath, {
+            query: request.query,
+            limit: request.limit,
+          }),
+        };
+      }
+
       if (request.type === 'local-project/list-dir') {
         return {
           ok: true,
@@ -11708,7 +12042,8 @@ export class MessageHandler {
           type: 'local-project/list-skills',
           result: await this.localProjectControlService.listProjectSkills(
             rootPath,
-            request.skillDirs
+            request.skillDirs,
+            { knownFingerprint: request.knownFingerprint }
           ),
         };
       }
@@ -11759,7 +12094,9 @@ export class MessageHandler {
       return {
         ok: true,
         type: 'local-project/list-global-skills',
-        result: await this.localProjectControlService.listGlobalSkills(),
+        result: await this.localProjectControlService.listGlobalSkills({
+          knownFingerprint: request.knownFingerprint,
+        }),
       };
     } catch (error) {
       return this.toLocalProjectControlError(
@@ -12188,9 +12525,6 @@ export class MessageHandler {
     void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
   }
 
-  // =====================================================================
-  // GC-related public methods
-  // =====================================================================
   /**
    * Check if a session has pending ACP updates that haven't been flushed yet.
    */
@@ -12415,6 +12749,7 @@ export class MessageHandler {
       },
       author: (sessionId) =>
         this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,
+      canEdit: (sessionId, userId) => this.verifyAutomationEditAccess(sessionId, userId),
     }));
   }
 

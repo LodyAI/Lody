@@ -24,6 +24,7 @@ const DEFAULT_APP_TOKEN_CACHE_MS = 15 * 60 * 1000;
 
 const tokenCache = new Map<string, TokenEntry>();
 const inFlightRequests = new Map<string, InFlightToken>();
+const workspaceInvalidationListeners = new Set<(workspaceId: string) => void>();
 let tokenCacheGeneration = 0;
 
 const GITHUB_TOKEN_INVALIDATION_CHANNEL = 'lody:github-token-invalidation';
@@ -112,6 +113,16 @@ function clearGitHubTokensForWorkspace(workspaceId: string) {
       inFlightRequests.delete(key);
     }
   }
+  workspaceInvalidationListeners.forEach((listener) => listener(workspaceId));
+}
+
+export function subscribeGitHubWorkspaceInvalidation(
+  listener: (workspaceId: string) => void
+): () => void {
+  workspaceInvalidationListeners.add(listener);
+  return () => {
+    workspaceInvalidationListeners.delete(listener);
+  };
 }
 
 function isGitHubPermissionFailure(error: unknown): boolean {

@@ -166,3 +166,9 @@ workspace. Encrypted workspaces answer `unsupported_protocol` for now.
 localProjectId and requester identity, never a host path. The daemon checks machine/project
 access and shares its native probe with local IPC. `requestProjectProbeLocalMember` returns
 the shared `ProjectProbeLocalMemberResult`, or null on failure. Local/file URLs are redacted.
+
+`local-project/list-branches` (capability `localProjectBranchListing`) serves paginated and
+query-filtered branch selectors (`{ query, limit, cursor }`) without scanning the working tree.
+Daemons publish lightweight `(git, defaultBranch, currentBranch)` summaries on Machine Flock
+`localProject` rows for immediate UI selection, and encrypted workspaces admit branch queries
+only for the verified owner or policy-admitted project writers against identity-verified roots.

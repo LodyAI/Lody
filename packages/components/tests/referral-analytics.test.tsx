@@ -16,7 +16,7 @@ const sink = vi.hoisted(() => ({
   fail: false,
   clipboard: true,
 }));
-vi.mock('@posthog/react', () => ({ usePostHog: () => client }));
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => client }));
 vi.mock('../src/lib/clipboard', () => ({ writeTextToClipboard: async () => sink.clipboard }));
 const client = {
   capture(event: string, properties: Record<string, unknown> = {}) {

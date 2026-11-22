@@ -342,6 +342,12 @@ export class RoostSessionBackend implements SessionBackend {
     return Promise.resolve(this.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, patch));
   }
 
+  applyAcpRuntimeConfigPatchToCurrentSnapshot(
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
+    return Promise.resolve(this.sessionDoc.applyAcpRuntimeConfigPatchToCurrentSnapshot(patch));
+  }
+
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult> {
     return this.services.sessionData.commands.replaceEditableTail(input);
   }

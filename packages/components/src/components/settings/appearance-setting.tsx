@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -373,13 +373,7 @@ export function AppearanceSettingsView({
             />
           </div>
         </CompactRow>
-        <CompactRow
-          label={t('settings.conversationWideMode.label', 'Full width')}
-          helper={t(
-            'settings.conversationWideMode.helper',
-            'Let the conversation column span the window instead of capping it.'
-          )}
-        >
+        <CompactRow label={t('settings.conversationWideMode.label', 'Full width')}>
           <Switch
             checked={conversationWideMode}
             onCheckedChange={onConversationWideModeChange}
@@ -388,7 +382,7 @@ export function AppearanceSettingsView({
         </CompactRow>
         <CompactRow
           label={t('settings.inlineMath.label', 'Render inline math')}
-          helper={t('settings.inlineMath.helper', 'Typeset $...$ and \\(...\\) in Markdown.')}
+          info={t('settings.inlineMath.helper', 'Typeset $...$ and \\(...\\) in Markdown.')}
         >
           <Switch
             checked={inlineMathEnabled}
@@ -398,9 +392,9 @@ export function AppearanceSettingsView({
         </CompactRow>
         <CompactRow
           label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
-          helper={t(
+          info={t(
             'settings.extendedCodeLanguages.helper',
-            'Adds more syntax grammars, including Lean and Rocq. Each grammar loads when first used and can slow that render.'
+            'Adds syntax grammars for more code languages. Each grammar loads when first used and can slow that render.'
           )}
         >
           <Switch
@@ -411,7 +405,7 @@ export function AppearanceSettingsView({
         </CompactRow>
         <CompactRow
           label={t('settings.fontLigatures.label', 'Font ligatures')}
-          helper={t(
+          info={t(
             'settings.fontLigatures.helper',
             'Applies to conversation, code, and tool output.'
           )}

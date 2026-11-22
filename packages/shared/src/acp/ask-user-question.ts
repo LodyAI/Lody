@@ -462,7 +462,6 @@ export function createAskUserQuestionPermissionOutcome(
   };
 }
 
-// ============================================================================
 // Elicitation bridge (acp-extension-claude >= 0.44.0)
 //
 // As of 0.44.0 Claude no longer surfaces AskUserQuestion as a permission
@@ -477,7 +476,6 @@ export function createAskUserQuestionPermissionOutcome(
 // `CreateElicitationResponse`. Rejected: a native elicitation path would
 // duplicate the question card, history persistence, and outcome wiring for no
 // behavioral gain.
-// ============================================================================
 
 type ElicitationChoiceField = {
   key: string;

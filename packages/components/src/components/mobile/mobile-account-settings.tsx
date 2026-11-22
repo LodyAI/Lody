@@ -32,7 +32,8 @@ import { LinkedAccountsList } from '../settings/linked-accounts-list';
 import { InviteMemberDialog, type InviteMemberRole } from '../settings/invite-member-dialog';
 import type { AccountSettingsPureProps } from '../settings/account-setting-pure';
 import { useMobileSettingsFold } from './mobile-settings-fold-context';
-import { describeCliApiKey } from '../settings/cli-api-key-display';
+import { describeCliApiKey, partitionCliApiKeys } from '../settings/cli-api-key-display';
+import { Collapsible } from '@lody/ui/collapsible';
 
 const EMPTY_MACHINE_NAMES: ReadonlyMap<string, string> = new Map();
 
@@ -125,6 +126,53 @@ export function MobileAccountSettings({
       t,
     });
   const cliApiKeyToRevokeDisplay = cliApiKeyToRevoke ? describeApiKey(cliApiKeyToRevoke) : null;
+  const { listed: listedCliApiKeys, signIn: signInCliApiKeys } = partitionCliApiKeys(cliApiKeys);
+  const [signInCliApiKeysOpen, setSignInCliApiKeysOpen] = useState(false);
+  const renderCliApiKeyRow = (apiKey: CliApiKeyRecord, ruled: boolean) => {
+    const display = describeApiKey(apiKey);
+    const details = [display.lifetime, display.createdAt, display.lastUsed].filter(Boolean);
+
+    return (
+      <div
+        key={apiKey.id}
+        className={cn('flex flex-col gap-3 px-4 py-3 text-sm', ruled && 'border-t border-border')}
+      >
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <p className="truncate text-[0.95rem] font-medium">{display.title}</p>
+            {display.isCurrentMachine && (
+              <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+            )}
+            {display.sourceLabel && <Badge>{display.sourceLabel}</Badge>}
+          </div>
+          {(apiKey.keyPreview || details.length > 0) && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[0.72rem] text-muted-foreground">
+              {apiKey.keyPreview && <span className="font-mono">{apiKey.keyPreview}</span>}
+              {details.map((detail) => (
+                <span key={detail}>{detail}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <Button
+            variant="secondary"
+            size="small"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setCliApiKeyToRevoke(apiKey)}
+            disabled={revokingCliApiKeyId === apiKey.id}
+          >
+            {revokingCliApiKeyId === apiKey.id ? (
+              <Spinner className="mr-1.5 h-3.5 w-3.5" />
+            ) : (
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {t('settings.account.cliAuth.revokeButton')}
+          </Button>
+        </div>
+      </div>
+    );
+  };
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   const [userNameDraft, setUserNameDraft] = useState(currentUser?.name ?? '');
@@ -726,58 +774,44 @@ export function MobileAccountSettings({
                   {t('settings.account.cliAuth.noRecords')}
                 </div>
               ) : (
-                cliApiKeys.map((apiKey, index) => {
-                  const display = describeApiKey(apiKey);
-                  const details = [display.lifetime, display.createdAt, display.lastUsed].filter(
-                    Boolean
-                  );
-
-                  return (
-                    <div
-                      key={apiKey.id}
-                      className={cn(
-                        'flex flex-col gap-3 px-4 py-3 text-sm',
-                        index > 0 && 'border-t border-border'
-                      )}
+                <>
+                  {listedCliApiKeys.map((apiKey, index) => renderCliApiKeyRow(apiKey, index > 0))}
+                  {signInCliApiKeys.length > 0 ? (
+                    <Collapsible.Root
+                      open={signInCliApiKeysOpen}
+                      onOpenChange={setSignInCliApiKeysOpen}
+                      className={cn(listedCliApiKeys.length > 0 && 'border-t border-border')}
                     >
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                          <p className="truncate text-[0.95rem] font-medium">{display.title}</p>
-                          {display.isCurrentMachine && (
-                            <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+                      <Collapsible.Trigger className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm">
+                        <span className="min-w-0 flex-1 space-y-1">
+                          <span className="block text-[0.95rem] font-medium">
+                            {t('settings.account.cliAuth.signInGroup')}
+                          </span>
+                          <span className="block text-[0.72rem] text-muted-foreground">
+                            {t('settings.account.cliAuth.signInGroupHelper', {
+                              count: signInCliApiKeys.length,
+                            })}
+                          </span>
+                        </span>
+                        {signInCliApiKeys.some(
+                          (apiKey) => describeApiKey(apiKey).isCurrentMachine
+                        ) ? (
+                          <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+                        ) : null}
+                        <ChevronDown
+                          aria-hidden="true"
+                          className={cn(
+                            'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
+                            signInCliApiKeysOpen && 'rotate-180'
                           )}
-                          {display.sourceLabel && <Badge>{display.sourceLabel}</Badge>}
-                        </div>
-                        {(apiKey.keyPreview || details.length > 0) && (
-                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[0.72rem] text-muted-foreground">
-                            {apiKey.keyPreview && (
-                              <span className="font-mono">{apiKey.keyPreview}</span>
-                            )}
-                            {details.map((detail) => (
-                              <span key={detail}>{detail}</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <Button
-                          variant="secondary"
-                          size="small"
-                          className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          onClick={() => setCliApiKeyToRevoke(apiKey)}
-                          disabled={revokingCliApiKeyId === apiKey.id}
-                        >
-                          {revokingCliApiKeyId === apiKey.id ? (
-                            <Spinner className="mr-1.5 h-3.5 w-3.5" />
-                          ) : (
-                            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                          )}
-                          {t('settings.account.cliAuth.revokeButton')}
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })
+                        />
+                      </Collapsible.Trigger>
+                      <Collapsible.Panel>
+                        {signInCliApiKeys.map((apiKey) => renderCliApiKeyRow(apiKey, true))}
+                      </Collapsible.Panel>
+                    </Collapsible.Root>
+                  ) : null}
+                </>
               )}
             </MobileSettingsSection>
           ) : null}

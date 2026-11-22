@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useContext } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -16,6 +16,7 @@ import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useConversationTail } from '@/hooks/use-conversation-view';
 import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import { useLocalSessionContinuation } from '@/components/sessions/use-local-session-continuation';
+import { SessionReadonlyContext } from '@/components/ai-gui/session-readonly-context';
 import { findClaudeSessionLimit } from './quota-continue';
 
 const styles = stylex.create({
@@ -70,12 +71,14 @@ function SessionLimitContinueOwner({
   const { turns } = useConversationTail(history, { extendToLastUserTurn: true });
   const failure = findClaudeSessionLimit(turns);
   const current = failure?.noticeId === entryId;
+  const readonly = useContext(SessionReadonlyContext);
   const local = !!localMachineId && session.machineId === localMachineId;
   const content = { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' } as const;
   const target =
+    !readonly &&
     runtime &&
     session.machineId &&
-    user?.id === session.userId &&
+    user?.id &&
     workspaceSupports(content, 'automations') &&
     (local ||
       (!!localMachineId && !!getAutomationProofIssuer() && workspaceSupports(content, 'rpc')))

@@ -30,7 +30,7 @@ renderer.plugins = [
         'desktop-settings-modal.tsx',
         'stats-setting.tsx',
         'mcp-setting.tsx',
-        'lody-agent-setting.tsx'
+        'harness/index.tsx'
       ]) {
         const owners = chunks.filter((chunk) =>
           Object.keys(chunk.modules).some((id) => id.endsWith(`/${module}`))

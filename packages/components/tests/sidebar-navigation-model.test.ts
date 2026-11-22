@@ -43,7 +43,7 @@ function sessionIds(items: SidebarNavItem[]): string[] {
 
 const baseOptions = {
   organizeMode: 'workspace' as const,
-  showFullSessionGroups: {},
+  revealedRowsByGroup: {},
   pinnedItems: [] as SidebarUpdatedItem[],
   pinnedSectionCollapsed: false,
   workspace: {
@@ -57,7 +57,7 @@ const baseOptions = {
   updated: {
     items: [] as SidebarUpdatedItem[],
     collapsedBuckets: {},
-    showFullBuckets: {},
+    revealedRowsByBucket: {},
   },
 };
 
@@ -75,7 +75,7 @@ describe('sidebar navigation model', () => {
                 machineId: 'machine',
                 localProjectId: 'project',
                 collapsed: false,
-                showFull: false,
+                revealedRows: 0,
                 sessions: [{ id: 'local-new' }, { id: 'local-old' }],
               },
             ],
@@ -126,68 +126,61 @@ describe('sidebar navigation model', () => {
           updatedItem('updated-new', '2026-07-16T11:00:00Z'),
         ],
         collapsedBuckets: {},
-        showFullBuckets: {},
+        revealedRowsByBucket: {},
       },
     });
 
     expect(sessionIds(items)).toEqual(['pinned', 'updated-new', 'updated-old']);
   });
 
-  it('walks the Status groups in the mobile Home order, skipping folded groups and idle overflow', () => {
-    const at = (hour: number) => `2026-07-16T${String(hour).padStart(2, '0')}:00:00Z`;
-    const idle = Array.from({ length: 21 }, (_, index) => updatedItem(`idle-${index}`, at(index)));
+  it('walks Status Focus in manual order and skips default-collapsed Later/Settled until expanded', () => {
+    const nowMs = Date.now();
+    const recent = (minutesAgo: number) => nowMs - minutesAgo * 60_000;
+    const settledItems = Array.from({ length: 22 }, (_, index) => ({
+      ...updatedItem(`settled-${index}`, nowMs - (10 + index) * 86_400_000),
+    }));
     const statusItems: SidebarUpdatedItem[] = [
-      ...idle,
-      { ...updatedItem('running', at(23)), isWorking: true, hasUnreadMessages: true },
-      { ...updatedItem('waiting', at(1)), isWaitingPermission: true },
-      { ...updatedItem('ci-failed', at(2)), prStatus: 'open', prCiState: 'f' },
-      { ...updatedItem('draft', at(3)), prStatus: 'draft', prCiState: 's' },
-      { ...updatedItem('unread', at(4)), hasUnreadMessages: true },
-      { ...updatedItem('open-pr', at(5)), prStatus: 'open', prCiState: 'p' },
-      { ...updatedItem('merged', at(22)), prStatus: 'merged' },
-      { ...updatedItem('failed', at(6)), hasFailedTurn: true },
-      // Working again after a failure: the agent may be fixing it.
-      { ...updatedItem('retrying', at(21)), hasFailedTurn: true, isWorking: true },
+      ...settledItems,
+      { ...updatedItem('focus-second', recent(1)), orderKey: '82' },
+      { ...updatedItem('focus-first', recent(30)), orderKey: '80' },
+      { ...updatedItem('focus-unkeyed', recent(5)) },
+      { ...updatedItem('later-soon', recent(10)), snoozedUntil: nowMs + 2 * 3_600_000 },
+      { ...updatedItem('later-far', recent(2)), snoozedUntil: nowMs + 3 * 86_400_000 },
     ];
 
-    const items = buildSidebarNavigationItems({
+    const defaultItems = buildSidebarNavigationItems({
       ...baseOptions,
       organizeMode: 'status',
-      updated: { items: statusItems, collapsedBuckets: {}, showFullBuckets: {} },
+      updated: { items: statusItems, collapsedBuckets: {}, revealedRowsByBucket: {} },
     });
-    const ids = sessionIds(items);
-    // Needs you (newest first), just finished, open pull requests, running, then idle.
-    expect(ids.slice(0, 8)).toEqual([
-      'failed',
-      'draft',
-      'ci-failed',
-      'waiting',
-      'unread',
-      'open-pr',
-      'running',
-      'retrying',
-    ]);
-    // A merged pull request is idle; idle alone folds to its first 20 rows.
-    expect(ids.slice(8)).toHaveLength(20);
-    expect(ids[8]).toBe('merged');
-    expect(items.find((item) => item.kind === 'session' && item.sessionId === 'unread')).toEqual({
+    // Later and Settled are collapsed by default; Focus preserves manual orderKey then unkeyed recency.
+    expect(sessionIds(defaultItems)).toEqual(['focus-first', 'focus-second', 'focus-unkeyed']);
+    expect(defaultItems[0]).toEqual({
       kind: 'session',
-      sessionId: 'unread',
-      groupKey: '__status:finished__',
+      sessionId: 'focus-first',
+      groupKey: '__status:focus__',
     });
 
-    const folded = buildSidebarNavigationItems({
+    const expanded = buildSidebarNavigationItems({
       ...baseOptions,
       organizeMode: 'status',
       updated: {
         items: statusItems,
-        collapsedBuckets: { attention: true, all: true },
-        showFullBuckets: { idle: true },
+        collapsedBuckets: { later: false, settled: false },
+        revealedRowsByBucket: {},
       },
     });
-    const foldedIds = sessionIds(folded);
-    expect(foldedIds.slice(0, 4)).toEqual(['unread', 'open-pr', 'running', 'retrying']);
-    expect(foldedIds).toHaveLength(4 + 22);
+    const expandedIds = sessionIds(expanded);
+    // Focus (3), Later ascending by wake-up (2), Settled capped at 20.
+    expect(expandedIds.slice(0, 5)).toEqual([
+      'focus-first',
+      'focus-second',
+      'focus-unkeyed',
+      'later-soon',
+      'later-far',
+    ]);
+    expect(expandedIds.slice(5)).toHaveLength(20);
+    expect(expandedIds[5]).toBe('settled-0');
   });
 
   it('matches collapsed sections and each list preview limit', () => {
@@ -209,7 +202,7 @@ describe('sidebar navigation model', () => {
                 machineId: 'machine',
                 localProjectId: 'hidden-project',
                 collapsed: false,
-                showFull: false,
+                revealedRows: 0,
                 sessions: [{ id: 'hidden-local' }],
               },
             ],
@@ -227,7 +220,7 @@ describe('sidebar navigation model', () => {
     const updatedPreview = buildSidebarNavigationItems({
       ...baseOptions,
       organizeMode: 'updated',
-      updated: { items: updatedItems, collapsedBuckets: {}, showFullBuckets: {} },
+      updated: { items: updatedItems, collapsedBuckets: {}, revealedRowsByBucket: {} },
     });
     expect(sessionIds(updatedPreview)).toHaveLength(20);
 
@@ -238,7 +231,7 @@ describe('sidebar navigation model', () => {
       updated: {
         items: updatedItems,
         collapsedBuckets: { all: true },
-        showFullBuckets: { all: true },
+        revealedRowsByBucket: { all: 20 },
       },
     });
     expect(sessionIds(updatedCollapsed)).toEqual(['pinned']);
@@ -282,7 +275,7 @@ describe('sidebar navigation model opened-by tree', () => {
           { ...updatedItem('opened', '2026-04-22T08:00:00.000Z'), openedBySessionId: 'opener' },
         ],
         collapsedBuckets: {},
-        showFullBuckets: {},
+        revealedRowsByBucket: {},
       },
     });
 
@@ -301,7 +294,7 @@ describe('sidebar navigation model opened-by tree', () => {
           updatedItem('other', '2026-04-22T07:00:00.000Z'),
         ],
         collapsedBuckets: {},
-        showFullBuckets: {},
+        revealedRowsByBucket: {},
       },
     });
 
@@ -321,7 +314,7 @@ describe('sidebar navigation model opened-by tree', () => {
           updatedItem('other', '2026-04-22T07:00:00.000Z'),
         ],
         collapsedBuckets: {},
-        showFullBuckets: {},
+        revealedRowsByBucket: {},
       },
     });
 
@@ -368,7 +361,7 @@ describe('sidebar navigation model opened-by tree', () => {
                 machineId: 'machine-1',
                 localProjectId: 'notes',
                 collapsed: true,
-                showFull: false,
+                revealedRows: 0,
                 sessions: [],
               },
             ],

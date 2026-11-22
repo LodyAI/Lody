@@ -128,6 +128,15 @@ groups stay visible even before they have candidates. Draft token hydration rema
 a separate synchronous path; this worker does not perform file discovery or I/O.
 
 Issues and PRs rank their own cached slices so one kind cannot starve the other.
+Local projects often carry a GitHub remote URL that has not been linked to the
+current Lody workspace, so callers pass `githubRepoFullName` into `mentionSource`
+only when `getWorkspaceRepositories` confirms the workspace link, and
+`useRepoIssuesAndPRs` treats `repo_not_linked`, `installation_not_found`,
+`repo_not_authorized`, and missing `githubIntegration` capabilities as
+`unavailable` rather than surfacing duplicate alert rows in aggregate `@`
+searches. Non-row list blocks (`groupLabel`, `message`, `notice`, `emptyState`)
+also set `flexShrink: 0` inside the capped menu scroller so multi-line messages
+scroll cleanly instead of compressing over adjacent headings.
 Files, sessions, roles, issues and PRs retain VS Code non-contiguous matching, with
 consecutive, separator, path, case, and camel-case bonuses. Skills keep their
 own ranking. A typed `/` or `、` query ranks Prompt Shortcuts and Agent Commands

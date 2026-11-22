@@ -204,11 +204,6 @@ function registerNativeNotificationHandlers(nativeOneSignal: NativeOneSignalPlug
   }
 
   nativeNotificationClickListenerRegistered = true;
-  // TODO(analytics P0): push/received — the native OneSignal plugin's typed
-  // surface here only exposes 'click'. Emitting push/received needs the
-  // 'foregroundWillDisplay' listener, which requires widening NativeOneSignalPlugin
-  // and confirming the plugin version exposes it; deferred to avoid a runtime
-  // risk on an unverified native API.
   nativeOneSignal.Notifications.addEventListener('click', (event) => {
     const recipient = event.notification.additionalData?.recipientUserId;
     if (typeof recipient === 'string' && recipient !== localStorage.getItem('lody:push-user'))

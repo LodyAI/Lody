@@ -168,8 +168,10 @@ describe('ElectronSessionCompletionNotifier', () => {
     await updateSessions([createSession('s1', { type: 'idle' })]);
     expect(showSessionCompletionNotification).not.toHaveBeenCalled();
 
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(5000);
+      // Notification formatting resolves through a lazy import.
+      await vi.dynamicImportSettled();
     });
 
     expect(showSessionCompletionNotification).toHaveBeenCalledTimes(1);

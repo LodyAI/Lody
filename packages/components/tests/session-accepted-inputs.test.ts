@@ -1,13 +1,12 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { LoroRepo } from 'loro-repo';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import {
-  createHistoryWriter,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getMachineRoomId,
-  getSessionRoomId,
-} from '@lody/shared';
+  getSessionRoomId} from '@lody/shared';
 import { createConversationSession } from '../src/lib/conversation-view';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';

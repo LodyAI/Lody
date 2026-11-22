@@ -1,12 +1,7 @@
+import { PromptSuggestionStore } from '@lody/shared/prompt-suggestions';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EphemeralRoomTransportLike } from '../src/providers/ephemeral-room-transport';
-import {
-  PromptSuggestionStore,
-  bytesToBase64,
-  type MachineId,
-  type SessionId,
-  type WorkspaceId,
-} from '@lody/shared';
+import { bytesToBase64, type MachineId, type SessionId, type WorkspaceId } from '@lody/shared';
 import type { LocalLoroDataPlaneServerMessage } from '@lody/shared';
 import { WorkspacePromptSuggestions } from '../src/providers/workspace-prompt-suggestions';
 
@@ -53,7 +48,13 @@ describe('workspace prompt suggestions', () => {
     );
     try {
       expect(seen.at(-1)).toBeNull();
+      const bootstrapped = Promise.withResolvers<void>();
+      const unsubscribeStatus = suggestions.subscribeSyncState((state) => {
+        if (state === 'synced') bootstrapped.resolve();
+      });
       suggestions.start({ baseUrl: 'https://example.test', auth: async () => 'test' });
+      await bootstrapped.promise;
+      unsubscribeStatus();
       expect(seen.at(-1)).toBe('Cloud hint');
       plane = 'local';
       suggestions.refreshRoutes();

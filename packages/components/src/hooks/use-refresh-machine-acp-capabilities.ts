@@ -30,10 +30,12 @@ export const toAcpModelOptionsRefreshProgress = (
     : null;
 
 /**
- * Starts the agent on its machine to read its capabilities again, switching it
- * to every model to record that model's own options. A person asked for this,
- * so it has no overall deadline; `onModelOptionsProgress` names each model as
- * it is read. Machines that cannot read models refresh as before. A response
+ * Starts the agent on its machine to read its capabilities again. By default
+ * this runs only `session/new` so Provider creation, verification, and auth
+ * discovery stay fast; callers that explicitly refresh a Provider's catalog
+ * pass `readModelOptions: true` to switch the probe session to every model and
+ * record each model's own options (`onModelOptionsProgress` names each model as
+ * it is read). Machines that cannot read models refresh as before. A response
  * that only says authentication is required is returned, not thrown: for a
  * Provider without credentials that is the expected next step.
  */
@@ -45,6 +47,7 @@ export function useRefreshMachineAcpCapabilities() {
     async (args: {
       machineId: MachineId;
       configId: AgentConfigId;
+      readModelOptions?: boolean;
       onModelOptionsProgress?: (progress: AcpModelOptionsRefreshProgress) => void;
     }) => {
       if (!runtime || !workspaceId) {
@@ -59,7 +62,7 @@ export function useRefreshMachineAcpCapabilities() {
           // A person pressed refresh because they changed something Lody cannot
           // see in the launch inputs, so this path always starts the agent.
           force: true,
-          readModelOptions: true,
+          ...(args.readModelOptions ? { readModelOptions: true as const } : {}),
         },
         {
           onProgress: (progress) => {

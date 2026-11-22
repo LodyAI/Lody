@@ -35,16 +35,34 @@ place them in named pin sections, such as "Maintenance".
   top. Dropping an unpinned conversation into the pin area pins it there. The
   context menu also offers "Move to section", which places the conversation at
   the top of that section, and "New section…".
+- On the desktop, a user section's header menu offers "New Chat in This Section". It
+  opens the new-chat page, which names the section beside the project pills and
+  keeps the project already chosen there. The conversation started from it is
+  pinned at the top of that section; unchecking the section starts it unpinned.
+  If the section is deleted meanwhile, the conversation lands in the default
+  section.
 - Deleting a section does not unpin its conversations; they return to the
   default section.
-- Unpinning clears the conversation's section and position. Pinning it again
-  places it at the top of the default section.
+- Unpinning clears the conversation's section (`pinSectionId`) while retaining
+  its `orderKey` so manual ordering in the Status view is preserved. Pinning it
+  again places it at the top of the default section with a fresh `orderKey`.
 - Each section can be collapsed. The collapsed state is stored only on this
   device.
+- The Pinned header's "Visible Sections" menu lists every section, including the
+  default one. Checked sections are shown. Toggling any checkbox keeps the menu
+  open. If the default section is hidden, its list disappears and the Pinned
+  header keeps the menu available. Visibility is stored on this device. Moving
+  a conversation to a hidden section with "Move to section" shows that section.
+- A view scope that hides a section's conversations leaves the section in
+  place; while expanded, it names the hidden row count under its rows.
 - Opener child conversations stay under their root conversation and move with
   it; they are not ordered independently.
-- The mobile layout shows non-empty sections and their order but offers no
-  dragging or section management.
+- On phones the behavior is the same on the phone WebView and the native iOS and
+  Android clients ([phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md)): a long
+  press that turns into a drag reorders pinned conversations and moves them
+  between sections, dropping an unpinned conversation into the pin area pins it,
+  the row menu offers "Move to section" and "Move to top", and each section
+  header's menu offers New section, Rename, Move up, Move down and Delete.
 
 ## Data ownership
 
@@ -56,7 +74,7 @@ device, and workspace members see the same pin layout.
   one row. Renaming or dragging it writes only that row, and deleting a section
   deletes the row.
 - **Conversation positions** live in session metadata (meta Flock) beside
-  `isPinned`, as two new optional fields: `pinSectionId` and `pinOrderKey`.
+  `isPinned`, as two new optional fields: `pinSectionId` and `orderKey`.
   Dragging a conversation writes only that conversation's metadata.
 - A conversation whose `pinSectionId` is missing or names a section that no
   longer exists is shown in the default section. Until the section rows have been
@@ -79,7 +97,7 @@ neighbours, with random jitter, so that two devices inserting at the same
 position do not produce the same key. Equal keys are ordered by id, so every
 client shows the same order.
 
-Pinned conversations without a `pinOrderKey`, including those pinned before
+Pinned conversations without a `orderKey`, including those pinned before
 this feature, sort after the keyed conversations in their section and keep
 their recent-activity order among themselves. There is no migration.
 
@@ -89,7 +107,7 @@ their recent-activity order among themselves. There is no migration.
   format.
 - Older clients ignore the unknown `pinSection` rows when parsing the workspace
   Flock and keep showing all pinned conversations as one list ordered by time.
-- Unpinning on an older client leaves `pinSectionId` and `pinOrderKey` in
+- Unpinning on an older client leaves `pinSectionId` and `orderKey` in
   place. Newer clients read those fields only while `isPinned` is true, so the
   stale values are harmless. Pinning again on a newer client places the
   conversation back in the default section.
@@ -100,14 +118,14 @@ their recent-activity order among themselves. There is no migration.
   tasks that need a fixed place use a destination that reuses one conversation
   (`own_session` or `existing_session`) and are pinned once.
 - Private, per-member pin layouts.
-- Native iOS and Android clients. They ignore the new fields and are
-  unaffected.
+- Encrypted workspaces on the native iOS and Android clients, which do not open
+  encrypted workspaces at all yet. The phone WebView supports them.
 
 ## Permissions
 
 Every member with workspace write permission can create, rename, delete and
 drag sections, including in encrypted workspaces; read-only members can only
-view them. Members already write the workspace Flock, for example when creating
+view them and are not offered section management. Members already write the workspace Flock, for example when creating
 a private Agent Role. A write path that rejects a `pinSection` row from a
 member with write permission is a gap to fix, not a reason to narrow section
 management further.
@@ -126,7 +144,9 @@ Implementation:
 - Pointer drag and mention delivery: `packages/components/src/components/pinned-rows-dnd.ts`,
   `packages/components/src/lib/pinned-drop-settle.ts`, `packages/components/src/lib/session-mention-drag.ts`
 - Sidebar: `packages/components/src/components/sidebar-pinned-sections.tsx`,
-  `sidebar-updated-session-list.tsx`, `loro-app-sidebar.tsx`; mobile:
+  `sidebar-updated-session-list.tsx`, `loro-app-sidebar.tsx`; new chat in a section:
+  the chat route's `pinSection` search, `components/chat/pin-section-target-pill.tsx`,
+  `lib/session-submission.ts`; mobile:
   `packages/components/src/components/mobile/mobile-chat-list.tsx`
 - Protected content selection: `packages/shared/src/workspace-streams-content.ts`
 - Scheduled task destinations: `packages/shared/src/schedule-types.ts`
@@ -136,5 +156,10 @@ Executed validation (unit and jsdom tests, not a running app):
 `packages/components/tests/workspace-catalog-write.test.ts`,
 `packages/components/tests/loro-sidebar-pinned-section.test.tsx`,
 `packages/components/tests/sidebar-navigation-model.test.ts`,
-`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`. Dragging a
-section header and E2EE write admission were not exercised.
+`packages/components/tests/mobile-chat-list-preview-cap.test.tsx`,
+`packages/shared/tests/status-view.test.ts`. Storybook end-to-end
+(`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`): a row moved
+into another section and a section reordered by dragging its header. A non-owner
+Member sealing a `pinSection` row is tested at the encrypted room level
+(`apps/electron/src/main/services/e2ee-runtime.test.mjs`); the hosted gateway's
+admission is not exercised. Phones: see the [phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md#verification).

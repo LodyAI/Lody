@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowUpRight, Lock, Search } from 'lucide-react';
 import { Avatar } from '@lody/ui/avatar';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Spinner } from '@lody/ui/spinner';
@@ -278,7 +279,7 @@ function IdentityRow({
   ) : authorized ? (
     <span {...stylex.props(styles.identity)}>
       <Avatar.Root size="mini">
-        {avatarUrl ? <Avatar.Image src={avatarUrl} alt="" /> : null}
+        <CachedAvatarImage src={avatarUrl} alt="" />
         <Avatar.Fallback>{(profile?.login ?? '?').slice(0, 1).toUpperCase()}</Avatar.Fallback>
       </Avatar.Root>
       <span>

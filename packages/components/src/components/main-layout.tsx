@@ -12,8 +12,16 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useScheduleRegistrySync } from '@/hooks/use-schedules';
 import { useIsCompactDesktop, useIsMobile } from '../hooks/use-mobile';
 import { syncCompactDesktopLayoutAtom } from '@/atoms/layout-state';
-import { MobileWorkspaceLayout } from './mobile/mobile-workspace-layout';
 import { WebWorkspaceLayout } from './web-workspace-layout';
+
+/* Lazy so the mobile layout graph (including `TerminalDockHost` → the lazy
+   xterm chunk) stays out of the desktop boot chunk. `useIsMobile` resolves
+   synchronously, so mobile loads this on first render; desktop never does. */
+const MobileWorkspaceLayout = lazy(() =>
+  import('./mobile/mobile-workspace-layout').then((module) => ({
+    default: module.MobileWorkspaceLayout,
+  }))
+);
 import { BugReportDialogContainer } from './bug-report/bug-report-dialog-container';
 import { JoinCommunityDialogContainer } from './settings/join-community-dialog-container';
 import { StuckConnectionBannerContainer } from './stuck-connection-banner';
@@ -59,7 +67,9 @@ export function WorkspaceRuntimeShell({
   const isMobile = useIsMobile();
   if (isMobile) {
     return (
-      <MobileWorkspaceLayout workspaceReady={workspaceReady}>{children}</MobileWorkspaceLayout>
+      <Suspense fallback={null}>
+        <MobileWorkspaceLayout workspaceReady={workspaceReady}>{children}</MobileWorkspaceLayout>
+      </Suspense>
     );
   }
 

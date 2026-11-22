@@ -12,6 +12,8 @@ Meta/Flock catch-up keeps replica-bound checkpoints and merges into the live rep
 [Streams catch-up](../../.agents/docs/workspace-catalog-durability.md#streams-catch-up)
 explains size selection and cursor-only timeout recovery.
 
+Cloud auth callbacks reject credential failures; undefined permits anonymous transport requests.
+
 ## Session history
 
 - History tolerates unknown string item types without rewriting or blocking unrelated writes.
@@ -66,6 +68,8 @@ explains size selection and cursor-only timeout recovery.
 
 Missing-history acknowledgements are exact-ID receipts; only the serialized host watcher adds them. `isMissingHistoryUserTurn`
 reads the retained map and legacy scalar; new activation must not clear old acknowledgements.
+
+Stopped queue rows retain paused drafts; explicit resends use new input identities.
 
 ## Machine protocol negotiation
 

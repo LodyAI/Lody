@@ -16,7 +16,11 @@ import {
   type AndroidEmulatorRemoteResponse,
 } from '@lody/shared';
 import { getAndroidEmulatorViewerSecretContext } from './rpc-secret';
-import { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
+import {
+  LocalProjectListBranchesRpcResponseSchema as LoroLocalProjectListBranchesRpcResponseSchema,
+  SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema,
+  type LocalProjectListBranchesRpcResponse,
+} from '@lody/shared/local-machine-rpc';
 import {
   SessionWithdrawInputResponseSchema,
   type SessionWithdrawInputResponse,
@@ -328,6 +332,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'session/preview-status',
   'project/probe-local-member',
   'local-project/git-state',
+  'local-project/list-branches',
   'local-project/control',
 ]);
 
@@ -829,6 +834,7 @@ export const LoroSessionPreviewRevokeRpcRequestSchema = BaseRpcRequestSchema.ext
       requestedByUserId: z.string().trim().min(1),
       proof: PreviewControlProofSchema,
       reason: z.string().trim().min(1).optional(),
+      stopProcess: z.boolean().optional(),
     })
     .strict(),
 }).strict();
@@ -849,6 +855,19 @@ export const LoroLocalProjectGitStateRpcRequestSchema = BaseRpcRequestSchema.ext
     .object({
       localProjectId: z.string().trim().min(1),
       requestedByUserId: z.string().trim().min(1),
+    })
+    .strict(),
+}).strict();
+
+export const LoroLocalProjectListBranchesRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('local-project/list-branches'),
+  params: z
+    .object({
+      localProjectId: z.string().trim().min(1),
+      requestedByUserId: z.string().trim().min(1),
+      query: z.string().max(256).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+      cursor: z.string().trim().min(1).max(512).optional(),
     })
     .strict(),
 }).strict();
@@ -912,10 +931,15 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroAndroidEmulatorRpcRequestSchema,
   LoroProjectProbeLocalMemberRpcRequestSchema,
   LoroLocalProjectGitStateRpcRequestSchema,
+  LoroLocalProjectListBranchesRpcRequestSchema,
   LoroLocalProjectControlRpcRequestSchema,
 ]);
 
-export { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
+export {
+  LoroLocalProjectListBranchesRpcResponseSchema,
+  LoroSessionLiveStatusRpcResponseSchema,
+  type LocalProjectListBranchesRpcResponse,
+};
 
 export const LoroLocalProjectGitStateRpcResponseSchema = z.discriminatedUnion('success', [
   z
@@ -1039,6 +1063,9 @@ export type LoroSessionPreviewRevokeRpcRequest = z.infer<
 >;
 export type LoroLocalProjectGitStateRpcRequest = z.infer<
   typeof LoroLocalProjectGitStateRpcRequestSchema
+>;
+export type LoroLocalProjectListBranchesRpcRequest = z.infer<
+  typeof LoroLocalProjectListBranchesRpcRequestSchema
 >;
 export type LoroLocalProjectControlRpcRequest = z.infer<
   typeof LoroLocalProjectControlRpcRequestSchema
@@ -1763,6 +1790,7 @@ export type LoroMachineRpcResult =
   | AndroidEmulatorRemoteResponse
   | ProjectProbeLocalMemberResult
   | LocalProjectGitStateRpcResponse
+  | LocalProjectListBranchesRpcResponse
   | LocalProjectControlResponse;
 
 const historyRpcFailureResponse = (
@@ -2126,6 +2154,18 @@ const toLegacyRpcErrorResponse = (
     };
   }
 
+  if (method === 'local-project/list-branches') {
+    return {
+      type: 'local-project/list-branches_response',
+      machineId,
+      workspaceId: localProjectContext?.workspaceId ?? '',
+      localProjectId: (localProjectContext?.localProjectId ?? '') as LocalProjectId,
+      success: false,
+      error: error.code,
+      message: error.message,
+    };
+  }
+
   if (method === 'local-project/control') {
     return {
       ok: false,
@@ -2327,6 +2367,10 @@ const parseRpcSuccessResult = async (
   if (response.method === 'local-project/git-state') {
     const parsed = LoroLocalProjectGitStateRpcResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as LocalProjectGitStateRpcResponse) : null;
+  }
+  if (response.method === 'local-project/list-branches') {
+    const parsed = LoroLocalProjectListBranchesRpcResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as LocalProjectListBranchesRpcResponse) : null;
   }
   if (response.method === 'local-project/control') {
     const parsed = LocalProjectControlResponseSchema.safeParse(response.result);
@@ -3896,6 +3940,7 @@ export class LoroStreamsMachineRpcClient {
     requestedByUserId: string;
     proof: PreviewControlProof;
     reason?: string;
+    stopProcess?: boolean;
     timeoutMs?: number;
   }): Promise<SessionPreviewRevokeResponse | null> {
     return (await this.sendRequest({
@@ -3906,6 +3951,7 @@ export class LoroStreamsMachineRpcClient {
         requestedByUserId: options.requestedByUserId,
         proof: options.proof,
         reason: options.reason,
+        ...(options.stopProcess ? { stopProcess: true } : {}),
       },
     })) as SessionPreviewRevokeResponse | null;
   }
@@ -3938,6 +3984,29 @@ export class LoroStreamsMachineRpcClient {
         requestedByUserId: options.requestedByUserId,
       },
     })) as LocalProjectGitStateRpcResponse | null;
+  }
+
+  async requestLocalProjectBranches(options: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+    query?: string;
+    limit?: number;
+    cursor?: string;
+    timeoutMs?: number;
+  }): Promise<LocalProjectListBranchesRpcResponse | null> {
+    const trimmedQuery = options.query?.trim();
+    const trimmedCursor = options.cursor?.trim();
+    return (await this.sendRequest({
+      method: 'local-project/list-branches',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      params: {
+        localProjectId: options.localProjectId,
+        requestedByUserId: options.requestedByUserId,
+        ...(trimmedQuery ? { query: trimmedQuery } : {}),
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+        ...(trimmedCursor ? { cursor: trimmedCursor } : {}),
+      },
+    })) as LocalProjectListBranchesRpcResponse | null;
   }
 
   async requestLocalProjectControl(options: {
@@ -4325,6 +4394,17 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'local-project/list-branches';
+          timeoutMs: number;
+          params: {
+            localProjectId: LocalProjectId;
+            requestedByUserId: string;
+            query?: string;
+            limit?: number;
+            cursor?: string;
+          };
+        }
+      | {
           method: 'local-project/control';
           timeoutMs: number;
           params: {
@@ -4443,7 +4523,7 @@ export class LoroStreamsMachineRpcClient {
           ? { sessionId: args.params.sessionId }
           : undefined,
       localProjectContext:
-        args.method === 'local-project/git-state'
+        args.method === 'local-project/git-state' || args.method === 'local-project/list-branches'
           ? { workspaceId: this.options.workspaceId, localProjectId: args.params.localProjectId }
           : args.method === 'local-project/control'
             ? { type: args.params.request.type }
@@ -4685,6 +4765,7 @@ export class LoroStreamsMachineRpcClient {
           break;
         case 'project/probe-local-member':
         case 'local-project/git-state':
+        case 'local-project/list-branches':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'local-project/control':

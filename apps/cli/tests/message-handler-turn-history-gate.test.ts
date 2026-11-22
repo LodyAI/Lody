@@ -204,6 +204,63 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
     }
   });
 
+  it('fills what a Lody Agent turn leaves unset from its Provider session defaults', async () => {
+    const sessionId = 'sorbet-session-defaults' as SessionId;
+    const { repo, doc, handler } = await createHandlerHarness(sessionId);
+    try {
+      vi.spyOn(doc, 'getMetaState').mockResolvedValue({
+        agentConfigId: 'sorbet-provider',
+      } as Awaited<ReturnType<SessionDocument['getMetaState']>>);
+      Object.assign((handler as unknown as { workspaceDocument: object }).workspaceDocument, {
+        getAgentConfigById: async () => ({
+          id: 'sorbet-provider',
+          sessionDefaults: {
+            configOptionValues: { permission_mode: 'full-access', thought_level: 'high' },
+          },
+        }),
+      });
+      const running: Record<string, string> = { permission_mode: 'ask', thought_level: 'low' };
+      const option = (id: string, values: string[]) => ({
+        id,
+        name: id,
+        type: 'select',
+        currentValue: running[id],
+        options: values.map((value) => ({ value, name: value })),
+      });
+      const options = () => [
+        option('permission_mode', ['ask', 'auto', 'full-access']),
+        { ...option('thought_level', ['low', 'medium', 'high']), category: 'thought_level' },
+      ];
+
+      await handler.applyAcpModeAndModel(
+        {
+          sessionId,
+          acpSessionId: 'acp-sorbet' as ACPSessionId,
+          agentClient: {
+            isCreated: () => true,
+            getAvailableCommands: () => [],
+            getAvailableCommandsForSession: () => [],
+            getConfigOptions: options,
+            setSessionConfigOption: async (_id: string, configId: string, value: string) => {
+              running[configId] = value;
+              return options();
+            },
+          } as unknown as AgentClient,
+        },
+        {
+          cliType: 'builtin',
+          agentType: 'sorbet',
+          configOptionValues: { thought_level: 'medium' },
+        },
+        { sessionDoc: doc }
+      );
+
+      expect(running).toEqual({ permission_mode: 'full-access', thought_level: 'medium' });
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   it.each(['codex', 'claude'])(
     'persists a rejected %s model as a GUI notice after the driving user turn',
     async (agentType) => {
@@ -226,6 +283,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
             agentClient: {
               isCreated: () => true,
               getAvailableCommands: () => [],
+              getAvailableCommandsForSession: () => [],
               getConfigOptions: () => [
                 { id: 'model', category: 'model', type: 'select', currentValue: 'active-model' },
               ],

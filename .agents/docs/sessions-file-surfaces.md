@@ -233,8 +233,8 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
 - Markdown file viewers copy the latest complete source text (including unsaved
   editor changes) from the top toolbar. On mobile, source mode uses the native
   text surface instead of Monaco so long-press keeps the OS selection menu;
-  rendered Markdown must opt into native selection through
-  `data-native-selection-allow`.
+  rendered Markdown is selectable through `MarkdownRenderer`'s
+  `data-text-selectable` marker.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
   turn diff RPC: `packages/shared/src/code-collab.ts`.
 - Content-addressed diff transport is capability-gated by `codeCollabDiffBlobs` v1: paged manifests

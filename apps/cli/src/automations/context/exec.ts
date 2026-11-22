@@ -9,6 +9,40 @@ export interface AutomationExecInput {
   cwd?: string;
 }
 
+/** Resolves a relative directory that must stay inside the Session workdir after symlinks. */
+export const resolveAutomationCwd = Effect.fn('Automations.resolveCwd')(function* (
+  root: string,
+  relativeCwd: string | undefined
+) {
+  if (path.isAbsolute(relativeCwd ?? '.'))
+    return yield* Effect.fail(new Error('AUTOMATION_EXEC_INVALID_CWD'));
+  return yield* Effect.tryPromise({
+    try: async () => {
+      const canonicalRoot = await realpath(root);
+      const resolved = await realpath(path.resolve(canonicalRoot, relativeCwd ?? '.'));
+      const relative = path.relative(canonicalRoot, resolved);
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+        throw new Error('AUTOMATION_EXEC_INVALID_CWD');
+      if (!(await stat(resolved)).isDirectory()) throw new Error('AUTOMATION_EXEC_INVALID_CWD');
+      return resolved;
+    },
+    catch: () => new Error('AUTOMATION_EXEC_INVALID_CWD'),
+  });
+});
+
+/** Host variables a command needs to find tools; credentials stay with their owners. */
+export const automationCommandEnvironment = (
+  searchPath: string | undefined = process.env.PATH
+): NodeJS.ProcessEnv => ({
+  PATH: searchPath,
+  HOME: process.env.HOME,
+  USERPROFILE: process.env.USERPROFILE,
+  SystemRoot: process.env.SystemRoot,
+  TMPDIR: process.env.TMPDIR,
+  TEMP: process.env.TEMP,
+  TMP: process.env.TMP,
+});
+
 /** Execute within a caller-resolved Session directory. The environment is explicitly supplied by the owner. */
 export const execAutomationCommand = Effect.fn('Automations.exec')(function* (
   input: AutomationExecInput,
@@ -21,20 +55,7 @@ export const execAutomationCommand = Effect.fn('Automations.exec')(function* (
     input.args?.some((arg) => arg.includes('\0'))
   )
     return yield* Effect.fail(new Error('AUTOMATION_EXEC_INVALID_COMMAND'));
-  if (path.isAbsolute(input.cwd ?? '.'))
-    return yield* Effect.fail(new Error('AUTOMATION_EXEC_INVALID_CWD'));
-  const cwd = yield* Effect.tryPromise({
-    try: async () => {
-      const canonicalRoot = await realpath(root);
-      const resolved = await realpath(path.resolve(canonicalRoot, input.cwd ?? '.'));
-      const relative = path.relative(canonicalRoot, resolved);
-      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
-        throw new Error('AUTOMATION_EXEC_INVALID_CWD');
-      if (!(await stat(resolved)).isDirectory()) throw new Error('AUTOMATION_EXEC_INVALID_CWD');
-      return resolved;
-    },
-    catch: () => new Error('AUTOMATION_EXEC_INVALID_CWD'),
-  });
+  const cwd = yield* resolveAutomationCwd(root, input.cwd);
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const tooLarge = yield* Deferred.make<never, Error>();

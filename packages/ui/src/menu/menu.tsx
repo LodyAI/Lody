@@ -15,6 +15,8 @@ import { portalClassName, usePopupContainer, type PopupContainer } from '../popu
 import { rowLabel } from '../popup/row-label';
 import { hiddenSurfaceForSide, surface } from '../popup/surface';
 import { useForcedThemeClassNames } from '../theme/theme';
+import { colors, shadow } from '../tokens/colors.stylex';
+import { corner, radius } from '../tokens/scales.stylex';
 
 /** The gap between a menu and whatever opened it; the rules' rise distance. */
 const POPUP_GAP = 4;
@@ -95,6 +97,8 @@ export interface MenuLinkItemProps
 
 export interface MenuCheckboxItemProps
   extends Omit<CheckboxItemBaseProps, 'className' | 'children'>, Omit<MenuRowProps, 'icon'> {
+  /** Show a checkbox well in both states. The default uses a standalone tick. */
+  indicator?: 'check' | 'checkbox';
   /** Place the tick after the label to leave the start of short filter rows unindented. */
   indicatorSide?: 'start' | 'end';
 }
@@ -352,11 +356,21 @@ export const MenuLinkItem = forwardRef<HTMLAnchorElement, MenuLinkItemProps>(fun
  */
 export const MenuCheckboxItem = forwardRef<HTMLDivElement, MenuCheckboxItemProps>(
   function MenuCheckboxItem(
-    { className, children, shortcut, endContent, indicatorSide = 'start', ...rest },
+    {
+      className,
+      children,
+      shortcut,
+      endContent,
+      indicator = 'check',
+      indicatorSide = 'start',
+      ...rest
+    },
     ref
   ) {
     const mark = (
-      <span {...stylex.props(surface.indicator)}>
+      <span
+        {...stylex.props(surface.indicator, indicator === 'checkbox' && checkboxWell.indicator)}
+      >
         <BaseMenu.CheckboxItemIndicator
           className={stylex.props(surface.indicatorGlyph).className}
           render={<span />}
@@ -391,6 +405,15 @@ export const MenuCheckboxItem = forwardRef<HTMLDivElement, MenuCheckboxItemProps
     );
   }
 );
+
+const checkboxWell = stylex.create({
+  indicator: {
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
+    borderRadius: radius.mini,
+    cornerShape: corner.round,
+  },
+});
 
 /** A row that picks one of a `Menu.RadioGroup`'s values; the same box, a dot. */
 export const MenuRadioItem = forwardRef<HTMLDivElement, MenuRadioItemProps>(function MenuRadioItem(

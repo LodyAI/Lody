@@ -144,6 +144,7 @@ import {
   SessionHistoryReadRpcPayloadSchema,
   SessionHistoryWriteRpcPayloadSchema,
   type LocalProjectGitStateRpcResponse,
+  type LocalProjectListBranchesRpcResponse,
   type LoroSessionLiveStatusRpcResponse,
   LoroStreamsRpcRequestSchema,
   LoroSessionAutomationControlPayloadSchema,
@@ -632,6 +633,7 @@ type RpcServerDeps = {
     requestedByUserId: string;
     proof: PreviewControlProof;
     reason?: string;
+    stopProcess?: boolean;
   }) => Promise<SessionPreviewRevokeResponse>;
   probeLocalProjectMember?: (args: {
     localProjectId: LocalProjectId;
@@ -641,6 +643,13 @@ type RpcServerDeps = {
     localProjectId: LocalProjectId;
     requestedByUserId: string;
   }) => Promise<LocalProjectGitStateRpcResponse>;
+  listLocalProjectBranches?: (args: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+    query?: string;
+    limit?: number;
+    cursor?: string;
+  }) => Promise<LocalProjectListBranchesRpcResponse>;
   dispatchLocalProjectControl?: (
     request: LocalProjectControlRequest
   ) => Promise<LocalProjectControlResponse>;
@@ -2375,6 +2384,7 @@ export class LoroStreamsMachineRpcServer {
             requestedByUserId: request.params.requestedByUserId,
             proof: request.params.proof,
             reason: request.params.reason,
+            ...(request.params.stopProcess ? { stopProcess: true } : {}),
           });
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
@@ -2405,6 +2415,24 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.getLocalProjectGitState({
             localProjectId: request.params.localProjectId as LocalProjectId,
             requestedByUserId: request.params.requestedByUserId,
+          });
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
+        case 'local-project/list-branches': {
+          if (!this.deps.listLocalProjectBranches) {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Local project branch listing is not available on this machine.',
+            });
+            return;
+          }
+          const response = await this.deps.listLocalProjectBranches({
+            localProjectId: request.params.localProjectId as LocalProjectId,
+            requestedByUserId: request.params.requestedByUserId,
+            query: request.params.query,
+            limit: request.params.limit,
+            cursor: request.params.cursor,
           });
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
@@ -2634,6 +2662,7 @@ export class LoroStreamsMachineRpcServer {
       | AndroidEmulatorResponse
       | ProjectProbeLocalMemberResult
       | LocalProjectGitStateRpcResponse
+      | LocalProjectListBranchesRpcResponse
       | LocalProjectControlResponse,
     options: {
       readonly codeCollabOwnerSessionId?: string;

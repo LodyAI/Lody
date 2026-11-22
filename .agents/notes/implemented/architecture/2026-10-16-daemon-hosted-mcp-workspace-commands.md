@@ -54,7 +54,7 @@ MCP process ──session/call-tool──▶ daemon: one workspace replica
 - Cloud MCP tool work now runs on the daemon event loop, including the operation store's synchronous SQLite calls. OSS has done this since #1133. The MCP process remains the protocol adapter, so it was not moved back.
 - Routed calls depend on the daemon. An agent calling Lody MCP already runs inside a daemon-managed Session, so this adds no new availability dependency. Routed calls keep the ten-minute bound the child-CLI path had; only a legacy `wait: true` call gets its maximum wait plus that bound. The earlier OSS bound was 30 seconds. The local-control protocol carries no cancellation, so an abandoned call still finishes in the daemon within that bound; OSS already behaved this way.
 - Admitting a replacement while the old owner's work is still retained can let a late write from the old stream arrive. Presence is latest-state with a 90-second TTL and 30-second heartbeats, so a stray entry heals itself; durable data is unaffected.
-- Standalone terminal `lody` commands still open a short-lived replica, because no daemon is guaranteed there. Their failures no longer fence later commands. `lody_session_share` stays in the MCP process because it needs the MCP request's abort signal and uses no workspace replica.
+- Standalone terminal `lody` commands still open a short-lived replica, because no daemon is guaranteed there. Their failures no longer fence later commands. `lody_session_manage` action `share` stays in the MCP process because it needs the MCP request's abort signal and uses no workspace replica.
 
 ## Verification
 

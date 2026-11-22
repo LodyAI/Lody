@@ -72,7 +72,7 @@ and the isolation of Roost reads alongside authorization and execution boundarie
 - Turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
 - Never steer after cancellation or infer delivery from it. Stop uses
-  preserve/discard and cancels pre-Stop queued eligibility; Edit & Resend uses preserve/keep,
+  preserve/discard; paused drafts require explicit resends; Edit & Resend uses preserve/keep,
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
   Unknown never replays; RPC ACKs never revive history. Encrypted recovery preserves terminal

@@ -36,6 +36,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
+  localProjectBranchListing: 'localProjectBranchListing',
   providerSetup: 'providerSetup',
   schedules: 'schedules',
   sessionAutomations: 'sessionAutomations',
@@ -50,11 +51,14 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   markdownFileLinks: 'markdownFileLinks',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
+  previewStopProcess: 'previewStopProcess',
   androidEmulator: 'androidEmulator',
   androidEmulatorQuality: 'androidEmulatorQuality',
+  androidEmulatorShutdown: 'androidEmulatorShutdown',
   iosSimulator: 'iosSimulator',
   iosSimulatorControls: 'iosSimulatorControls',
   iosSimulatorExterior: 'iosSimulatorExterior',
+  iosSimulatorShutdown: 'iosSimulatorShutdown',
   piExtensions: 'piExtensions',
   antigravitySkipPermissions: 'antigravitySkipPermissions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
@@ -75,6 +79,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   machineDiskStatus: 'machineDiskStatus',
   managedDaemonUpdates: 'managedDaemonUpdates',
   sessionInputWithdraw: 'sessionInputWithdraw',
+  localProjectFileSearch: 'localProjectFileSearch',
+  localProjectSkillsFingerprint: 'localProjectSkillsFingerprint',
 } as const;
 
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
@@ -85,13 +91,23 @@ export const E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION = 1;
 export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
 
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
-export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
+// v1 serves identity providers (Nowledge Mem). v2 adds account providers
+// (EverMe): sign-in, install and agent connect/disconnect requests.
+export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 2;
+const MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION = 1;
-export const SORBET_PROVIDERS_PROTOCOL_VERSION = 1;
-export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = 1;
+/** v2 (the page's minimum): list, create, delete, refresh, models. v3 adds update. */
+export const SORBET_PROVIDERS_PROTOCOL_VERSION = 3;
+export const SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION = 2;
+export const SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION = 3;
+/**
+ * The encrypted feature path forwards every `sorbet/providers-*` and `sorbet/models-list`
+ * method to the same owner-scoped handler, so the remote version tracks the local one.
+ */
+export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = SORBET_PROVIDERS_PROTOCOL_VERSION;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
 export const E2EE_ACP_INTERACTION_PROTOCOL_VERSION = 1;
@@ -102,6 +118,7 @@ export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION = 1;
+export const LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 // v2 preserves ACP string/boolean values and reads legacy stringified booleans.
 const SCHEDULES_PROMPT_PROTOCOL_VERSION = 2;
@@ -134,6 +151,13 @@ export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 /** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
 export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
+/**
+ * `local-project/search-files` exists. An older daemon's strict request schema
+ * drops the unknown type without replying, so a caller must check before sending.
+ */
+export const LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION = 1;
+/** `local-project/list-skills` / `list-global-skills` accept `knownFingerprint`. */
+export const LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -156,6 +180,17 @@ export function machineSupportsProtocolCapability(
 }
 
 export function machineSupportsMemoryProviders(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.memoryProviders,
+    MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the daemon understands account providers' sign-in, install and connect requests. */
+export function machineSupportsAccountMemoryProviders(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
   return machineSupportsProtocolCapability(
@@ -222,6 +257,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection]: PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
     LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing]:
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
@@ -238,11 +275,14 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.markdownFileLinks]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.previewStopProcess]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.androidEmulator]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorShutdown]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulator]: IOS_SIMULATOR_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls]: IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorShutdown]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpModelOptionsRead]: ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION,
@@ -260,7 +300,47 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectFileSearch]:
+    LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectSkillsFingerprint]:
+    LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION,
 };
+
+/**
+ * Fits a local-project control request to what the target daemon understands:
+ * `knownFingerprint` is dropped for a daemon without it (the request still
+ * works, it just returns everything), and a file search the daemon cannot
+ * answer returns `null` so the caller never sends it.
+ */
+export function adaptLocalProjectControlRequestToMachine<
+  TRequest extends { type: string; knownFingerprint?: string },
+>(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  request: TRequest
+): TRequest | null {
+  if (
+    request.type === 'local-project/search-files' &&
+    !machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.localProjectFileSearch,
+      LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION
+    )
+  ) {
+    return null;
+  }
+  if (
+    request.knownFingerprint !== undefined &&
+    !machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.localProjectSkillsFingerprint,
+      LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION
+    )
+  ) {
+    const { knownFingerprint: _dropped, ...rest } = request;
+    return rest as TRequest;
+  }
+  return request;
+}
 
 /**
  * Whether `machine/bug-report` may carry `clientLog`. Its request schema is
@@ -401,6 +481,16 @@ export function machineSupportsLocalProjectRemovalProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval,
     LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsLocalProjectBranchListing(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing,
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION
   );
 }
 
@@ -675,6 +765,36 @@ export function machineSupportsAndroidEmulatorQuality(
   return machineSupportsProtocolCapability(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality,
+    1
+  );
+}
+
+export function machineSupportsPreviewStopProcess(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.previewStopProcess,
+    1
+  );
+}
+
+export function machineSupportsIosSimulatorShutdown(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorShutdown,
+    1
+  );
+}
+
+export function machineSupportsAndroidEmulatorShutdown(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorShutdown,
     1
   );
 }

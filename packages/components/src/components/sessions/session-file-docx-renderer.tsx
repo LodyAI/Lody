@@ -163,7 +163,7 @@ export function SessionFileDocxRenderer({
       }
     >
       {document ? (
-        <div {...stylex.props(styles.pageHost)} data-native-selection-allow>
+        <div {...stylex.props(styles.pageHost)} data-text-selectable>
           <ReactDocxViewer document={document} zoom={zoom} />
         </div>
       ) : (

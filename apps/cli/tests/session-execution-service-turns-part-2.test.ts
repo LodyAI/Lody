@@ -1,3 +1,4 @@
+import { nativeSessionCredentials } from '@/session/session-credentials';
 import { createSessionBackend } from '@/session/session-backend';
 import { RequestError, type ContentBlock } from '@agentclientprotocol/sdk';
 import {
@@ -1980,6 +1981,7 @@ describe('SessionExecutionService initialization deadline', () => {
                 agentClient,
                 terminalManager: {} as unknown,
                 getWorkdir: () => '/tmp',
+                getGitHubCredentials: () => nativeSessionCredentials,
                 getHostWorkdir: () => '/tmp',
                 getParentSessionId: () => undefined,
                 exec: vi.fn(async () => ''),

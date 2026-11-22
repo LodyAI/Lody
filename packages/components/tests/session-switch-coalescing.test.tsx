@@ -9,7 +9,15 @@ import {
   type SidebarNavCallbacks,
   type SidebarNavItem,
 } from '../src/atoms/focus-layer';
+import {
+  SIDEBAR_SHORTCUT_HOLD_DELAY_MS,
+  sidebarShortcutOverlayActiveAtom,
+  sidebarShortcutPlatformOverrideAtom,
+} from '../src/atoms/sidebar-shortcuts';
+import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
+import { SidebarBindingPill } from '../src/components/sidebar-shortcut-pill';
 import { useKeyboardNavigation } from '../src/hooks/use-keyboard-navigation';
+import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
 import { commands } from '../src/lib/commands/registry';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
@@ -118,6 +126,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   unmount();
   container.remove();
   frames.restore();
@@ -248,5 +257,170 @@ describe('session switch coalescing', () => {
     pressNext();
     expect(navigations).toEqual([]);
     expect(frames.pending).toBe(0);
+  });
+});
+
+describe('sidebar visible session 1-9 shortcuts and pills', () => {
+  it('switches to the 1st-9th visible session across section headers and abandons pending bursts', () => {
+    act(() => {
+      store.set(sidebarNavItemsAtom, [
+        { kind: 'group-header', groupKey: 'pinned', collapsed: false },
+        { kind: 'session', sessionId: 's1', groupKey: 'pinned' },
+        { kind: 'local-project', machineId: 'm1', localProjectId: 'p1', collapsed: false },
+        { kind: 'session', sessionId: 's2', groupKey: 'local-project:m1:p1' },
+        { kind: 'session', sessionId: 's3', groupKey: 'local-project:m1:p1' },
+        { kind: 'show-more', groupKey: 'local-project:m1:p1' },
+        ...SESSION_IDS.slice(3).map((sessionId) => ({
+          kind: 'session' as const,
+          sessionId,
+          groupKey: 'chats',
+        })),
+      ]);
+    });
+
+    pressNext();
+    expect(navigations).toEqual(['s2']);
+    pressNext();
+    expect(frames.pending).toBe(1);
+
+    let executed = false;
+    act(() => {
+      executed = commands.execute('session.switchToVisible9');
+    });
+    expect(executed).toBe(true);
+    expect(navigations).toEqual(['s2', 's9']);
+
+    // Stale queued burst frame must not overwrite the direct 1-9 jump.
+    frames.paint();
+    expect(navigations).toEqual(['s2', 's9']);
+
+    // Out-of-range slot when fewer than 9 visible sessions exist is disabled.
+    act(() => {
+      store.set(sidebarNavItemsAtom, [
+        { kind: 'session', sessionId: 's1', groupKey: 'chats' },
+        { kind: 'session', sessionId: 's2', groupKey: 'chats' },
+      ]);
+    });
+    expect(commands.execute('session.switchToVisible3')).toBe(false);
+    expect(commands.execute('session.switchToVisible1')).toBe(true);
+    expect(navigations).toEqual(['s2', 's9', 's1']);
+  });
+
+  it('reveals 1-9 pills only after holding the platform modifier and avoids quick-chord flash', () => {
+    vi.useFakeTimers();
+    act(() => {
+      store.set(sidebarShortcutPlatformOverrideAtom, 'mac');
+    });
+
+    // Quick Cmd+K before hold delay must not flash the overlay.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
+      vi.advanceTimersByTime(SIDEBAR_SHORTCUT_HOLD_DELAY_MS + 50);
+    });
+    expect(store.get(sidebarShortcutOverlayActiveAtom)).toBe(false);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', metaKey: false }));
+    });
+
+    // Holding Meta cleanly past the delay reveals the overlay and keeps it
+    // open while pressing digits 1-9, then hides on release.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true }));
+      vi.advanceTimersByTime(SIDEBAR_SHORTCUT_HOLD_DELAY_MS - 1);
+    });
+    expect(store.get(sidebarShortcutOverlayActiveAtom)).toBe(false);
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(store.get(sidebarShortcutOverlayActiveAtom)).toBe(true);
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: '2', code: 'Digit2', metaKey: true })
+      );
+    });
+    expect(store.get(sidebarShortcutOverlayActiveAtom)).toBe(true);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', metaKey: false }));
+    });
+    expect(store.get(sidebarShortcutOverlayActiveAtom)).toBe(false);
+
+    // Windows mode responds to Control and hides on window blur.
+    act(() => {
+      store.set(sidebarShortcutPlatformOverrideAtom, 'windows');
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true }));
+      vi.advanceTimersByTime(SIDEBAR_SHORTCUT_HOLD_DELAY_MS);
+    });
+    expect(store.get(sidebarShortcutOverlayActiveAtom)).toBe(true);
+
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+    expect(store.get(sidebarShortcutOverlayActiveAtom)).toBe(false);
+  });
+
+  it('renders macOS icon pills and Windows Control pills only on the first 9 rows', () => {
+    renderWith(
+      createElement(
+        'div',
+        null,
+        createElement(Harness),
+        createElement(SidebarRowEndSlot, { sessionId: 's1', selected: true }),
+        createElement(SidebarRowEndSlot, { sessionId: 's9' }),
+        createElement(SidebarRowEndSlot, { sessionId: 's10' })
+      )
+    );
+
+    act(() => {
+      store.set(sidebarShortcutPlatformOverrideAtom, 'mac');
+      store.set(sidebarShortcutOverlayActiveAtom, true);
+    });
+
+    const pill1 = container.querySelector('[data-sidebar-shortcut-pill="1"]');
+    const pill9 = container.querySelector('[data-sidebar-shortcut-pill="9"]');
+    const pill10 = container.querySelector('[data-sidebar-shortcut-pill="10"]');
+    expect(pill1?.getAttribute('data-sidebar-shortcut-platform')).toBe('mac');
+    expect(pill1?.querySelector('svg')).not.toBeNull();
+    expect(pill1?.textContent).toBe('1');
+    expect(pill9?.textContent).toBe('9');
+    expect(pill10).toBeNull();
+
+    act(() => {
+      store.set(sidebarShortcutPlatformOverrideAtom, 'windows');
+    });
+    const winPill1 = container.querySelector('[data-sidebar-shortcut-pill="1"]');
+    expect(winPill1?.getAttribute('data-sidebar-shortcut-platform')).toBe('windows');
+    expect(winPill1?.querySelector('svg')).toBeNull();
+    expect(winPill1?.textContent).toBe('Control1');
+  });
+
+  it('grows the ⇧ glyph inside a macOS binding pill to match ⌘ ink', () => {
+    (window as { __LODY_PLATFORM__?: { os?: string } }).__LODY_PLATFORM__ = { os: 'darwin' };
+    __resetPlatformCacheForTests();
+    try {
+      renderWith(createElement(SidebarBindingPill, { binding: 'Mod+Shift+D' }));
+
+      const pill = container.querySelector('[data-sidebar-binding-pill="Mod+Shift+D"]');
+      expect(pill).not.toBeNull();
+      const [commandGlyph, shiftGlyph] = pill!.querySelectorAll('svg');
+      expect(pill!.querySelectorAll('svg')).toHaveLength(2);
+      expect(shiftGlyph.getAttribute('stroke-width')).toBe('1.5');
+      expect(commandGlyph.getAttribute('stroke-width')).toBe('2');
+      const commandClasses = new Set((commandGlyph.getAttribute('class') ?? '').split(' '));
+      const grownClasses = (shiftGlyph.getAttribute('class') ?? '')
+        .split(' ')
+        .filter((name) => !commandClasses.has(name) && !name.startsWith('lucide'));
+      expect(grownClasses).toHaveLength(1);
+      expect(pill!.textContent).toBe('D');
+    } finally {
+      delete (window as { __LODY_PLATFORM__?: { os?: string } }).__LODY_PLATFORM__;
+      __resetPlatformCacheForTests();
+    }
   });
 });
