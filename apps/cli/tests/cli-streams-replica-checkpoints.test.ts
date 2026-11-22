@@ -204,14 +204,16 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
     'attaches cloud ephemeral rooms only when enabled (%s)',
     async (attachCloudEphemeralSinks) => {
       const seen = new Set<string>();
-      let monitorRequested: () => void = () => {};
-      const monitorReady = new Promise<void>((resolve) => {
-        monitorRequested = resolve;
-      });
+      const requested = new Map<string, () => void>();
+      const roomsReady = Promise.all(
+        ['presence', 'machine-monitor'].map(
+          (room) => new Promise<void>((resolve) => requested.set(room, resolve))
+        )
+      );
       const server = createStreamsServer(metaSnapshotWithA(), (url, method, init) => {
         const ephemeral = url.searchParams.get('ephemeral');
         if (ephemeral) seen.add(ephemeral);
-        if (ephemeral === 'machine-monitor') monitorRequested();
+        if (ephemeral && method === 'GET') requested.get(ephemeral)?.();
         if (ephemeral && method === 'GET') {
           let stopped = false;
           let stop = () => {};
@@ -285,7 +287,7 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
       try {
         const attaching = manager.attachRemoteStreamsTransport();
         await attaching;
-        if (attachCloudEphemeralSinks) await monitorReady;
+        if (attachCloudEphemeralSinks) await roomsReady;
         expect((await syncMeta(cli)).ok).toBe(true);
         expect(cli.repo.getMeta().get(keyA)).toBe('A');
         expect(server.bootstraps()).toBe(1);
