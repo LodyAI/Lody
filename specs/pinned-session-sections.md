@@ -149,5 +149,4 @@ Executed validation (unit and jsdom tests, not a running app):
 into another section and a section reordered by dragging its header. A non-owner
 Member sealing a `pinSection` row is tested at the encrypted room level
 (`apps/electron/src/main/services/e2ee-runtime.test.mjs`); the hosted gateway's
-admission is not exercised. Known gap: the phone WebView does not show the count
-of pinned rows the scope hid. Phones: see the [phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md#verification).
+admission is not exercised. Phones: see the [phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md#verification).

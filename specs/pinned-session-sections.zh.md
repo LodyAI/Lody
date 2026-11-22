@@ -107,5 +107,5 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 `packages/shared/tests/status-view.test.ts`。Storybook 端到端测试
 （`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`）：把对话移到另一个分组、拖动
 分组标题调整分组顺序。非拥有者成员加密写入 `pinSection` 行已在加密房间层测试
-（`apps/electron/src/main/services/e2ee-runtime.test.mjs`）；托管网关的准入未覆盖。已知缺口：手机 WebView 不显示被可见范围隐藏的 pin 行数。手机端见
+（`apps/electron/src/main/services/e2ee-runtime.test.mjs`）；托管网关的准入未覆盖。手机端见
 [手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md#验证)。
