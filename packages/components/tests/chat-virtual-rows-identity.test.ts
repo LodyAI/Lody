@@ -20,7 +20,9 @@ import {
 import {
   COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID,
   buildLatestCoordinatorBubbleByTaskId,
+  buildSupersededCoordinatorCardKeys,
   createCoordinatorActionCommandRegistry,
+  formatCoordinatorBubbleKey,
   resolveCoordinatorBubbleActions,
   resolveCoordinatorProactiveCard,
 } from '../src/components/project-mode/coordinator-action-engine';
@@ -1079,5 +1081,27 @@ describe('coordinator conversation bubbles and search', () => {
     expect(areAssistantChatVirtualRowsEqual({ ...cardRowB, item: cardRowA.item }, cardRowA)).toBe(
       false
     );
+
+    const streamWithFollowupUser: ChatStreamItem[] = [
+      turnA,
+      wrap(
+        makeMessage(
+          'user-followup-1',
+          'user',
+          [{ type: 'text', text: '兼容窗口改成保留 14 天吧' }],
+          true
+        )
+      ),
+    ];
+    const supersededKeys = buildSupersededCoordinatorCardKeys({
+      items: streamWithFollowupUser,
+      tasksById: tasksMap,
+    });
+    expect(
+      supersededKeys.has(formatCoordinatorBubbleKey('assistant:card-turn', 'b-card-only'))
+    ).toBe(true);
+    expect(
+      supersededKeys.has(formatCoordinatorBubbleKey('assistant:card-turn', 'b-with-card'))
+    ).toBe(false);
   });
 });

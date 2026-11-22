@@ -7,6 +7,7 @@ import {
   sessionHistoryWriteIntentDigest,
   SessionHistoryReadResponseSchema,
   isContainedSession,
+  isCoordinatorSession,
 } from '@lody/shared';
 import { setTimeout as backfillWait } from 'node:timers/promises';
 import {
@@ -2703,12 +2704,23 @@ export class MessageHandler {
   ): Promise<string | undefined> {
     if (!userTurnId) return undefined;
     try {
+      const ownMetaRow = await this.workspaceDocument.repo
+        .getDocMeta(getSessionRoomId(sessionId))
+        .catch(() => undefined);
+      const isCoordinator = isCoordinatorSession(ownMetaRow?.meta as SessionMeta | undefined);
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const backend = await this.getSessionBackend(sessionDoc);
       return await resolveCoordinatorPromptReplyHeader({
         history: backend.history,
         workspaceId,
         userTurnId,
+        isCoordinator,
+        readSessionTitle: async (targetId) => {
+          const targetRow = await this.workspaceDocument.repo
+            .getDocMeta(getSessionRoomId(targetId))
+            .catch(() => undefined);
+          return (targetRow?.meta as SessionMeta | undefined)?.title;
+        },
       });
     } catch (error) {
       this.logger.warn(

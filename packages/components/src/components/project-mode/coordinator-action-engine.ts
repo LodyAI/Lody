@@ -4,15 +4,18 @@ import {
   extractActionLinkedSessionIds,
   extractLinkedSessionIdsFromText,
   hasWorkspaceChanges,
+  matchUserMessageToOpenCoordinatorCards,
   normalizeCoordinatorActionResolutions,
   normalizeCoordinatorActionSpecs,
   normalizeCoordinatorProactiveCard,
+  normalizeSessionTurnInputConfig,
   type CoordinatorActionResolution,
   type CoordinatorActionSpec,
   type CoordinatorCardKind,
   type CoordinatorReplyRef,
   type GitHubMergeMethod,
   type MessageContent,
+  type OpenCoordinatorCardCandidate,
   type SessionId,
 } from '@lody/shared';
 import type { ChatStreamItem } from '@/components/ai-gui/view';
@@ -735,4 +738,146 @@ export function resolveCoordinatorProactiveCard(args: {
     customFeedbackSummary:
       customFeedback?.status === 'executed' ? customFeedback.summary : undefined,
   };
+}
+
+/**
+ * Identifies unchosen proactive cards (`turnId\0bubbleId`) that have been
+ * superseded by a subsequent user message in the composer or by newer
+ * coordinator delegation to the same task, so outdated open cards hide
+ * automatically once the user gives new instructions.
+ */
+export function buildSupersededCoordinatorCardKeys(args: {
+  items: readonly ChatStreamItem[];
+  tasksById?: ReadonlyMap<string, ProjectBoardRow>;
+  hasPendingLocalUserMessage?: boolean;
+}): ReadonlySet<string> {
+  const { items, tasksById, hasPendingLocalUserMessage = false } = args;
+  const superseded = new Set<string>();
+  let openCards: OpenCoordinatorCardCandidate[] = [];
+  let lastAssistantTurnId: string | undefined;
+
+  for (const streamItem of items) {
+    if (streamItem.type !== 'message') continue;
+    const msg = streamItem.message;
+
+    if (msg.role === 'assistant') {
+      lastAssistantTurnId = msg.id;
+      for (const entry of msg.items) {
+        if (entry.type !== 'coordinator_message') continue;
+        const normalizedCard = normalizeCoordinatorProactiveCard(entry.card);
+        const legacyActions = normalizedCard
+          ? []
+          : normalizeCoordinatorActionSpecs(entry.actions);
+        if (!normalizedCard && legacyActions.length === 0) continue;
+
+        const actions = normalizedCard ? normalizedCard.actions : legacyActions;
+        const resolutions = normalizeCoordinatorActionResolutions(entry.actionResolutions);
+        const alreadyChosen =
+          Boolean(resolutions[COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID]?.status === 'executed') ||
+          actions.some((act) => {
+            const st = resolutions[act.id]?.status;
+            return st === 'executed' || st === 'dismissed';
+          });
+        if (alreadyChosen) continue;
+
+        const linkedIds = extractBubbleLinkedSessionIds(entry);
+        const taskNumbers: number[] = [];
+        const taskTitles: string[] = [];
+        const prNumbers: number[] = [];
+        if (tasksById) {
+          for (const sid of linkedIds) {
+            const task = tasksById.get(sid);
+            if (!task) continue;
+            if (task.taskNumber !== null) taskNumbers.push(task.taskNumber);
+            if (task.session.title?.trim()) taskTitles.push(task.session.title.trim());
+            if (task.pullRequest?.number !== null && task.pullRequest?.number !== undefined) {
+              prNumbers.push(task.pullRequest.number);
+            }
+          }
+        }
+
+        openCards.push({
+          key: formatCoordinatorBubbleKey(msg.id, entry.id),
+          turnId: msg.id,
+          bubbleId: entry.id,
+          threadRootId: entry.replyTo?.threadRootId,
+          cardTitle: normalizedCard?.title ?? '',
+          cardSummary: normalizedCard?.summary,
+          bubbleBody: entry.body,
+          actionTexts: actions.flatMap((a) =>
+            a.description ? [a.label, a.description] : [a.label]
+          ),
+          linkedSessionIds: linkedIds,
+          taskNumbers,
+          taskTitles,
+          prNumbers,
+        });
+      }
+      continue;
+    }
+
+    if (msg.role === 'user' && openCards.length > 0) {
+      const textParts: string[] = [];
+      for (const part of msg.items) {
+        if (part.type === 'text' && part.text.trim()) {
+          textParts.push(part.text.trim());
+        }
+      }
+      const config = normalizeSessionTurnInputConfig(msg.inputConfig);
+      const userText = textParts.join('\n\n') || config?.prompt?.trim() || '';
+      const replyTo = config?.replyTo;
+      const markedOpenCards = openCards.map((c) => ({
+        ...c,
+        isImmediatelyPrecedingTurn: c.turnId === lastAssistantTurnId,
+      }));
+      const matched = new Set(
+        matchUserMessageToOpenCoordinatorCards({
+          text: userText,
+          replyToTargetTurnId: replyTo?.target.turnId,
+          replyToTargetBubbleId:
+            replyTo?.target.kind === 'coordinator_bubble' ? replyTo.target.bubbleId : undefined,
+          replyToThreadRootId: replyTo?.threadRootId,
+          openCards: markedOpenCards,
+        })
+      );
+      if (matched.size > 0) {
+        for (const key of matched) superseded.add(key);
+        openCards = openCards.filter((c) => !matched.has(c.key));
+      }
+      lastAssistantTurnId = undefined;
+      continue;
+    }
+
+    if (msg.role === 'system' && openCards.length > 0) {
+      const progressedSessions = new Set<string>();
+      for (const sysItem of msg.items) {
+        if (sysItem.type === 'operation_progress') {
+          for (const targetItem of sysItem.items) {
+            progressedSessions.add(targetItem.target.sessionId);
+          }
+        }
+      }
+      if (progressedSessions.size > 0) {
+        openCards = openCards.filter((c) => {
+          const sids = c.linkedSessionIds ?? [];
+          if (sids.length > 0 && sids.every((sid) => progressedSessions.has(sid))) {
+            superseded.add(c.key);
+            return false;
+          }
+          return true;
+        });
+      }
+    }
+  }
+
+  if (hasPendingLocalUserMessage && openCards.length > 0) {
+    const preceding = openCards.filter((c) => c.turnId === lastAssistantTurnId);
+    if (preceding.length === 1) {
+      superseded.add(preceding[0]!.key);
+    } else if (openCards.length === 1) {
+      superseded.add(openCards[0]!.key);
+    }
+  }
+
+  return superseded;
 }

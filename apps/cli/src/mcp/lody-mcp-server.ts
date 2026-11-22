@@ -332,7 +332,7 @@ const CoordinatorSendMessageCardInputSchema = z
       .min(1)
       .max(COORDINATOR_ACTIONS_MAX_COUNT)
       .describe(
-        '1-4 predicted next-step or decision options in the user language. Put the recommended choice first with tone: "primary" and include a 1-sentence description on each option; the card already provides a built-in custom-feedback input.'
+        '1-4 predicted next-step or decision options in the user language. Put the recommended choice first with tone: "primary" and include a 1-sentence description on each option; the user can type directly in the chat input for any other instructions.'
       ),
   })
   .strict();

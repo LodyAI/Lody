@@ -16,6 +16,7 @@ import { planOperationProgress } from '../src/session-data/operation-progress';
 import { formatCoordinatorAnchorId, parseCoordinatorAnchorId } from '../src/coordinator-threads';
 import {
   computeCoordinatorActionDedupKey,
+  matchUserMessageToOpenCoordinatorCards,
   normalizeCoordinatorActionSpecs,
   normalizeCoordinatorProactiveCard,
 } from '../src/coordinator-actions';
@@ -997,4 +998,44 @@ it('syncs coordinator bubble replies, originThreadId progress, and shallow direc
       },
     ],
   });
+
+  const openCards = [
+    {
+      key: 't3\0card-speed',
+      turnId: 't3',
+      bubbleId: 'card-speed',
+      cardTitle: 'Composer 单闪电与双闪电已可预览',
+      taskNumbers: [3],
+      taskTitles: ['修复 Lody composer 速度图标'],
+      prNumbers: [2631],
+    },
+    {
+      key: 't4\0card-avatar',
+      turnId: 't4',
+      bubbleId: 'card-avatar',
+      isImmediatelyPrecedingTurn: true,
+      cardTitle: '10 种 Lottie 头像可离线试玩',
+      cardSummary: '水母是默认角色，已可导出选中头像。',
+      taskNumbers: [4],
+      taskTitles: ['Lody 水生动物 Lottie 可定制头像'],
+    },
+  ];
+  expect(
+    matchUserMessageToOpenCoordinatorCards({
+      text: '头像的效果有一些粗糙，你让它可以先生成图片给我看',
+      openCards,
+    })
+  ).toEqual(['t4\0card-avatar']);
+  expect(
+    matchUserMessageToOpenCoordinatorCards({
+      text: '把 T3 的 #2631 先合并了吧',
+      openCards,
+    })
+  ).toEqual(['t3\0card-speed']);
+  expect(
+    matchUserMessageToOpenCoordinatorCards({
+      text: '好，就按推荐的执行',
+      openCards,
+    })
+  ).toEqual(['t4\0card-avatar']);
 });

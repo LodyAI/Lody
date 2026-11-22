@@ -3097,5 +3097,32 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       },
       createdAt: expect.any(Number),
     });
+
+    await backend.appendHistoryTurn({
+      id: 'user-plain-followup',
+      role: 'user',
+      timestamp: new Date(1_700_000_006_000).toISOString(),
+      inputConfig: {
+        prompt: '排查结果我看过了，先别急着提 PR，让它补一个真机模拟器验证再说',
+        inputBlocks: [
+          { type: 'text', text: '排查结果我看过了，先别急着提 PR，让它补一个真机模拟器验证再说' },
+        ],
+        cliType: 'builtin',
+        agentType: 'claude',
+      },
+      items: [
+        { type: 'text', text: '排查结果我看过了，先别急着提 PR，让它补一个真机模拟器验证再说' },
+      ],
+    });
+
+    const implicitCardHeader = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-plain-followup',
+      isCoordinator: true,
+    });
+    expect(implicitCardHeader).toContain('<related_card_context');
+    expect(implicitCardHeader).toContain('排查已完成，下一步如何推进？');
+    expect(implicitCardHeader).toContain('child-ios-fix');
   });
 });

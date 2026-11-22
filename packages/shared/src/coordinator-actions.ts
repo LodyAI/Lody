@@ -263,3 +263,205 @@ export function extractActionLinkedSessionIds(
   }
   return out;
 }
+
+export type OpenCoordinatorCardCandidate = {
+  readonly key: string;
+  readonly turnId: string;
+  readonly bubbleId: string;
+  readonly threadRootId?: string;
+  readonly isImmediatelyPrecedingTurn?: boolean;
+  readonly cardTitle: string;
+  readonly cardSummary?: string;
+  readonly bubbleBody?: string;
+  readonly actionTexts?: readonly string[];
+  readonly linkedSessionIds?: readonly string[];
+  readonly taskNumbers?: readonly number[];
+  readonly taskTitles?: readonly string[];
+  readonly prNumbers?: readonly number[];
+};
+
+export type CoordinatorUserCardMatchInput = {
+  readonly text: string;
+  readonly replyToTargetTurnId?: string;
+  readonly replyToTargetBubbleId?: string;
+  readonly replyToThreadRootId?: string;
+  readonly openCards: readonly OpenCoordinatorCardCandidate[];
+};
+
+const LATIN_STOPWORDS = new Set([
+  'the',
+  'and',
+  'for',
+  'with',
+  'that',
+  'this',
+  'from',
+  'into',
+  'let',
+  'can',
+  'you',
+  'please',
+  'pr',
+  'pull',
+  'request',
+  'task',
+  'session',
+  'lody',
+]);
+
+const CJK_STOP_BIGRAMS = new Set([
+  '这个',
+  '那个',
+  '可以',
+  '一下',
+  '我们',
+  '你们',
+  '他们',
+  '给我',
+  '帮我',
+  '什么',
+  '怎么',
+  '如果',
+  '然后',
+  '现在',
+  '已经',
+  '需要',
+  '不要',
+  '先不',
+  '还是',
+  '或者',
+  '觉得',
+  '一些',
+  '一样',
+  '一个',
+  '先看',
+  '看看',
+  '处理',
+  '修改',
+  '问题',
+  '任务',
+  '对话',
+  '直接',
+  '顺便',
+  '继续',
+]);
+
+function extractCardMatchTokens(text: string): string[] {
+  const lowered = text.toLowerCase();
+  const tokens = new Set<string>();
+  for (const match of lowered.matchAll(/[a-z0-9_-]{2,}/gu)) {
+    const word = match[0];
+    if (word && !LATIN_STOPWORDS.has(word) && !/^t\d+$/u.test(word)) {
+      tokens.add(word);
+    }
+  }
+  for (const match of lowered.matchAll(/\p{Script=Han}{2,}/gu)) {
+    const run = match[0];
+    if (!run) continue;
+    const chars = Array.from(run);
+    for (let i = 0; i + 1 < chars.length; i += 1) {
+      const bigram = `${chars[i]}${chars[i + 1]}`;
+      if (!CJK_STOP_BIGRAMS.has(bigram)) {
+        tokens.add(bigram);
+      }
+    }
+  }
+  return Array.from(tokens);
+}
+
+/**
+ * Resolves which open proactive coordinator card(s) a user's composer message
+ * refers to, combining explicit reply anchors, `T<n>` / `#PR` / session-link
+ * references, CJK/Latin topic overlap, and immediate-turn adjacency.
+ */
+export function matchUserMessageToOpenCoordinatorCards(
+  input: CoordinatorUserCardMatchInput
+): string[] {
+  const { openCards } = input;
+  if (openCards.length === 0) return [];
+
+  if (input.replyToTargetTurnId && input.replyToTargetBubbleId) {
+    const exact = openCards.filter(
+      (c) =>
+        c.turnId === input.replyToTargetTurnId && c.bubbleId === input.replyToTargetBubbleId
+    );
+    if (exact.length > 0) return exact.map((c) => c.key);
+  }
+
+  if (input.replyToThreadRootId) {
+    const byThread = openCards.filter((c) => c.threadRootId === input.replyToThreadRootId);
+    if (byThread.length > 0) return byThread.map((c) => c.key);
+  }
+
+  const trimmed = input.text.trim();
+  if (!trimmed) return [];
+
+  const mentionedSessions = new Set<string>(extractLinkedSessionIdsFromText(trimmed));
+  const mentionedTasks = new Set<number>();
+  for (const m of trimmed.matchAll(/(?:^|[^a-z0-9])t(\d{1,4})(?=$|[^a-z0-9])/giu)) {
+    mentionedTasks.add(Number(m[1]));
+  }
+  const mentionedPrs = new Set<number>();
+  for (const m of trimmed.matchAll(/(?:^|[^\w/])#(\d{1,7})\b/gu)) {
+    mentionedPrs.add(Number(m[1]));
+  }
+  const userTokens = extractCardMatchTokens(trimmed);
+
+  const scored = openCards.map((card, index) => {
+    let score = 0;
+    if (card.linkedSessionIds?.some((sid) => mentionedSessions.has(sid))) {
+      score += 120;
+    }
+    if (card.taskNumbers?.some((num) => mentionedTasks.has(num))) {
+      score += 100;
+    }
+    if (card.prNumbers?.some((pr) => mentionedPrs.has(pr))) {
+      score += 100;
+    }
+    if (userTokens.length > 0) {
+      const corpus = [
+        card.cardTitle,
+        card.cardSummary,
+        card.bubbleBody,
+        ...(card.taskTitles ?? []),
+        ...(card.actionTexts ?? []),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      for (const token of userTokens) {
+        if (corpus.includes(token)) {
+          score += 12;
+        }
+      }
+    }
+    if (score > 0 && card.isImmediatelyPrecedingTurn) {
+      score += 4;
+    }
+    return { card, score, index };
+  });
+
+  const maxScore = Math.max(...scored.map((item) => item.score));
+  if (maxScore >= 100) {
+    return scored
+      .filter((item) => item.score >= 100)
+      .sort((a, b) => b.score - a.score || b.index - a.index)
+      .map((item) => item.card.key);
+  }
+  if (maxScore > 0) {
+    const cutoff = Math.max(12, maxScore * 0.65);
+    return scored
+      .filter((item) => item.score >= cutoff)
+      .sort((a, b) => b.score - a.score || b.index - a.index)
+      .map((item) => item.card.key);
+  }
+
+  const preceding = openCards.filter((c) => c.isImmediatelyPrecedingTurn);
+  if (preceding.length === 1) {
+    return [preceding[0]!.key];
+  }
+  if (openCards.length === 1) {
+    return [openCards[0]!.key];
+  }
+  return [];
+}

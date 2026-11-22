@@ -5,6 +5,8 @@ import {
   extractLinkedSessionIdsFromText,
   formatCoordinatorAnchorId,
   formatCoordinatorReplyContextBlock,
+  matchUserMessageToOpenCoordinatorCards,
+  normalizeCoordinatorActionResolutions,
   normalizeCoordinatorActionSpecs,
   normalizeCoordinatorProactiveCard,
   normalizeSessionTurnInputConfig,
@@ -12,6 +14,7 @@ import {
   parseThreadRootsScalar,
   type CoordinatorAnchorRef,
   type CoordinatorReplyRef,
+  type OpenCoordinatorCardCandidate,
   type OperationCompletionContent,
   type SessionId,
   type WorkspaceId,
@@ -190,20 +193,191 @@ export async function readAnchorSnapshotFromHistory(
   };
 }
 
+const MAX_RECENT_CARD_SCAN_TURNS = 8;
+
+const escapeXmlAttr = (value: string): string =>
+  value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+async function resolveImplicitRelatedCardHeader(args: {
+  history: SessionHistoryReader;
+  workspaceId: WorkspaceId;
+  userTurnId: string;
+  userText: string;
+  readSessionTitle?: (sessionId: SessionId) => Promise<string | undefined> | string | undefined;
+}): Promise<string | undefined> {
+  if (!args.userText.trim()) return undefined;
+  const total = await args.history.count();
+  if (total === 0) return undefined;
+  const windowSize = Math.min(total, MAX_RECENT_CARD_SCAN_TURNS + 4);
+  const start = Math.max(0, total - windowSize);
+  const directory = await args.history.readDirectory(start, windowSize);
+
+  let targetIdx = directory.findIndex(
+    (row) => (row?.turnId ?? row?.scalars?.id) === args.userTurnId
+  );
+  if (targetIdx < 0) {
+    targetIdx = directory.length;
+  }
+  if (targetIdx === 0) return undefined;
+
+  const priorTurns: SessionTurn[] = [];
+  for (let i = Math.max(0, targetIdx - MAX_RECENT_CARD_SCAN_TURNS); i < targetIdx; i += 1) {
+    const turnId = directory[i]?.turnId ?? directory[i]?.scalars?.id;
+    if (!turnId || turnId === args.userTurnId) continue;
+    const read = await args.history.readTurn(turnId);
+    if (read.state === 'ready') {
+      priorTurns.push(read.turn);
+    }
+  }
+  if (priorTurns.length === 0) return undefined;
+
+  let lastAssistantTurnId: string | undefined;
+  for (let i = priorTurns.length - 1; i >= 0; i -= 1) {
+    if (priorTurns[i]?.role === 'assistant') {
+      lastAssistantTurnId = priorTurns[i]!.id;
+      break;
+    }
+    if (priorTurns[i]?.role === 'user') {
+      break;
+    }
+  }
+
+  type RichCandidate = OpenCoordinatorCardCandidate & {
+    optionLabels: string[];
+  };
+
+  let openCards: RichCandidate[] = [];
+  const titleCache = new Map<string, string>();
+  const getTitle = async (sid: SessionId): Promise<string | undefined> => {
+    if (titleCache.has(sid)) return titleCache.get(sid);
+    const loaded = (await args.readSessionTitle?.(sid))?.trim();
+    if (loaded) titleCache.set(sid, loaded);
+    return loaded;
+  };
+
+  for (const turn of priorTurns) {
+    if (turn.role === 'assistant') {
+      for (const item of turn.items ?? []) {
+        if (!isRecord(item) || item.type !== 'coordinator_message') continue;
+        const card = normalizeCoordinatorProactiveCard(item.card);
+        if (!card) continue;
+        const resolutions = normalizeCoordinatorActionResolutions(item.actionResolutions);
+        const alreadyHandled = card.actions.some((act) => {
+          const st = resolutions[act.id]?.status;
+          return st === 'executed' || st === 'dismissed';
+        });
+        if (alreadyHandled) continue;
+
+        const bubbleId = String(item.id ?? '');
+        const linkedIds = collectTurnLinkedSessionIds(turn, bubbleId);
+        const taskTitles: string[] = [];
+        for (const sid of linkedIds) {
+          const title = await getTitle(sid);
+          if (title) taskTitles.push(title);
+        }
+        const replyToRec = isRecord(item.replyTo) ? item.replyTo : undefined;
+        openCards.push({
+          key: `${turn.id}\0${bubbleId}`,
+          turnId: turn.id,
+          bubbleId,
+          threadRootId:
+            typeof replyToRec?.threadRootId === 'string' ? replyToRec.threadRootId : undefined,
+          isImmediatelyPrecedingTurn: turn.id === lastAssistantTurnId,
+          cardTitle: card.title,
+          cardSummary: card.summary,
+          bubbleBody: typeof item.body === 'string' ? item.body : undefined,
+          actionTexts: card.actions.flatMap((a) =>
+            a.description ? [a.label, a.description] : [a.label]
+          ),
+          optionLabels: card.actions.map((a) => a.label),
+          linkedSessionIds: linkedIds,
+          taskTitles,
+        });
+      }
+    } else if (turn.role === 'user' && openCards.length > 0) {
+      const earlierConfig = normalizeSessionTurnInputConfig(turn.inputConfig);
+      const earlierReply = earlierConfig?.replyTo;
+      const earlierMatched = new Set(
+        matchUserMessageToOpenCoordinatorCards({
+          text: extractUserTurnPlainText(turn),
+          replyToTargetTurnId: earlierReply?.target.turnId,
+          replyToTargetBubbleId:
+            earlierReply?.target.kind === 'coordinator_bubble'
+              ? earlierReply.target.bubbleId
+              : undefined,
+          replyToThreadRootId: earlierReply?.threadRootId,
+          openCards,
+        })
+      );
+      if (earlierMatched.size > 0) {
+        openCards = openCards.filter((c) => !earlierMatched.has(c.key));
+      }
+    }
+  }
+
+  if (openCards.length === 0) return undefined;
+
+  const matchedKeys = matchUserMessageToOpenCoordinatorCards({
+    text: args.userText,
+    openCards,
+  });
+  if (matchedKeys.length === 0) return undefined;
+
+  const matchedSet = new Set(matchedKeys);
+  const blocks: string[] = [];
+  for (const card of openCards) {
+    if (!matchedSet.has(card.key)) continue;
+    const anchorId = formatCoordinatorAnchorId({
+      kind: 'coordinator_bubble',
+      turnId: card.turnId,
+      bubbleId: card.bubbleId,
+    });
+    const sessionLinks = (card.linkedSessionIds ?? []).map(
+      (sid) => `lody://session/${sid}?workspace=${args.workspaceId}`
+    );
+    const attrs = [
+      `card_id="${escapeXmlAttr(anchorId)}"`,
+      ...(sessionLinks.length > 0
+        ? [`related_sessions="${escapeXmlAttr(sessionLinks.join(','))}"`]
+        : []),
+    ].join(' ');
+    const lines = [`<related_card_context ${attrs}>`, `Card: ${card.cardTitle}`];
+    if (card.cardSummary) lines.push(`Summary: ${card.cardSummary}`);
+    if (card.optionLabels.length > 0) {
+      lines.push(`Suggested options: ${card.optionLabels.join(' | ')}`);
+    }
+    lines.push('</related_card_context>');
+    blocks.push(lines.join('\n'));
+  }
+
+  return blocks.length > 0 ? blocks.join('\n') : undefined;
+}
+
 /**
- * Builds the `<reply_context ...>` prompt header when a user replies to a
- * specific message or bubble inside a coordinator conversation.
+ * Builds the `<reply_context ...>` or `<related_card_context ...>` prompt header
+ * for a user message inside a coordinator conversation.
  */
 export async function resolveCoordinatorPromptReplyHeader(args: {
   history: SessionHistoryReader;
   workspaceId: WorkspaceId;
   userTurnId: string;
+  isCoordinator?: boolean;
+  readSessionTitle?: (sessionId: SessionId) => Promise<string | undefined> | string | undefined;
 }): Promise<string | undefined> {
   const inputRead = await args.history.readTurn(args.userTurnId);
   if (inputRead.state !== 'ready' || inputRead.turn.role !== 'user') return undefined;
   const config = normalizeSessionTurnInputConfig(inputRead.turn.inputConfig);
   const replyTo = config?.replyTo;
-  if (!replyTo) return undefined;
+  if (!replyTo) {
+    if (args.isCoordinator === false) return undefined;
+    return await resolveImplicitRelatedCardHeader({
+      history: args.history,
+      workspaceId: args.workspaceId,
+      userTurnId: args.userTurnId,
+      userText: extractUserTurnPlainText(inputRead.turn),
+      readSessionTitle: args.readSessionTitle,
+    });
+  }
 
   const targetSnapshot = await readAnchorSnapshotFromHistory(args.history, replyTo.target);
   const quotedText = targetSnapshot?.text || replyTo.previewText;

@@ -312,6 +312,8 @@ import { CoordinatorProactiveCard } from '@/components/project-mode/coordinator-
 import { CoordinatorChildAttentionCards } from '@/components/project-mode/coordinator-child-attention-cards';
 import {
   buildLatestCoordinatorBubbleByTaskId,
+  buildSupersededCoordinatorCardKeys,
+  formatCoordinatorBubbleKey,
   resolveCoordinatorProactiveCard,
 } from '@/components/project-mode/coordinator-action-engine';
 import {
@@ -2041,6 +2043,17 @@ export const SessionChatStreamView = forwardRef<
       () => (coordinatorBubbles ? buildLatestCoordinatorBubbleByTaskId(items) : undefined),
       [coordinatorBubbles, items]
     );
+    const supersededCoordinatorCardKeys = useMemo(
+      () =>
+        coordinatorBubbles
+          ? buildSupersededCoordinatorCardKeys({
+              items,
+              tasksById: coordinatorContext?.tasks,
+              hasPendingLocalUserMessage: (localUserMessages?.length ?? 0) > 0,
+            })
+          : undefined,
+      [coordinatorBubbles, coordinatorContext?.tasks, items, localUserMessages?.length]
+    );
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -2826,7 +2839,8 @@ export const SessionChatStreamView = forwardRef<
 
     return (
       <CoordinatorStreamLatestBubbleContext.Provider value={latestCoordinatorBubbleByTaskId}>
-        <SessionChatActionContext.Provider value={chatActionContextValue}>
+        <CoordinatorSupersededCardsContext.Provider value={supersededCoordinatorCardKeys}>
+          <SessionChatActionContext.Provider value={chatActionContextValue}>
           <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
             <LiveTurnContext.Provider value={liveTurnContextValue}>
               <ContainerQueryProvider
@@ -2951,7 +2965,8 @@ export const SessionChatStreamView = forwardRef<
               </ContainerQueryProvider>
             </LiveTurnContext.Provider>
           </SessionImagePreviewContext.Provider>
-        </SessionChatActionContext.Provider>
+          </SessionChatActionContext.Provider>
+        </CoordinatorSupersededCardsContext.Provider>
       </CoordinatorStreamLatestBubbleContext.Provider>
     );
   }
@@ -6602,11 +6617,12 @@ const AssistantChatItem = memo(function AssistantChatItem({
     </>
   );
 
-  // Progress prose keeps its reading gap even inside expanded work. Only
-  // individual activity details share the compact tool-row pitch.
+  const supersededCoordinatorCards = useContext(CoordinatorSupersededCardsContext);
+  const isSupersededCoordinatorCard =
+    content.kind === 'coordinator_card' &&
+    Boolean(supersededCoordinatorCards?.has(formatCoordinatorBubbleKey(message.id, content.entry.id)));
+
   const turnSiblingGap = conversationSurface.proseRow;
-  /* Surfaces need more separation than prose, whose leading already supplies
-     part of the visual gap. Keep both gaps in the conversation token group. */
   const cardSiblingGap = conversationSurface.surfaceRow;
   const verticalClass = (() => {
     switch (content.kind) {
@@ -6615,7 +6631,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
       case 'coordinator_bubble':
         return coordinatorBubbleStyles.siblingGap;
       case 'coordinator_card':
-        return coordinatorBubbleStyles.cardGap;
+        return isSupersededCoordinatorCard
+          ? coordinatorBubbleStyles.supersededCardGap
+          : coordinatorBubbleStyles.cardGap;
       case 'coordinator_notice':
         return coordinatorBubbleStyles.cardGap;
       case 'plan':
@@ -6891,6 +6909,8 @@ const CoordinatorStreamLatestBubbleContext = createContext<ReadonlyMap<string, s
   undefined
 );
 
+const CoordinatorSupersededCardsContext = createContext<ReadonlySet<string> | undefined>(undefined);
+
 function CoordinatorReplyBubble({
   messageId,
   entry,
@@ -7053,6 +7073,10 @@ function CoordinatorProactiveCardRow({
 }) {
   const { t } = useTranslation();
   const coordinator = useCoordinatorConversation();
+  const supersededCards = useContext(CoordinatorSupersededCardsContext);
+  const isSuperseded = Boolean(
+    supersededCards?.has(formatCoordinatorBubbleKey(messageId, entry.id))
+  );
   const resolvedCard = useMemo(
     () =>
       resolveCoordinatorProactiveCard({
@@ -7070,6 +7094,7 @@ function CoordinatorProactiveCardRow({
   return (
     <CoordinatorProactiveCard
       card={resolvedCard}
+      superseded={isSuperseded}
       onOpenTask={coordinator?.openTask}
       onOpenPr={coordinator?.openPr}
       onExecuteAction={
@@ -7082,19 +7107,6 @@ function CoordinatorProactiveCardRow({
                 bubbleReplyTo: entry.replyTo,
                 activeThreadRootId: coordinator.activeThreadRootId,
                 action,
-              })
-          : undefined
-      }
-      onSubmitFeedback={
-        coordinator?.onSubmitCardFeedback
-          ? (feedback) =>
-              coordinator.onSubmitCardFeedback!({
-                turnId: messageId,
-                bubbleId: entry.id,
-                cardTitle: resolvedCard.title,
-                bubbleReplyTo: entry.replyTo,
-                activeThreadRootId: coordinator.activeThreadRootId,
-                feedback,
               })
           : undefined
       }
@@ -7278,6 +7290,9 @@ const coordinatorBubbleStyles = stylex.create({
   cardGap: {
     paddingTop: space[2],
     paddingBottom: 2,
+  },
+  supersededCardGap: {
+    paddingBlock: 0,
   },
   firstRow: {
     paddingTop: 4,
