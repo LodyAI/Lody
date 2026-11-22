@@ -14,13 +14,19 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
-import { getLoroMetaStreamId, getWorkspaceFlockDocId, type WorkspaceId } from '@lody/shared';
+import {
+  getLoroMetaStreamId,
+  getLoroStreamIdForDocId,
+  getWorkspaceFlockDocId,
+  type WorkspaceId,
+} from '@lody/shared';
 import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { LoroRepo } from 'loro-repo';
 import {
   createCliSqliteRepoStore,
   hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
+  ProcessDocumentRemoteCursorStore,
   type CliSqliteRepoStore,
   type DocumentCursorScope,
 } from '../src/lib/loro/sqlite-repo-store';
@@ -500,6 +506,91 @@ describe('CLI Streams checkpoints are bound to the replica that loaded them', ()
     expect(doc.getText('t').toString()).toBe('complete history');
     expect(rows()).toEqual(before);
   });
+
+  it('bootstraps a pending-only replica and restores its missing causal prefix without writing shared cursors', async () => {
+    const docId = 'session-pending-seed';
+    const remote = new LoroDoc();
+    remote.setPeerId('1');
+    remote.getText('t').insert(0, 'A');
+    remote.commit();
+    const beforeU2 = remote.oplogVersion();
+    remote.getText('t').push('B');
+    remote.commit();
+    const u2 = remote.export({ mode: 'update', from: beforeU2 });
+    const oneShot = await openCliProcess('process');
+    const oldDoc = (await oneShot.repo.openPersistedDoc(docId)).doc;
+    expect(oldDoc.import(u2).pending?.size).toBeGreaterThan(0);
+    // Pinned Loro 1.17.0 retains pending separately from both version vectors.
+    expect([...oldDoc.oplogVersion().toJSON()]).toEqual([]);
+    expect([...oldDoc.version().toJSON()]).toEqual([]);
+    expect(oldDoc.exportPendingUpdates()?.byteLength).toBeGreaterThan(0);
+
+    createStreamsServer(remote.export({ mode: 'snapshot' }));
+    const daemon = await openCliProcess();
+    expect((await syncDoc(daemon, docId, (await daemon.repo.openPersistedDoc(docId)).doc)).ok).toBe(
+      true
+    );
+    const rows = () => daemon.store.sqliteStore.db.prepare('SELECT * FROM remote_cursors').all();
+    const before = rows();
+    const row = before[0] as { stream_url: string };
+    expect(
+      (await daemon.documentRemoteCursorStore.load(row.stream_url))?.serverLowerBoundVersion
+    ).toEqual({ '1': 2 });
+    const recovery = createStreamsServer(remote.export({ mode: 'snapshot' }));
+    expect((await syncDoc(oneShot, docId, oldDoc)).ok).toBe(true);
+    expect(recovery.bootstraps()).toBe(1);
+    expect(oldDoc.getText('t').toString()).toBe('AB');
+    expect(oldDoc.version().toJSON()).toEqual(remote.version().toJSON());
+    expect(oldDoc.exportPendingUpdates()).toBeUndefined();
+    expect(rows()).toEqual(before);
+  });
+
+  it.each(['pending', 'detached'] as const)(
+    'refuses a seed for a %s replica even when its oplog covers the cursor',
+    async (state) => {
+      const docId = 'session-applied-seed';
+      const remote = new LoroDoc();
+      remote.setPeerId('1');
+      remote.getText('t').insert(0, 'A');
+      remote.commit();
+      const prefix = remote.frontiers();
+      remote.getText('t').push('B');
+      remote.commit();
+      createStreamsServer(remote.export({ mode: 'snapshot' }));
+      const daemon = await openCliProcess();
+      expect(
+        (await syncDoc(daemon, docId, (await daemon.repo.openPersistedDoc(docId)).doc)).ok
+      ).toBe(true);
+      const rows = () => daemon.store.sqliteStore.db.prepare('SELECT * FROM remote_cursors').all();
+      const before = rows();
+      const row = before[0] as { stream_url: string };
+      const oneShot = await openCliProcess('process');
+      const doc = (await oneShot.repo.openPersistedDoc(docId)).doc;
+      if (state === 'pending') {
+        remote.getText('t').push('C');
+        remote.commit();
+        const beforeD = remote.oplogVersion();
+        remote.getText('t').push('D');
+        remote.commit();
+        expect(
+          doc.import(remote.export({ mode: 'update', from: beforeD })).pending?.size
+        ).toBeGreaterThan(0);
+        expect([...doc.version().toJSON()]).toEqual([['1', 2]]);
+        expect(doc.exportPendingUpdates()?.byteLength).toBeGreaterThan(0);
+      } else {
+        doc.checkout(prefix);
+        expect([...doc.version().toJSON()]).toEqual([['1', 1]]);
+      }
+      expect([...doc.oplogVersion().toJSON()]).toEqual([['1', 2]]);
+      const cursors = oneShot.documentRemoteCursorStore;
+      if (!(cursors instanceof ProcessDocumentRemoteCursorStore))
+        throw new Error('missing process cursor store');
+      cursors.bindDocument(getLoroStreamIdForDocId(workspaceId, docId), doc);
+      expect(await cursors.load(row.stream_url)).toBeNull();
+      expect(rows()).toEqual(before);
+      if (state === 'detached') doc.attach();
+    }
+  );
 
   it('rejects a future peer even when every other peer clock is covered', async () => {
     const docId = 'session-future-peer';

@@ -57,7 +57,8 @@ see [observe scopes](../../commands/session-observe-runtime.ts).
 
 Per identity, share `repo.sqlite3`, not replicas. Meta/Flock cursors use
 `createRepoStreamsPersistence`. Only the daemon writes shared LoroDoc cursors.
-Process seeds require nonempty peer clocks covered by the synchronized document;
+Process seeds require nonempty peer clocks covered by the synchronized document's
+applied version and no pending updates;
 process saves and deletions stay in memory. The [decision](../../../../../.agents/notes/implemented/architecture/2026-09-27-loro-repo-flock-persistence-migration.md)
 explains why unchecked shared reads lose data. Never use a shared `remoteCursorStore`
 or schedule-only `onPersist*`. The incomplete-recovery scope survives reattachment.

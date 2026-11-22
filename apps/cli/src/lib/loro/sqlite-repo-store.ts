@@ -164,10 +164,12 @@ export class ProcessDocumentRemoteCursorStore implements RemoteCursorStore {
     // A concurrent save/delete wins over the asynchronous disk read.
     if (this.cursors.has(streamUrl)) return this.cursors.get(streamUrl) ?? null;
     if (doc !== this.documents.get(streamId)?.deref()) return null;
-    const version = doc ? new Map<string, number>(doc.oplogVersion().toJSON()) : undefined;
+    const version = doc ? new Map<string, number>(doc.version().toJSON()) : undefined;
+    const hasPending = (doc?.exportPendingUpdates()?.byteLength ?? 0) > 0;
     const clocks = cursor ? Object.entries(cursor.serverLowerBoundVersion) : [];
     const covered =
       version &&
+      !hasPending &&
       clocks.length > 0 &&
       clocks.every(
         ([peer, clock]) =>
@@ -209,15 +211,20 @@ export const createDocumentRemoteCursorStore = (
     server_lower_bound_version: z.string(),
     updated_at_ms: z.number(),
   });
+  let select: Database.Statement | undefined;
   return new ProcessDocumentRemoteCursorStore({
     load: async (streamUrl) => {
-      let database: Database.Database | undefined;
+      const database = (store.sqliteStore as unknown as { readonly db: Database.Database }).db;
+      if (!database.open) return null;
       try {
-        database = new Database(store.dbPath, { readonly: true, fileMustExist: true, timeout: 0 });
-        const select = database.prepare(
+        select ??= database.prepare(
           'SELECT next_offset, server_lower_bound_version, updated_at_ms FROM remote_cursors WHERE stream_url = ?'
         );
-
+      } catch {
+        return null;
+      }
+      if (!select.readonly) throw new Error('document_cursor_seed_query_must_be_readonly');
+      try {
         for (const url of [streamUrl, ...getLoroStreamsRemoteCursorUrlAliases(streamUrl)]) {
           const row = rowSchema.safeParse(select.get(url));
           if (!row.success) continue;
@@ -238,8 +245,6 @@ export const createDocumentRemoteCursorStore = (
         return null;
       } catch {
         return null;
-      } finally {
-        database?.close();
       }
     },
   });
