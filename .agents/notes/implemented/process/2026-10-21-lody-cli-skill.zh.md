@@ -7,12 +7,12 @@ Translation: current
 
 ## 摘要
 
-用户与 Agent 需要两类不同的 Lody 指引：覆盖工作流、界面入口与源码查证路径的产品使用指南，以及补充 `--help` 未涵盖的运行时前提、认证恢复与重试规则的 `lody` CLI 操作约定。两份面向外部用户的技能统一存放在独立的 `LodyAI/skills` 仓库，并以根目录 `skills` 子模块挂载到主仓，暂不内置进 MCP 技能服务，使 `skills.sh` 分发独立于 CLI 发版，同时通过 `.agents/skills` 软链接保留仓内发现能力。`lody` 通过四份按需参考、实时 `lody_help`/`--help`/`llms.txt` 自省及 `LodyAI/Lody` 规格与源码地图分层回答产品问题；`lody-cli` 负责安全登录、工作上下文与需人工确认的命令。技能文档与引用路径已完成静态核验，跨外部宿主的端到端自动触发尚未实测。
+用户与 Agent 需要两类不同的 Lody 指引：覆盖界面入口、应用内直达深链与源码查证路径的产品参考，以及补充 `--help` 未涵盖的运行时前提、认证恢复与重试规则的 `lody` CLI 操作约定。两份面向外部用户的技能统一存放在独立的 `LodyAI/skills` 仓库，并以根目录 `skills` 子模块挂载到主仓，暂不内置进 MCP 技能服务，使 `skills.sh` 分发独立于 CLI 发版，同时通过 `.agents/skills` 软链接保留仓内发现能力。`lody` 通过五份按需参考、实时 `lody_help`/`--help`/`llms.txt` 自省及 `LodyAI/Lody` 规格与源码地图分层回答产品问题；`lody-cli` 负责安全登录、工作上下文与需人工确认的命令。技能文档与引用路径已完成静态核验，跨外部宿主的端到端自动触发尚未实测。
 
 ## 决策
 
 - 面向外部用户的可安装技能统一由 `LodyAI/skills` 承载，并在主仓根目录挂载为 `skills` Git 子模块（正本位于 `skills/skills/lody/SKILL.md` 与 `skills/skills/lody-cli/SKILL.md`）。`.agents/skills/lody`、`.agents/skills/lody-cli` 与 `.claude/skills/lody-cli` 通过符号链接指向子模块内部，保持仓内技能发现不变，且暂不将 `lody` 打包进内置 MCP 技能服务。
-- 按职责拆分而非合并成单一巨型文档：`lody` 负责产品心智模型、最佳实践、界面/快捷键/预览/Role/MCP/E2EE 指引、故障排查以及 `LodyAI/Lody` 源码定位地图（`references/*.md`），涉及纯 CLI 调用细节时交由 `lody-cli`，涉及后台条件脚本编写时交由内置 `lody-automations`。
+- 按职责拆分而非合并成单一巨型文档：`lody` 负责产品概念、应用内直达深链、界面/快捷键/预览/Role/MCP/E2EE 指引、故障排查以及 `LodyAI/Lody` 源码定位地图（`references/*.md`），涉及纯 CLI 调用细节时交由 `lody-cli`，涉及后台条件脚本编写时交由内置 `lody-automations`。
 - `lody-cli` 面向全局安装 `lody` 或使用 `npx lody` 的外部用户与 Agent，只描述 CLI 产品行为，不涉及内部通信或构建步骤；`lody` 则在专门的源码寻址章节中提供 `LodyAI/Lody` 下 `specs/`、`.agents/docs/`、`locales/`、`packages/` 与 `apps/` 的权威阅读顺序，并明确说明开源客户端与闭源云端后端的仓库边界。
 - 只覆盖登录后的云端产品功能。开源本地版和 `migrate --from-oss` 导入不写入技能，正文开头明确这一范围，避免 Agent 将云端登录前提套用到本地版。
 - 登录指引对 Agent 安全：不在 Agent 里直接运行裸 `lody login`；由用户在终端运行，或由用户通过受控的密钥渠道提供 CLI API key 后使用 `--auth`。技能用只读命令探测认证，并区分 Lody token 失效与模型提供方凭据错误。

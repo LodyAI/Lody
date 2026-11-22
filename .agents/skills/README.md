@@ -36,7 +36,7 @@ in that file. `.claude/skills/archive-agent-notes` links to it. See the
 
 `lody` and `lody-cli` live in the [`skills`](../../skills/README.md) submodule (`LodyAI/skills`) at the repository root:
 
-- [`skills/skills/lody`](../../skills/skills/lody/SKILL.md) is the user-facing product guide: Lody's mental model, recommended workflows, UI/preview/shortcut references, Agent Config/Role/MCP boundaries, orchestration, E2EE workspaces, troubleshooting, and source-code lookup in `LodyAI/Lody`. `.agents/skills/lody` links to it.
+- [`skills/skills/lody`](../../skills/skills/lody/SKILL.md) is the user-facing product guide: Lody concepts, actionable in-app links, UI/preview/shortcut references, Agent Config/Role/MCP boundaries, orchestration, E2EE workspaces, troubleshooting, and source-code lookup in `LodyAI/Lody`. `.agents/skills/lody` links to it.
 - [`skills/skills/lody-cli`](../../skills/skills/lody-cli/SKILL.md) is the operating guide for the `lody` CLI: runtime prerequisites, sign-in recovery, work-context selection, selector and environment conventions, the schedule draft format, and confirmation-worthy commands. Built-in `--help` remains the flag authority. `.agents/skills/lody-cli` and `.claude/skills/lody-cli` link to it. See the [decision note](../notes/implemented/process/2026-10-21-lody-cli-skill.md).
 
 ## Session execution verification
