@@ -817,7 +817,7 @@ export const AggregateSearchSourceError: Story = {
         category(type, type, type === 'issue' ? 'Issues' : 'Pull Requests', type, [], {
           status: 'error' as const,
           message:
-            'Repository "example/example-repository" is not linked to your workspace. Add it in Settings → Integrations',
+            'GitHub could not list issues for "example/example-repository-with-a-long-name". Check the integration in Settings → Integrations and try again.',
         })
       ),
     ],

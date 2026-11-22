@@ -6,10 +6,12 @@ import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import {
+  useLegacyWorkspaceQueryStatus,
   useWorkspaceFeature,
   useWorkspaceFeatureReason,
   useMachineRpcFeatureReason,
 } from '@/hooks/use-workspace-feature';
+import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { useLocalSessionContinuation } from './use-local-session-continuation';
 import { SessionContinuationNote } from './session-continuation-note';
@@ -3007,17 +3009,34 @@ export const SessionChatInterface = memo(
     const [resolvingConflictsSessionId, setResolvingConflictsSessionId] =
       useState<SessionId | null>(null);
     const isResolvingConflicts = resolvingConflictsSessionId === session.id;
+    const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
     const repositories = useLegacyWorkspaceQuery(
       cloudOperations.github.getWorkspaceRepositories,
       workspaceId ? { workspaceId } : 'skip'
     );
-    const isRepoPublic = useMemo(() => {
-      if (!repoFullName || !repositories) return undefined;
-      const repo = repositories.find((r) => r.fullName === repoFullName);
-      return repo ? !repo.private : undefined;
-    }, [repoFullName, repositories]);
+    const linkedRepo = useMemo(
+      () => resolveLinkedWorkspaceGitHubRepo(repoFullName, repositories),
+      [repoFullName, repositories]
+    );
+    const isRepoPublic = linkedRepo?.isPublic;
+    const isRepoLinked = useMemo(() => {
+      if (!repoFullName || !hasHostedGitHub || legacyQueryStatus === 'blocked') return false;
+      if (session.project?.kind === 'local') return Boolean(linkedRepo);
+      if (repositories !== undefined) return Boolean(linkedRepo);
+      return undefined;
+    }, [
+      hasHostedGitHub,
+      legacyQueryStatus,
+      linkedRepo,
+      repoFullName,
+      repositories,
+      session.project?.kind,
+    ]);
 
-    const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(repoFullName, isRepoPublic);
+    const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(
+      isRepoLinked === false ? undefined : (linkedRepo?.fullName ?? repoFullName),
+      isRepoPublic
+    );
 
     type InputActionState = 'ready' | 'dispatching';
     const [inputActionState, setInputActionState] = useState<InputActionState>('ready');
@@ -3059,6 +3078,7 @@ export const SessionChatInterface = memo(
               session,
               sessionLocalProjectRootPath: resolvedLocalProjectMeta?.rootPath ?? null,
               isRepoPublic,
+              isRepoLinked,
             },
         availableCommands,
         skillAgent: editSkillAgent,
@@ -3067,6 +3087,7 @@ export const SessionChatInterface = memo(
         availableCommands,
         editSkillAgent,
         isArchivedSession,
+        isRepoLinked,
         isRepoPublic,
         resolvedLocalProjectMeta?.rootPath,
         session,
@@ -8046,6 +8067,7 @@ export const SessionChatInterface = memo(
                             configOptionSelectors={configOptionSelectors}
                             configOptionValues={configOptionValues}
                             isRepoPublic={isRepoPublic}
+                            isRepoLinked={isRepoLinked}
                             availableCommands={availableCommands}
                             commandsEnabled={isVisible}
                             freeTurnLimitNotice={freeSessionTurnNotice}

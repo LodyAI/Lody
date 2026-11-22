@@ -191,6 +191,7 @@ import { useOrganization } from '@/hooks/useOrganization';
 import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
 import { useResolvedTheme } from '../../theme-provider';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
 import {
   LOCAL_PROJECT_BRANCH_PAGE_SIZE,
   LocalProjectBranchSwrCache,
@@ -4781,11 +4782,11 @@ function WorkspaceChatLanding({
     openSettings('agents');
   };
 
-  const isSelectedRepoPublic = useMemo(() => {
-    if (!selectedRepo) return undefined;
-    const repo = freshRepositories?.find((r) => r.fullName === selectedRepo);
-    return repo ? !repo.private : undefined;
-  }, [freshRepositories, selectedRepo]);
+  const linkedSelectedRepo = useMemo(
+    () => resolveLinkedWorkspaceGitHubRepo(selectedRepo, freshRepositories),
+    [freshRepositories, selectedRepo]
+  );
+  const isSelectedRepoPublic = linkedSelectedRepo?.isPublic;
   const selectedLocalProjectGithubRepoFullName = useMemo(() => {
     if (contextType !== 'local') return undefined;
     return (
@@ -4793,6 +4794,10 @@ function WorkspaceChatLanding({
       undefined
     );
   }, [activeLocalGitState, contextType, selectedLocalProjectMeta]);
+  const linkedLocalProjectRepo = useMemo(
+    () => resolveLinkedWorkspaceGitHubRepo(selectedLocalProjectGithubRepoFullName, freshRepositories),
+    [freshRepositories, selectedLocalProjectGithubRepoFullName]
+  );
 
   const mentionSource = useMemo(() => {
     if (contextType === 'chat') return undefined;
@@ -4802,15 +4807,23 @@ function WorkspaceChatLanding({
         machineId: selectedLocalProject.machineId,
         workspaceId,
         localProjectId: selectedLocalProject.localProjectId,
-        githubRepoFullName: selectedLocalProjectGithubRepoFullName,
+        githubRepoFullName: linkedLocalProjectRepo?.fullName,
+        isPublic: linkedLocalProjectRepo?.isPublic,
       };
     }
-    return { kind: 'github' as const, repoFullName: selectedRepo, isPublic: isSelectedRepoPublic };
+    return {
+      kind: 'github' as const,
+      repoFullName: selectedRepo,
+      isPublic: isSelectedRepoPublic,
+      issuePrEnabled: !repositoriesReady || Boolean(linkedSelectedRepo),
+    };
   }, [
     contextType,
     isSelectedRepoPublic,
+    linkedLocalProjectRepo,
+    linkedSelectedRepo,
+    repositoriesReady,
     selectedLocalProject,
-    selectedLocalProjectGithubRepoFullName,
     selectedRepo,
     workspaceId,
   ]);
@@ -4823,8 +4836,17 @@ function WorkspaceChatLanding({
     getChatComposerPromptPlaceholderKey({ mentionSource, availableCommands, skillAgent })
   );
   const issuePrRepoFullName =
-    contextType === 'local' ? selectedLocalProjectGithubRepoFullName : selectedRepo;
-  const issuePrRepoIsPublic = contextType === 'github' ? isSelectedRepoPublic : undefined;
+    contextType === 'local'
+      ? linkedLocalProjectRepo?.fullName
+      : repositoriesReady
+        ? linkedSelectedRepo?.fullName
+        : selectedRepo;
+  const issuePrRepoIsPublic =
+    contextType === 'local'
+      ? linkedLocalProjectRepo?.isPublic
+      : contextType === 'github'
+        ? isSelectedRepoPublic
+        : undefined;
 
   const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(
     issuePrRepoFullName,

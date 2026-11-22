@@ -264,14 +264,14 @@ describe('phone Status grouping', () => {
     expect(rowTitles().slice(-2).sort()).toEqual(['quiet', 'settled']);
   });
 
-  it('folds Settled past 20 rows behind Show all', () => {
+  it('folds Settled past 20 rows behind Show more', () => {
     const settled = Array.from({ length: 23 }, (_, index) =>
       item({ id: `s${index}`, settledAt: NOW - index })
     );
     render({ chats: settled, sections: [] });
     act(() => heading('Settled').click());
     expect(rowTitles()).toHaveLength(20);
-    expect(text()).toContain('Show all (23)');
+    expect(text()).toContain('Show more');
   });
 
   it('offers each tier its own swipe actions', () => {

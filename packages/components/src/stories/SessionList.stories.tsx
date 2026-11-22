@@ -736,7 +736,7 @@ const ALL_DIFF_AND_PR_STATES_ARGS: SessionListProps = {
 /**
  * A long, scrollable session list containing every PR status and the important
  * diff combinations. No group has more than five rows, so Storybook renders all
- * cases immediately instead of hiding part of the matrix behind “Show all”.
+ * cases immediately instead of hiding part of the matrix behind “Show more”.
  */
 export const AllDiffAndPrStates: Story = {
   name: 'All Diff and PR States',
