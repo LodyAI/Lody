@@ -5,7 +5,7 @@ export const GIT_IDENTITY_POLICY_TIMEOUT_MS = 3_000;
 
 /** Bound the complete policy promise, including work outside the HTTP fetch. */
 export const resolveGitIdentityPolicy = Effect.fnUntraced(function* (
-  lookup: () => Promise<{ personalEnabled: boolean }>,
+  lookup: (signal: AbortSignal) => Promise<{ personalEnabled: boolean }>,
   logger: Pick<Logger, 'debug' | 'warn'>,
   context: string
 ) {
@@ -41,7 +41,7 @@ export const resolveGitIdentityPolicy = Effect.fnUntraced(function* (
 
 /** @deprecated Temporary Promise boundary for SessionManager. */
 export async function resolveGitIdentityPolicyLegacy(
-  lookup: () => Promise<{ personalEnabled: boolean }>,
+  lookup: (signal: AbortSignal) => Promise<{ personalEnabled: boolean }>,
   logger: Pick<Logger, 'debug' | 'warn'>,
   context: string,
   signal?: AbortSignal
