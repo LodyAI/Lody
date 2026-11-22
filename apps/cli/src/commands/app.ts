@@ -120,7 +120,7 @@ export async function resolveLocalProjectForApp(args: {
 
 export const appCommand = new Command('app')
   .description(
-    'Open the Lody desktop app on a new chat with a local directory selected (registers it if needed)'
+    'Open the Lody desktop app on a new session with a local directory selected (registers it if needed)'
   )
   // `lody app reset-cache` wins over the optional path argument, so a directory
   // with that exact name has to be passed as `./reset-cache`.

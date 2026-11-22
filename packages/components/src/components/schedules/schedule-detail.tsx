@@ -448,7 +448,7 @@ export function ScheduleRunList({
             </span>
             {chat.sessionId ? (
               <Button variant="secondary" size="small" onClick={() => onOpen(chat.sessionId!)}>
-                {t('schedules.history.openChat', 'Open chat')}
+                {t('schedules.history.openChat', 'Open session')}
                 <ArrowUpRight {...stylex.props(styles.icon14)} />
               </Button>
             ) : (
@@ -469,10 +469,10 @@ export function ScheduleRunList({
         <>
           <p {...stylex.props(styles.caption)}>
             {chat
-              ? t('schedules.history.countInChat', '{{count}} runs in this chat', {
+              ? t('schedules.history.countInChat', '{{count}} runs in this session', {
                   count: runs.length,
                 })
-              : t('schedules.history.countChats', '{{count}} chats', { count: runs.length })}
+              : t('schedules.history.countChats', '{{count}} sessions', { count: runs.length })}
           </p>
           <div {...scheduleCardProps()}>
             {runs.map((run) => (

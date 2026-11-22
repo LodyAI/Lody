@@ -73,7 +73,7 @@ export function SessionMobileDiffDrawer({
             <Drawer.Title>
               {onBackToFiles
                 ? t('sessions.changes.title', 'Changes')
-                : t('sessions.diffTab', 'Conversation Diff')}
+                : t('sessions.diffTab', 'Session Diff')}
             </Drawer.Title>
           </div>
           {onBackToFiles ? (

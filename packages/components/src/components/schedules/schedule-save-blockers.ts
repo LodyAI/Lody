@@ -112,7 +112,7 @@ export function collectScheduleSaveIssues(
     push(
       'destination',
       'missing',
-      t('schedules.destination.requireChat', 'Choose a chat to send runs into.')
+      t('schedules.destination.requireChat', 'Choose a session to send runs into.')
     );
   // A shared chat already has an Agent on a machine; the CLI refuses to append
   // a turn driven by any other. Say so here rather than at dispatch time.
@@ -121,13 +121,13 @@ export function collectScheduleSaveIssues(
     push(
       'agent',
       'invalid',
-      t('schedules.destination.agentMismatch', 'Use the Agent this chat already runs with.')
+      t('schedules.destination.agentMismatch', 'Use the Agent this session already runs with.')
     );
   if (session && agentConfig && agentConfig.machineId !== session.machineId)
     push(
       'destination',
       'invalid',
-      t('schedules.destination.machineMismatch', 'The chat lives on a different machine.')
+      t('schedules.destination.machineMismatch', 'The session lives on a different machine.')
     );
   return issues;
 }

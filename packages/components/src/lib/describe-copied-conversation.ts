@@ -8,7 +8,7 @@ export function describeCopiedConversation(
   if (stats.overBudget) {
     return t(
       'sessions.copyConversationHistoryCopiedOverBudget',
-      'Conversation copied as Markdown (~{{tokens}}k tokens — message text alone exceeds the target)',
+      'Session copied as Markdown (~{{tokens}}k tokens — message text alone exceeds the target)',
       { tokens: Math.round(stats.estimatedTokens / 1000) }
     );
   }
@@ -34,11 +34,11 @@ export function describeCopiedConversation(
   }
 
   if (trimmed.length === 0) {
-    return t('sessions.copyConversationHistoryCopied', 'Conversation copied as Markdown');
+    return t('sessions.copyConversationHistoryCopied', 'Session copied as Markdown');
   }
   return t(
     'sessions.copyConversationHistoryCopiedTrimmed',
-    'Conversation copied as Markdown (trimmed: {{omitted}})',
+    'Session copied as Markdown (trimmed: {{omitted}})',
     { omitted: trimmed.join(', ') }
   );
 }

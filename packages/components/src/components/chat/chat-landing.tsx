@@ -3326,7 +3326,7 @@ function WorkspaceChatLanding({
           setComposerError(
             t(
               'chat.projectGroup.unsupportedMachine',
-              'Update Lody on this machine to start project group conversations.'
+              'Update Lody on this machine to start project group sessions.'
             )
           );
           return;
@@ -3476,7 +3476,7 @@ function WorkspaceChatLanding({
           toast.error(
             t(
               'chat.embeddedHandoffFailed',
-              'The conversation was created, but this view could not be updated.'
+              'The session was created, but this view could not be updated.'
             )
           );
         }
@@ -4670,7 +4670,7 @@ function WorkspaceChatLanding({
       : projectGroupLaunchTarget?.kind === 'machines_conflict'
         ? t(
             'chat.projectGroup.machinesConflictStatus',
-            'This group has local repositories on different machines, so they cannot share one conversation.'
+            'This group has local repositories on different machines, so they cannot share one session.'
           )
         : projectGroupLacksLocalCopies
           ? t(
@@ -4684,7 +4684,7 @@ function WorkspaceChatLanding({
               !machineSupportsMultiRepoProject(scopedMachineMeta)
             ? t(
                 'chat.projectGroup.unsupportedMachine',
-                'Update Lody on this machine to start project group conversations.'
+                'Update Lody on this machine to start project group sessions.'
               )
             : projectGroupUsesRepositoryMembers &&
                 scopedMachineMeta &&
@@ -5534,11 +5534,11 @@ function WorkspaceChatLanding({
                   : sharingReviewState.teamLooksEmpty
                     ? t(
                         'inbox.sharingReview.emptyTeam',
-                        'Nothing is visible in this team workspace yet. Ask a teammate to share a machine or project if you expected to see their conversations.'
+                        'Nothing is visible in this team workspace yet. Ask a teammate to share a machine or project if you expected to see their sessions.'
                       )
                     : t(
                         'inbox.sharingReview.noLocalResources',
-                        'No team machines or local projects are visible to you. A teammate may need to share them before their local conversations appear.'
+                        'No team machines or local projects are visible to you. A teammate may need to share them before their local sessions appear.'
                       ),
               updatedAt: item.updatedAt,
               unread: item.readAt === undefined,
@@ -5565,7 +5565,7 @@ function WorkspaceChatLanding({
                   : t('inbox.permission.default', 'The agent is waiting for your approval.'),
               updatedAt: item.updatedAt,
               unread: item.readAt === undefined,
-              actionLabel: t('inbox.openConversation', 'Open conversation'),
+              actionLabel: t('inbox.openConversation', 'Open session'),
             };
           }
           return {
@@ -5575,7 +5575,7 @@ function WorkspaceChatLanding({
             description: t('inbox.sessionCompleted', 'Session completed.'),
             updatedAt: item.updatedAt,
             unread: item.readAt === undefined,
-            actionLabel: t('inbox.openConversation', 'Open conversation'),
+            actionLabel: t('inbox.openConversation', 'Open session'),
           };
         }),
     [
@@ -5814,13 +5814,13 @@ function WorkspaceChatLanding({
           toast.info(
             t(
               'archive.localProject.restoreUnavailable',
-              'Re-add this local project to restore its conversations.'
+              'Re-add this local project to restore its sessions.'
             )
           );
           return;
         }
         console.error('Failed to restore archived conversation', error);
-        toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+        toast.error(t('archive.restoreFailed', 'Failed to restore session.'));
       });
     },
     [restoreSession, t]
@@ -6610,7 +6610,7 @@ function WorkspaceChatLanding({
       title: t('chat.mobileNewChat.title', '新建对话'),
       backAriaLabel: t('common.back', 'Back'),
     },
-    targetNode: t('chat.mobileNewChat.title', 'New chat'),
+    targetNode: t('chat.mobileNewChat.title', 'New session'),
     coordinator: MobileInlinePickerCoordinator,
     summary: (
       <div className="flex flex-col gap-2 py-3">
@@ -6976,7 +6976,7 @@ function WorkspaceChatLanding({
             ),
             privateHelpDescription: t(
               'sharing.privateHelpDescription',
-              'Private machines, local projects, and their conversations are hidden from teammates. Share a machine in device settings or a project in project settings.'
+              'Private machines, local projects, and their sessions are hidden from teammates. Share a machine in device settings or a project in project settings.'
             ),
             privateHelpClose: t('sharing.privateHelpClose', 'Got it'),
             projectsTab: t('chat.contextSwitch.projects', '项目'),
@@ -7016,7 +7016,7 @@ function WorkspaceChatLanding({
               selectedMobileHomeTab === 'inbox'
                 ? t('chat.mobileHome.searchPlaceholderInbox', 'Search')
                 : selectedMobileHomeTab === 'chat'
-                  ? t('chat.mobileHome.searchPlaceholderChat', 'Search conversations')
+                  ? t('chat.mobileHome.searchPlaceholderChat', 'Search sessions')
                   : selectedMobileHomeTab === 'schedules'
                     ? t('schedules.search', 'Search schedules')
                     : selectedProjectsSubTab === 'github'
@@ -7305,7 +7305,7 @@ function WorkspaceChatLanding({
           somethingWentWrong: t('common.somethingWentWrong', 'Something went wrong'),
           composerCrashed: t(
             'chat.composerCrashed',
-            'The chat composer failed to render. Your draft is preserved below.'
+            'The session composer failed to render. Your draft is preserved below.'
           ),
           tryAgain: t('common.tryAgain', 'Try again'),
           unavailable: t('common.unavailable', 'Unavailable'),

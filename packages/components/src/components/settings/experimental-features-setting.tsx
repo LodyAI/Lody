@@ -39,7 +39,7 @@ export function ExperimentalFeatureRows() {
           label={t('settings.experimental.today', 'Today')}
           helper={t(
             'settings.experimental.todayHelper',
-            'A daily outline for notes, prompts and conversations. Turning it off only hides it; your notes keep syncing.'
+            'A daily outline for notes, prompts and sessions. Turning it off only hides it; your notes keep syncing.'
           )}
         >
           <Switch

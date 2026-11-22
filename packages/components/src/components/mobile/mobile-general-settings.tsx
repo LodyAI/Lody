@@ -627,7 +627,7 @@ export function MobileGeneralSettings() {
                     label={t('settings.liveActivities.enableToggle', 'Enable Dynamic Island')}
                     helper={t(
                       'settings.liveActivities.description',
-                      'Show running conversations and permission requests in Live Activities.'
+                      'Show running sessions and permission requests in Live Activities.'
                     )}
                   >
                     <Switch

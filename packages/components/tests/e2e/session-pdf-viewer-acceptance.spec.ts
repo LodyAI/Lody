@@ -97,7 +97,7 @@ test('PDF text selection carries source and comment into the composer handoff', 
   await page.mouse.up();
   await expect(page.getByRole('region', { name: 'Selection annotation' })).toContainText('Page 1');
   await page.getByRole('textbox', { name: 'Selection comment' }).fill('Explain this passage');
-  await page.getByRole('button', { name: 'Add to chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Add to session', exact: true }).click();
   const selection = await page.evaluate(
     () =>
       (
@@ -133,7 +133,7 @@ test('PDF region capture previews source pixels and stages a PNG with its commen
   await expect(page.getByRole('group', { name: 'Markup tools' })).toHaveCount(0);
   await page.getByRole('textbox', { name: 'Selection comment' }).fill('Review this layout');
   await page.screenshot({ path: '/tmp/lody-document-selection-pdf.png' });
-  await page.getByRole('button', { name: 'Add to chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Add to session', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Selection annotation' })).toHaveCount(0);
   const image = await page.evaluate(async () => {
     const selection = (
@@ -598,7 +598,7 @@ test.describe('high-density document regions', () => {
     const displayed = await preview.boundingBox();
     expect(displayed!.width).toBe(340);
     expect(displayed!.height).toBe(200);
-    await page.getByRole('button', { name: 'Add to chat', exact: true }).click();
+    await page.getByRole('button', { name: 'Add to session', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Selection annotation' })).toHaveCount(0);
     const dimensions = await page.evaluate(async () => {
       const file = (window as Window & { documentSelection?: { image: File } }).documentSelection!

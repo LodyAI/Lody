@@ -239,7 +239,7 @@ function PrivacyHelp({
       <Tooltip.Content side="left">
         {t(
           'settings.account.machines.privacyHelp',
-          'Conversations on a private machine, and conversations in private directories on a shared machine, are not visible to other workspace members.'
+          'Sessions on a private machine, and sessions in private directories on a shared machine, are not visible to other workspace members.'
         )}
       </Tooltip.Content>
     </Tooltip.Root>

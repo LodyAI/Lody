@@ -801,7 +801,7 @@ export function ChatShareImageDialog({
     </FitPreview>
   ) : (
     <div {...stylex.props(styles.empty)}>
-      {t('sessions.shareImage.empty', 'No conversation to share')}
+      {t('sessions.shareImage.empty', 'No session to share')}
     </div>
   );
 

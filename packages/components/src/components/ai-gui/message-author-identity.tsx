@@ -126,7 +126,7 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
               size="mini"
               onClick={() => navigate({ sessionId: author.sessionId as SessionId })}
             >
-              {t('sessions.messageAuthor.source', 'Open source conversation')}
+              {t('sessions.messageAuthor.source', 'Open source session')}
             </Button>
           ) : null}
         </div>

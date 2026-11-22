@@ -678,7 +678,7 @@ describe('static publication client lifecycle', () => {
         language === 'en'
           ? 'Sharing publishes a decrypted copy outside E2EE, where the server can read it.'
           : '分享会把一份解密后的副本发布到 E2EE 之外（服务器可读）';
-      const publishLabel = language === 'en' ? 'Share conversation' : '分享对话';
+      const publishLabel = language === 'en' ? 'Share session' : '分享对话';
       const cancelLabel = language === 'en' ? 'Cancel' : '取消';
       const confirmLabel = language === 'en' ? 'Publish decrypted copy' : '确认发布解密副本';
       await render();

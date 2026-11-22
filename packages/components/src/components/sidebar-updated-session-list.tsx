@@ -580,9 +580,9 @@ export type SidebarUpdatedSessionListProps = {
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
-  heading: 'Chats',
+  heading: 'Sessions',
   emptyTitle: 'Nothing yet',
-  emptyDescription: 'Start a chat or open a worktree to see it here.',
+  emptyDescription: 'Start a session or open a worktree to see it here.',
 };
 
 export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList({
@@ -986,7 +986,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           data-status-focus-empty=""
                           className="flex min-h-10 items-center justify-center rounded-md border border-dashed border-sidebar-border/60 px-3 py-2 text-xs text-sidebar-foreground-muted/75"
                         >
-                          {t('sidebar.status.focusEmptyDrop', 'Drag a conversation here to focus')}
+                          {t('sidebar.status.focusEmptyDrop', 'Drag a session here to focus')}
                         </div>
                       );
                     }

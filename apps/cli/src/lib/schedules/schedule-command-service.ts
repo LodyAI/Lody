@@ -212,7 +212,7 @@ export async function executeScheduleCommand(
     if (destinationSessionId) {
       // A shared chat carries its own workspace; a schedule sending into one
       // must not also claim a project of its own.
-      if (draft.project) throw new Error('A schedule that sends into a chat has no project');
+      if (draft.project) throw new Error('A schedule that sends into a session has no project');
       await sync(getSessionRoomId(destinationSessionId));
       const sessionRecord = await manager.repo.getDocMeta(getSessionRoomId(destinationSessionId));
       const problem = destinationSessionProblem({
@@ -229,8 +229,8 @@ export async function executeScheduleCommand(
       if (problem)
         throw new Error(
           destination.kind === 'existing_session'
-            ? 'Choose one of your own chats on the target machine, driven by the same Agent'
-            : 'This schedule’s chat uses a different Agent; start a new chat to change it'
+            ? 'Choose one of your own sessions on the target machine, driven by the same Agent'
+            : 'This schedule’s session uses a different Agent; start a new session to change it'
         );
     }
     if (!localOnly) {

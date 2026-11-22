@@ -602,7 +602,7 @@ function ShareDetailDialog({
               </time>
             </DetailRow>
           )}
-          <DetailRow ruled label={t('settings.shares.conversationsLabel', 'Conversations')}>
+          <DetailRow ruled label={t('settings.shares.conversationsLabel', 'Sessions')}>
             {entry.conversationCount}
           </DetailRow>
           <DetailRow ruled label={t('settings.shares.size', 'Size')}>
@@ -633,7 +633,7 @@ function ShareDetailDialog({
           )}
           {sourceSessionId && (
             <Button variant="secondary" size="small" onClick={() => onOpenSession(sourceSessionId)}>
-              {t('settings.shares.openConversation', 'Open conversation')}
+              {t('settings.shares.openConversation', 'Open session')}
             </Button>
           )}
         </div>

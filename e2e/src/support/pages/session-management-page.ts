@@ -58,7 +58,7 @@ export class SessionManagementPage {
   async renameSession(): Promise<void> {
     await this.openRowMenu(this.activeRow(CREATED_SESSION_TITLE));
     await this.page.getByRole('menuitem', { name: /^(Rename|重命名)$/u }).click();
-    const dialog = this.page.getByRole('dialog', { name: /^(Rename Chat|重命名聊天)$/u });
+    const dialog = this.page.getByRole('dialog', { name: /^(Rename Session|重命名聊天)$/u });
     await dialog.locator('textarea').fill(RENAMED_SESSION_TITLE);
     await dialog.getByRole('button', { name: /^(Save|保存)$/u }).click();
     await expect(this.activeRow(RENAMED_SESSION_TITLE)).toBeVisible();
@@ -160,7 +160,7 @@ export class SessionManagementPage {
   }
 
   private async openHome(): Promise<void> {
-    await this.page.getByRole('button', { name: /^(Home|New chat|主页|新对话)$/u }).click();
+    await this.page.getByRole('button', { name: /^(New|Home|主页|新对话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u);
   }
 

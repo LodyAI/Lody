@@ -259,7 +259,7 @@ export function ProviderRow({
         kind,
         defaultModel,
         usage && usage.conversations > 0
-          ? t('settings.agent.provider.conversationCount', '{{count}} conversations', {
+          ? t('settings.agent.provider.conversationCount', '{{count}} sessions', {
               count: usage.conversations,
             })
           : null,

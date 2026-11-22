@@ -33,7 +33,7 @@ export class ShortcutPage {
 
     await page.keyboard.press(`${PRIMARY_MODIFIER}+k`);
     const palette = page.getByPlaceholder(
-      /^(Search commands and chats\.\.\.|搜索命令和对话\.\.\.)$/u
+      /^(Search commands and sessions\.\.\.|搜索命令和对话\.\.\.)$/u
     );
     await expect(palette).toBeVisible();
     // The dialog moves focus into its input a frame after it renders; until
@@ -145,7 +145,7 @@ export class ShortcutPage {
 
   private async waitForCommandDispatch(page: Page): Promise<void> {
     const palette = page.getByPlaceholder(
-      /^(Search commands and chats\.\.\.|搜索命令和对话\.\.\.)$/u
+      /^(Search commands and sessions\.\.\.|搜索命令和对话\.\.\.)$/u
     );
     await expect
       .poll(

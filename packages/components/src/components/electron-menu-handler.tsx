@@ -57,7 +57,7 @@ export function ElectronMenuHandler() {
 
   useCommand({
     id: 'session.new',
-    title: t('commands.session.new', 'New Chat'),
+    title: t('commands.session.new', 'New session'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.new'),
     when: () => Boolean(workspaceSlug),

@@ -71,13 +71,11 @@ it('requires confirmation, disables duplicate submits, and exposes restore only 
     if (!match) throw new Error(`Missing button: ${name}`);
     return match;
   };
-  await act(async () => button('Stop all conversation collaboration').click());
-  expect(document.body.textContent).toContain(
-    'This will stop all conversations in the conversation tree.'
-  );
+  await act(async () => button('Stop all session collaboration').click());
+  expect(document.body.textContent).toContain('This will stop all sessions in the session tree.');
   await act(async () => button('Cancel').click());
   expect(accepted).toEqual([]);
-  await act(async () => button('Stop all conversation collaboration').click());
+  await act(async () => button('Stop all session collaboration').click());
   await act(async () => button('Confirm').click());
   expect(button('Confirm').disabled).toBe(true);
   expect(accepted).toEqual([]);
@@ -89,7 +87,7 @@ it('requires confirmation, disables duplicate submits, and exposes restore only 
   expect(document.body.textContent).toContain('Collaboration stopped.');
   await act(async () => button('Restore collaboration').click());
   expect(accepted).toEqual([true, false]);
-  expect(button('Stop all conversation collaboration')).toBeDefined();
+  expect(button('Stop all session collaboration')).toBeDefined();
 });
 
 it('keeps contained Tabs on the root scroll row and navigates to the exact Tab', async () => {

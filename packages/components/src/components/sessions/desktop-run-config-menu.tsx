@@ -326,7 +326,7 @@ export function DesktopMachineMenu({
                 <Tooltip.Content side="right" className="max-w-64">
                   {t(
                     'sharing.machinePrivateHelp',
-                    'Only you can use this machine. Share it from machine settings so teammates can see its shared projects and conversations.'
+                    'Only you can use this machine. Share it from machine settings so teammates can see its shared projects and sessions.'
                   )}
                 </Tooltip.Content>
               </Tooltip.Root>

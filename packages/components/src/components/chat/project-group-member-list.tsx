@@ -102,7 +102,7 @@ export function ProjectGroupMemberList({
         render={
           <button
             type="button"
-            aria-label={t('chat.projectGroup.membersLabel', 'Repositories in this conversation')}
+            aria-label={t('chat.projectGroup.membersLabel', 'Repositories in this session')}
             {...stylex.props(
               styles.trigger,
               contextPill.surface,

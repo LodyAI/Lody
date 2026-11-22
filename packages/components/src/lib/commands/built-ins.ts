@@ -54,13 +54,13 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
   {
     id: 'session.new',
     titleKey: 'commands.session.new',
-    title: 'New Chat',
+    title: 'New session',
     category: 'Session',
   },
   {
     id: 'session.archiveCurrent',
     titleKey: 'commands.session.archiveCurrent',
-    title: 'Archive Current Chat',
+    title: 'Archive Current Session',
     category: 'Session',
   },
   {
@@ -72,13 +72,13 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
   {
     id: 'session.toggleCurrentPinned',
     titleKey: 'commands.session.toggleCurrentPinned',
-    title: 'Toggle Current Chat Pinned',
+    title: 'Toggle Current Session Pinned',
     category: 'Session',
   },
   {
     id: 'session.searchCurrent',
     titleKey: 'commands.session.searchCurrent',
-    title: 'Find in Current Chat',
+    title: 'Find in Current Session',
     category: 'Session',
   },
   {
@@ -108,7 +108,7 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
   {
     id: 'session.renameCurrent',
     titleKey: 'commands.session.renameCurrent',
-    title: 'Rename Current Chat',
+    title: 'Rename Current Session',
     category: 'Session',
   },
   {

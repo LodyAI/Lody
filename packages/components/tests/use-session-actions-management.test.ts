@@ -48,7 +48,8 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionToCreate,
-  type WorkspaceId} from '@lody/shared';
+  type WorkspaceId,
+} from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
@@ -1460,7 +1461,7 @@ describe('useSessionActions', () => {
 
       const { result } = await startConfirmation(archive, tree.rootSession.id);
       expect(confirmationDialog()?.textContent).toContain(
-        'This conversation opened 2 active sub-conversations.'
+        'This session opened 2 active sub-sessions.'
       );
       expect(confirmationDialog()?.textContent).toContain(
         '1 is still working; archiving it stops that work.'
@@ -1525,7 +1526,7 @@ describe('useSessionActions', () => {
       const { result: plain } = await startConfirmation(archive, tree.archivedOpened.id, {
         confirm: true,
       });
-      expect(confirmationDialog()?.textContent).toContain('Archive chat?');
+      expect(confirmationDialog()?.textContent).toContain('Archive session?');
       expect(confirmationDialog()?.textContent).not.toContain('sub-conversation');
       await answerConfirmation('Archive');
       await expect(plain).resolves.toBe(true);
@@ -1536,7 +1537,7 @@ describe('useSessionActions', () => {
         confirm: true,
       });
       expect(document.querySelectorAll('[role="alertdialog"]')).toHaveLength(1);
-      expect(confirmationDialog()?.textContent).toContain('Archive sub-conversations too?');
+      expect(confirmationDialog()?.textContent).toContain('Archive sub-sessions too?');
       await answerConfirmation('Archive all');
       await expect(treeArchive).resolves.toBe(true);
       expect(tree.metaRepo.getSession(tree.openedSession.id)?.isArchived).toBe(true);
@@ -1557,7 +1558,7 @@ describe('useSessionActions', () => {
 
       const { result } = await startConfirmation(settle, tree.rootSession.id);
       expect(confirmationDialog()?.textContent).toContain(
-        'This conversation opened 2 active sub-conversations.'
+        'This session opened 2 active sub-sessions.'
       );
       expect(confirmationDialog()?.textContent).toContain('1 is still working.');
       // Nothing is written while the user decides.
@@ -1615,7 +1616,7 @@ describe('useSessionActions', () => {
     {
       action: 'snooze' as const,
       labels: {
-        title: 'Snooze sub-conversations too?',
+        title: 'Snooze sub-sessions too?',
         only: 'Snooze this only',
         all: 'Snooze all',
       },
@@ -1624,7 +1625,7 @@ describe('useSessionActions', () => {
     {
       action: 'focus' as const,
       labels: {
-        title: 'Move sub-conversations to Focus too?',
+        title: 'Move sub-sessions to Focus too?',
         only: 'Move this only',
         all: 'Move all to Focus',
       },
@@ -1644,11 +1645,7 @@ describe('useSessionActions', () => {
       await answerConfirmation(labels.all);
       await expect(result).resolves.toBe(true);
       // Opened Sessions follow; contained Tabs keep no status fields of their own.
-      for (const session of [
-        tree.rootSession,
-        tree.openedSession,
-        tree.openedFromTabSession,
-      ]) {
+      for (const session of [tree.rootSession, tree.openedSession, tree.openedFromTabSession]) {
         expect(applied(tree.metaRepo.getSession(session.id))).toBe(true);
       }
       for (const session of [tree.tabSession, tree.openedTab]) {

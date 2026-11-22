@@ -143,7 +143,7 @@ export class SessionForkPage {
   }
 
   async verifyOriginAndCleanup(resources: SessionForkResources): Promise<void> {
-    const originPrefix = this.page.getByText(/^(This conversation was forked from|此对话分叉自)$/u);
+    const originPrefix = this.page.getByText(/^(This session was forked from|此对话分叉自)$/u);
     await originPrefix.locator('..').getByRole('button').click();
     await expect.poll(() => this.currentSessionId()).toBe(resources.sourceSessionId);
     await expect(this.page.getByText(SOURCE_PROMPT, { exact: true })).toBeVisible();
@@ -151,10 +151,9 @@ export class SessionForkPage {
 
     await this.navigateToSession(resources.targetSessionId);
     await expect
-      .poll(
-        () => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath),
-        { intervals: [1_000, 2_000] }
-      )
+      .poll(() => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath), {
+        intervals: [1_000, 2_000],
+      })
       .toBe(true);
     await this.archiveAndDeleteCurrentSession(resources.targetSessionId);
     await expect
@@ -177,10 +176,10 @@ export class SessionForkPage {
     await expect(this.assistantResponse()).toBeVisible();
     await this.archiveAndDeleteCurrentSession(resources.sourceSessionId);
     await expect
-      .poll(
-        () => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath),
-        { timeout: 30_000, intervals: [1_000, 2_000] }
-      )
+      .poll(() => isFixtureProcessAlive(resources.sourceAgentPid, this.fixture.eventLogPath), {
+        timeout: 30_000,
+        intervals: [1_000, 2_000],
+      })
       .toBe(false);
   }
 
@@ -248,7 +247,7 @@ export class SessionForkPage {
     await expect(this.page.getByText(SOURCE_PROMPT, { exact: true })).toBeVisible();
     await expect(this.assistantResponse()).toBeVisible();
     await expect(
-      this.page.getByText(/^(This conversation was forked from|此对话分叉自)$/u)
+      this.page.getByText(/^(This session was forked from|此对话分叉自)$/u)
     ).toBeVisible();
     await expect.poll(() => existsSync(forkEvent.cwd!)).toBe(true);
 

@@ -1005,7 +1005,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
               >
                 {t(
                   'settings.agent.machineLifecycle.upgradeImmediatelyButton',
-                  'Update now (interrupt conversations)'
+                  'Update now (interrupt sessions)'
                 )}
               </Button>
             </div>

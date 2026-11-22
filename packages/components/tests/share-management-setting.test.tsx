@@ -150,7 +150,7 @@ describe('share management settings inventory', () => {
     // than inside the settings container.
     const openConversationButton = () =>
       [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent === 'Open conversation'
+        (button) => button.textContent === 'Open session'
       );
 
     await render();

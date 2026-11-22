@@ -43,7 +43,7 @@ test('DOCX selected text and XLSX cell ranges can be annotated for chat', async 
   await page.mouse.down();
   await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 8 });
   await page.mouse.up();
-  await page.getByRole('button', { name: 'Add to chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Add to session', exact: true }).click();
   expect(
     await page.evaluate(
       () => (window as Window & { documentSelection?: { text: string } }).documentSelection?.text
@@ -60,7 +60,7 @@ test('DOCX selected text and XLSX cell ranges can be annotated for chat', async 
   await expect(page.getByRole('region', { name: 'Selection annotation' })).toContainText(
     'Revenue!A1:B2'
   );
-  await page.getByRole('button', { name: 'Add to chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Add to session', exact: true }).click();
   expect(
     await page.evaluate(
       () => (window as Window & { documentSelection?: { text: string } }).documentSelection?.text
@@ -168,7 +168,7 @@ test('CSV cell annotations carry the selected rectangle and displayed values', a
   await grid.press('Shift+ArrowDown');
   await page.getByRole('button', { name: 'Annotate selected cells' }).click();
   await expect(page.getByRole('region', { name: 'Selection annotation' })).toContainText('A2:B3');
-  await page.getByRole('button', { name: 'Add to chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Add to session', exact: true }).click();
   expect(
     await page.evaluate(
       () => (window as Window & { documentSelection?: { text: string } }).documentSelection?.text
@@ -196,7 +196,7 @@ for (const kind of ['docx', 'xlsx'] as const) {
     const editor = page.getByRole('region', { name: 'Selection annotation' });
     await expect(editor).toBeVisible();
     if (kind === 'docx') await expect(editor).toContainText('Page 1');
-    await page.getByRole('button', { name: 'Add to chat', exact: true }).click();
+    await page.getByRole('button', { name: 'Add to session', exact: true }).click();
     await expect(editor).toHaveCount(0);
     const image = await page.evaluate(async () => {
       const file = (window as Window & { documentSelection?: { image: File } }).documentSelection!

@@ -348,11 +348,11 @@ function SupportedSchedulesWorkspace({
       description: item.scheduledMessage
         ? t(
             'schedules.deleteMessageHelp',
-            'The message is removed from this list. Anything already sent stays in the chat.'
+            'The message is removed from this list. Anything already sent stays in the session.'
           )
         : t(
             'schedules.deleteHelp',
-            'Future runs stop and the schedule is removed. Chats it already started are kept.'
+            'Future runs stop and the schedule is removed. Sessions it already started are kept.'
           ),
       accept: deleteSchedule(item.scheduleId),
       destructive: true,
@@ -365,7 +365,7 @@ function SupportedSchedulesWorkspace({
       }),
       description: t(
         'schedules.clearEndedHelp',
-        'They are removed from this list. Anything already sent stays in its chat.'
+        'They are removed from this list. Anything already sent stays in its session.'
       ),
       // Each deletion stands alone: one failure keeps what was deleted and
       // does not stop the rest. The first original error is reported.
@@ -410,8 +410,8 @@ function SupportedSchedulesWorkspace({
       title:
         meta?.title ||
         (item.destination.kind === 'own_session'
-          ? t('schedules.destination.ownSession', 'One chat for this task')
-          : t('schedules.destination.untitledChat', 'Untitled chat')),
+          ? t('schedules.destination.ownSession', 'One session for this task')
+          : t('schedules.destination.untitledChat', 'Untitled session')),
       // Its own chat exists once a first run created it.
       sessionId: meta || item.destination.kind === 'existing_session' ? id : undefined,
     };
@@ -491,7 +491,9 @@ function SupportedSchedulesWorkspace({
     if (chatId)
       detailActions.push({
         key: 'chat',
-        label: t('schedules.openChat', 'Open chat “{{title}}”', { title: rowContext.chat!.title }),
+        label: t('schedules.openChat', 'Open session “{{title}}”', {
+          title: rowContext.chat!.title,
+        }),
         icon: MessageSquare,
         onClick: () => openSession(chatId),
       });
@@ -802,7 +804,7 @@ function ScheduleEditor({
   const archivedSessions = useAtomValue(archivedSessionListAtom);
   const describeSession = (meta: SessionMeta): PickableSession => ({
     id: meta.id,
-    title: meta.title || t('schedules.destination.untitledChat', 'Untitled chat'),
+    title: meta.title || t('schedules.destination.untitledChat', 'Untitled session'),
     detail: [
       agents.find((entry) => entry.id === meta.agentConfigId)?.name,
       machines.get(meta.machineId as never)?.name,

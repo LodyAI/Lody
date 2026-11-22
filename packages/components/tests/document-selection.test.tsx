@@ -96,11 +96,11 @@ describe('document selection ownership', () => {
       }
     );
     await act(async () => button('Pick cells').click());
-    await act(async () => button('Add to chat').click());
+    await act(async () => button('Add to session').click());
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
     expect(container.textContent).toContain('North');
     accepted = true;
-    await act(async () => button('Add to chat').click());
+    await act(async () => button('Add to session').click());
     expect(received).toEqual([{ path: 'report.xlsx', location: 'A1', text: 'North', comment: '' }]);
     expect(container.querySelector('[aria-label="Selection annotation"]')).toBeNull();
   });

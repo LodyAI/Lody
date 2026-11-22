@@ -240,11 +240,11 @@ export function SessionShareConsent({
   return (
     <section
       {...stylex.props(styles.card)}
-      aria-label={t('sharing.request.title', 'Share this conversation?')}
+      aria-label={t('sharing.request.title', 'Share this session?')}
     >
       <div {...stylex.props(styles.eyebrow)}>
         <Share2 {...stylex.props(styles.eyebrowIcon)} aria-hidden />
-        <span>{t('sharing.request.title', 'Share this conversation?')}</span>
+        <span>{t('sharing.request.title', 'Share this session?')}</span>
       </div>
       <p {...stylex.props(styles.purpose)}>
         {t('sharing.request.purpose', 'Purpose: {{purpose}}', { purpose: request.purpose })}
@@ -252,7 +252,7 @@ export function SessionShareConsent({
       <p {...stylex.props(styles.prose)}>
         {t(
           'sharing.request.deliveryDisclosure',
-          'Approval publishes the selected conversations, including thinking, tool output and images, but not file attachments. Anyone with the link can read them without signing in. The complete access link will be returned to the requesting agent, which can use or forward it. You can revoke the link in Share management; downloaded copies cannot be recalled.'
+          'Approval publishes the selected sessions, including thinking, tool output and images, but not file attachments. Anyone with the link can read them without signing in. The complete access link will be returned to the requesting agent, which can use or forward it. You can revoke the link in Share management; downloaded copies cannot be recalled.'
         )}
       </p>
       <ul {...stylex.props(shareSurface.region, styles.targets)}>

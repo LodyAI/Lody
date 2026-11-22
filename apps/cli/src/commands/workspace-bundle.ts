@@ -32,11 +32,11 @@ const SKIP_REASONS: Record<string, string> = {
   'unrelated-same-id': 'same ID, unrelated history',
   'deleted-in-target': 'deleted in this workspace',
   'machine-room': 'machine settings stay with their machine',
-  'roost-exists': 'this workspace already has this Roost conversation',
+  'roost-exists': 'this workspace already has this Roost session',
 };
 
 const KIND_NAMES: Record<BundleKind, string> = {
-  conversations: 'Conversations',
+  conversations: 'Sessions',
   schedules: 'Schedules',
   previewComments: 'Preview comments',
   catalog: 'Projects, Agent Roles and MCP',
@@ -73,7 +73,7 @@ export function formatImportPlan(plan: ImportPlan): string {
 }
 
 const PLAINTEXT_WARNING =
-  'The bundle contains every conversation and attachment in plain text. Anyone with the file can read it.';
+  'The bundle contains every session and attachment in plain text. Anyone with the file can read it.';
 
 type Target =
   | { kind: 'local'; machineId: MachineId; workspaceId: string }

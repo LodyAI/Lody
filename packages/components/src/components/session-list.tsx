@@ -1584,7 +1584,7 @@ function ProjectGroupHeaderRow({
             <button
               type="button"
               className={SIDEBAR_HOVER_ACTION_CLASS}
-              aria-label={t('sidebar.projectGroups.newChat', 'New chat in this project group')}
+              aria-label={t('sidebar.projectGroups.newChat', 'New session in this project')}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -1618,7 +1618,7 @@ function ProjectGroupHeaderRow({
                 disabled={sessionIds.length === 0}
                 onClick={() => onArchiveChats(sessionIds)}
               >
-                {t('sidebar.localProjects.archiveChats', 'Archive chats')}
+                {t('sidebar.localProjects.archiveChats', 'Archive sessions')}
               </ContextMenu.Item>
             ) : null}
             {/* The same action a folder row offers. */}
@@ -1974,7 +1974,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                       disabled={group.sessions.length === 0}
                       onClick={() => onArchiveRepoChats(group.sessions.map((row) => row.sessionId))}
                     >
-                      {t('sidebar.localProjects.archiveChats', 'Archive chats')}
+                      {t('sidebar.localProjects.archiveChats', 'Archive sessions')}
                     </ContextMenu.Item>
                   ) : null}
                 </ContextMenu.Content>

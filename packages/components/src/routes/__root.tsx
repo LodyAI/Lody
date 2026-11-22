@@ -438,7 +438,7 @@ function SessionDeepLinkRouter() {
   useEffect(() => {
     if (!navigationTarget) return undefined;
     return watchSessionLinkRequest(store, navigationTarget, () => {
-      toast.error(i18next.t('deepLink.openFailed', 'Unable to open this conversation.'));
+      toast.error(i18next.t('deepLink.openFailed', 'Unable to open this session.'));
     });
   }, [navigationTarget, store]);
   useEffect(() => {
@@ -541,7 +541,7 @@ function SessionDeepLinkRouter() {
                       )
                       .catch(() =>
                         toast.error(
-                          i18next.t('deepLink.openFailed', 'Unable to open this conversation.')
+                          i18next.t('deepLink.openFailed', 'Unable to open this session.')
                         )
                       );
                   },
@@ -566,7 +566,7 @@ function SessionDeepLinkRouter() {
       .catch(() => {
         if (store.get(pendingSessionLinkAtom) === target) {
           setNavigationTarget(null);
-          toast.error(i18next.t('deepLink.openFailed', 'Unable to open this conversation.'));
+          toast.error(i18next.t('deepLink.openFailed', 'Unable to open this session.'));
         }
       });
   }, [pending, workspaces, currentWorkspaceId, navigate, setNavigationTarget, store]);

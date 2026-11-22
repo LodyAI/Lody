@@ -1812,7 +1812,7 @@ function ReadingReviewDiffLayout({
   const isPreview = selection?.kind === 'preview';
   const label = isPreview
     ? t('sessions.sidebar.browser', 'Browser')
-    : t('sessions.diffTab', 'Conversation Diff');
+    : t('sessions.diffTab', 'Session Diff');
   const panel = isPreview ? (
     <SessionBrowserPanelView toolbar={readingPreviewToolbar} onDismissError={action}>
       <ManagedPreviewSurface

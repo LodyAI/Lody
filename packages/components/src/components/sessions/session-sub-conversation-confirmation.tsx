@@ -213,25 +213,25 @@ export function SessionSubConversationConfirmationDialog() {
 
 const DIALOG_COPY = {
   archive: {
-    title: 'Archive sub-conversations too?',
+    title: 'Archive sub-sessions too?',
     working: '{{count}} are still working; archiving them stops that work.',
     onlyThis: 'Archive this only',
     all: 'Archive all',
   },
   settle: {
-    title: 'Mark sub-conversations as completed too?',
+    title: 'Mark sub-sessions as completed too?',
     working: '{{count}} are still working.',
     onlyThis: 'Mark this only',
     all: 'Mark all as completed',
   },
   snooze: {
-    title: 'Snooze sub-conversations too?',
+    title: 'Snooze sub-sessions too?',
     working: '{{count}} are still working.',
     onlyThis: 'Snooze this only',
     all: 'Snooze all',
   },
   focus: {
-    title: 'Move sub-conversations to Focus too?',
+    title: 'Move sub-sessions to Focus too?',
     working: '{{count}} are still working.',
     onlyThis: 'Move this only',
     all: 'Move all to Focus',
@@ -289,12 +289,12 @@ export function SessionSubConversationConfirmationView({
           {count === 0 ? (
             <>
               <AlertDialog.Title>
-                {t('sessions.archiveConfirm.title', 'Archive chat?')}
+                {t('sessions.archiveConfirm.title', 'Archive session?')}
               </AlertDialog.Title>
               <AlertDialog.Description>
                 {t(
                   'sessions.archiveConfirm.description',
-                  'This chat will move to the archive. You can restore it later.'
+                  'This session will move to the archive. You can restore it later.'
                 )}
               </AlertDialog.Description>
             </>
@@ -312,8 +312,7 @@ export function SessionSubConversationConfirmationView({
                           defaultValue: copy.working,
                         })
                       : t(`${keyPrefix}.idle`, 'None of them is working right now.'),
-                  defaultValue:
-                    'This conversation opened {{count}} active sub-conversations. {{status}}',
+                  defaultValue: 'This session opened {{count}} active sub-sessions. {{status}}',
                 })}
               </AlertDialog.Description>
             </>

@@ -1355,8 +1355,8 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
-      const visibleEntries = block.entries.filter((entry) =>
-        entry.content.type === 'thought' || entry.content.kind !== 'think'
+      const visibleEntries = block.entries.filter(
+        (entry) => entry.content.type === 'thought' || entry.content.kind !== 'think'
       );
       if (visibleEntries.length === 0) return;
 
@@ -3319,7 +3319,7 @@ const SystemNoticeView = ({
               ellipsis would replace the entire title. */}
           <span className="flex min-w-0 items-baseline gap-1">
             <span className="shrink-0">
-              {t('sessions.systemNotices.forkOrigin.prefix', 'This conversation was forked from')}
+              {t('sessions.systemNotices.forkOrigin.prefix', 'This session was forked from')}
             </span>
             <button
               type="button"
@@ -3891,7 +3891,7 @@ const MessageAuthorSourceLink = memo(function MessageAuthorSourceLink({
     [sourceSessionId]
   );
   const sourceTitle = useAtomValue(titleAtom);
-  const openSourceLabel = t('sessions.messageAuthor.source', 'Open source conversation');
+  const openSourceLabel = t('sessions.messageAuthor.source', 'Open source session');
   const displayLabel = sourceTitle ?? openSourceLabel;
   const accessibleLabel = sourceTitle ? `${openSourceLabel}: ${sourceTitle}` : openSourceLabel;
 
@@ -4688,7 +4688,7 @@ const AssistantTurnTimingRows = ({
       case 'syncing':
         return {
           value: '—',
-          title: t('sessions.turnTiming.syncingHint', 'Catching up with this conversation.'),
+          title: t('sessions.turnTiming.syncingHint', 'Catching up with this session.'),
         };
       case 'noUpdateYet':
         return {

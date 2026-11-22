@@ -181,7 +181,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
           data-lody-session-drawer
         >
           <DrawerTitle className="sr-only">
-            {t('sessions.prTab.conversation', 'Conversation')}
+            {t('sessions.prTab.conversation', 'Session')}
           </DrawerTitle>
           {/* Edge-only interactive back: Vaul drives the drag but only from the
              left-edge zone (`topInset` clears the header + tab bar so the back

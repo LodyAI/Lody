@@ -174,17 +174,14 @@ export function SessionRelationsChip({
                   <Popover.Trigger
                     render={<Button size="mini" variant="ghost" tone="destructive" />}
                   >
-                    {t(
-                      'sessions.relations.stopCollaboration',
-                      'Stop all conversation collaboration'
-                    )}
+                    {t('sessions.relations.stopCollaboration', 'Stop all session collaboration')}
                   </Popover.Trigger>
                   <Popover.Content side="top" align="end" initialFocus={cancelRef}>
                     <div {...stylex.props(styles.confirmation)}>
                       <Popover.Title>
                         {t(
                           'sessions.relations.stopConfirmation',
-                          'This will stop all conversations in the conversation tree.'
+                          'This will stop all sessions in the session tree.'
                         )}
                       </Popover.Title>
                       <Popover.Description>

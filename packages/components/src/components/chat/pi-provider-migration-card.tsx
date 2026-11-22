@@ -25,7 +25,7 @@ export function PiProviderMigrationCard({
       <p className="mt-1 text-muted-foreground">
         {t(
           'chat.piMigration.description',
-          'Switch your existing Pi providers to the built-in version managed by Lody. Names, credentials and settings are kept. Start a new chat after upgrading; old Pi sessions cannot be resumed by the new adapter.'
+          'Switch your existing Pi providers to the built-in version managed by Lody. Names, credentials and settings are kept. Start a new session after upgrading; old Pi sessions cannot be resumed by the new adapter.'
         )}
       </p>
       {error && (

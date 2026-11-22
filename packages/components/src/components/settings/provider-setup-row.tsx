@@ -246,7 +246,7 @@ export function ProviderSetupRow({
             {config.cliType === 'builtin' && config.agentType === 'sorbet'
               ? t(
                   'settings.agent.dialog.option.sorbet.description',
-                  'An agent harness for work that outlives one conversation. Built for Lody.'
+                  'An agent harness for work that outlives one session. Built for Lody.'
                 )
               : labelForAgent(config.cliType, config.agentType)}
           </div>

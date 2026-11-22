@@ -1351,7 +1351,7 @@ function ProjectSettingsDesktop({
                 title={t('workspace.projects.anyMachineTitle', 'Any machine')}
                 description={t(
                   'workspace.projects.anyMachineHint',
-                  'Projects of several repositories; conversations run wherever a copy is available.'
+                  'Projects of several repositories; sessions run wherever a copy is available.'
                 )}
                 boxed
               >
@@ -1466,7 +1466,7 @@ function ProjectLine({
     shared ? t('workspace.projects.sharedBadge', 'Shared') : null,
     privateRepo ? t('workspace.projects.privateRepo', 'Private') : null,
     conversationCount != null && conversationCount > 0
-      ? t('workspace.projects.conversationCount', '{{count}} conversations', {
+      ? t('workspace.projects.conversationCount', '{{count}} sessions', {
           count: conversationCount,
         })
       : null,
@@ -1585,7 +1585,7 @@ function ProjectAddMenu({
               <span {...stylex.props(styles.menuHint)}>
                 {t(
                   'workspace.projects.createMultiRepoHint',
-                  'One conversation works across all of them'
+                  'One session works across all of them'
                 )}
               </span>
             </span>
@@ -1716,7 +1716,7 @@ function ProjectWindow({
       : page === 'defaultMcp'
         ? t(
             'workspace.projects.window.defaultMcpDescription',
-            'MCP servers new conversations in this project start with. You can still change them in the composer.'
+            'MCP servers new sessions in this project start with. You can still change them in the composer.'
           )
         : null;
 
@@ -2634,7 +2634,7 @@ function ProjectShareControl({
       : t('workspace.projects.private', 'Private to you');
   const scopeDescription = t(
     'workspace.projects.shareScopeDescription',
-    'Sharing a project also shares its machine, which teammates need to open and continue conversations.'
+    'Sharing a project also shares its machine, which teammates need to open and continue sessions.'
   );
 
   if (!teamSharingAvailable) {
@@ -2796,7 +2796,7 @@ export function WorktreeSetupEditor({
     phase === 'cleanup'
       ? t(
           'workspace.projects.worktreeCleanupDescription',
-          'Runs when the conversation is archived, before the worktree is removed from disk.'
+          'Runs when the session is archived, before the worktree is removed from disk.'
         )
       : t(
           'workspace.projects.worktreeSetupDescription',

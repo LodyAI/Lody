@@ -655,7 +655,7 @@ export const SessionChatInputArea = memo(
         await onRestoreSession();
       } catch (error) {
         console.error('Failed to restore archived conversation', error);
-        toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+        toast.error(t('archive.restoreFailed', 'Failed to restore session.'));
       } finally {
         restoringRef.current = false;
         setRestoring(false);

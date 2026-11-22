@@ -550,7 +550,7 @@ function useRowActions(entry: Entry, handlers: RowHandlers) {
   if (chatId && handlers.onOpenSession)
     actions.push({
       key: 'chat',
-      label: t('schedules.openChat', 'Open chat “{{title}}”', { title: context.chat!.title }),
+      label: t('schedules.openChat', 'Open session “{{title}}”', { title: context.chat!.title }),
       icon: MessageSquare,
       onClick: () => handlers.onOpenSession!(chatId),
     });
@@ -618,7 +618,7 @@ function Destination({
       <span {...stylex.props(styles.destination, compact && styles.compactDestination)}>
         <Folder {...stylex.props(styles.icon14)} aria-hidden="true" />
         <span {...stylex.props(styles.truncate)}>
-          {t('schedules.destination.newSession', 'New chat each run')} ·{' '}
+          {t('schedules.destination.newSession', 'New session each run')} ·{' '}
           {context?.project ?? (row.projectKey || t('schedules.chatOnly', 'Chat only'))}
         </span>
       </span>
@@ -631,7 +631,7 @@ function Destination({
           variant="ghost"
           size="small"
           className={stylex.props(styles.chatButton).className}
-          title={t('schedules.openChat', 'Open chat “{{title}}”', { title: chat.title })}
+          title={t('schedules.openChat', 'Open session “{{title}}”', { title: chat.title })}
           onClick={() => onOpenSession(chat.sessionId!)}
         >
           <MessageSquare {...stylex.props(styles.icon14)} aria-hidden="true" />
@@ -646,8 +646,8 @@ function Destination({
       <span {...stylex.props(styles.truncate)}>
         {chat?.title ??
           (row.destination.kind === 'own_session'
-            ? t('schedules.destination.ownSession', 'One chat for this task')
-            : t('schedules.destination.existingSession', 'An existing chat'))}
+            ? t('schedules.destination.ownSession', 'One session for this task')
+            : t('schedules.destination.existingSession', 'An existing session'))}
         {row.destination.kind === 'own_session' && !chat?.sessionId
           ? ` · ${t('schedules.destination.notCreatedYet', 'Not created yet')}`
           : ''}
@@ -1111,7 +1111,7 @@ export function ScheduleListView({
       title: t('schedules.section.messages', 'Scheduled messages'),
       info: t(
         'schedules.section.messagesInfo',
-        'A message written in a chat with “Schedule send…”, sent to that chat once at the chosen time.'
+        'A message written in a session with “Schedule send…”, sent to that session once at the chosen time.'
       ),
       entries: visible.filter((entry) => entry.row.scheduledMessage),
       total: entries.filter((entry) => entry.row.scheduledMessage).length,
@@ -1209,7 +1209,7 @@ export function ScheduleListView({
               <p {...stylex.props(styles.emptyHelp)}>
                 {t(
                   'schedules.emptyHelp',
-                  'Choose a prompt and a time. Your machine will start a new chat for each run.'
+                  'Choose a prompt and a time. Your machine will start a new session for each run.'
                 )}
               </p>
               <Button

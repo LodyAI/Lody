@@ -430,7 +430,7 @@ export class AgentProviderLifecyclePage {
   }
 
   private async openHome(): Promise<void> {
-    await this.page.getByRole('button', { name: /^(Home|New chat|主页|新对话)$/u }).click();
+    await this.page.getByRole('button', { name: /^(New|Home|主页|新对话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u);
   }
 

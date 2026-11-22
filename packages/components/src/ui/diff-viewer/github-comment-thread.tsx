@@ -404,7 +404,7 @@ export function GitHubCommentThread({
       ? t('comments.countOne', '1 comment')
       : t('comments.count', '{{count}} comments', { count: commentCount });
   const hasLine = thread.subjectType === 'line' && thread.anchor.line > 0;
-  const sendLabel = t('comments.sendToChat', 'Send to chat');
+  const sendLabel = t('comments.sendToChat', 'Send to session');
 
   return (
     <div

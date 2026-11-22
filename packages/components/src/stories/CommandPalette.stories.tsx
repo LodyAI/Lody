@@ -10,7 +10,7 @@ import {
 } from '@/components/commands/command-palette-view';
 
 const LABELS: CommandPaletteLabels = {
-  placeholder: 'Search commands and chats...',
+  placeholder: 'Search commands and sessions...',
   empty: 'No results found.',
   navigate: 'Navigate',
   select: 'Select',
@@ -20,7 +20,14 @@ const LABELS: CommandPaletteLabels = {
 const noop = () => {};
 
 const COMMAND_FIXTURES: PaletteResult[] = [
-  { kind: 'command', key: 'c1', title: 'New Chat', subtitle: null, shortcut: 'Mod+n', run: noop },
+  {
+    kind: 'command',
+    key: 'c1',
+    title: 'New session',
+    subtitle: null,
+    shortcut: 'Mod+n',
+    run: noop,
+  },
   {
     kind: 'command',
     key: 'c2',
@@ -109,7 +116,7 @@ const MIXED_RESULTS: PaletteResult[] = [
   {
     kind: 'command',
     key: 'c1',
-    title: 'New Chat',
+    title: 'New session',
     subtitle: null,
     shortcut: 'Mod+n',
     icon: COMMAND_ICONS['session.new'],

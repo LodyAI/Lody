@@ -269,7 +269,7 @@ export function MachineBatchUpdateDialog({
       'request-failed': t('settings.machines.batchUpdate.status.requestFailed', 'Request failed'),
       'waiting-idle': t(
         'settings.machines.batchUpdate.status.waitingIdle',
-        'Waiting until no conversation is running'
+        'Waiting until no session is running'
       ),
       switching: t(
         'settings.machines.batchUpdate.status.switching',
@@ -371,11 +371,9 @@ export function MachineBatchUpdateDialog({
                   ) : null}
                   {!status && row.kind === 'update' && row.runningSessionCount > 0 ? (
                     <span {...stylex.props(styles.detail)}>
-                      {t(
-                        'settings.machines.batchUpdate.running',
-                        '{{count}} conversations running',
-                        { count: row.runningSessionCount }
-                      )}
+                      {t('settings.machines.batchUpdate.running', '{{count}} sessions running', {
+                        count: row.runningSessionCount,
+                      })}
                     </span>
                   ) : null}
                   {!status && row.kind === 'unsupported' && row.reason === 'install' ? (
@@ -404,7 +402,7 @@ export function MachineBatchUpdateDialog({
               aria-checked={policy === 'immediate'}
               onClick={() => setPolicy('immediate')}
             >
-              {t('settings.machines.batchUpdate.immediate', 'Update now (interrupt conversations)')}
+              {t('settings.machines.batchUpdate.immediate', 'Update now (interrupt sessions)')}
             </Button>
           </div>
         ) : null}
@@ -412,7 +410,7 @@ export function MachineBatchUpdateDialog({
           <p role="alert" {...stylex.props(styles.warning)}>
             {t(
               'settings.machines.batchUpdate.confirmImmediate',
-              '{{count}} running conversations will be interrupted. You can continue each one after the update.',
+              '{{count}} running sessions will be interrupted. You can continue each one after the update.',
               { count: runningTotal }
             )}
           </p>
