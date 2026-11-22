@@ -454,6 +454,28 @@ describe('Today to-dos', () => {
   });
 });
 
+describe('Today zoomed subtree', () => {
+  it("lists a folded root's descendants from depth 0, and Enter on its title adds a first child", () => {
+    const doc = new LoroDoc();
+    const outline = openTodayOutline(doc);
+    outline.paste({ kind: 'page-start' }, parseTodayPasteText('a\n  b\n    c\n  d\ne'));
+    const id = (text: string) => outline.getAllNodes().find((node) => node.text === text)!.id;
+    outline.setCollapsed(id('a'), true);
+    const rows = () => outline.getSubtree(id('a'))!.visible.map((node) => [node.text, node.depth]);
+    expect(rows()).toEqual([
+      ['b', 0],
+      ['c', 1],
+      ['d', 0],
+    ]);
+    outline.split(id('e'), 1, { intoChildren: true });
+    expect(outline.getSubtree(id('e'))!.visible.map((node) => node.text)).toEqual(['']);
+    outline.split(id('e'), 0, { intoChildren: true });
+    expect(outline.getSubtree(id('e'))!.visible.map((node) => node.text)).toEqual(['', '']);
+    expect(outline.getNode(id('e'))?.parentId).toBeNull();
+    expect(outline.getSubtree('9@9' as never)).toBeNull();
+  });
+});
+
 describe('Today snapshot caches', () => {
   it('match a page opened afresh after every local edit, undo, redo and merged peer edit', () => {
     let seed = 11;
@@ -524,6 +546,12 @@ describe('Today snapshot caches', () => {
       expect(shape(outline.getSnapshot()), `step ${step} action ${action}`).toEqual(
         shape(fresh.getSnapshot())
       );
+      const zoomed = pick(outline.getAllNodes())?.id;
+      if (zoomed) {
+        expect(shape(outline.getSubtree(zoomed)!), `step ${step} subtree`).toEqual(
+          shape(fresh.getSubtree(zoomed)!)
+        );
+      }
       fresh.dispose();
     }
   });

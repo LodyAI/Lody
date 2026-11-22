@@ -116,7 +116,7 @@ any time; when off it changes none of the app's existing behavior.
   task markers (`- [ ]`, `- [x]`), and pasting reads them back.
 - Selection bar (user decision): once the pointer is released, a block selection shows a small bar floating above
   it (below when its top is scrolled out of view) with the to-do step, Convert to task, Copy and Delete. The bar never
-  takes focus, so the selection's keys keep working. Clicking a bullet selects its node and so brings up the bar.
+  takes focus, so the selection's keys keep working.
 - A bullet shows a halo under the pointer, marking it as a control. A line with no text, no children and no to-do
   state hides its dot until its row is hovered, edited or selected (user decision).
 - Fold state is stored in the page document and synced with it, and a page opens with its stored folds; but a
@@ -124,10 +124,30 @@ any time; when off it changes none of the app's existing behavior.
   fold or unfold that node themselves (user decision). Folding is not an undo step.
 - While an IME composition is active, Enter, Tab, Backspace and the `@` menu do not react.
 
+### Focus view
+
+- User decision, after Workflowy and Logseq. A day's date heading opens that day alone; clicking a bullet (or `⌥→`)
+  zooms into its node, showing only it and its subtree. The top-left of the Today toolbar then shows a breadcrumb,
+  "Today › YYYY-MM-DD › ancestors › node", each part a way back; "Today" returns to the stream at the scroll
+  position it had (anchored to the top visible row, so peers' edits above do not shift it). Middle ancestors fold
+  into "…" past five parts.
+- Zoomed in, the node's text is the view's editable title (no bullet) and its children list below from depth 0,
+  even if the node is folded. Enter in the title starts a first child; the caret, Mod+A, drags and drops stay inside
+  the subtree; the node itself is not indented, outdented, moved, merged or deleted from its own view, and its
+  direct children do not outdent out of it. A node deleted meanwhile shows "This node was deleted." with a way back.
+- Keys: `⌥→` zooms into the edited or selected node and `⌥←` goes up one level (node, parent, day, stream). On
+  Windows and Linux they always apply; on the Mac, where `⌥←/→` move by word, they apply in block selection and
+  while editing only from the node's end (`⌥→`) or start (`⌥←`). `⌘.`, `⌘,` and `⌘[` keep their app bindings;
+  on the full page the browser's Back leaves the focus, since the focus is part of the route (`focus=day|<id>`).
+  The pinned column and the Today window keep it in their own state.
+- Hovering a row shows a "⋯" button left of its fold toggle (at the row's end when the column sits at the window's
+  edge, where there is no margin); it and a right-click on the bullet open the node's menu: Zoom in, the to-do step,
+  Convert to task, Copy and Delete. The node shows selected while the menu is open.
+
 ### Node drag and drop
 
-- The bullet is the drag handle. Moving more than 5px starts a drag; otherwise it is a click that selects the node
-  and shows the selection bar.
+- The bullet is the drag handle. Moving more than 5px starts a drag; otherwise it is a click that zooms into the
+  node (Focus view).
 - There is a single kind of drop target: an insertion line between two visible nodes, with depth chosen by the
   pointer's horizontal position; the node lands at the depth the line shows. A node with children, or folded,
   moves with its whole subtree; dragging a selected node carries every selected block. When the drop would make

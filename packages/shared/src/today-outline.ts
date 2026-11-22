@@ -103,10 +103,17 @@ export type TodayOutline = {
   /** Child ids of `parentId` (the roots for null), in order; hidden ones included. */
   childIds(parentId: TodayNodeId | null): TodayNodeId[];
   getSnapshot(): TodayPageSnapshot;
+  /**
+   * The rows under `rootId` for a zoomed view: its descendants, depth counted
+   * from its children (0), shown even when the root itself is folded. Null
+   * when the node is gone.
+   */
+  getSubtree(rootId: TodayNodeId): TodayPageSnapshot | null;
   getNode(id: TodayNodeId): TodayNodeView | undefined;
   getText(id: TodayNodeId): LoroText | undefined;
   insertFirst(text?: string): FocusIntent;
-  split(id: TodayNodeId, offset: number): FocusIntent;
+  /** `intoChildren`: the new line becomes the first child (a zoomed root's title). */
+  split(id: TodayNodeId, offset: number, options?: { intoChildren?: boolean }): FocusIntent;
   enterOnEmpty(id: TodayNodeId): FocusIntent;
   mergeWithPrevious(id: TodayNodeId): FocusIntent;
   mergeWithNext(id: TodayNodeId): FocusIntent;
@@ -271,6 +278,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   let cachedSnapshot: TodayPageSnapshot | null = null;
   /** Row of each visible node in `cachedSnapshot`, and every node's last view. */
   let indexById = new Map<string, number>();
+  const subtreeCache = new Map<string, { from: TodayPageSnapshot; subtree: TodayPageSnapshot }>();
   const viewById = new Map<string, TodayNodeView>();
   let structureDirty = true;
   const dirtyText = new Set<string>();
@@ -715,6 +723,56 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       cachedSnapshot = { visible, isEmpty, layout: {} };
       return cachedSnapshot;
     },
+    getSubtree: (rootId) => {
+      const snapshot = outline.getSnapshot();
+      if (!live(rootId)) return null;
+      const cached = subtreeCache.get(rootId);
+      if (cached && cached.from === snapshot) return cached.subtree;
+      const previous = new Map(cached?.subtree.visible.map((row) => [row.id as string, row]));
+      const visible: TodayNodeView[] = [];
+      let isEmpty = true;
+      const visit = (key: string, depth: number, parentId: TodayNodeId) => {
+        for (const raw of kids.get(key) ?? []) {
+          const id = raw as TodayNodeId;
+          const node = richCache.has(raw) && attrCache.has(raw) ? undefined : live(id);
+          const rich = node ? cachedRich(node) : richCache.get(raw)!;
+          const attrs = node ? readAttrs(node) : attrCache.get(raw)!;
+          if (!rich || !attrs) continue;
+          const children = kids.get(raw);
+          const collapsed = viewFolds.get(raw) ?? attrs.collapsed;
+          const hasChildren = !!children && children.length > 0;
+          if (isEmpty && rich.text.trim()) isEmpty = false;
+          const old = previous.get(raw);
+          visible.push(
+            old &&
+              old.text === rich.text &&
+              old.mentions === rich.mentions &&
+              old.parentId === parentId &&
+              old.depth === depth &&
+              old.collapsed === collapsed &&
+              old.hasChildren === hasChildren &&
+              old.todo === attrs.todo
+              ? old
+              : {
+                  id,
+                  parentId,
+                  depth,
+                  text: rich.text,
+                  mentions: rich.mentions,
+                  collapsed,
+                  hasChildren,
+                  ...(attrs.todo ? { todo: attrs.todo } : {}),
+                }
+          );
+          if (!collapsed) visit(raw, depth + 1, id);
+        }
+      };
+      visit(rootId, 0, rootId);
+      const layout = cached && cached.from.layout === snapshot.layout ? cached.subtree.layout : {};
+      const subtree = { visible, isEmpty, layout };
+      subtreeCache.set(rootId, { from: snapshot, subtree });
+      return subtree;
+    },
     getNode: (id) => {
       const node = live(id);
       return node ? view(node, depthOf(node)) : undefined;
@@ -730,12 +788,17 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return { nodeId: node.id, offset: text.length };
     },
 
-    split: (id, offset) => {
+    split: (id, offset, options) => {
       const node = live(id);
       const text = node && textOf(node);
       if (!node || !text) return null;
       const length = text.length;
       const todo = todoOf(node) ? ('todo' as const) : undefined;
+      if (offset <= 0 && length > 0 && options?.intoChildren) {
+        const child = create(node, 0, { todo });
+        commit();
+        return { nodeId: child.id, offset: 0 };
+      }
       if (offset <= 0 && length > 0) {
         create(node.parent(), indexOf(node), { todo });
         commit();
@@ -743,7 +806,8 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       }
       const right = { ...sliceTodayRich(readTodayText(text), offset), todo };
       if (right.text) text.delete(offset, length - offset);
-      const intoChildren = childrenOf(node).length > 0 && !isCollapsed(node);
+      const intoChildren =
+        options?.intoChildren || (childrenOf(node).length > 0 && !isCollapsed(node));
       const created = intoChildren
         ? create(node, 0, right)
         : create(node.parent(), indexOf(node) + 1, right);

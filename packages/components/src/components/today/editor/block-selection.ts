@@ -64,6 +64,8 @@ export type BlockIntent =
   | { type: 'move-down' }
   | { type: 'select-all' }
   | { type: 'cycle-todo' }
+  | { type: 'zoom-in' }
+  | { type: 'zoom-out' }
   | { type: 'undo' }
   | { type: 'redo' };
 
@@ -94,6 +96,10 @@ export function resolveBlockKey(
       if (mod || event.altKey) return null;
       return { type: 'step', step };
     }
+    case 'ArrowLeft':
+    case 'ArrowRight':
+      if (!event.altKey || event.shiftKey || event.metaKey || event.ctrlKey) return null;
+      return { type: event.key === 'ArrowRight' ? 'zoom-in' : 'zoom-out' };
     case 'a':
     case 'A':
       return mod ? { type: 'select-all' } : null;
