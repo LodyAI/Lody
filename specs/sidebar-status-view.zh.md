@@ -80,6 +80,9 @@ Translation: current
 已执行的验证：测试样例（13 个布局用例、38 个命令用例）在 `packages/shared/tests/status-view.test.ts`
 里运行，也在 `packages/components` 的桌面和手机适配层、iOS 和 Android 的 runtime 测试里运行；Storybook
 端到端测试 `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`（5 个用例）；手机
-WebView 在 iOS 模拟器和 Android 模拟器上的 Storybook；原生列表在模拟器上用离线测试数据。没有验证：
-真机、原生客户端登录后的云端工作区、桌面应用写入真实副本、真实的加密 Guest 会话和托管网关接受加密写入、
-设备上的 VoiceOver、Capacitor 打包后的 App。详见[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md#验证)。
+WebView 在 iOS 模拟器和 Android 模拟器上的 Storybook，以及在 Chromium 里用真实触摸输入操作；原生列表
+用离线测试数据，在 iOS 26.5 和 27.0 模拟器以及 Pixel 8 / Android 16 模拟器上验证。没有验证：真机、
+iOS 16.4–17.3 运行环境、原生客户端登录后的云端工作区、Android 对 staging 的 `/api/time` 读取、桌面应用
+写入真实副本、真实的加密 Guest 会话和托管网关接受加密写入、设备上的 VoiceOver、Capacitor 打包后的 App。
+已知缺口：在 iOS 和 Android 上，队友本地项目里的对话不提供状态操作，因为原生 runtime 读不到项目是否
+共享；桌面在项目共享时提供。详见[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md#验证)。

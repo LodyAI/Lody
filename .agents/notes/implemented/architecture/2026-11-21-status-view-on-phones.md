@@ -197,6 +197,12 @@ folds past 20 rows.
   (`isSessionEditableToUser`), so those rows are `readOnly`. Pinning stays
   available. Allowing the write needs the portable machine-sharing read the phone
   lacks, not a looser guard.
+- On iOS and Android, a teammate's local-project conversation, a Project group
+  with a local member included, offers no status actions: whether that project is
+  shared with the team is server access state the runtime cannot read, and a
+  machine's Flock lists private projects too (`sessionPermissions` in the
+  runtime's `status-view.ts`). Pinning still works for the conversation's author.
+  Desktop offers the actions when the project is shared with the member.
 - Encrypted workspaces on the WebView need no special handling: no in-repository
   layer filters session metadata fields or workspace Flock row families. A
   non-owner Member sealing a `pinSection` row and the new session fields is tested
@@ -215,11 +221,11 @@ folds past 20 rows.
   in the future, so a re-snoozed row floats again when it expires. Desktop builds
   older than this rule (before LodyAI/Lody#3077) float a placed woken row back to
   the top; the data is valid both ways.
+- On every phone surface the long-press menu opens on a stationary release, and a
+  press that moved opens no menu; iOS 16.4–17.3 cannot present a menu from code
+  and keep the system context menu, which still turns into the drag.
 - Known gaps: no haptics on the iOS WebView, and Chrome refuses vibration before
-  the first tap; on all three phone surfaces
-  (WebView, Android, iOS) the long-press menu opens on release; Android reads the read-only flag once at
-  connect; on a first install on iOS a read-only member sees the actions until the
-  member list loads.
+  the first tap.
 
 ## Verification
 
@@ -231,19 +237,26 @@ Verified:
 - Desktop: the Storybook end-to-end suite for Focus drops
   (`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`, 5 cases).
 - Phone WebView: the list, gestures, sheets and drag in Storybook, opened in Safari
-  on the iOS Simulator and in Chrome on the Android emulator.
-- Native Android: the list, menus, swipes and drag on the emulator with the offline
-  fixture.
-- Native iOS: the list, menus, swipes, drag, edge scrolling and catalog read-back on
-  the Simulator with the offline fixture, light and dark.
+  on the iOS Simulator and in Chrome on the Android emulator, and with real touch
+  input in Chromium.
+- Native Android: on a Pixel 8 / Android 16 emulator with the offline fixture, 23
+  interaction checks of the list, menus, swipes and drag, and a smoke pass on the
+  final head.
+- Native iOS: on the iOS 26.5 and 27.0 Simulators with the offline fixture, light
+  and dark, the `home-status` and `home-status-drag` UI regressions (collapsed
+  tiers, Later presets, Later and Settle Undo, Move to Top held through a stale
+  catalog and read back, a held drag reordering Focus and moving a pinned row into
+  an empty section, the stationary long-press menu, both swipes) and edge
+  scrolling during a drag.
 
-Not verified anywhere: physical phones; a signed-in cloud workspace on the native
-clients; the desktop app writing to a real repository replica (as opposed to tests
-and Storybook); a real encrypted Guest session, and the hosted gateway admitting
-the new encrypted writes; VoiceOver activating Move up and Move down on a device
-(the handlers are tested: each sends exactly one `move` with the right
-`beforeId`); the Capacitor-packaged app, since the WebView list was only exercised
-in browsers.
+Not verified anywhere: physical devices; iOS 16.4–17.3 runtimes; a signed-in cloud
+workspace on the native clients; the Android runtime's `/api/time` read against
+staging (it was reached only through a forward from a Mac); the desktop app
+writing to a real repository replica (as opposed to tests and Storybook); a real
+encrypted Guest session, and the hosted gateway admitting the new encrypted
+writes; VoiceOver activating Move up and Move down on a device (the handlers are
+tested: each sends exactly one `move` with the right `beforeId`); the
+Capacitor-packaged app, since the WebView list was only exercised in browsers.
 
 ## Evidence
 
@@ -251,7 +264,9 @@ in browsers.
   [pin sections](../../../../specs/pinned-session-sections.md).
 - Pull requests: LodyAI/Lody#3063 (shared layout, planner, desktop),
   LodyAI/Lody#3065 (phone WebView), LodyAI/lody-ios#130 (shared runtime),
-  LodyAI/lody-ios#131 (iOS list), LodyAI/lody-android#25 (Android list and bridge).
+  LodyAI/lody-ios#131 (iOS list), LodyAI/lody-android#25 (Android list and bridge);
+  review fixes in LodyAI/Lody#3093, #3096 and #3098, LodyAI/lody-ios#137 and #138,
+  and LodyAI/lody-android#33.
 - Shared-list precedent: matrix-rust-sdk `RoomListService` computes the sorted room
   list in shared code and hands it to Swift and Kotlin.
 - Interaction references read in source: Telegram (pinned chats and folders),

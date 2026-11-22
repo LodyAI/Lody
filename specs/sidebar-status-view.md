@@ -185,9 +185,13 @@ Executed validation: the golden vectors (13 layout and 38 command cases) in
 in `packages/components` and in the iOS and Android runtime tests; the Storybook
 end-to-end suite `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`
 (5 cases); the phone WebView in Storybook on the iOS Simulator and the Android
-emulator; the native lists on the Simulator and the emulator with the offline
-fixture. Not verified: physical phones, a signed-in cloud workspace on the native
-clients, the desktop app writing to a real replica, a real encrypted Guest session
-and the hosted gateway admitting the encrypted writes, VoiceOver on a device, and
-the Capacitor-packaged app. Details: the
+emulator, and with real touch input in Chromium; the native lists with the offline
+fixture on the iOS 26.5 and 27.0 Simulators and a Pixel 8 / Android 16 emulator.
+Not verified: physical devices, iOS 16.4–17.3 runtimes, a signed-in cloud workspace
+on the native clients, the Android `/api/time` read against staging, the desktop app
+writing to a real replica, a real encrypted Guest session and the hosted gateway
+admitting the encrypted writes, VoiceOver on a device, and the Capacitor-packaged
+app. Known gap: on iOS and Android a teammate's local-project conversation offers
+no status actions, because the native runtime cannot read whether the project is
+shared; desktop offers them when it is. Details: the
 [phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md#verification).
