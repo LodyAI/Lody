@@ -162,6 +162,16 @@ export const pinSectionsCollapsedAtom = atomWithStorage<Record<string, boolean>>
   {}
 );
 
+/**
+ * Pin sections hidden on this device, keyed by `pinSectionKey(section.id)`
+ * (`'default'` for the default section). The visibility menu on the Pinned
+ * header can restore sections.
+ */
+export const pinSectionsHiddenAtom = atomWithStorage<Record<string, boolean>>(
+  'lody-sidebar-pin-sections-hidden',
+  {}
+);
+
 export type LocalProjectCollapseState = Record<string, boolean>;
 
 /**
