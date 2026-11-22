@@ -78,8 +78,16 @@ const alive = (pid: number) => {
 async function untilGone(pid: number) {
   while (alive(pid)) await new Promise((resolve) => setImmediate(resolve));
 }
+/** The running host: right after a kill, `engine.json` names the dead one until its successor starts. */
+async function liveHostPid(dataDir: string) {
+  for (;;) {
+    const pid = await hostPid(dataDir).catch(() => 0);
+    if (pid && alive(pid)) return pid;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
 async function killHost(dataDir: string, signal: NodeJS.Signals) {
-  const pid = await hostPid(dataDir);
+  const pid = await liveHostPid(dataDir);
   process.kill(pid, signal);
   await untilGone(pid);
 }
