@@ -184,7 +184,6 @@ describe('CLI token list folds sign-in tokens into a closed group', () => {
       const revoked: string[] = [];
       await renderTokens(mobile, revoked);
 
-      // Closed by default: the manual and pairing tokens stay in view with their Revoke.
       expect(container.textContent).toContain('CI runner');
       expect(container.textContent).toContain('Home server');
       expect(container.textContent).not.toContain('lody_mac…');
@@ -193,7 +192,6 @@ describe('CLI token list folds sign-in tokens into a closed group', () => {
       const trigger = groupTrigger();
       expect(trigger?.getAttribute('aria-expanded')).toBe('false');
       expect(trigger?.textContent).toContain('2 tokens created automatically');
-      // The current machine's token is inside, so the closed group says so.
       expect(trigger?.textContent).toContain('This computer');
 
       await act(async () => trigger!.click());
@@ -203,8 +201,6 @@ describe('CLI token list folds sign-in tokens into a closed group', () => {
       expect(container.textContent).toContain('Old login');
       expect(revokeButtons()).toHaveLength(4);
 
-      // Revoking a sign-in token still goes through the confirmation dialog.
-      // Listed tokens come first; the sign-in group keeps the backend's order.
       await act(async () => revokeButtons()[2]!.click());
       expect(revoked).toEqual([]);
       const dialog = document.querySelector('[role="alertdialog"]');

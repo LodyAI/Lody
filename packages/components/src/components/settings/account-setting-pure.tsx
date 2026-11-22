@@ -67,7 +67,6 @@ const styles = stylex.create({
   noteLoading: { display: 'flex', alignItems: 'center', gap: space[2] },
   /** A token's "This computer" badge beside its Revoke answer. */
   tokenControls: { display: 'inline-flex', alignItems: 'center', gap: space[2] },
-  /** The sign-in token group's chevron turns down-to-up as the group opens. */
   chevron: { transitionProperty: 'transform', transitionDuration: duration.fast },
   chevronOpen: { transform: 'rotate(180deg)' },
   block: { display: 'block' },
@@ -993,8 +992,7 @@ export function AccountSettingsPure({
 
       {isWorkspaceSurface ? workspaceJoinRequestsSlot : null}
 
-      {/* CLI tokens: each a row saying what it is and when it was used, answered by Revoke.
-          Tokens a sign-in created on its own fold into one group, closed until opened. */}
+      {/* CLI tokens: each a row saying what it is and when it was used, answered by Revoke. */}
       {surface === 'account' && canGenerateCliApiKey ? (
         <CompactSection
           title={t('settings.account.cliAuth.title')}

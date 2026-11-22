@@ -86,10 +86,6 @@ export function describeCliApiKey(
   };
 }
 
-/**
- * Tokens a sign-in created on its own (`source: 'auto'`) fold into one group;
- * the ones a person made or paired stay in the list. Order is kept within each.
- */
 export function partitionCliApiKeys(apiKeys: readonly CliApiKeyRecord[]): {
   listed: CliApiKeyRecord[];
   signIn: CliApiKeyRecord[];
