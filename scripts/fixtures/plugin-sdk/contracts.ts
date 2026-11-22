@@ -5,6 +5,7 @@ import {
   defineMutation,
   defineQuery,
   hostQueries,
+  lodyQueries,
   type CreateSessionRequest,
   type MachineRef,
   type PluginCallErrorCode,
@@ -13,8 +14,11 @@ import {
   type WorkspaceRef,
 } from '@lody/plugin-sdk';
 import {
+  defineClientPlugin,
   useHost,
+  useLodyQuery,
   useMutation,
+  usePluginSettings,
   useQuery,
   type ProjectPageProps,
   type ToolRenderProps,
@@ -61,6 +65,41 @@ export const validManifest: PluginManifest = {
   client: './dist/client.js',
   machine: './dist/machine.js',
   skills: ['test-triage'],
+  agentRoles: [
+    {
+      id: 'reviewer',
+      name: 'Red-Team Reviewer',
+      emoji: '🛡️',
+      promptPrefix: 'Audit every failure boundary before approving.',
+      defaultSkills: ['test-triage'],
+      preferredModelTier: 'reasoning',
+    },
+  ],
+  settings: {
+    maxParallelAgents: {
+      title: 'Max parallel agents',
+      type: 'number',
+      min: 1,
+      max: 8,
+      default: 4,
+      scope: 'user',
+    },
+    reviewerTarget: {
+      title: 'Reviewer target',
+      type: 'roleTarget',
+      blueprintId: 'reviewer',
+      scope: 'project',
+    },
+  },
+  themes: [
+    {
+      id: 'cyber-war-room',
+      label: 'Cyber War Room',
+      appearance: 'dark',
+      path: './assets/cyber-war-room.json',
+    },
+  ],
+  styles: ['./assets/war-room.css'],
   env: {
     TRACKER_API_KEY: {
       description: 'API token for issue lookup on the daemon.',
@@ -98,6 +137,28 @@ export const retriableOfflineCode: PluginCallErrorCode = 'machine_offline';
 export const unknownOutcomeCode: PluginCallErrorCode = 'outcome_unknown';
 export const quarantinedPluginCode: PluginCallErrorCode = 'plugin_faulted';
 
+export const customizableShellPlugin = defineClientPlugin((lody) => {
+  lody.styles.add({
+    id: 'compact-rows',
+    css: '[data-lody-slot="sidebar"] { --lody-row-gap: 2px; }',
+  });
+  lody.shell.overlays.add({
+    id: 'agent-radar',
+    Component: () => null,
+  });
+  lody.shell.statusBar.add({
+    id: 'active-swarm-count',
+    align: 'right',
+    Component: () => null,
+  });
+  lody.commands.add({
+    id: 'activate-war-room-theme',
+    title: 'Switch to War Room Theme',
+    defaultShortcut: 'Mod+Shift+W',
+    run: ({ host }) => host.themes.activate('cyber-war-room'),
+  });
+});
+
 export function verifyToolRenderStateNarrowing(
   props: ToolRenderProps<{ readonly filter?: string }, { readonly passed: number }>
 ): number | null {
@@ -119,15 +180,40 @@ export async function verifyClientTypeSafety(
   pageProps: ProjectPageProps
 ) {
   const host = useHost();
+  const settings = usePluginSettings<{ readonly maxParallelAgents: number }>(project);
+  const maxParallel: number = settings.values.maxParallelAgents;
+  void maxParallel;
+
+  // Surface props stay thin — raw repository state comes from `useLodyQuery`, not prop stuffing.
+  // @ts-expect-error Raw repositoryState is pulled via useLodyQuery(project, lodyQueries.gitState).
+  void pageProps.repositoryState;
 
   // WorkspaceRef is purely logical and has no single machineId.
   // @ts-expect-error WorkspaceRef does not carry a single machineId.
   void workspace.machineId;
 
-  const machinesRead = useQuery(workspace, hostQueries.machines, {});
+  const machinesRead = useLodyQuery(workspace, lodyQueries.machines);
   if (machinesRead.status === 'ready') {
     const firstMachine: MachineRef | undefined = machinesRead.data.items[0]?.machine;
     void firstMachine;
+  }
+
+  const rolesRead = useLodyQuery(workspace, lodyQueries.agentRoles, { pluginId: 'test-report' });
+  if (rolesRead.status === 'ready') {
+    const firstRoleName: string | undefined = rolesRead.data.items[0]?.name;
+    void firstRoleName;
+  }
+
+  const gitRead = useLodyQuery(project, lodyQueries.gitState);
+  if (gitRead.status === 'ready') {
+    const dirty: boolean = gitRead.data.dirty;
+    void dirty;
+  }
+
+  const diffRead = useLodyQuery(session, lodyQueries.sessionDiff);
+  if (diffRead.status === 'ready') {
+    const fileCount: number = diffRead.data.files.length;
+    void fileCount;
   }
 
   const okMachineRead = useQuery(machine, machineDigestQuery, {});
@@ -142,30 +228,35 @@ export async function verifyClientTypeSafety(
     void step;
   }
 
-  const detailRead = useQuery(session, hostQueries.sessionDetail, { recentTurnLimit: 5 });
+  const detailRead = useLodyQuery(session, lodyQueries.sessionDetail, { recentTurnLimit: 5 });
   if (detailRead.status === 'ready') {
     const turnCount: number = detailRead.data.recentTurns.length;
     void turnCount;
   }
 
-  const byKeyRead = useQuery(project, hostQueries.sessions, {
+  const byKeyRead = useLodyQuery(project, hostQueries.sessions, {
     createdByMe: true,
     createdByPlugin: true,
     businessKey: 'review/42/abc123',
   });
   if (byKeyRead.status === 'ready') {
-    const key: string | undefined = byKeyRead.data.items[0]?.businessKey;
+    const first = byKeyRead.data.items[0];
+    const key: string | undefined = first?.businessKey;
+    const rootOpener: string | undefined = first?.openedByRootSessionId;
+    const roleId: string | undefined = first?.agentRoleId;
     void key;
+    void rootOpener;
+    void roleId;
   }
 
   // @ts-expect-error Project-scoped query cannot be called with a WorkspaceRef.
-  useQuery(workspace, hostQueries.worktrees, {});
+  useLodyQuery(workspace, lodyQueries.worktrees);
 
   // @ts-expect-error Machine-scoped plugin query cannot be called with a WorkspaceRef.
   useQuery(workspace, machineDigestQuery, {});
 
   // @ts-expect-error Workspace-scoped query cannot be called with a ProjectRef.
-  useQuery(project, hostQueries.projects, {});
+  useLodyQuery(project, lodyQueries.projects);
 
   const pin = useMutation(project, projectPinMutation);
   // @ts-expect-error Mutation input is validated against the Zod input schema.
@@ -179,11 +270,14 @@ export async function verifyClientTypeSafety(
   void sendReceipt.disposition;
   await host.sessions.requestStop(session);
   host.panels.openSession(session, 'issues', { identifier: 'LODY-101' });
+  host.themes.activate('cyber-war-room');
 
   const createRequest: CreateSessionRequest = {
     requestId: 'create-review-attempt-1',
     businessKey: 'review/42/abc123',
     businessKeyScope: 'project',
+    pluginRoleId: 'reviewer',
+    parentSession: session,
     prompt: 'Review PR #42 at abc123.',
     waitCondition: {
       program: 'async ({ ctx }) => Boolean(ctx.params.prNumber)',
@@ -196,7 +290,10 @@ export async function verifyClientTypeSafety(
     requestId: 'create-unbound-triage-1',
     prompt: 'Inspect recent daemon alerts.',
   });
-  host.drafts.open(machine, { prompt: 'Quick machine-scoped investigation.' });
+  host.drafts.open(machine, {
+    prompt: 'Quick machine-scoped investigation.',
+    pluginRoleId: 'reviewer',
+  });
 
   // The same immutable request is used after an uncertain result, even if the
   // original Session has since been archived. A new generation gets a new ID.

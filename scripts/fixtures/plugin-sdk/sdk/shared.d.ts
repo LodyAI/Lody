@@ -1,43 +1,63 @@
 import type { z } from 'zod';
 
-declare const refBrand: unique symbol;
+/**
+ * Maximum UTF-8 byte length of a schema-validated plugin tool output stored inline
+ * inside Loro Session History (`tool_call` plugin payload). Larger payloads write
+ * full details to `ctx.sessionDataDir` or `ctx.dataDir` and return a summary + lookup key.
+ */
+export const MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES = 16_384;
 
 /**
- * All logical scopes understood by the plugin SDK.
- * - `workspace`: Cross-machine workspace scope backed by synced host state (no single `machineId`).
- * - `machine` | `project` | `session`: Concrete execution scopes bound to an owning `machineId`.
+ * Maximum UTF-8 byte length of a single `plugin/query` or `plugin/mutate` request payload.
+ * Sized so encrypted E2EE RPC envelopes fit within a single 1 MiB `purpose 8` frame on the
+ * direct Desktop-to-Machine Iroh P2P fast path without spilling into multi-frame Streams fallback.
  */
-export type PluginScope = 'workspace' | 'machine' | 'project' | 'session';
+export const MAX_PLUGIN_RPC_REQUEST_BYTES = 262_144;
 
-/** Scopes valid for plugin-authored `machine` handlers (`PluginWorker` always runs on one machine). */
-export type MachinePluginScope = 'machine' | 'project' | 'session';
+/**
+ * Maximum total byte size of a packed plugin's browser-pure `client.js` + `assets/` archive,
+ * staying well within the 16 MiB E2EE paged read response ceiling (`purpose 9` 256 KiB chunks).
+ */
+export const MAX_PACKED_CLIENT_BUNDLE_BYTES = 4_194_304;
 
+declare const workspaceRefBrand: unique symbol;
+declare const machineRefBrand: unique symbol;
+declare const projectRefBrand: unique symbol;
+declare const sessionRefBrand: unique symbol;
+
+/**
+ * Logical workspace capability reference. Intentionally carries NO `machineId`:
+ * workspace-level views read synced catalog projections directly without failing
+ * when one machine is offline, and fan out per `MachineRef` when needed.
+ */
 export interface WorkspaceRef {
-  readonly [refBrand]: 'workspace';
+  readonly [workspaceRefBrand]: 'WorkspaceRef';
   readonly workspaceId: string;
 }
 
 export interface MachineRef {
-  readonly [refBrand]: 'machine';
+  readonly [machineRefBrand]: 'MachineRef';
   readonly workspaceId: string;
   readonly machineId: string;
 }
 
 export interface ProjectRef {
-  readonly [refBrand]: 'project';
+  readonly [projectRefBrand]: 'ProjectRef';
   readonly workspaceId: string;
   readonly machineId: string;
   readonly projectId: string;
-  readonly memberId?: string;
 }
 
 export interface SessionRef {
-  readonly [refBrand]: 'session';
+  readonly [sessionRefBrand]: 'SessionRef';
   readonly workspaceId: string;
   readonly machineId: string;
   readonly sessionId: string;
-  readonly project?: ProjectRef;
+  readonly projectId?: string;
 }
+
+export type PluginScope = 'workspace' | 'machine' | 'project' | 'session';
+export type MachinePluginScope = 'machine' | 'project' | 'session';
 
 export type ScopeTarget<S extends PluginScope> = S extends 'workspace'
   ? WorkspaceRef
@@ -47,36 +67,17 @@ export type ScopeTarget<S extends PluginScope> = S extends 'workspace'
       ? ProjectRef
       : SessionRef;
 
-/**
- * Maximum UTF-8 byte length of a validated `defineTool` or `results.add` payload persisted
- * inline inside Loro Session history. Larger payloads must be stored in `ctx.sessionDataDir`
- * (or `ctx.dataDir`) and fetched on demand via `defineQuery`.
- */
-export const MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES = 16_384;
-
-/**
- * Maximum serialized UTF-8 byte length for a `plugin/query` or `plugin/mutate` request so
- * desktop-to-machine E2EE calls remain on the single-frame Iroh fast path (`<= 256 KiB`).
- */
-export const MAX_PLUGIN_RPC_REQUEST_BYTES = 262_144;
-
-/**
- * Maximum combined byte size of a packed `client.js` bundle plus `assets/`, bounded well
- * within the 64-page / 16 MiB E2EE paged read-query response ceiling.
- */
-export const MAX_PACKED_CLIENT_BUNDLE_BYTES = 4_194_304;
-
 export type PluginCallErrorCode =
-  | 'revision_mismatch'
-  | 'worker_restarted'
-  | 'outcome_unknown'
+  | 'untrusted_plugin'
+  | 'plugin_disabled'
   | 'plugin_faulted'
+  | 'revision_mismatch'
   | 'machine_offline'
-  | 'timeout'
+  | 'forbidden'
+  | 'not_found'
   | 'idempotency_conflict'
   | 'business_key_conflict'
-  | 'forbidden'
-  | 'unavailable'
+  | 'outcome_unknown'
   | 'validation_failed'
   | 'handler_error';
 
@@ -177,7 +178,12 @@ export interface CreateSessionRequest {
    * while `requestId` receipts remain strictly isolated per calling user.
    */
   readonly businessKeyScope?: BusinessKeyScope;
+  /** Workspace `AgentRole` ID to instantiate for this Session. */
   readonly roleId?: string;
+  /** Portable blueprint ID declared in this plugin's `manifest.agentRoles`, resolved to the user's bound target. */
+  readonly pluginRoleId?: string;
+  /** Optional parent Session pointer recorded in `SessionMeta.openedBySessionId` / `openedByRootSessionId`. */
+  readonly parentSession?: SessionRef;
   readonly prompt: string;
   readonly skillIds?: readonly string[];
   /** Optional initial PR link so plaintext `github.*` observations have a bound PR target before Turn 1. */
@@ -206,17 +212,29 @@ export interface SendSessionMessageReceipt {
   readonly disposition: 'started' | 'queued' | 'steered';
 }
 
-export interface HostQueryDescriptor<S extends PluginScope, TInput, TOutput> {
-  readonly kind: 'host-query';
+export interface LodyQueryDescriptor<S extends PluginScope, TInput, TOutput> {
+  readonly kind: 'lody-query';
   readonly scope: S;
   readonly id: string;
   readonly __types?: { readonly input: TInput; readonly output: TOutput };
 }
 
+/** Backwards-compatible alias for `LodyQueryDescriptor`. */
+export type HostQueryDescriptor<S extends PluginScope, TInput, TOutput> = LodyQueryDescriptor<
+  S,
+  TInput,
+  TOutput
+>;
+
 export interface MachineSummary {
   readonly machine: MachineRef;
   readonly name: string;
   readonly presence: 'online' | 'offline' | 'unknown';
+  readonly agentConfigs: readonly {
+    readonly agentConfigId: string;
+    readonly cliType: string;
+    readonly label: string;
+  }[];
 }
 
 export interface ProjectSummary {
@@ -225,14 +243,69 @@ export interface ProjectSummary {
   readonly repository?: string;
 }
 
+export interface AgentRoleSummary {
+  readonly roleId: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly emoji?: string;
+  readonly visibility: 'private' | 'workspace';
+  readonly availability: 'ready' | 'unavailable' | 'unknown';
+  /** Present when materialized from a plugin's `manifest.agentRoles` blueprint. */
+  readonly pluginId?: string;
+  readonly pluginRoleId?: string;
+}
+
+export interface WorkspaceMemberSummary {
+  readonly userId: string;
+  readonly displayName: string;
+  readonly avatarUrl?: string;
+}
+
+export interface ScheduleSummary {
+  readonly scheduleId: string;
+  readonly title: string;
+  readonly cronExpression?: string;
+  readonly enabled: boolean;
+  readonly machine?: MachineRef;
+  readonly project?: ProjectRef;
+  readonly nextRunAt?: number;
+}
+
+/**
+ * Raw visible `SessionMeta` + ephemeral presence record exposed directly through `lodyQueries.sessions`
+ * so custom sidebars, multi-Agent dashboards, and panels can reconstruct parent/child lineages
+ * (`openedBySessionId` / `openedByRootSessionId`), Role lanes (`agentRoleId`), and pin/status buckets
+ * without bespoke host grouping concepts or bloated component props.
+ */
 export interface SessionSummary {
   readonly session: SessionRef;
   readonly title: string;
   readonly status: 'idle' | 'busy' | 'waiting' | 'stopped';
   readonly machinePresence: 'online' | 'offline' | 'unknown';
   readonly isMine: boolean;
+  readonly userId: string;
   readonly archived: boolean;
+  readonly createdAt: number;
   readonly updatedAt: number;
+  readonly project?: ProjectRef;
+  readonly openedBySessionId?: string;
+  readonly openedByRootSessionId?: string;
+  readonly agentRoleId?: string;
+  readonly agentRoleRevision?: number;
+  readonly cliType?: string;
+  readonly lastModel?: { readonly modelId?: string; readonly name?: string } | null;
+  readonly branchName?: string;
+  readonly baseBranch?: string;
+  readonly isWorktree?: boolean;
+  readonly isPinned?: boolean;
+  readonly pinSectionId?: string;
+  readonly orderKey?: string;
+  readonly snoozedUntil?: number;
+  readonly settledAt?: number;
+  readonly scheduleId?: string;
+  readonly contextWindowUsage?: { readonly usedTokens: number; readonly maxTokens?: number };
+  /** Present when the Session was created by a plugin (`pluginId`). */
+  readonly createdByPluginId?: string;
   /** Present only when the Session was created by the calling plugin (`pluginId`). */
   readonly businessKey?: string;
   readonly pullRequests: readonly {
@@ -256,7 +329,34 @@ export interface SessionDetail extends SessionSummary {
     readonly reason?: string;
     readonly nextCheckAt?: number;
   };
+  readonly queuedCount: number;
+  readonly pendingPermission: boolean;
   readonly recentTurns: readonly SessionTurnSummary[];
+}
+
+export interface RepositoryGitState {
+  readonly hasRepository: boolean;
+  readonly branch: string | null;
+  readonly baseBranch: string | null;
+  readonly dirty: boolean;
+  readonly ahead: number;
+  readonly behind: number;
+}
+
+export interface SessionDiffSummary {
+  readonly files: readonly {
+    readonly path: string;
+    readonly status: 'added' | 'modified' | 'deleted' | 'renamed';
+    readonly additions: number;
+    readonly deletions: number;
+  }[];
+}
+
+export interface FilePreviewEntry {
+  readonly path: string;
+  readonly kind: 'file' | 'directory';
+  readonly content?: string;
+  readonly truncated?: boolean;
 }
 
 export interface WorktreeEntry {
@@ -273,21 +373,51 @@ export interface PullRequestSummary {
   readonly state: 'open' | 'closed' | 'merged';
   readonly draft: boolean;
   readonly ciStatus: 'success' | 'failure' | 'pending' | 'unknown';
+  readonly reviewDecision?: 'approved' | 'changes_requested' | 'review_required';
+  readonly unresolvedCommentCount?: number;
   readonly observedAt: number;
 }
 
-export declare const hostQueries: {
-  readonly machines: HostQueryDescriptor<
+export interface SkillSummary {
+  readonly skillId: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly source: 'repository' | 'user' | 'plugin' | 'system';
+}
+
+/**
+ * Lody's published client/host read & network SDK.
+ * Workspace/session catalog descriptors subscribe directly to Lody's shared ref-counted Loro/Flock
+ * rooms with zero extra RPC; machine/project/network descriptors reuse Lody's authenticated
+ * `WorkspaceMachineRpcFacade` and platform cloud ports.
+ */
+export declare const lodyQueries: {
+  readonly machines: LodyQueryDescriptor<
     'workspace',
-    { readonly limit?: number },
+    { readonly limit?: number } | void,
     { readonly items: readonly MachineSummary[] }
   >;
-  readonly projects: HostQueryDescriptor<
+  readonly projects: LodyQueryDescriptor<
     'workspace',
-    { readonly limit?: number; readonly cursor?: string },
+    { readonly limit?: number; readonly cursor?: string } | void,
     { readonly items: readonly ProjectSummary[]; readonly nextCursor?: string }
   >;
-  readonly sessions: HostQueryDescriptor<
+  readonly agentRoles: LodyQueryDescriptor<
+    'workspace',
+    { readonly pluginId?: string } | void,
+    { readonly items: readonly AgentRoleSummary[]; readonly synced: boolean }
+  >;
+  readonly members: LodyQueryDescriptor<
+    'workspace',
+    void,
+    { readonly items: readonly WorkspaceMemberSummary[] }
+  >;
+  readonly schedules: LodyQueryDescriptor<
+    'workspace' | 'machine' | 'project',
+    { readonly enabledOnly?: boolean } | void,
+    { readonly items: readonly ScheduleSummary[] }
+  >;
+  readonly sessions: LodyQueryDescriptor<
     'workspace' | 'machine' | 'project',
     {
       readonly archived?: boolean;
@@ -297,30 +427,51 @@ export declare const hostQueries: {
       readonly createdByPlugin?: boolean;
       /** Business-task lookup within the calling plugin's namespace; archive filtering is independent. */
       readonly businessKey?: string;
+      /** Filter to descendants opened by a root Session (`openedByRootSessionId`). */
+      readonly rootSessionId?: string;
       /** Optional execution-machine filter when querying at `workspace` scope. */
       readonly machineId?: string;
       readonly search?: string;
       readonly limit?: number;
       readonly cursor?: string;
-    },
+    } | void,
     { readonly items: readonly SessionSummary[]; readonly nextCursor?: string }
   >;
-  readonly sessionDetail: HostQueryDescriptor<
+  readonly sessionDetail: LodyQueryDescriptor<
     'session',
-    { readonly recentTurnLimit?: number },
+    { readonly recentTurnLimit?: number } | void,
     SessionDetail
   >;
-  readonly worktrees: HostQueryDescriptor<
+  readonly gitState: LodyQueryDescriptor<'project' | 'session', void, RepositoryGitState>;
+  readonly worktrees: LodyQueryDescriptor<
     'project',
-    { readonly limit?: number; readonly cursor?: string },
+    { readonly limit?: number; readonly cursor?: string } | void,
     { readonly items: readonly WorktreeEntry[]; readonly nextCursor?: string }
   >;
-  readonly pullRequests: HostQueryDescriptor<
+  readonly sessionDiff: LodyQueryDescriptor<
+    'session',
+    { readonly turnId?: string } | void,
+    SessionDiffSummary
+  >;
+  readonly filePreview: LodyQueryDescriptor<
+    'project' | 'session',
+    { readonly path: string; readonly maxBytes?: number },
+    FilePreviewEntry
+  >;
+  readonly pullRequests: LodyQueryDescriptor<
     'project',
     { readonly number: number } | { readonly url: string },
     PullRequestSummary | null
   >;
+  readonly skills: LodyQueryDescriptor<
+    'machine' | 'project',
+    void,
+    { readonly items: readonly SkillSummary[] }
+  >;
 };
+
+/** Alias of `lodyQueries` retained for symmetry with `MachineHostPort.read`. */
+export declare const hostQueries: typeof lodyQueries;
 
 export declare function defineQuery<
   S extends MachinePluginScope,

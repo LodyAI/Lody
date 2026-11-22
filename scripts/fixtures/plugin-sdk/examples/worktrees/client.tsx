@@ -1,18 +1,19 @@
 import {
   defineClientPlugin,
-  hostQueries,
+  lodyQueries,
   useHost,
-  useQuery,
+  useLodyQuery,
   type ProjectPageProps,
   type WorktreeEntry,
 } from '@lody/plugin-sdk/client';
 import { Alert, Badge, Button, Table, type TableColumn } from '@lody/ui';
 
-function WorktreeManagerPage({ project, repositoryState }: ProjectPageProps) {
+function WorktreeManagerPage({ project }: ProjectPageProps) {
   const host = useHost();
-  const worktrees = useQuery(project, hostQueries.worktrees, { limit: 50 });
+  const gitState = useLodyQuery(project, lodyQueries.gitState);
+  const worktrees = useLodyQuery(project, lodyQueries.worktrees, { limit: 50 });
 
-  if (repositoryState === 'none') {
+  if (gitState.status === 'ready' && !gitState.data.hasRepository) {
     return (
       <Alert.Root tone="neutral">
         <Alert.Description>This project has no Git repository attached.</Alert.Description>

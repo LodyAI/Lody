@@ -4,12 +4,14 @@ import {
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
   hostQueries,
+  lodyQueries,
   type AttachmentItem,
   type AttachmentSnapshot,
   type AttachmentSourceDescriptor,
   type BusinessKeyScope,
   type CreateSessionRequest,
   type HostQueryDescriptor,
+  type LodyQueryDescriptor,
   type MachinePluginScope,
   type MachineRef,
   type MutationDescriptor,
@@ -31,8 +33,10 @@ export {
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
   hostQueries,
+  lodyQueries,
   type BusinessKeyScope,
   type CreateSessionRequest,
+  type LodyQueryDescriptor,
   type MachinePluginScope,
   type MachineRef,
   type ProjectRef,
@@ -46,7 +50,7 @@ export {
 export interface MachineHostPort {
   read<S extends PluginScope, TInput, TOutput>(
     target: ScopeTarget<S>,
-    query: HostQueryDescriptor<S, TInput, TOutput>,
+    query: LodyQueryDescriptor<S, TInput, TOutput>,
     input: TInput
   ): Promise<TOutput>;
   readonly sessions: {
@@ -118,8 +122,17 @@ export interface AttachmentContext {
 export interface ObservationReadResult<TValue> {
   readonly value: TValue;
   readonly observedAt: number;
-  /** Optional source revision/fingerprint re-verified by the host before dispatching a matched wait. */
+  /** Optional version/digest checked again during Session wakeup admission to prevent stale-read races. */
   readonly revision?: string;
+}
+
+export interface SessionLifecycleEvent {
+  readonly kind: 'turn.completed' | 'session.idle' | 'session.waiting' | 'session.stopped';
+  readonly session: SessionRef;
+  readonly project?: ProjectRef;
+  readonly turnId?: string;
+  readonly openedByRootSessionId?: string;
+  readonly agentRoleId?: string;
 }
 
 export interface MachinePluginRegistry {
@@ -127,40 +140,50 @@ export interface MachinePluginRegistry {
     descriptor: QueryDescriptor<S, TInput, TOutput>,
     handler: (
       ctx: MachineContext<S>,
-      input: z.infer<TInput>
+      input: z.output<TInput>
     ) => Promise<z.input<TOutput>> | z.input<TOutput>
   ): void;
-
   mutation<S extends MachinePluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: MutationDescriptor<S, TInput, TOutput>,
     handler: (
       ctx: MachineContext<S>,
-      input: z.infer<TInput>
+      input: z.output<TInput>
     ) => Promise<z.input<TOutput>> | z.input<TOutput>
   ): void;
-
   tool<TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: ToolDescriptor<TInput, TOutput>,
-    execute: (
+    handler: (
       ctx: ToolExecutionContext,
-      input: z.infer<TInput>
+      input: z.output<TInput>
     ) => Promise<z.input<TOutput>> | z.input<TOutput>
   ): void;
-
   attachmentSource<TMeta extends z.ZodType>(
     descriptor: AttachmentSourceDescriptor<TMeta>,
     handlers: {
-      search(ctx: AttachmentContext, query: string): Promise<readonly AttachmentItem[]>;
-      resolve(ctx: AttachmentContext, itemId: string): Promise<AttachmentSnapshot<z.input<TMeta>>>;
+      search(
+        ctx: AttachmentContext,
+        query: string
+      ): Promise<readonly AttachmentItem[]> | readonly AttachmentItem[];
+      resolve(
+        ctx: AttachmentContext,
+        itemId: string
+      ): Promise<AttachmentSnapshot<z.input<TMeta>>> | AttachmentSnapshot<z.input<TMeta>>;
     }
   ): void;
-
   observation<S extends MachinePluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: ObservationDescriptor<S, TInput, TOutput>,
     read: (
       ctx: MachineContext<S>,
-      input: z.infer<TInput>
-    ) => Promise<ObservationReadResult<z.input<TOutput>>>
+      input: z.output<TInput>
+    ) => Promise<ObservationReadResult<z.input<TOutput>>> | ObservationReadResult<z.input<TOutput>>
+  ): void;
+  /**
+   * Event-driven lifecycle hook for low-latency multi-Agent pipelines on this machine.
+   * Note: in E2EE workspaces, handler contexts without an active human root Turn still cannot mint
+   * new unsigned prompts (`sessions.create` / `send` remain gated by signed `e2eeIntent`).
+   */
+  onSessionEvent(
+    handler: (ctx: MachineContext<'session'>, event: SessionLifecycleEvent) => void | Promise<void>
   ): void;
 }
 

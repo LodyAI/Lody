@@ -1,4 +1,4 @@
-import { defineMutation, defineObservation, defineQuery, hostQueries } from '@lody/plugin-sdk';
+import { defineMutation, defineObservation, defineQuery, lodyQueries } from '@lody/plugin-sdk';
 import { defineMachinePlugin } from '@lody/plugin-sdk/machine';
 import { z } from 'zod';
 import { runSuiteTool } from './examples/test-report/shared';
@@ -45,7 +45,7 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
   machine.query(sessionMonitorQuery, async (ctx) => {
     const sessionDir: string = ctx.sessionDataDir;
     void sessionDir;
-    const detail = await ctx.host.read(ctx.target, hostQueries.sessionDetail, {
+    const detail = await ctx.host.read(ctx.target, lodyQueries.sessionDetail, {
       recentTurnLimit: 3,
     });
     return { activeStep: detail.recentTurns[0]?.previewText ?? null };
@@ -57,6 +57,14 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
     revision: 'depth-v1',
   }));
 
+  machine.onSessionEvent((ctx, event) => {
+    if (event.kind === 'turn.completed') {
+      const rootId: string | undefined = event.openedByRootSessionId;
+      void rootId;
+      ctx.invalidate(sessionMonitorQuery, ctx.target);
+    }
+  });
+
   machine.mutation(recoverReviewMutation, async (ctx, input) => {
     const key = `review/${input.prNumber}/${input.headSha}`;
     // Push-assist wakeup hint for waiting Sessions watching this project observation.
@@ -67,6 +75,7 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
       requestId: input.requestId,
       businessKey: key,
       businessKeyScope: 'project',
+      pluginRoleId: 'reviewer',
       pullRequestUrl: `https://github.com/lodyai/lody/pull/${input.prNumber}`,
       prompt: `Review PR #${input.prNumber} at ${input.headSha}.`,
     });

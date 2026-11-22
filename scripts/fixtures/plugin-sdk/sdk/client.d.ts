@@ -5,12 +5,16 @@ import {
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
   hostQueries,
+  lodyQueries,
+  type AgentRoleSummary,
   type AttachmentItem,
   type AttachmentSnapshot,
   type AttachmentSourceDescriptor,
   type BusinessKeyScope,
   type CreateSessionRequest,
+  type FilePreviewEntry,
   type HostQueryDescriptor,
+  type LodyQueryDescriptor,
   type MachinePluginScope,
   type MachineRef,
   type MachineSummary,
@@ -22,14 +26,19 @@ import {
   type ProjectSummary,
   type PullRequestSummary,
   type QueryDescriptor,
+  type RepositoryGitState,
+  type ScheduleSummary,
   type ScopeTarget,
   type SendSessionMessageReceipt,
   type SendSessionMessageRequest,
   type SessionDetail,
+  type SessionDiffSummary,
   type SessionRef,
   type SessionSummary,
   type SessionTurnSummary,
+  type SkillSummary,
   type ToolDescriptor,
+  type WorkspaceMemberSummary,
   type WorkspaceRef,
   type WorktreeEntry,
 } from './shared';
@@ -39,9 +48,13 @@ export {
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
   hostQueries,
+  lodyQueries,
+  type AgentRoleSummary,
   type BusinessKeyScope,
   type CreateSessionRequest,
+  type FilePreviewEntry,
   type HostQueryDescriptor,
+  type LodyQueryDescriptor,
   type MachinePluginScope,
   type MachineRef,
   type MachineSummary,
@@ -51,12 +64,17 @@ export {
   type ProjectRef,
   type ProjectSummary,
   type PullRequestSummary,
+  type RepositoryGitState,
+  type ScheduleSummary,
   type SendSessionMessageReceipt,
   type SendSessionMessageRequest,
   type SessionDetail,
+  type SessionDiffSummary,
   type SessionRef,
   type SessionSummary,
   type SessionTurnSummary,
+  type SkillSummary,
+  type WorkspaceMemberSummary,
   type WorkspaceRef,
   type WorktreeEntry,
 };
@@ -118,17 +136,18 @@ export interface SessionPanelProps {
   readonly params: Readonly<Record<string, string>>;
 }
 
-export type RepositoryState = 'available' | 'none' | 'unavailable' | 'unknown';
-
 export interface WorkspacePageProps {
   readonly workspace: WorkspaceRef;
   readonly params: Readonly<Record<string, string>>;
 }
 
+/**
+ * Surface props carry only capability references and URL params; raw repository/session/catalog
+ * data is pulled reactively via `useLodyQuery` / `useQuery` rather than stuffed into props.
+ */
 export interface ProjectPageProps {
   readonly workspace: WorkspaceRef;
   readonly project: ProjectRef;
-  readonly repositoryState: RepositoryState;
   readonly params: Readonly<Record<string, string>>;
 }
 
@@ -150,6 +169,21 @@ export interface SidebarViewProps {
   readonly activeSession?: SessionRef;
   readonly taskScope?: 'mine' | 'all';
   readonly filters: Readonly<Record<string, boolean>>;
+}
+
+export interface SidebarReplaceProps {
+  readonly workspace: WorkspaceRef;
+  readonly activeSession?: SessionRef;
+}
+
+export interface ShellOverlayProps {
+  readonly workspace: WorkspaceRef;
+  readonly activeSession?: SessionRef;
+}
+
+export interface StatusBarItemProps {
+  readonly workspace: WorkspaceRef;
+  readonly activeSession?: SessionRef;
 }
 
 export interface ClientPluginRegistry {
@@ -220,6 +254,16 @@ export interface ClientPluginRegistry {
         readonly Component: ComponentType<SidebarViewProps>;
       }): void;
     };
+    /**
+     * Replaces the default sidebar body with a custom plugin-rendered sidebar (e.g. a multi-Agent
+     * Swarm hierarchy or Role-lane board built on `useLodyQuery(workspace, lodyQueries.sessions)`),
+     * while the host retains a minimal switcher + `--safe-mode` escape hatch.
+     */
+    replace(spec: {
+      readonly id: string;
+      readonly title: string;
+      readonly Component: ComponentType<SidebarReplaceProps>;
+    }): void;
   };
   readonly settings: {
     readonly pages: {
@@ -240,6 +284,41 @@ export interface ClientPluginRegistry {
       ): void;
     };
   };
+  /**
+   * Local client appearance & shell extensions (`styles`, `shell.overlays`, `shell.statusBar`, `commands`).
+   * Active for the opting-in local user/profile without auto-propagating to other collaborators' clients;
+   * cleanly disposed on plugin disablement/HMR and bypassed via `lody --safe-mode`.
+   */
+  readonly styles: {
+    add(spec: { readonly id: string; readonly css: string }): void;
+  };
+  readonly shell: {
+    readonly overlays: {
+      add(spec: {
+        readonly id: string;
+        readonly Component: ComponentType<ShellOverlayProps>;
+      }): void;
+    };
+    readonly statusBar: {
+      add(spec: {
+        readonly id: string;
+        readonly align?: 'left' | 'right';
+        readonly Component: ComponentType<StatusBarItemProps>;
+      }): void;
+    };
+  };
+  readonly commands: {
+    add(spec: {
+      readonly id: string;
+      readonly title: string;
+      readonly defaultShortcut?: string;
+      readonly run: (ctx: {
+        readonly workspace: WorkspaceRef;
+        readonly activeSession?: SessionRef;
+        readonly host: HostActions;
+      }) => void | Promise<void>;
+    }): void;
+  };
 }
 
 export interface HostActions {
@@ -259,6 +338,7 @@ export interface HostActions {
       draft: {
         readonly prompt?: string;
         readonly roleId?: string;
+        readonly pluginRoleId?: string;
         readonly skillIds?: readonly string[];
         readonly attachments?: readonly AttachmentSnapshot[];
       }
@@ -285,7 +365,32 @@ export interface HostActions {
       params?: Readonly<Record<string, string>>
     ): void;
   };
+  readonly themes: {
+    /** Switches the client's active theme to a built-in or plugin-contributed theme ID. */
+    activate(themeId: string): void;
+  };
 }
+
+/**
+ * Subscribes to Lody's built-in raw reactive stores (shared Loro/Flock rooms & presence) or
+ * authenticated host network / `MachineRpc` adapters (`lodyQueries.*`).
+ */
+export declare function useLodyQuery<S extends PluginScope, TOutput>(
+  target: ScopeTarget<S>,
+  query: LodyQueryDescriptor<S, void, TOutput>
+): QueryResult<TOutput>;
+
+export declare function useLodyQuery<S extends PluginScope, TInput, TOutput>(
+  target: ScopeTarget<S>,
+  query: LodyQueryDescriptor<S, TInput | void, TOutput>,
+  input?: TInput
+): QueryResult<TOutput>;
+
+export declare function useLodyQuery<S extends PluginScope, TInput, TOutput>(
+  target: ScopeTarget<S>,
+  query: LodyQueryDescriptor<S, TInput, TOutput>,
+  input: TInput
+): QueryResult<TOutput>;
 
 export declare function useQuery<
   S extends MachinePluginScope,
@@ -299,7 +404,7 @@ export declare function useQuery<
 
 export declare function useQuery<S extends PluginScope, TInput, TOutput>(
   target: ScopeTarget<S>,
-  query: HostQueryDescriptor<S, TInput, TOutput>,
+  query: LodyQueryDescriptor<S, TInput, TOutput>,
   input: TInput
 ): QueryResult<TOutput>;
 
@@ -311,6 +416,15 @@ export declare function useMutation<
   target: ScopeTarget<S>,
   mutation: MutationDescriptor<S, TInput, TOutput>
 ): MutationHandle<z.input<TInput>, z.infer<TOutput>>;
+
+export declare function usePluginSettings<
+  TValues extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
+>(
+  target?: ProjectRef | MachineRef
+): {
+  readonly values: TValues;
+  readonly update: (patch: Partial<TValues>) => Promise<void>;
+};
 
 export declare function useHost(): HostActions;
 
