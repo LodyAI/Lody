@@ -309,6 +309,8 @@ import {
   useCoordinatorConversation,
 } from '@/components/project-mode/coordinator-conversation';
 import { CoordinatorProactiveCard } from '@/components/project-mode/coordinator-action-bar';
+import { seedCoordinatorAvatarStreamSnapshot } from '@/components/project-mode/coordinator-avatar-mood';
+import { CoordinatorBubbleAvatar } from '@/components/project-mode/coordinator-bubble-avatar';
 import { CoordinatorChildAttentionCards } from '@/components/project-mode/coordinator-child-attention-cards';
 import {
   buildLatestCoordinatorBubbleByTaskId,
@@ -2054,6 +2056,17 @@ export const SessionChatStreamView = forwardRef<
           : undefined,
       [coordinatorBubbles, coordinatorContext?.tasks, items, localUserMessages?.length]
     );
+    const coordinatorAvatarScopeKey = coordinatorContext?.activeThreadRootId
+      ? `${sessionId}:thread:${coordinatorContext.activeThreadRootId}`
+      : `${sessionId}:main`;
+    useMemo(() => {
+      if (!coordinatorBubbles) return;
+      seedCoordinatorAvatarStreamSnapshot(
+        coordinatorAvatarScopeKey,
+        items.flatMap((entry) => (entry.type === 'message' ? [entry.message] : [])),
+        initialWindowReady
+      );
+    }, [coordinatorAvatarScopeKey, coordinatorBubbles, initialWindowReady, items]);
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -6967,6 +6980,11 @@ function CoordinatorReplyBubble({
     setIsBubbleHovered(false);
   };
 
+  const avatarScopeKey = coordinator?.activeThreadRootId
+    ? `${sessionId}:thread:${coordinator.activeThreadRootId}`
+    : `${sessionId}:main`;
+  const bubbleKey = formatCoordinatorBubbleKey(messageId, entry.id);
+
   return (
     <div
       {...stylex.props(coordinatorBubbleStyles.column)}
@@ -6981,85 +6999,95 @@ function CoordinatorReplyBubble({
       }
     >
       <div {...stylex.props(coordinatorBubbleStyles.row)}>
-        <div
-          ref={bubbleRef}
-          onPointerEnter={handleInteractiveEnter}
-          onPointerLeave={handleInteractiveLeave}
-          {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}
-        >
-          <div className="flex flex-col gap-2">
-            {showInlineQuote && entry.replyTo ? (
-              <CoordinatorInlineQuoteChip
-                replyTo={entry.replyTo}
-                onOpenThread={
-                  coordinator?.activeThreadRootId === entry.replyTo.threadRootId
-                    ? undefined
-                    : coordinator?.onOpenThread
+        <CoordinatorBubbleAvatar
+          scopeKey={avatarScopeKey}
+          bubbleKey={bubbleKey}
+          entry={entry}
+          createdAt={entry.createdAt}
+        />
+        <div {...stylex.props(coordinatorBubbleStyles.contentColumn)}>
+          <div {...stylex.props(coordinatorBubbleStyles.bubbleRow)}>
+            <div
+              ref={bubbleRef}
+              onPointerEnter={handleInteractiveEnter}
+              onPointerLeave={handleInteractiveLeave}
+              {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}
+            >
+              <div className="flex flex-col gap-2">
+                {showInlineQuote && entry.replyTo ? (
+                  <CoordinatorInlineQuoteChip
+                    replyTo={entry.replyTo}
+                    onOpenThread={
+                      coordinator?.activeThreadRootId === entry.replyTo.threadRootId
+                        ? undefined
+                        : coordinator?.onOpenThread
+                    }
+                  />
+                ) : null}
+                {hasBody ? (
+                  <MarkdownBlock
+                    text={entry.body}
+                    size={conversationFontSize}
+                    isStreaming={false}
+                    onFilePathClick={onFilePathClick}
+                    searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
+                  />
+                ) : null}
+                {hasImages ? (
+                  <ImageGroupBubble
+                    content={{ type: 'image_group', images: entry.images! }}
+                    sessionId={sessionId}
+                    messageId={messageId}
+                    itemIndex={itemIndex}
+                    align="start"
+                  />
+                ) : null}
+                {hasFiles ? (
+                  <SessionFileGroup files={entry.files!} sessionId={sessionId} align="start" />
+                ) : null}
+              </div>
+            </div>
+            <div
+              ref={sideActionsRef}
+              onPointerEnter={handleInteractiveEnter}
+              onPointerLeave={handleInteractiveLeave}
+              {...stylex.props(coordinatorBubbleStyles.sideActionsSlot)}
+            >
+              <CoordinatorBubbleSideActions
+                copyText={entry.body}
+                isHovered={isBubbleHovered}
+                alwaysRevealActions={isMobile && mobileActionsRevealed}
+                onReply={
+                  coordinator?.onReplyToBubble
+                    ? () =>
+                        coordinator.onReplyToBubble!(
+                          createCoordinatorReplyRef({
+                            target: {
+                              kind: 'coordinator_bubble',
+                              turnId: messageId,
+                              bubbleId: entry.id,
+                            },
+                            existingThreadRootId:
+                              coordinator.activeThreadRootId ?? entry.replyTo?.threadRootId,
+                            author: 'coordinator',
+                            text: entry.body,
+                          })
+                        )
+                    : undefined
                 }
               />
-            ) : null}
-            {hasBody ? (
-              <MarkdownBlock
-                text={entry.body}
-                size={conversationFontSize}
-                isStreaming={false}
-                onFilePathClick={onFilePathClick}
-                searchBlockId={getCoordinatorMessageSearchBlockId(messageId, itemIndex)}
-              />
-            ) : null}
-            {hasImages ? (
-              <ImageGroupBubble
-                content={{ type: 'image_group', images: entry.images! }}
-                sessionId={sessionId}
-                messageId={messageId}
-                itemIndex={itemIndex}
-                align="start"
-              />
-            ) : null}
-            {hasFiles ? (
-              <SessionFileGroup files={entry.files!} sessionId={sessionId} align="start" />
-            ) : null}
+            </div>
           </div>
-        </div>
-        <div
-          ref={sideActionsRef}
-          onPointerEnter={handleInteractiveEnter}
-          onPointerLeave={handleInteractiveLeave}
-          {...stylex.props(coordinatorBubbleStyles.sideActionsSlot)}
-        >
-          <CoordinatorBubbleSideActions
-            copyText={entry.body}
-            isHovered={isBubbleHovered}
-            alwaysRevealActions={isMobile && mobileActionsRevealed}
-            onReply={
-              coordinator?.onReplyToBubble
-                ? () =>
-                    coordinator.onReplyToBubble!(
-                      createCoordinatorReplyRef({
-                        target: {
-                          kind: 'coordinator_bubble',
-                          turnId: messageId,
-                          bubbleId: entry.id,
-                        },
-                        existingThreadRootId:
-                          coordinator.activeThreadRootId ?? entry.replyTo?.threadRootId,
-                        author: 'coordinator',
-                        text: entry.body,
-                      })
-                    )
-                : undefined
-            }
-          />
+          {replyCount > 0 && coordinator?.onOpenThread ? (
+            <div {...stylex.props(coordinatorBubbleStyles.replyPillRow)}>
+              <CoordinatorThreadReplyCountPill
+                count={replyCount}
+                onClick={() => coordinator.onOpenThread!(anchorId, entry.body)}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
-      {replyCount > 0 && coordinator?.onOpenThread ? (
-        <div {...stylex.props(coordinatorBubbleStyles.replyPillRow)}>
-          <CoordinatorThreadReplyCountPill
-            count={replyCount}
-            onClick={() => coordinator.onOpenThread!(anchorId, entry.body)}
-          />
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -7092,25 +7120,27 @@ function CoordinatorProactiveCardRow({
   if (!resolvedCard) return null;
 
   return (
-    <CoordinatorProactiveCard
-      card={resolvedCard}
-      superseded={isSuperseded}
-      onOpenTask={coordinator?.openTask}
-      onOpenPr={coordinator?.openPr}
-      onExecuteAction={
-        coordinator?.onExecuteBubbleAction
-          ? (action) =>
-              coordinator.onExecuteBubbleAction!({
-                turnId: messageId,
-                bubbleId: entry.id,
-                bubbleBody: entry.body || resolvedCard.title,
-                bubbleReplyTo: entry.replyTo,
-                activeThreadRootId: coordinator.activeThreadRootId,
-                action,
-              })
-          : undefined
-      }
-    />
+    <div {...stylex.props(coordinatorBubbleStyles.avatarAlignedSlot)}>
+      <CoordinatorProactiveCard
+        card={resolvedCard}
+        superseded={isSuperseded}
+        onOpenTask={coordinator?.openTask}
+        onOpenPr={coordinator?.openPr}
+        onExecuteAction={
+          coordinator?.onExecuteBubbleAction
+            ? (action) =>
+                coordinator.onExecuteBubbleAction!({
+                  turnId: messageId,
+                  bubbleId: entry.id,
+                  bubbleBody: entry.body || resolvedCard.title,
+                  bubbleReplyTo: entry.replyTo,
+                  activeThreadRootId: coordinator.activeThreadRootId,
+                  action,
+                })
+            : undefined
+        }
+      />
+    </div>
   );
 }
 
@@ -7326,7 +7356,29 @@ const coordinatorBubbleStyles = stylex.create({
     display: 'flex',
     alignItems: 'flex-start',
     justifyContent: 'flex-start',
+    gap: 10,
     width: '100%',
+  },
+  contentColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
+    minWidth: 0,
+    flex: '1 1 0%',
+  },
+  bubbleRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    width: '100%',
+  },
+  avatarAlignedSlot: {
+    width: '100%',
+    paddingInlineStart: {
+      default: 0,
+      '@media (min-width: 640px)': 42,
+    },
   },
   bubble: {
     display: 'flex',

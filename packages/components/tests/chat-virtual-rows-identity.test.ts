@@ -26,6 +26,12 @@ import {
   resolveCoordinatorBubbleActions,
   resolveCoordinatorProactiveCard,
 } from '../src/components/project-mode/coordinator-action-engine';
+import {
+  claimCoordinatorBubbleAvatarPlayback,
+  inferCoordinatorBubbleMood,
+  resetCoordinatorAvatarPlaybackForTest,
+  seedCoordinatorAvatarStreamSnapshot,
+} from '../src/components/project-mode/coordinator-avatar-mood';
 import type { ProjectBoardRow } from '../src/components/project-mode/project-board-model';
 import type { TurnIndexRow } from '../src/lib/conversation-view';
 
@@ -1102,6 +1108,87 @@ describe('coordinator conversation bubbles and search', () => {
     ).toBe(true);
     expect(
       supersededKeys.has(formatCoordinatorBubbleKey('assistant:card-turn', 'b-with-card'))
+    ).toBe(false);
+  });
+
+  it('selects coordinator avatar moods from message content and restricts Lottie playback to one-shot live arrivals', () => {
+    expect(
+      inferCoordinatorBubbleMood({
+        body: '我会安排排查 iOS 对话页为什么有时只显示 ACP 图标，也请审查员独立看一遍。',
+      })
+    ).toBe('thinking');
+    expect(
+      inferCoordinatorBubbleMood({
+        body: 'Composer 单闪电与双闪电已可预览，回归测试通过。',
+      })
+    ).toBe('happy');
+    expect(
+      inferCoordinatorBubbleMood({
+        body: '这里有两个分支命名不一致，不确定你希望保留哪一个？',
+      })
+    ).toBe('confused');
+    expect(
+      inferCoordinatorBubbleMood({
+        body: '抱歉，构建失败且单测未通过，暂时无法合并。',
+      })
+    ).toBe('sad');
+    expect(
+      inferCoordinatorBubbleMood({
+        body: '检测到密钥泄露风险，严禁直接推送到公开仓库！',
+      })
+    ).toBe('angry');
+
+    resetCoordinatorAvatarPlaybackForTest();
+    const mountAt = 100_000;
+    const scopeKey = 'coord-session-1:main';
+    const historicalTurn = makeMessage(
+      'assistant:hist-1',
+      'assistant',
+      [
+        {
+          type: 'coordinator_message',
+          id: 'hist-bubble',
+          body: '历史已完成消息',
+          createdAt: mountAt - 60_000,
+        },
+      ],
+      true
+    );
+
+    seedCoordinatorAvatarStreamSnapshot(scopeKey, [historicalTurn], true, mountAt);
+    expect(
+      claimCoordinatorBubbleAvatarPlayback(
+        scopeKey,
+        'assistant:hist-1:hist-bubble',
+        mountAt - 60_000,
+        mountAt
+      )
+    ).toBe(false);
+
+    expect(
+      claimCoordinatorBubbleAvatarPlayback(
+        scopeKey,
+        'assistant:older-page:old-bubble',
+        mountAt - 30_000,
+        mountAt + 5_000
+      )
+    ).toBe(false);
+
+    expect(
+      claimCoordinatorBubbleAvatarPlayback(
+        scopeKey,
+        'assistant:live-1:new-bubble',
+        mountAt + 3_000,
+        mountAt + 3_050
+      )
+    ).toBe(true);
+    expect(
+      claimCoordinatorBubbleAvatarPlayback(
+        scopeKey,
+        'assistant:live-1:new-bubble',
+        mountAt + 3_000,
+        mountAt + 4_000
+      )
     ).toBe(false);
   });
 });

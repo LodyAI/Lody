@@ -30,6 +30,7 @@ import {
 } from '@/components/sessions/session-conversation-page';
 import { buildChildSessionsByParent } from '@/components/sessions/session-list-rows';
 import { ProjectBoardView } from '@/components/project-mode/project-board';
+import { CoordinatorBubbleAvatar } from '@/components/project-mode/coordinator-bubble-avatar';
 import {
   buildProjectBoard,
   coordinatorProjectKeyId,
@@ -829,5 +830,50 @@ export const WorkingZhCn: Story = {
 /** The start page: the board beside the start form, split by a resizable divider. */
 export const StartPageZhCn: Story = {
   args: { page: 'start' },
+  globals: { theme: 'light', locale: 'zh_CN' },
+};
+
+function AvatarMoodShowcase() {
+  const [seq, setSeq] = useState(1);
+  const samples = [
+    { label: 'thinking（思考）', body: '我会先安排排查 iOS 对话页为什么有时只显示图标。' },
+    { label: 'happy（开心）', body: '双闪电图标更新已完成，回归测试全部通过，现在可预览。' },
+    { label: 'confused（疑惑）', body: '这两个分支的配置策略不一致，请问你希望保留哪一个？' },
+    { label: 'sad（悲伤）', body: '抱歉，远端集成测试失败，合并受阻。' },
+    { label: 'angry（生气）', body: '检测到密钥泄露高危风险，严禁提交到公开仓库！' },
+  ];
+  return (
+    <div className="flex flex-col gap-4 bg-background p-8 text-foreground">
+      <div>
+        <button
+          type="button"
+          className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          onClick={() => setSeq((prev) => prev + 1)}
+        >
+          模拟新消息事件播放一次 Lottie 动画
+        </button>
+      </div>
+      <div className="flex flex-col gap-3">
+        {samples.map((sample, idx) => (
+          <div key={`${seq}:${idx}`} className="flex items-start gap-2.5">
+            <CoordinatorBubbleAvatar
+              scopeKey={`story-avatar-${seq}`}
+              bubbleKey={`turn-${seq}:bubble-${idx}`}
+              entry={{ body: sample.body }}
+              createdAt={Date.now()}
+            />
+            <div className="rounded-2xl bg-muted/60 px-3.5 py-2 text-sm">
+              <div className="text-xs font-medium text-muted-foreground">{sample.label}</div>
+              <div>{sample.body}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export const AvatarMoodsZhCn: Story = {
+  render: () => <AvatarMoodShowcase />,
   globals: { theme: 'light', locale: 'zh_CN' },
 };
