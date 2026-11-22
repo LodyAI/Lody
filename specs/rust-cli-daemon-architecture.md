@@ -29,8 +29,9 @@ responsibilities are divided first, and that the implementation is Rust second:
    plane is a replaceable backend adapter.
 2. **Session logic is a pure state machine that performs no I/O.** The runtime only
    executes the actions it emits.
-3. **Every input enters one durable admission journal.** A session consumes only
-   from that journal.
+3. **Every activated input enters one durable session inbox.** A session consumes only
+   from that inbox; there is no parallel journal alongside `OperationInbox` or
+   unpromoted `messageQueue` drafts.
 4. **One application interface.** The CLI, MCP, local IPC and remote RPC are
    projections of it.
 5. **Ports, implementations and composition are separate.** The local composition
@@ -57,7 +58,7 @@ flowchart TB
 
   subgraph EXEC["Execution plane: lodyd"]
     API["Application interface"]
-    KERNEL["Session kernel and admission journal"]
+    KERNEL["Session kernel and unified inbox"]
     RES["Machine resources: ACP, worktrees, PTY, watchers"]
   end
 
@@ -78,8 +79,8 @@ flowchart TB
 
 | Durable state | Owner |
 | --- | --- |
-| Workspace Meta, the `wf`/`mf`/`sr` Flock tables, Session/Schedule/Preview documents, the upload outbox, content encryption | Engine process |
-| Admission journal, `operations.sqlite3`, `schedules.sqlite`, `pr-poller-state.sqlite3`, history RPC rejection records, per-workspace `automations/<id>.sqlite`, the turn diff store, the E2EE ledger and key custody | `lodyd` |
+| Workspace Meta, the `wf`/`mf`/`sr` Flock tables, Session/Schedule/Preview documents (including unpromoted `messageQueue` drafts), the upload outbox, content encryption | Engine process |
+| Unified session inbox and operation store (`operations.sqlite3`), `schedules.sqlite`, `pr-poller-state.sqlite3`, history RPC rejection records, per-workspace `automations/<id>.sqlite`, the turn diff store, the E2EE ledger and key custody | `lodyd` |
 | Roost session history | `lodyd` today; see [open questions](#open-questions) for a transfer |
 
 - **Single owner.** No process other than the owner opens these stores. This also
@@ -89,8 +90,11 @@ flowchart TB
   renderer reads plaintext only through Electron main; `lodyd` and main each hold one
   connection.
 - **Starting on demand is not going online.** A `lodyd` started by a one-shot command
-  opens storage only. It publishes no presence and accepts no dispatch, and it does
-  not take over an existing Host lease.
+  acquires a local storage lease without claiming the online Host lease: it opens
+  storage only, publishes no presence and accepts no dispatch. When an online `lodyd`
+  starts (`daemon start` or Electron), the storage-only instance drains its in-flight
+  command and releases the storage lease before the online owner opens any store, so
+  two `lodyd` processes never hold the same SQLite or Roost files concurrently.
 - **`daemon-runner` keeps its duties.** The Host lease, release verification, channel
   and downgrade confirmation, candidate health checks, bounded drain and failure
   rollback all remain as the
@@ -124,9 +128,11 @@ The reasons for this division:
   existing TypeScript implementation.
 - Entry code depends only on the application interface, so an action such as
   creating a session has one implementation.
-- The local composition does not link the connected backend's implementation, so the
-  public default build cannot issue authenticated cloud requests. That is stronger
-  than a runtime check.
+- The default `local` Cargo build does not compile or link connected backend crates,
+  so the public local-only build cannot issue authenticated cloud requests at the
+  binary level. The `connected` Cargo build links the vendor-neutral backend crates,
+  and its composition root still instantiates no connected client until an explicit
+  backend profile is present.
 
 ## Session kernel
 
@@ -141,9 +147,11 @@ Idle (keeps the last released turn and an optional warm Agent)
   → Idle
 ```
 
-- **A released turn is not destroyed.** When an Agent is woken after its turn by a
-  background task, a scheduled wake-up or a cron, that work still acts for the frozen
-  invocation of the previous turn, so `Idle` must keep it.
+- **A released turn is not destroyed.** When a live Agent continues background child
+  activity or emits late tool output after `end_turn` (`sessionActivity`), that work
+  still belongs to the frozen invocation of the released turn, so `Idle` retains it.
+  Schedules and matched Automations do not reuse that released turn; they enter the
+  inbox as distinct new turns with their own turn ID and frozen author provenance.
 - **Late events are dropped by generation.** Every Agent event carries a generation;
   one that does not match the current turn changes no state.
 - **Control input never queues behind output.** Cancel, permission replies, Steer and
@@ -162,19 +170,28 @@ One session's failure does not block another, and every wait on a user path is
 bounded. After a remote input arrives, only correctness-critical setup may stand
 before ACP `prompt`.
 
-## Admission journal
+## Unified session inbox (single source of admission truth)
 
-Every session has one durable input journal. Local IPC, the remote RPC fast path,
-observation of the CRDT document, cross-session delegation, Automations and Schedules
-each do one thing: append an entry, deduplicated by user turn ID. The session
-consumes the journal in order, and the journal is the only answer to which input
-counts and in what order.
+Admission is not a second log placed in front of or beside `OperationInbox` or
+`messageQueue`; each stage of an input has exactly one owner:
 
-- The fast path only delivers content earlier. It does not create a second input.
+- **Unpromoted queued drafts stay solely in the data plane.** Pending items in a
+  session's `messageQueue` are not pre-copied into local SQLite while waiting. Cross-
+  device edits, reordering, deletion, and Stop-induced `paused: true` markers keep a
+  single source of truth in the synced document until the moment one item is promoted.
+- **Activated inputs share one inbox in `operations.sqlite3`.** `OperationInbox`
+  evolves into the single durable admission store for every runnable turn—local IPC,
+  the remote RPC fast path, a newly promoted `messageQueue` item or CRDT activation
+  pointer, delegated completion batches, Automations, and Schedules—deduplicated by
+  input/turn ID and preserving human-over-automatic yield, submission fencing, and
+  `pauseInbox` semantics in one state machine.
+- The fast path only delivers an accepted payload earlier; it writes the same
+  idempotent inbox entry and never creates a second input.
 - A reply still waits for the user message to be durable in the data plane before it
-  is written to history, but that wait exists in one place.
-- A cancelled or retired entry never starts. After a crash, a turn in an uncertain
-  state is recovered or settled by replaying the journal.
+  is written to history, and that wait exists in one place.
+- A cancelled or retired entry never starts. After a crash, an uncertain turn is
+  recovered or settled from this single inbox, and draining before rollback leaves no
+  separate journal file invisible to the previous CLI.
 
 ## Security boundary
 
@@ -184,12 +201,12 @@ Verification has two levels, each with one job:
    access check of an ordinary cloud workspace, and signature verification and
    decryption of an encrypted workspace's envelope yield a verified caller at entry.
    The response is sealed for the channel it arrived on.
-2. **Every input is verified again when it enters the admission journal.** Inputs to
-   an encrypted workspace also arrive as signed rows through document sync, which
-   entry code never sees. The journal judges each entry under the workspace's
-   security policy: only signed content counts, an unsigned `resume` is not a
-   requested target, the executing identity comes from verification, and an entry's
-   `userId` is display data.
+2. **Every input is verified again when it is admitted into the inbox.** Inputs to an
+   encrypted workspace also arrive as signed rows through document sync, which entry
+   code never sees. The inbox judges each candidate under the workspace's security
+   policy before recording admission: only signed content counts, an unsigned `resume`
+   is not a requested target, the executing identity comes from verification, and an
+   entry's `userId` is display data.
 
 The kernel receives only verified input and contains no encryption branch. Sealing,
 signing and opening content is done by the engine; ledger verification, key receipt
@@ -198,17 +215,20 @@ mode authorizes no plaintext egress.
 
 ## Connected backends and composition
 
-Without a backend profile, `lodyd` runs the local composition: it constructs no
-connected implementation and issues no cloud request. Public managed-runtime
-downloads are the existing exception. A profile is created only when the user
-explicitly runs `lody login --server <origin>`, which reads
-`/.well-known/lody-configuration` (a `profile.toml` may override it). The official
-cloud and an enterprise self-hosted instance take the same path. Local storage,
-credentials and encryption anchors are isolated per profile.
+The default `local` build excludes connected backend crates at compile time. In the
+`connected` build, `lodyd` still runs the local composition when no backend profile
+exists: it constructs no connected client and issues no cloud request (public
+managed-runtime downloads remain the existing exception). A profile is created only
+when the user explicitly runs `lody login --server <origin>`, which reads
+`/.well-known/lody-configuration` (a `profile.toml` may override it). One `connected`
+binary therefore serves both the official cloud and enterprise self-hosted instances
+through the same runtime profile path, with local storage, credentials and encryption
+anchors isolated per profile.
 
-Today the CLI reads its endpoints from environment variables at run time and derives
-the auth site address by replacing `.convex.cloud`. The backend profile replaces
-both; the site address is delivered explicitly.
+Today the CLI mixes build-time endpoint inlining (`vite.config.ts`) with runtime
+environment reads (`const.ts`) and derives the auth site address by replacing
+`.convex.cloud`. The backend profile replaces all three; the site address is delivered
+explicitly.
 
 Ports stay vendor-neutral. Six are fixed now: the control plane (including OIDC
 sign-in, a custom CA and proxies), negotiated object upload, the artifact source
@@ -262,15 +282,16 @@ owner decisions that this document keeps.
 ## Open questions
 
 - Whether Roost history transfers to the data plane, leaving `lodyd` with only
-  rebuildable state and the admission journal.
+  rebuildable state and the unified session inbox.
 - Whether a long-lived process should hold each Agent's stdio so that upgrading or
   crashing `lodyd` does not end turns in progress.
 - Whether the encryption core keeps an implementation in each language or becomes
   one implementation compiled for the clients.
 - Whether the current Effect v4 migration continues during the rewrite, freezes, or
   keeps only the units that define kernel boundaries.
-- The admission journal's storage format, and how its inputs survive a rollback to
-  the previous version.
+- Whether extending `OperationInbox` in `operations.sqlite3` to cover non-delegated
+  ordinary activations needs additive columns (shared with the Node CLI before
+  cutover) or fits within the existing `inbox_inputs` / receipt tables.
 - Who starts and supervises the engine on a host without Electron, the drain order
   of the engine and `lodyd` during an upgrade, and how sessions recover after an
   engine crash.
