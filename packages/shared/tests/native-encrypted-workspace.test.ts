@@ -102,6 +102,8 @@ async function device(name: 'a' | 'b', baseUrl: string) {
   const network = { online: true };
   /** The verified ledger's admitted devices, as this device last ingested them. */
   const ledger = { admitted };
+  /** Remote retries the attachment scheduled; a test runs them by hand. */
+  const retries: { retry: () => void; delayMs: number }[] = [];
   const attach = (pendingWipe: NativePendingWipe = memoryWipe(), onOpenPending?: () => void) =>
     attachNativeEncryptedWorkspace({
       client,
@@ -124,8 +126,23 @@ async function device(name: 'a' | 'b', baseUrl: string) {
       },
       pendingWipe,
       onOpenPending,
+      scheduleRetry: (retry, delayMs) => {
+        const entry = { retry, delayMs };
+        retries.push(entry);
+        return () => void retries.splice(retries.indexOf(entry) >>> 0, 1);
+      },
     });
-  return { dataDir, client, writer, attach, network, ledger, syncs: () => syncs };
+  return {
+    dataDir,
+    client,
+    writer,
+    attach,
+    network,
+    ledger,
+    retries,
+    tokens: () => tokens,
+    syncs: () => syncs,
+  };
 }
 
 /** A replica's local edit, committed as the daemon and desktop commit theirs. */
@@ -241,6 +258,34 @@ describe('native encrypted workspace', () => {
     await createDocRoom(b.client, ws, room.id);
     await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
     expect(JSON.stringify((await b.client.readDoc(ws, room)).value)).toContain('written-offline');
+  }, 60_000);
+
+  it('an attachment opened offline configures its remote on a backoff, without a refresh', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const b = await device('b', baseUrl);
+    a.network.online = false;
+    const wa = await a.attach();
+    cleanups.push(async () => wa.close());
+    await createDocRoom(a.client, ws, room.id);
+    await write(a.client, 'written-offline');
+    expect(a.retries.map((entry) => entry.delayMs)).toEqual([1_000]);
+
+    a.retries.shift()!.retry();
+    await vi.waitFor(() => expect(a.retries.map((entry) => entry.delayMs)).toEqual([2_000]));
+
+    a.network.online = true;
+    a.retries.shift()!.retry();
+    await vi.waitFor(() => expect(a.tokens()).toBeGreaterThan(0));
+    await vi.waitFor(async () =>
+      expect((await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0)
+    );
+    expect(a.retries).toEqual([]);
+    const wb = await b.attach();
+    cleanups.push(async () => wb.close());
+    expect(
+      await createNativeRemoteHistoryPort(b.client, ws, room.id).readPath(['session'])
+    ).toEqual({ note: 'written-offline' });
   }, 60_000);
 
   it('a frame from a writer the installed ledger does not admit yet asks for a catch-up, then opens', async () => {

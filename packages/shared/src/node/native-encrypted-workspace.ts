@@ -64,6 +64,8 @@ export interface NativeEncryptedWorkspaceOptions {
   readonly onOpenPending?: () => void;
   /** This process's own machine, whose Machine Flock stays live like the workspace's. */
   readonly machineId?: string;
+  /** Runs `retry` after `delayMs` and returns its cancellation; a timer by default. */
+  readonly scheduleRetry?: (retry: () => void, delayMs: number) => () => void;
 }
 
 /**
@@ -94,6 +96,18 @@ export const NATIVE_ENCRYPTED_SNAPSHOT_POLICY = {
   minUpdateBytes: 1024 * 1024,
   maxUpdateBytes: 4 * 1024 * 1024,
 } as const;
+
+/**
+ * An unconfigured remote (no content token yet: offline, or a refused grant) is
+ * retried on this backoff while attached, doubling up to five minutes.
+ */
+const REMOTE_RETRY_FIRST_MS = 1_000;
+const REMOTE_RETRY_MAX_MS = 5 * 60_000;
+const timerRetry = (retry: () => void, delayMs: number) => {
+  const timer = setTimeout(retry, delayMs);
+  timer.unref?.();
+  return () => clearTimeout(timer);
+};
 
 /** A device that may write ranks above read-only ones, so appends never use a read-only token. */
 const WRITER_TOKEN_PRIORITY = 200;
@@ -285,6 +299,8 @@ export async function attachNativeEncryptedWorkspace(
   };
   const stopServing = () => {
     closed = true;
+    cancelRetry?.();
+    cancelRetry = undefined;
     offState();
     void pendingWatch?.unsubscribe().catch(() => {});
     if (slot?.source === options.contentToken) slot.source = undefined;
@@ -299,6 +315,19 @@ export async function attachNativeEncryptedWorkspace(
   };
 
   let remoteConfigured = false;
+  let retryDelay = REMOTE_RETRY_FIRST_MS;
+  let cancelRetry: (() => void) | undefined;
+  const scheduleRetry = options.scheduleRetry ?? timerRetry;
+  const armRetry = () => {
+    if (closed || remoteConfigured || cancelRetry) return;
+    const delay = retryDelay;
+    retryDelay = Math.min(retryDelay * 2, REMOTE_RETRY_MAX_MS);
+    cancelRetry = scheduleRetry(() => {
+      cancelRetry = undefined;
+      void reinstall().catch(() => {});
+    }, delay);
+  };
+  const reinstall = () => run(install).finally(armRetry);
   const configureContentRemote = async () => {
     const grant = await options.contentToken();
     await client.configureRemote(workspaceId, {
@@ -317,6 +346,7 @@ export async function attachNativeEncryptedWorkspace(
     if (!closed) setNativeNamespaceRemote(client, workspaceId, NATIVE_CONTENT_REMOTE_ID);
   };
   await run(install);
+  armRetry();
 
   const pendingWatch = options.onOpenPending
     ? await client
@@ -338,11 +368,17 @@ export async function attachNativeEncryptedWorkspace(
 
   const offState = client.onConnectionStateChange((state) => {
     if (state !== 'connected' || closed) return;
-    void run(install).catch(() => {});
+    void reinstall().catch(() => {});
   });
 
   return {
-    refresh: () => (closed ? Promise.resolve() : run(install)),
+    refresh: () => {
+      if (closed) return Promise.resolve();
+      cancelRetry?.();
+      cancelRetry = undefined;
+      retryDelay = REMOTE_RETRY_FIRST_MS;
+      return reinstall();
+    },
     wipe: () =>
       run(async () => {
         stopServing();

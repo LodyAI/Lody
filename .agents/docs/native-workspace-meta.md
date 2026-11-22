@@ -383,7 +383,11 @@ then, after the caller's content-open admission:
 
 Opening never waits on the network. The engine persists the remote, and each
 install (attach, refresh or reconnect) configures it until a content token is
-issued; offline edits stay queued meanwhile.
+issued; offline edits stay queued meanwhile. The host connection stays up while
+the network is down, so no reconnect follows the network's return. An
+unconfigured remote is therefore retried on its own backoff from 1 s, doubling to
+five minutes, until it is configured or the attachment closes. A refresh restarts
+the backoff.
 
 The engine answers reads from its local copy, so a room only another device wrote
 reads empty until something pulls it. Once the remote is configured, the
@@ -462,6 +466,15 @@ legacy path, so the switch never blocks opening a workspace.
 Each client and namespace registers one token provider, because the client
 replays registrations and cannot remove one. It serves the current attachment's
 tokens, and a closed attachment (an account switch or a wipe) serves none.
+The engine asks the matching connections in rank order, and a provider that fails
+(throws, drops or times out) passes the request to the next one (loro-repo
+#350). A closed attachment's provider throws, and a revoked device's token request
+fails with its revoked credential, so another process on the same host still
+serves the namespace. The client sends one rule per connection, the union of its
+domains at its highest priority, so a role change cannot lower a registered
+priority. That only matters when two different members share one host and one is
+downgraded: the personal device and machine identity of one installation
+normally belong to the same member and change role together.
 
 Limits: an encrypted namespace does not import the legacy local store. It
 bootstraps from the cloud, because re-uploading imported state would sign
