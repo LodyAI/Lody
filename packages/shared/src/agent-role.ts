@@ -135,6 +135,25 @@ export const getAgentRoleMentionSlug = (role: Pick<AgentRole, 'name'>): string =
   normalizeAgentRoleMentionSlug(role.name);
 
 /**
+ * The `@` token for one target of a Role.
+ *
+ * A single-target Role is mentioned by its name. On several machines each
+ * target is its own mention — the alias, or the name and machine — so the
+ * token names where the work runs. Settings shows this exact token beside each
+ * machine, and the composer completes it, so the two can never disagree.
+ */
+export const getAgentRoleTargetMentionSlug = (input: {
+  roleName: string;
+  alias?: string;
+  machineName: string;
+  multiTarget: boolean;
+}): string =>
+  input.multiTarget
+    ? normalizeAgentRoleMentionSlug(input.alias || `${input.roleName} ${input.machineName}`) ||
+      normalizeAgentRoleMentionSlug(input.roleName)
+    : normalizeAgentRoleMentionSlug(input.roleName);
+
+/**
  * Normalize a name into a token the composer can carry.
  *
  * Whitespace is the only thing that MUST go: an `@` token ends at the next

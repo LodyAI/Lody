@@ -46,7 +46,11 @@ describe('PromptShortcutForm command field', () => {
     vi.restoreAllMocks();
   });
 
-  const renderForm = async (initial: PromptShortcut, isNew = false) => {
+  const renderForm = async (
+    initial: PromptShortcut,
+    isNew = false,
+    onSave: (value: PromptShortcut) => Promise<void> = vi.fn(async () => {})
+  ) => {
     await act(async () => {
       root?.render(
         <PromptShortcutForm
@@ -54,7 +58,7 @@ describe('PromptShortcutForm command field', () => {
           options={{ projects: [], machines: [], providers: [] }}
           saving={false}
           isNew={isNew}
-          onSave={vi.fn(async () => {})}
+          onSave={onSave}
           onCancel={vi.fn()}
         />
       );
@@ -122,5 +126,30 @@ describe('PromptShortcutForm command field', () => {
     await type(nameInput, 'My Command');
     expect(input.value).toBe('my-command');
     expect(warningVisible()).toBe(false);
+  });
+
+  it('keeps an unnamed Prompt unsaved and says so beside the name', async () => {
+    const saved: PromptShortcut[] = [];
+    await renderForm(shortcut({ name: '', slug: 'draft' }), true, async (value) => {
+      saved.push(value);
+    });
+    const form = document.body.querySelector('form');
+    if (!form) throw new Error('shortcut form missing');
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    const nameInput = document.body.querySelector<HTMLInputElement>('#shortcut-name');
+    expect(saved).toEqual([]);
+    expect(nameInput?.getAttribute('aria-invalid')).toBe('true');
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe(
+      'Give this Prompt a name.'
+    );
+
+    await type(nameInput!, 'Draft');
+    expect(document.body.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(saved.map((value) => value.name)).toEqual(['Draft']);
   });
 });

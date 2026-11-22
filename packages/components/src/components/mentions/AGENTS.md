@@ -122,14 +122,19 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   conversation COLUMN paints ONE `ConversationDropOverlay` via
   `SessionMentionDropLayer`, never one per keep-alive tab page.
 
+## Prompt Shortcuts
+
+- Visible labels call a Prompt Shortcut a "Prompt". Its rows show one fixed glyph
+  and no emoji; the stored emoji field stays in the schema for old rows.
+
 ## Agent Roles
 
 - An Agent Role mention has the session mention's shape (plain `@<token>`; the
   RANGE carries `formatAgentRoleMentionValue`: Role id, plus machine for a
   multi-machine Role), but its rewrite is a reference naming only that id/machine,
   never an instruction to create a Session (root `AGENTS.md` owns MCP create/freeze). An
-  unavailable or bare multi-machine Role stays plain text. Tokens derive from
-  the name or alias; uniqueness uses them.
+  unavailable or bare multi-machine Role stays plain text. Tokens come from
+  `getAgentRoleTargetMentionSlug`, which Settings also shows; uniqueness uses them.
 - A Role candidate's emoji REPLACES the category glyph
   (`MentionCandidate.iconEmoji`), defaulted through `getAgentRoleEmoji`, and its
   candidate sets no detail `title`. The committed range shows that emoji through
