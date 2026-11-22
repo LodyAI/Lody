@@ -338,7 +338,6 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
           onSubmit={async (endpoint) => {
             await sorbet.updateEndpoint(custom.id, endpoint);
             setEditing(false);
-            // A new address or protocol can serve different models.
             void refresh();
           }}
           failure="Could not save the endpoint on this machine."
@@ -1012,8 +1011,6 @@ export function PermissionsPanel({ scope }: { scope: Scope }) {
       <div {...stylex.props(ps.auto)} role="radiogroup" aria-label="Autonomy">
         {AUTONOMY.map((level) => {
           const active = current === level.id;
-          // A mode the agent does not offer here (no sandbox for Automatic
-          // review, say) is shown, not selectable.
           const offered = !defaults.autonomyOffered || defaults.autonomyOffered.has(level.id);
           return (
             <button

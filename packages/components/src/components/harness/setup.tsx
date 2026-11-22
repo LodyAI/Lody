@@ -259,7 +259,6 @@ function Review({
   const checks = useSetupChecks();
   const [at, setAt] = useState(0);
 
-  // The list reveals one row at a time; every row already holds its real result.
   useEffect(() => {
     if (at > checks.length) return;
     if (at === checks.length) {

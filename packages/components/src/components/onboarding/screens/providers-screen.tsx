@@ -1161,7 +1161,6 @@ export function ProvidersScreen({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
-            // Set from Settings > Lody Agent, not from this dialog: keep it.
             sessionDefaults: dialogMode.config.sessionDefaults,
           });
           // Editing can change credentials or the launch command; keep Test as

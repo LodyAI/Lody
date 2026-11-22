@@ -143,8 +143,6 @@ describe('fetchAcpCapabilities', () => {
   });
 
   it('advertises the Provider session defaults as the probe session current values', async () => {
-    // A fake Sorbet: every switch answers with its whole option list, the way
-    // `session/set_config_option` does, and the thinking ladder follows the model.
     const state = { model: 'a/fast', thought_level: 'low', permission_mode: 'ask' };
     const options = () => [
       {
@@ -207,7 +205,6 @@ describe('fetchAcpCapabilities', () => {
             thought_level: 'high',
             model: 'a/deep',
             permission_mode: 'full-access',
-            // Not offered by this agent: skipped, the probe still succeeds.
             sandbox: 'off',
           },
         },

@@ -30,9 +30,6 @@ vi.mock('../src/components/harness/device-capabilities', () => ({
   useDeviceCapabilities: () => capabilities.current,
 }));
 
-// The Providers page talks to the machine through the bridge's actions; the
-// fake machine below answers them by re-reading into the store, the same way
-// the real bridge settles a write.
 const machine = vi.hoisted(() => ({
   supportsEdit: true,
   discovered: [] as Array<{
@@ -75,9 +72,6 @@ vi.mock('../src/components/harness/sorbet', () => ({
   },
 }));
 
-// The workspace the settings write to: each machine's Lody Agent Provider in
-// a writable store (the agent-config atoms), the selected device, and the
-// workspace MCP catalog. Writes land here exactly as the Flock row would.
 vi.mock('../src/atoms/agents', async () => {
   const { atom } = await import('jotai');
   const __agentConfigs = atom<AgentConfigMeta[]>([]);
@@ -269,7 +263,6 @@ describe('harness models page', () => {
     });
     await render();
 
-    // Nothing set yet: the page shows what the agent runs with today.
     expect(
       [...container.querySelectorAll('[role="radio"]')]
         .find((el) => el.textContent === 'Low')
@@ -294,9 +287,6 @@ describe('harness models page', () => {
       ).click();
     });
 
-    // "Profile · all devices" lands on every machine's Lody Agent, keyed by
-    // Sorbet's own config ids, and each machine re-probes so its composer
-    // default becomes the new value.
     for (const machineId of ['machine-a', 'machine-b']) {
       expect(defaultsOn(machineId)).toEqual({
         configOptionValues: { model: 'gateway/meridian-2', thought_level: 'high' },
@@ -317,7 +307,6 @@ describe('harness models page', () => {
     expect(container.textContent).toContain('Subagent model');
     expect(container.textContent).toContain('Fallback');
     expect(container.textContent).toContain('Not supported by Lody Agent yet');
-    // Clicking the disabled Fallback switch changes nothing on any machine.
     await act(async () => {
       (container.querySelector('[aria-label="Fallback"]') as HTMLElement).click();
     });
@@ -412,7 +401,6 @@ describe('harness providers page: custom endpoints', () => {
     });
 
     expect(container.textContent).toContain('Meridian 1');
-    // Another Provider's models are not this endpoint's.
     expect(container.textContent).not.toContain('Other X');
   });
 
@@ -469,7 +457,6 @@ describe('harness permissions and plugins pages', () => {
             name: 'Permissions',
             type: 'select',
             currentValue: 'ask',
-            // This machine has no workspace-write sandbox, so no automatic review.
             options: [
               { value: 'ask', name: 'Ask' },
               { value: 'full-access', name: 'Full access' },
@@ -510,7 +497,6 @@ describe('harness permissions and plugins pages', () => {
     expect(defaultsOn('machine-b')).toBeUndefined();
     expect(reprobed).toEqual(['machine-a']);
     expect(card('Full access').getAttribute('aria-checked')).toBe('true');
-    // File access, network and guarded actions have no Sorbet setting yet.
     for (const chip of container.querySelectorAll('[aria-pressed]'))
       expect((chip as HTMLButtonElement).disabled).toBe(true);
   });
@@ -531,7 +517,6 @@ describe('harness permissions and plugins pages', () => {
       root.render(<PluginsPanel />);
     });
     expect(container.textContent).toContain('Issues and pull requests');
-    // The drawn catalogue is gone: only real servers and Sorbet's own plugins.
     expect(container.textContent).not.toContain('Repo map');
 
     await act(async () => {

@@ -96,7 +96,6 @@ describe('a new schedule starts from the chat landing’s choices', () => {
   });
 
   it('lets the Provider’s session defaults win over what was merely used last', () => {
-    // Settings > Lody Agent set Full access and a model for this Provider.
     const config = {
       ...agent('reviewer', 'macbook'),
       sessionDefaults: { configOptionValues: { mode: 'auto', model: 'deep' } },
@@ -109,7 +108,6 @@ describe('a new schedule starts from the chat landing’s choices', () => {
     expect(seedScheduleAgentRunRef(config, machine('macbook')).configOptionValues).toEqual({
       mode: 'auto',
       model: 'deep',
-      // What the defaults do not name still comes from the last run.
       verbose: true,
     });
   });

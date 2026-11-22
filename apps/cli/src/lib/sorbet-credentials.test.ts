@@ -117,8 +117,6 @@ describe('daemon Sorbet credentials', () => {
       baseUrl: 'https://new.example/v1',
     });
 
-    // Sorbet replaces the whole definition: curated model fields and catalog
-    // references must survive an edit of the address.
     expect(instance.providers.updateCustom).toHaveBeenCalledWith(
       'custom',
       {
@@ -130,7 +128,6 @@ describe('daemon Sorbet credentials', () => {
       },
       { signal: undefined }
     );
-    // The wire carries only what the strict RPC schema admits.
     expect(
       SorbetProvidersResultSchema.parse({ type: 'sorbet/providers-update', provider: updated })
     ).toEqual({

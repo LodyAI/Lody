@@ -1,7 +1,7 @@
 {
   "version": 1,
   "scopes": {
-    "apps/cli": 7380,
+    "apps/cli": 7379,
     "apps/electron": 1552,
     "apps/mobile": 7,
     "apps/mobile-capacitor": 300,
@@ -23,7 +23,7 @@
     "packages/iroh-native": 22,
     "packages/loro-streams-rpc": 248,
     "packages/platform": 13,
-    "packages/shared": 2145,
+    "packages/shared": 2144,
     "packages/turn-diff-store": 14,
     "packages/ui": 767
   }

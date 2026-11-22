@@ -1,17 +1,3 @@
-/*
- * The values Settings > Lody Agent really controls: what a new conversation of
- * Lody Agent (Sorbet) starts with on each machine. They live on that machine's
- * Sorbet Provider as `sessionDefaults`, keyed by Sorbet's own ACP config ids,
- * so every client sees them and the daemon applies them:
- *
- *   - the capability probe sets them on its session, so the composer's default
- *     (`currentValue`) is the configured value;
- *   - a turn that names no value of its own (CLI, MCP) is filled from them.
- *
- * "Profile · all devices" writes the same value to every machine; the device
- * scope writes one. The profile's own value stays in the local harness store so
- * a device that differs from it can be marked and reset.
- */
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useMemo, useState } from 'react';
 import type { AgentConfigMeta, AgentSessionDefaults, MachineId } from '@lody/shared';
@@ -137,7 +123,6 @@ export function useSessionDefaults(scope: Scope): SessionDefaults {
     (option) => option.id === SORBET_PERMISSION_MODE_CONFIG_ID && option.type === 'select'
   );
 
-  // What the agent runs with when nothing is set: the probe's current values.
   const agentCurrent = (key: SessionDefaultKey): string | undefined => {
     const option =
       key === 'mainModel'
@@ -188,9 +173,6 @@ export function useSessionDefaults(scope: Scope): SessionDefaults {
               failed.push(config.machineId);
               return;
             }
-            // New conversations read the probe's current values: re-probe so
-            // the composer's default is the value just set. An offline machine
-            // picks it up on its next refresh; the stored default stands.
             void refreshCapabilities({ machineId: config.machineId, configId: config.id }).catch(
               () => {}
             );
@@ -228,7 +210,6 @@ export function useSessionDefaults(scope: Scope): SessionDefaults {
         if (profileSet.has(key)) await write([deviceConfig], key, String(state.profile[key]));
       }
     },
-    // profileSet is derived from state on each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deviceConfig, state.profile, state.profileKeys, write]
   );

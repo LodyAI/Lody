@@ -208,7 +208,6 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
     const sessionId = 'sorbet-session-defaults' as SessionId;
     const { repo, doc, handler } = await createHandlerHarness(sessionId);
     try {
-      // Settings > Lody Agent: Full access and high effort for this machine's Provider.
       vi.spyOn(doc, 'getMetaState').mockResolvedValue({
         agentConfigId: 'sorbet-provider',
       } as Awaited<ReturnType<SessionDocument['getMetaState']>>);
@@ -220,7 +219,6 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
           },
         }),
       });
-      // The agent: its live options, and what each switch leaves it running with.
       const running: Record<string, string> = { permission_mode: 'ask', thought_level: 'low' };
       const option = (id: string, values: string[]) => ({
         id,
@@ -249,7 +247,6 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
             },
           } as unknown as AgentClient,
         },
-        // A turn from the composer names its effort; it says nothing about permissions.
         {
           cliType: 'builtin',
           agentType: 'sorbet',
