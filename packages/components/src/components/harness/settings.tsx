@@ -46,7 +46,8 @@ import {
   useSlidingSelection,
 } from './primitives';
 import { parts } from './parts';
-import { harness, overriddenKeys, useHarness, type Scope } from './store';
+import { useSessionDefaults } from './session-defaults';
+import { harness, useHarness, type Scope } from './store';
 import { settingsStyles } from './settings.styles';
 
 export type HarnessPage = 'devices' | 'providers' | 'models' | 'plugins' | 'permissions';
@@ -65,8 +66,8 @@ const NAV: NavItem[] = [
   { id: 'devices', label: 'Devices', icon: MonitorSmartphone },
 ];
 
-/** Pages whose values can differ per device. */
-const SCOPED = new Set(['models', 'plugins', 'permissions']);
+/** Pages whose values differ per device; MCP defaults on Plugins are workspace-wide. */
+const SCOPED = new Set(['models', 'permissions']);
 
 /**
  * The pairing/empty and setup states a harness page can be in. `settings` is
@@ -88,11 +89,11 @@ export function Settings({
   /** The pairing surface, drawn where the overview would be. */
   renderEmpty?: () => ReactNode;
 }) {
-  const state = useHarness();
   const { device, devices } = useActiveDevice();
   const [scopeKind, setScopeKind] = useState<'profile' | 'device'>('profile');
   const scope: Scope = scopeKind === 'device' && device ? { device: device.id } : 'profile';
-  const overrides = device ? overriddenKeys(state, device.id).length : 0;
+  const defaults = useSessionDefaults(scope);
+  const overrides = device ? defaults.overridesFor(device.id) : 0;
   const tabs = useSlidingSelection(page);
 
   return (
@@ -176,11 +177,8 @@ export function Settings({
                 <ModelsPanel scope={scope} />
               </Section>
             ) : page === 'plugins' ? (
-              <Section
-                title="Plugins"
-                hint="Context, MCP servers, skills and hooks injected into every session."
-              >
-                <PluginsPanel scope={scope} />
+              <Section title="Plugins" hint="MCP servers and plugins new conversations start with.">
+                <PluginsPanel />
               </Section>
             ) : page === 'permissions' ? (
               <Section
@@ -263,7 +261,7 @@ function ProvidersStatus() {
 /* ── devices ───────────────────────────────────────────────────────────── */
 
 function Devices({ onPair }: { onPair: () => void }) {
-  const state = useHarness();
+  const defaults = useSessionDefaults('profile');
   const { devices, machines, activeDevice, select, isLoading } = useHarnessDevices();
 
   return (
@@ -293,7 +291,7 @@ function Devices({ onPair }: { onPair: () => void }) {
               device={device}
               machine={machines.get(device.id as MachineId)}
               active={device.id === activeDevice}
-              overrides={overriddenKeys(state, device.id)}
+              overrides={defaults.overridesFor(device.id)}
               onSelect={() => select(device.id as MachineId)}
             />
           ))}
@@ -335,7 +333,7 @@ function DeviceCard({
   device: Device;
   machine: MachineViewMeta | undefined;
   active: boolean;
-  overrides: string[];
+  overrides: number;
   onSelect: () => void;
 }) {
   const online = useDeviceStatus(device.id as MachineId);
@@ -461,9 +459,7 @@ function DeviceCard({
         <div {...stylex.props(settingsStyles.deviceFact)}>
           <dt {...stylex.props(settingsStyles.deviceFactLabel)}>Config</dt>
           <dd {...stylex.props(settingsStyles.deviceFactValue)}>
-            {overrides.length
-              ? `Profile + ${overrides.length} override${overrides.length > 1 ? 's' : ''}`
-              : 'Profile'}
+            {overrides ? `Profile + ${overrides} override${overrides > 1 ? 's' : ''}` : 'Profile'}
           </dd>
         </div>
       </dl>

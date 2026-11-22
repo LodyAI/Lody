@@ -53,7 +53,7 @@ import {
 } from '@/lib/session-local-file-source';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { buildDraftSessionAgentRolePatch, type DraftSessionTab } from '@/lib/session-draft-tabs';
-import { agentDefaultsCache } from '@/lib/local-storage-cache';
+import { readAgentStartDefaults } from '@/lib/local-storage-cache';
 import {
   isThoughtLevelSelector,
   type AcpConfigOptionSelector,
@@ -227,9 +227,11 @@ export const DraftSessionChatInterface = memo(
       const draftAgentDefaults = useMemo(
         () =>
           preferAgentDefaults && draft.agentConfigId
-            ? agentDefaultsCache.get(draft.agentConfigId)
+            ? readAgentStartDefaults(
+                agentConfigs.find((config) => config.id === draft.agentConfigId)
+              )
             : null,
-        [draft.agentConfigId, preferAgentDefaults]
+        [agentConfigs, draft.agentConfigId, preferAgentDefaults]
       );
       const preferredSessionConfig = useMemo(() => {
         if (agentRolePreference) {
@@ -598,7 +600,7 @@ export const DraftSessionChatInterface = memo(
             return;
           }
           const useParentConfig = nextConfig.id === parentSession.agentConfigId;
-          const agentDefaults = useParentConfig ? null : agentDefaultsCache.get(nextConfig.id);
+          const agentDefaults = useParentConfig ? null : readAgentStartDefaults(nextConfig);
           onDraftChange(draft.id, {
             agentConfigId: nextConfig.id,
             cliType: nextConfig.cliType,

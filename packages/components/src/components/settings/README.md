@@ -71,7 +71,26 @@ the selected method against the agent before requesting credentials.
 Connection management uses the target machine’s local capabilities for same-machine
 IPC and its remote capabilities for encrypted workspace RPC. A remote machine in a
 plaintext workspace can use the existing ACP sign-in flow, but cannot manage Sorbet
-custom endpoints through the encrypted-only Provider API.
+custom endpoints through the encrypted-only Provider API. Every remote `sorbet/*`
+request requires the verified signer context, as credential requests already did.
+A custom endpoint row lists the models Sorbet discovered for it (`sorbet/models-list`),
+refreshes discovery for that endpoint alone, and edits its name, protocol and base URL
+through `sorbet/providers-update` (Providers protocol v3). The daemon applies an edit
+over the stored definition, so discovered models and catalog references survive.
+
+### Session defaults
+
+The Models and Permissions pages write the Sorbet Provider's `sessionDefaults`
+(`AgentConfigMeta`), keyed by Sorbet's own config ids: `model`, `thought_level` and
+`permission_mode` (`ask`, `auto`, `full-access`). They take effect in three places:
+the capability probe sets them on its session, so the advertised `currentValue` is
+the default; `readAgentStartDefaults` lets them win over the device's last-used run
+configuration when a conversation starts; and the daemon fills whatever a turn leaves
+unset from them, which covers CLI and MCP sessions. A write re-probes each written
+machine. Controls Sorbet has no setting for (subagent model, fallback, file access,
+network, guarded actions) stay visible and disabled. The Plugins page toggles the
+workspace MCP servers' `enabledByDefault`, which is workspace-wide, and lists Sorbet's
+built-in plugins, which Sorbet configures per conversation.
 
 ## Usage range transitions
 

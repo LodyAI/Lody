@@ -99,8 +99,15 @@ export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION = 1;
-export const SORBET_PROVIDERS_PROTOCOL_VERSION = 2;
-export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = 1;
+/** v2 (the page's minimum): list, create, delete, refresh, models. v3 adds update. */
+export const SORBET_PROVIDERS_PROTOCOL_VERSION = 3;
+export const SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION = 2;
+export const SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION = 3;
+/**
+ * The encrypted feature path forwards every `sorbet/providers-*` and `sorbet/models-list`
+ * method to the same owner-scoped handler, so the remote version tracks the local one.
+ */
+export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = SORBET_PROVIDERS_PROTOCOL_VERSION;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
 export const E2EE_ACP_INTERACTION_PROTOCOL_VERSION = 1;
