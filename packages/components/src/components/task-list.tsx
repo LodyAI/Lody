@@ -54,7 +54,7 @@ import type {
   SessionPullRequestCiState,
   SessionPullRequestReadiness,
 } from '@lody/shared';
-import { ONLY_CHATS_KEY, sidebarShowFullListAtom } from '@/atoms/focus-layer';
+import { ONLY_CHATS_KEY, sidebarRevealedRowsAtom } from '@/atoms/focus-layer';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
@@ -188,11 +188,8 @@ export type TaskGroup = {
 
 export const MAX_VISIBLE_TASKS = 5;
 
-export function getVisibleTaskGroupTasks(
-  group: TaskGroup,
-  whetherShowFullList: boolean
-): TaskListTask[] {
-  return whetherShowFullList ? group.tasks : group.tasks.slice(0, MAX_VISIBLE_TASKS);
+export function getVisibleTaskGroupTasks(group: TaskGroup, revealedRows: number): TaskListTask[] {
+  return group.tasks.slice(0, MAX_VISIBLE_TASKS + revealedRows);
 }
 
 function normalizeRepoFullName(value: TaskListTask['repoFullName']): string | null {
@@ -310,15 +307,15 @@ export function buildGroups(
   return ordered;
 }
 
-function reconcileShowFullListByGroups(
-  current: Record<string, boolean>,
+function reconcileRevealedRowsByGroups(
+  current: Record<string, number>,
   groups: TaskGroup[]
-): Record<string, boolean> {
-  let next: Record<string, boolean> | null = null;
+): Record<string, number> {
+  let next: Record<string, number> | null = null;
 
   for (const group of groups) {
-    const previousValue = current[group.key] ?? false;
-    const nextValue = group.collapsed ? false : previousValue;
+    const previousValue = current[group.key] ?? 0;
+    const nextValue = group.collapsed ? 0 : previousValue;
 
     if (current[group.key] !== nextValue) {
       next ??= { ...current };
@@ -348,7 +345,8 @@ type TaskGroupSectionProps = {
   now: Date;
   selectedTaskId?: string | null;
   activeGroupKey?: string | null;
-  whetherShowFullList: boolean;
+  /** Extra rows revealed beyond {@link MAX_VISIBLE_TASKS}. */
+  revealedRows: number;
   onSelectTask?: (taskId: string) => void;
   onToggleRepoCollapsed?: (repoFullName: string) => void;
   onToggleChatsCollapsed?: () => void;
@@ -360,7 +358,8 @@ type TaskGroupSectionProps = {
   onNew?: (repoFullName?: string) => void;
   onNavigateToNewSession?: (repoFullName?: string) => void;
   onOpenPullRequest?: (request: TaskListPullRequestOpen) => void;
-  onToggleFullList?: (groupKey: string) => void;
+  onShowMore?: (groupKey: string) => void;
+  onShowLess?: (groupKey: string) => void;
   getTaskHref?: (taskId: string) => string | undefined;
   dragHandle?: ReactNode;
   archiveTooltipLabel: string;
@@ -396,7 +395,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
   now,
   selectedTaskId,
   activeGroupKey,
-  whetherShowFullList,
+  revealedRows,
   onSelectTask,
   onToggleRepoCollapsed,
   onToggleChatsCollapsed,
@@ -408,7 +407,8 @@ const TaskGroupSection = memo(function TaskGroupSection({
   onNew,
   onNavigateToNewSession,
   onOpenPullRequest,
-  onToggleFullList,
+  onShowMore,
+  onShowLess,
   getTaskHref,
   dragHandle,
   archiveTooltipLabel,
@@ -482,14 +482,11 @@ const TaskGroupSection = memo(function TaskGroupSection({
   };
 
   const isSelectable = typeof onSelectTask === 'function';
-  // whetherShowFullList keeps each group in a compact preview by default (latest N),
-  // and only reveals the full list after the user explicitly expands it.
-  const canToggleFullList = group.tasks.length > MAX_VISIBLE_TASKS;
-  const visibleTasks = getVisibleTaskGroupTasks(group, whetherShowFullList);
-  const shouldShowExpandCollapse = canToggleFullList;
-  const toggleListLabel = whetherShowFullList
-    ? t('sessions.showLess', 'Show less')
-    : t('sessions.showAll', 'Show all ({{count}})', { count: group.tasks.length });
+  const canRevealRows = group.tasks.length > MAX_VISIBLE_TASKS;
+  const hasMoreRows = group.tasks.length > MAX_VISIBLE_TASKS + revealedRows;
+  const visibleTasks = getVisibleTaskGroupTasks(group, revealedRows);
+  const showMoreLabel = t('sessions.showMore', 'Show more');
+  const showLessLabel = t('sessions.showLess', 'Show less');
   const resolvedTrailingContent = trailingContent ?? (group.collapsed ? null : dragHandle);
   // The same two rungs as the session list: a repo ("loro-dev/loro") is a row
   // (row type, medium, the row ink from `sidebarSurface.row`) and "Chats" is the
@@ -1088,7 +1085,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 </SwipeActionRow>
               );
             })}
-          {shouldShowExpandCollapse && (
+          {canRevealRows && hasMoreRows && (
             <button
               type="button"
               data-id={`show-more:${group.key}`}
@@ -1100,11 +1097,30 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
               )}
-              aria-label={toggleListLabel}
-              onClick={() => onToggleFullList?.(group.key)}
+              aria-label={showMoreLabel}
+              onClick={() => onShowMore?.(group.key)}
             >
               <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
-              <span>{toggleListLabel}</span>
+              <span>{showMoreLabel}</span>
+            </button>
+          )}
+          {canRevealRows && revealedRows > 0 && (
+            <button
+              type="button"
+              data-id={`show-less:${group.key}`}
+              data-scope-item="row"
+              data-sidebar-show-less={group.key}
+              className={cn(
+                'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
+                'transition-colors',
+                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+              )}
+              aria-label={showLessLabel}
+              onClick={() => onShowLess?.(group.key)}
+            >
+              <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
+              <span>{showLessLabel}</span>
             </button>
           )}
         </div>
@@ -1236,8 +1252,7 @@ export const TaskList = memo(function TaskList({
     [tasks, repos, chatsCollapsed]
   );
   const now = useStableNow();
-  const [whetherShowFullListByGroup, setWhetherShowFullListByGroup] =
-    useAtom(sidebarShowFullListAtom);
+  const [revealedRowsByGroup, setRevealedRowsByGroup] = useAtom(sidebarRevealedRowsAtom);
   const handleSelect = onSelect ?? onSelectTask;
   const repoIds = useMemo(
     () => groups.filter((group) => group.kind === 'repo').map((group) => group.key),
@@ -1258,25 +1273,33 @@ export const TaskList = memo(function TaskList({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const handleToggleFullList = useCallback(
+  const handleShowMore = useCallback(
     (groupKey: string) => {
-      setWhetherShowFullListByGroup((prev) => {
-        return { ...prev, [groupKey]: !prev[groupKey] };
+      setRevealedRowsByGroup((prev) => {
+        return { ...prev, [groupKey]: (prev[groupKey] ?? 0) + MAX_VISIBLE_TASKS };
       });
     },
-    [setWhetherShowFullListByGroup]
+    [setRevealedRowsByGroup]
+  );
+  const handleShowLess = useCallback(
+    (groupKey: string) => {
+      setRevealedRowsByGroup((prev) => {
+        return { ...prev, [groupKey]: 0 };
+      });
+    },
+    [setRevealedRowsByGroup]
   );
 
-  const resolvedShowFullListByGroup = useMemo(
-    () => reconcileShowFullListByGroups(whetherShowFullListByGroup, groups),
-    [whetherShowFullListByGroup, groups]
+  const resolvedRevealedRowsByGroup = useMemo(
+    () => reconcileRevealedRowsByGroups(revealedRowsByGroup, groups),
+    [revealedRowsByGroup, groups]
   );
 
   useLayoutEffect(() => {
-    setWhetherShowFullListByGroup((prev) => {
-      return reconcileShowFullListByGroups(prev, groups);
+    setRevealedRowsByGroup((prev) => {
+      return reconcileRevealedRowsByGroups(prev, groups);
     });
-  }, [groups, setWhetherShowFullListByGroup]);
+  }, [groups, setRevealedRowsByGroup]);
 
   if (isLoading && tasks.length === 0) {
     return (
@@ -1325,7 +1348,7 @@ export const TaskList = memo(function TaskList({
         <SortableContext items={repoIds} strategy={verticalListSortingStrategy}>
           <div className={cn('flex flex-col', className)}>
             {groups.map((group, groupIndex) => {
-              const whetherShowFullList = resolvedShowFullListByGroup[group.key] ?? false;
+              const revealedRows = resolvedRevealedRowsByGroup[group.key] ?? 0;
               const groupHeaderAction = groupIndex === 0 ? headerAction : undefined;
               if (group.kind === 'repo' && group.repoFullName) {
                 return (
@@ -1337,7 +1360,7 @@ export const TaskList = memo(function TaskList({
                     now={now}
                     selectedTaskId={selectedTaskId}
                     activeGroupKey={activeGroupKey}
-                    whetherShowFullList={whetherShowFullList}
+                    revealedRows={revealedRows}
                     onSelectTask={handleSelect}
                     onToggleRepoCollapsed={onToggleRepoCollapsed}
                     onToggleChatsCollapsed={onToggleChatsCollapsed}
@@ -1349,7 +1372,8 @@ export const TaskList = memo(function TaskList({
                     onNew={onNew}
                     onNavigateToNewSession={onNavigateToNewSession}
                     onOpenPullRequest={onOpenPullRequest}
-                    onToggleFullList={handleToggleFullList}
+                    onShowMore={handleShowMore}
+                    onShowLess={handleShowLess}
                     getTaskHref={getTaskHref}
                     archiveTooltipLabel={archiveTooltipLabel}
                     archiveActionLabel={archiveActionLabel}
@@ -1368,7 +1392,7 @@ export const TaskList = memo(function TaskList({
                   now={now}
                   selectedTaskId={selectedTaskId}
                   activeGroupKey={activeGroupKey}
-                  whetherShowFullList={whetherShowFullList}
+                  revealedRows={revealedRows}
                   onSelectTask={handleSelect}
                   onToggleRepoCollapsed={onToggleRepoCollapsed}
                   onToggleChatsCollapsed={onToggleChatsCollapsed}
@@ -1380,7 +1404,8 @@ export const TaskList = memo(function TaskList({
                   onNew={onNew}
                   onNavigateToNewSession={onNavigateToNewSession}
                   onOpenPullRequest={onOpenPullRequest}
-                  onToggleFullList={handleToggleFullList}
+                  onShowMore={handleShowMore}
+                  onShowLess={handleShowLess}
                   getTaskHref={getTaskHref}
                   archiveTooltipLabel={archiveTooltipLabel}
                   archiveActionLabel={archiveActionLabel}

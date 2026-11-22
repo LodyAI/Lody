@@ -222,7 +222,7 @@ export type SidebarUpdatedItem = {
  * The Updated organize mode renders ONE section ("Chats") — a flat
  * recency-sorted list keyed 'all'. The Status organize mode renders one
  * section per {@link StatusViewTier}, keyed by the group, skipping empty
- * groups. Both share the collapse / show-all state maps.
+ * groups. Both share the collapse / reveal state maps.
  */
 export type SidebarUpdatedBucketKey = 'all' | StatusViewTier;
 
@@ -358,8 +358,8 @@ export function toStatusViewSession(item: SidebarUpdatedItem): StatusViewSession
 }
 
 /**
- * Whether a section folds past {@link SHOW_FULL_BUCKET_THRESHOLD} rows behind
- * "Show all". Focus and Later list in full when expanded; Settled and Updated
+ * Whether a section folds past {@link UPDATED_BUCKET_PREVIEW_MAX} rows behind
+ * "Show more". Focus and Later list in full when expanded; Settled and Updated
  * recency lists fold past the preview cap.
  */
 export function updatedBucketCanFold(key: SidebarUpdatedBucketKey): boolean {
@@ -393,11 +393,11 @@ export function resolveUpdatedItemProjectLabel(item: SidebarUpdatedItem): string
 
 /**
  * When a bucket has more than this many rows, the row list collapses to the
- * latest N and reveals a "Show all (count)" toggle. Mirrors the per-group
- * preview pattern in SessionList, but with a higher threshold because Updated
- * mode is a flat firehose rather than a small per-repo group.
+ * latest N and reveals a "Show more" stepper. Mirrors the per-group preview
+ * pattern in SessionList, but with a higher threshold because Updated mode is
+ * a flat firehose rather than a small per-repo group.
  */
-export const SHOW_FULL_BUCKET_THRESHOLD = 20;
+export const UPDATED_BUCKET_PREVIEW_MAX = 20;
 
 /** Group ranking key: pinned first, then latest activity. */
 function updatedItemRootRank(item: SidebarUpdatedItem): number {
@@ -414,13 +414,13 @@ export const SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS = {
     item.openedByRowSessionId ?? item.openedBySessionId ?? null,
 } as const;
 
-/** TOP-LEVEL row count — what the "Show all" threshold is measured against. */
+/** TOP-LEVEL row count — what the preview threshold is measured against. */
 export function countUpdatedItemRoots(orderedItems: SidebarUpdatedItem[]): number {
   return countOpenedByTreeRoots(orderedItems, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
 }
 
 export function updatedBucketOverflowsPreview(orderedItems: SidebarUpdatedItem[]): boolean {
-  return countUpdatedItemRoots(orderedItems) > SHOW_FULL_BUCKET_THRESHOLD;
+  return countUpdatedItemRoots(orderedItems) > UPDATED_BUCKET_PREVIEW_MAX;
 }
 
 /**
@@ -430,12 +430,12 @@ export function updatedBucketOverflowsPreview(orderedItems: SidebarUpdatedItem[]
  */
 export function getVisibleUpdatedItemTree(
   orderedItems: SidebarUpdatedItem[],
-  canToggleFullList: boolean,
-  showFull: boolean,
+  canRevealRows: boolean,
+  revealedRows: number,
   collapsedOpenedBySessionIds?: Record<string, boolean>,
   preserveOrder = false
 ): OpenedBySessionTreeNode<SidebarUpdatedItem>[] {
-  const capped = canToggleFullList && !showFull && updatedBucketOverflowsPreview(orderedItems);
+  const capped = canRevealRows && updatedBucketOverflowsPreview(orderedItems);
   return buildOpenedBySessionTree(orderedItems, {
     ...SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
     isCollapsed: (openerId) => collapsedOpenedBySessionIds?.[openerId] === true,
@@ -443,21 +443,21 @@ export function getVisibleUpdatedItemTree(
     // Session so nesting can never bury a just-updated row under a stale opener.
     // A manually ordered pin section keeps its roots where the user put them.
     ...(preserveOrder ? {} : { rootRank: updatedItemRootRank }),
-    ...(capped ? { maxRoots: SHOW_FULL_BUCKET_THRESHOLD } : {}),
+    ...(capped ? { maxRoots: UPDATED_BUCKET_PREVIEW_MAX + revealedRows } : {}),
   });
 }
 
 export function getVisibleUpdatedItems(
   orderedItems: SidebarUpdatedItem[],
-  canToggleFullList: boolean,
-  showFull: boolean,
+  canRevealRows: boolean,
+  revealedRows: number,
   collapsedOpenedBySessionIds?: Record<string, boolean>,
   preserveOrder = false
 ): SidebarUpdatedItem[] {
   return getVisibleUpdatedItemTree(
     orderedItems,
-    canToggleFullList,
-    showFull,
+    canRevealRows,
+    revealedRows,
     collapsedOpenedBySessionIds,
     preserveOrder
   ).map((node) => node.item);
@@ -528,12 +528,14 @@ export type SidebarUpdatedSessionListProps = {
   onToggleBucket?: (key: SidebarUpdatedBucketKey) => void;
   toggleBucketLabel?: string;
   /**
-   * Per-bucket "show all" state. When false (default) and the bucket exceeds
-   * {@link SHOW_FULL_BUCKET_THRESHOLD} items, only the latest N render and a
-   * "Show all" button appears.
+   * Per-bucket incremental reveal. When a bucket exceeds
+   * {@link UPDATED_BUCKET_PREVIEW_MAX} top-level rows, only the latest N
+   * render and a "Show more" button uncovers one more page per click; "Show
+   * less" returns to the preview.
    */
-  showFullBuckets?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
-  onToggleFullBucket?: (key: SidebarUpdatedBucketKey) => void;
+  revealedRowsByBucket?: Partial<Record<SidebarUpdatedBucketKey, number>>;
+  onShowMore?: (key: SidebarUpdatedBucketKey) => void;
+  onShowLess?: (key: SidebarUpdatedBucketKey) => void;
   /**
    * Always-visible action rendered at the right end of the FIRST bucket's
    * header row (desktop sidebar filter trigger). While loading or empty the
@@ -612,8 +614,9 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   collapsedBuckets,
   onToggleBucket,
   toggleBucketLabel,
-  showFullBuckets,
-  onToggleFullBucket,
+  revealedRowsByBucket,
+  onShowMore,
+  onShowLess,
   headerAction,
   showProjectContext = false,
   grouping = 'recency',
@@ -706,7 +709,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   const handleToggleOpenedBySessions = useSetAtom(toggleSidebarCollapsedOpenedBySessionAtom);
 
   const canToggleBucket = typeof onToggleBucket === 'function';
-  const canToggleFullBucket = typeof onToggleFullBucket === 'function';
+  const canToggleFullBucket = typeof onShowMore === 'function';
 
   const nowMs = now instanceof Date ? now.getTime() : Date.now();
   const buckets = useMemo(
@@ -737,7 +740,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           nodes: getVisibleUpdatedItemTree(
             bucket.items,
             canToggleFullBucket && updatedBucketCanFold(bucket.key),
-            Boolean(showFullBuckets?.[bucket.key]),
+            revealedRowsByBucket?.[bucket.key] ?? 0,
             collapsedOpenedBySessionIds,
             preserveOrder || bucket.key === 'focus' || bucket.key === 'later'
           ),
@@ -750,7 +753,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       collapsedOpenedBySessionIds,
       preserveOrder,
       sendStates,
-      showFullBuckets,
+      revealedRowsByBucket,
     ]
   );
 
@@ -859,7 +862,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
               </div>
             );
           }
-          const showFull = Boolean(showFullBuckets?.[bucket.key]);
+          const revealedRows = revealedRowsByBucket?.[bucket.key] ?? 0;
           const {
             overflows,
             nodes: visibleNodes,
@@ -884,11 +887,14 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           // Only a bucket that actually contains an opened Session enables the
           // tree wrapper. Unrelated top-level rows keep their flat geometry.
           const showTreeGutter = hasOpenedByTreeNesting(visibleNodes);
-          const showToggleFullList =
-            canToggleFullBucket && updatedBucketCanFold(bucket.key) && overflows && !collapsed;
-          const toggleFullListLabel = showFull
-            ? t('sessions.showLess', 'Show less')
-            : t('sessions.showAll', 'Show all ({{count}})', { count: bucket.items.length });
+          const bucketCanFold = canToggleFullBucket && updatedBucketCanFold(bucket.key);
+          const hasMoreRows =
+            bucketCanFold &&
+            countUpdatedItemRoots(bucket.items) > UPDATED_BUCKET_PREVIEW_MAX + revealedRows;
+          const showMoreRow = bucketCanFold && overflows && hasMoreRows && !collapsed;
+          const showLessRow = bucketCanFold && overflows && revealedRows > 0 && !collapsed;
+          const showMoreLabel = t('sessions.showMore', 'Show more');
+          const showLessLabel = t('sessions.showLess', 'Show less');
           return (
             <div
               key={bucket.key}
@@ -1017,7 +1023,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       );
                     });
                   })()}
-                  {showToggleFullList ? (
+                  {showMoreRow ? (
                     <button
                       type="button"
                       data-sidebar-updated-show-more={bucket.key}
@@ -1027,14 +1033,34 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                         'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                         'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
                       )}
-                      aria-label={toggleFullListLabel}
-                      onClick={() => onToggleFullBucket?.(bucket.key)}
+                      aria-label={showMoreLabel}
+                      onClick={() => onShowMore?.(bucket.key)}
                     >
                       <span
                         className="flex h-4 w-4 items-center justify-center"
                         aria-hidden="true"
                       />
-                      <span>{toggleFullListLabel}</span>
+                      <span>{showMoreLabel}</span>
+                    </button>
+                  ) : null}
+                  {showLessRow ? (
+                    <button
+                      type="button"
+                      data-sidebar-updated-show-less={bucket.key}
+                      className={cn(
+                        'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
+                        'transition-colors',
+                        'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+                      )}
+                      aria-label={showLessLabel}
+                      onClick={() => onShowLess?.(bucket.key)}
+                    >
+                      <span
+                        className="flex h-4 w-4 items-center justify-center"
+                        aria-hidden="true"
+                      />
+                      <span>{showLessLabel}</span>
                     </button>
                   ) : null}
                 </div>
