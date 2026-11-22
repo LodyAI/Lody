@@ -1,12 +1,12 @@
 #![forbid(unsafe_code)]
 
 use lody_acp::{ManagedArtifactInstaller, StdioAcpLauncher};
-use lody_engine::{RepoEngineClient, RoostHistoryStore};
+use lody_engine::RepoEngineClient;
 use lody_entry::{EntryMode, parse_entry_mode, run_local_status};
 use lody_env::HostEnv;
-use lody_ports::{BackendPort, ManagedArtifactSource, StorageLeaseMode};
+use lody_ports::{BackendPort, ManagedArtifactSource, PortResult, StorageLeaseMode};
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
-use lody_sqlite::{SqliteDataLayout, SqliteInboxStore};
+use lody_sqlite::{SqliteDataLayout, SqliteStore};
 use lody_worktree::{GitWorktreeManager, LocalTurnDiffStore};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -47,25 +47,28 @@ fn resolve_artifact_source(
     }
 }
 
-fn compose_runtime(host_env: &HostEnv, lease_mode: StorageLeaseMode) -> DaemonRuntime {
+fn compose_runtime(host_env: &HostEnv, lease_mode: StorageLeaseMode) -> PortResult<DaemonRuntime> {
     let backend = load_backend_profile(&host_env.data_dir);
     let effective_data_dir = match &backend {
         Some(b) => b.profile().isolated_data_dir(&host_env.data_dir),
         None => host_env.data_dir.clone(),
     };
     let artifact_source = resolve_artifact_source(host_env, backend.as_ref());
-    let layout = SqliteDataLayout::new(effective_data_dir);
-    DaemonRuntime::new(DaemonDependencies {
+    let sqlite = Arc::new(SqliteStore::open(SqliteDataLayout::new(
+        effective_data_dir,
+    ))?);
+    Ok(DaemonRuntime::new(DaemonDependencies {
         storage_lease_mode: lease_mode,
         engine: Arc::new(RepoEngineClient::new(None)),
-        history: Arc::new(RoostHistoryStore),
-        inbox: Arc::new(SqliteInboxStore::new(layout)),
+        history: Arc::clone(&sqlite) as Arc<dyn lody_ports::HistoryPort>,
+        inbox: Arc::clone(&sqlite) as Arc<dyn lody_ports::InboxStorePort>,
+        projects: sqlite as Arc<dyn lody_ports::ProjectStorePort>,
         diff_store: Arc::new(LocalTurnDiffStore),
         artifacts: Arc::new(ManagedArtifactInstaller::new(artifact_source)),
         acp: Arc::new(StdioAcpLauncher::default()),
         worktree: Arc::new(GitWorktreeManager),
         backend,
-    })
+    }))
 }
 
 fn main() -> ExitCode {
@@ -97,7 +100,13 @@ fn main() -> ExitCode {
             StorageLeaseMode::StorageOnly
         }
     };
-    let runtime = compose_runtime(&host_env, lease_mode);
+    let runtime = match compose_runtime(&host_env, lease_mode) {
+        Ok(rt) => rt,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::FAILURE;
+        }
+    };
     match run_local_status(&runtime) {
         Ok(resp) => {
             println!("{resp:?}");

@@ -62,6 +62,16 @@ pub struct LocalProjectRecord {
     pub default_branch: Option<String>,
 }
 
+pub trait ProjectStorePort: Send + Sync {
+    fn register_project(
+        &self,
+        name: &str,
+        root_path: &std::path::Path,
+    ) -> PortResult<LocalProjectRecord>;
+    fn get_project(&self, project_id: &LocalProjectId) -> PortResult<Option<LocalProjectRecord>>;
+    fn list_projects(&self) -> PortResult<Vec<LocalProjectRecord>>;
+}
+
 pub trait InboxStorePort: Send + Sync {
     fn store_name(&self) -> &'static str;
     fn admit_turn(&self, input: &AdmittedTurnInput) -> PortResult<AdmissionVerdict>;

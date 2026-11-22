@@ -6,9 +6,10 @@ use lody_ports::{
     AcpEventSink, AcpLauncherPort, AcpSessionPort, AcpSpawnSpec, AdmissionVerdict,
     AdmittedTurnInput, ArtifactRegistryPort, DiffStorePort, EnginePort, EpochKeyMaterial,
     HistoryPort, HistoryTurnRecord, InboxStorePort, InstalledArtifact, LocalProjectId,
-    ManagedArtifactSource, PermissionDecision, PortError, PortErrorKind, PortResult,
-    QueuedDraftItem, SessionMetaSnapshot, SteerVerdict, StorageLeaseMode, SubmissionStage,
-    TurnDiffSummary, TurnTerminalOutcome, WorkspaceSecurityMode, WorktreeLease, WorktreePort,
+    LocalProjectRecord, ManagedArtifactSource, PermissionDecision, PortError, PortErrorKind,
+    PortResult, ProjectStorePort, QueuedDraftItem, SessionMetaSnapshot, SteerVerdict,
+    StorageLeaseMode, SubmissionStage, TurnDiffSummary, TurnTerminalOutcome, WorkspaceSecurityMode,
+    WorktreeLease, WorktreePort,
 };
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
 use std::collections::HashMap;
@@ -220,6 +221,24 @@ impl AcpLauncherPort for FakeAcpLauncher {
     }
 }
 
+struct NoopProjects;
+impl ProjectStorePort for NoopProjects {
+    fn register_project(&self, name: &str, root: &Path) -> PortResult<LocalProjectRecord> {
+        Ok(LocalProjectRecord {
+            project_id: LocalProjectId("p1".to_string()),
+            name: name.to_string(),
+            root_path: root.to_path_buf(),
+            default_branch: None,
+        })
+    }
+    fn get_project(&self, _: &LocalProjectId) -> PortResult<Option<LocalProjectRecord>> {
+        Ok(None)
+    }
+    fn list_projects(&self) -> PortResult<Vec<LocalProjectRecord>> {
+        Ok(Vec::new())
+    }
+}
+
 fn build_test_runtime(cancel_calls: Arc<AtomicUsize>) -> DaemonRuntime {
     DaemonRuntime::with_settling_timeout(
         DaemonDependencies {
@@ -227,6 +246,7 @@ fn build_test_runtime(cancel_calls: Arc<AtomicUsize>) -> DaemonRuntime {
             engine: Arc::new(TestEngine),
             history: Arc::new(MemoryHistory::default()),
             inbox: Arc::new(NoopInbox),
+            projects: Arc::new(NoopProjects),
             diff_store: Arc::new(NoopDiff),
             artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
             acp: Arc::new(FakeAcpLauncher { cancel_calls }),

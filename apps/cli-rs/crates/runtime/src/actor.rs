@@ -236,6 +236,13 @@ pub fn spawn_session_actor(
         opts.depth,
     );
 
+    let mut turn_records = BTreeMap::new();
+    if let Ok(prior_turns) = deps.history.read_turns_by_session_id(&opts.session_id) {
+        for rec in prior_turns {
+            turn_records.insert(rec.turn_id.0.clone(), rec);
+        }
+    }
+
     let actor = SessionActor {
         opts,
         deps,
@@ -243,7 +250,7 @@ pub fn spawn_session_actor(
         state,
         live_agent: None,
         worktree_lease: None,
-        turn_records: BTreeMap::new(),
+        turn_records,
         event_tx: event_tx.clone(),
         control_rx,
         event_rx,

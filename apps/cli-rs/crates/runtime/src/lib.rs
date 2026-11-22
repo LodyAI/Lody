@@ -6,13 +6,13 @@ pub mod actor;
 pub use actor::{ControlCommand, SessionHandle, SessionSpawnOptions, spawn_session_actor};
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, CapabilitySet, CustomCommandSpec,
-    DaemonStatusView, LocalProjectId, LocalProjectRecord, PortError, PortErrorKind, PortResult,
-    ProfileId, SessionId, StorageLeaseMode, VerifiedPrincipal, WorkspaceId, enforce_command_policy,
+    DaemonStatusView, LocalProjectId, PortError, PortErrorKind, PortResult, ProfileId, SessionId,
+    StorageLeaseMode, VerifiedPrincipal, WorkspaceId, enforce_command_policy,
 };
 use lody_kernel::{FrozenTurnInvocation, KernelEvent, TurnSourceKind};
 use lody_ports::{
     AcpLauncherPort, ArtifactRegistryPort, BackendPort, DiffStorePort, EnginePort, HistoryPort,
-    InboxStorePort, WorkspaceSecurityMode, WorktreePort,
+    InboxStorePort, ProjectStorePort, WorkspaceSecurityMode, WorktreePort,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -26,6 +26,7 @@ pub struct DaemonDependencies {
     pub engine: Arc<dyn EnginePort>,
     pub history: Arc<dyn HistoryPort>,
     pub inbox: Arc<dyn InboxStorePort>,
+    pub projects: Arc<dyn ProjectStorePort>,
     pub diff_store: Arc<dyn DiffStorePort>,
     pub artifacts: Arc<dyn ArtifactRegistryPort>,
     pub acp: Arc<dyn AcpLauncherPort>,
@@ -37,8 +38,6 @@ pub struct DaemonRuntime {
     deps: Arc<DaemonDependencies>,
     acp_start_semaphore: Arc<Semaphore>,
     sessions: RwLock<HashMap<(WorkspaceId, SessionId), SessionHandle>>,
-    projects: RwLock<HashMap<LocalProjectId, LocalProjectRecord>>,
-    next_project_seq: RwLock<u64>,
     settling_timeout: Duration,
     owned_tokio: Option<tokio::runtime::Runtime>,
 }
@@ -60,8 +59,6 @@ impl DaemonRuntime {
             deps: Arc::new(deps),
             acp_start_semaphore: Arc::new(Semaphore::new(max_starts)),
             sessions: RwLock::new(HashMap::new()),
-            projects: RwLock::new(HashMap::new()),
-            next_project_seq: RwLock::new(0),
             settling_timeout,
             owned_tokio,
         }
@@ -109,13 +106,10 @@ impl DaemonRuntime {
             .engine
             .read_workspace_security_mode(workspace_id)?;
         let workspace_encrypted = matches!(mode, WorkspaceSecurityMode::Encrypted { .. });
-        let project_root = local_project_id.as_ref().and_then(|pid| {
-            self.projects
-                .read()
-                .expect("projects lock")
-                .get(pid)
-                .map(|rec| rec.root_path.clone())
-        });
+        let project_root = match &local_project_id {
+            Some(pid) => self.deps.projects.get_project(pid)?.map(|r| r.root_path),
+            None => None,
+        };
 
         let mut guard = self.sessions.write().expect("sessions lock");
         if let Some(existing) = guard.get(&key) {
@@ -186,21 +180,7 @@ impl DaemonRuntime {
             }),
             AppCommand::ClearBackendProfile => Ok(AppResponse::ProfileCleared),
             AppCommand::RegisterProject { name, root_path } => {
-                let id = {
-                    let mut seq = self.next_project_seq.write().expect("project seq lock");
-                    *seq += 1;
-                    LocalProjectId(format!("proj_{}", *seq))
-                };
-                let rec = LocalProjectRecord {
-                    project_id: id.clone(),
-                    name,
-                    root_path,
-                    default_branch: None,
-                };
-                self.projects
-                    .write()
-                    .expect("projects lock")
-                    .insert(id, rec.clone());
+                let rec = self.deps.projects.register_project(&name, &root_path)?;
                 Ok(AppResponse::ProjectRegistered(rec))
             }
             AppCommand::CreateSession {
@@ -387,13 +367,7 @@ impl DaemonRuntime {
                 }))
             }
             AppQuery::ListProjects => {
-                let projects = self
-                    .projects
-                    .read()
-                    .expect("projects lock")
-                    .values()
-                    .cloned()
-                    .collect();
+                let projects = self.deps.projects.list_projects()?;
                 Ok(AppResponse::ProjectsListed { projects })
             }
             AppQuery::ListSessions { .. } => Ok(AppResponse::SessionsListed {
@@ -403,10 +377,19 @@ impl DaemonRuntime {
                 workspace_id,
                 session_id,
             } => {
-                let turns = self
-                    .deps
-                    .history
-                    .read_session_turns(&workspace_id, &session_id)?;
+                let turns = if workspace_id.0.is_empty() || workspace_id.0 == "*" {
+                    self.deps.history.read_turns_by_session_id(&session_id)?
+                } else {
+                    let exact = self
+                        .deps
+                        .history
+                        .read_session_turns(&workspace_id, &session_id)?;
+                    if exact.is_empty() {
+                        self.deps.history.read_turns_by_session_id(&session_id)?
+                    } else {
+                        exact
+                    }
+                };
                 Ok(AppResponse::SessionHistory { turns })
             }
             AppQuery::GetTurnDiff {

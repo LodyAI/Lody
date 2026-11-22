@@ -32,6 +32,6 @@ pub use identity::{
 pub use storage::{
     AdmissionVerdict, AdmittedTurnInput, AutomationProgramRecord, AutomationStorePort,
     DiffFileEntry, DiffStorePort, InboxCategory, InboxStorePort, LocalProjectRecord,
-    ScheduleRecord, ScheduleStorePort, StorageLeaseMode, StorageLeasePort, SubmissionStage,
-    TurnDiffSummary,
+    ProjectStorePort, ScheduleRecord, ScheduleStorePort, StorageLeaseMode, StorageLeasePort,
+    SubmissionStage, TurnDiffSummary,
 };
