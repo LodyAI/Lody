@@ -1,6 +1,9 @@
 <doc>
   <h1 id="QmpzxdHD">Lody CLI → Rust (<code>lodyd</code>) 架构分层梳理与解耦设计方案</h1>
   <p id="pOweUEXW">本文档对当前 <code>apps/cli</code>（604 个非测试 TS 文件、<b>194,604 行代码</b>）及其关联的 10 余个 Workspace Packages 进行系统性架构梳理，诊断现有耦合根因，并给出面向 Rust 重构的 <b>六层单向 Cargo 架构</b> 与新一代单进程守护内核 <b><code>lodyd</code></b> 设计蓝图。</p>
+  <alert id="Rv7sPec1" type="important">
+    <p>本文档记录的是早期方案。整体架构已在 <code>specs/rust-cli-daemon-architecture.zh.md</code> 中修订，两者不一致处以 Spec 为准。主要变化：按数据、执行、控制三个平面划分所有权，取代六层划分；会话逻辑改为不做 I/O 的纯状态机；所有输入先进准入日志；新增统一的应用接口层；端口、实现与组合分开；渲染进程不直连引擎；<code>lodyd</code> 不链接 CRDT crate，也不拥有 <code>repo.sqlite3</code>；本地 SQLite 不合并为 <code>machine-state.sqlite3</code>；内存对比图是估算，没有测量依据。</p>
+  </alert>
   <alert id="3DZ6rG21" type="tip">
     <p>配套交互画布与沙盘：<ref whiteboard="rust-daemon-topology">打开完整交互式架构白板</ref> · <ref html="crate-explorer">打开交互式 Crate 拆解与内存推演工作台</ref>。你可以在本文任意段落直接划选评论，或点击文末/章节内的选项控件提交你的架构决策。</p>
   </alert>

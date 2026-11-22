@@ -5,131 +5,178 @@ Translation: current
 
 [English](rust-cli-daemon-architecture.md)
 
-## 背景场景与核心决策
+## 背景与决定
 
-当前基于 TypeScript 的 CLI（`apps/cli`）在演进中承担了多重机器侧运行时角色：守护进程监督器、协作文档本地/云中继、多协议 RPC 服务端、ACP 进程与 Worktree 沙箱管家、内置 MCP 服务器、Automations 宿主以及预览网关。受限于 Node.js 单线程事件循环与 32 位 WebAssembly 线性内存上限，单个守护运行时被迫裂变为 7 个以上的子进程与 Worker 线程；同时核心会话状态高度坍缩进双向耦合的巨石模块（`MessageHandler`、`SessionExecutionService`、`SessionDispatchWatcher`、`LoroDocumentManager`），并伴随编译期写死云端地址及散落全链路的 `if (encrypted)` 分支。
+`apps/cli` 现在同时是机器上的执行宿主、协作文档的本地和云端中继、本地与远端 RPC 服务端、ACP 进程和 Worktree 管理器、内置 MCP 服务器、Automations 宿主和预览网关。它有两类问题：
 
-决定将 Lody CLI 与守护进程重构为基于 **六层单向 Cargo Workspace** 构建的单一零依赖 Rust 可执行文件（`lody`）：
+- **与语言有关的**：Node 单线程和 Loro/Flock 的 WebAssembly 内存上限，让一个 daemon 分裂成看门狗、Worker、HTTP MCP host、四类 Code Collab worker 和若干包装进程。
+- **与语言无关的**：会话状态分散在 `MessageHandler`、`SessionExecutionService`、`SessionDispatchWatcher` 之间；同一个用户动作在 CLI 命令、MCP 工具、本地控制和远端 RPC 里各实现一遍；独立命令和 daemon 自己的子系统都会直接写工作区仓库；同一条输入从三条路径到达并互相竞争。
 
-1. **单一二进制、四种运行入口**：无状态本地 RPC 薄客户端命令（`lody <cmd>`）、无状态 `mcp-stdio` 转发桥、极薄的 `daemon-runner` 租约/升级监督子模式，以及单进程多线程异步守护内核（`lodyd`）。
-2. **预留外部 `loro-repo-rs` 数据引擎接缝**：`lodyd` 不重复自研 CRDT 本地存储、房间生命周期、Presence 传输或 Durable Streams 云房间同步，而是通过窄端口连接独立的 `loro-repo-engine` 宿主进程，并保留与之并存的 Roost 历史端口。
-3. **原生面向企业私有化部署（Self-Hosted）与公有云的统一抽象**：废除编译期写死端点及云厂商专属的对象分片、代码托管与隧道假设，在底层固化运行时 `BackendProfile` 自动发现与厂商无关的后端端口契约。
+第二类问题换语言不会消失。本 Spec 因此先定职责怎么切，再定用 Rust 实现：
 
-[`apps/cli/AGENTS.md`](../apps/cli/AGENTS.md)、[`packages/platform/AGENTS.md`](../packages/platform/AGENTS.md) 与 [`packages/shared/AGENTS.md`](../packages/shared/AGENTS.md) 中的既有作用域不变量在迁移期间继续有效。
+1. **三个平面，各有一个所有者**：数据平面归独立的 `loro-repo-rs` 引擎进程，执行平面归 `lodyd`，控制平面是可替换的后端适配器。
+2. **会话逻辑是不做 I/O 的纯状态机**，运行时只是执行它产出的动作。
+3. **所有输入先进一本持久的准入日志**，会话只从日志消费。
+4. **一层应用接口**，CLI、MCP、本地 IPC 和远端 RPC 都是它的投影。
+5. **端口、实现、组合分开**：本地组合不构造任何联网后端的实现。
 
-## 进程拓扑与存储单写者所有权
+[`apps/cli/AGENTS.md`](../apps/cli/AGENTS.md)、[`packages/platform/AGENTS.md`](../packages/platform/AGENTS.md)、[`packages/shared/AGENTS.md`](../packages/shared/AGENTS.md) 和[故障隔离规则](../.agents/docs/failure-containment.md)里的不变量在迁移期间继续有效。数据平面遵循已批准的 [native 引擎 Spec](native-engine-cloud-e2ee.zh.md)，本文不修改它。
+
+## 三个平面与进程
 
 ```mermaid
 flowchart TB
-  subgraph BIN["单一 Rust 可执行文件: lody"]
-    CLI["lody <command><br/>无状态本地 RPC 薄客户端"]
-    MCP["lody mcp-stdio<br/>无状态 stdio 转本地 IPC 桥接"]
-    RUN["lody daemon-runner<br/>持有 Host 租约与原子升级切换"]
-    DAEMON["lodyd 守护内核<br/>Tokio 异步 + 阻塞/Rayon 线程池 + 内置 MCP HTTP"]
+  subgraph ENTRY["入口：同一个 lody 可执行文件"]
+    CLI["lody 命令<br/>薄客户端"]
+    MCP["lody mcp-stdio<br/>stdio 桥"]
+  end
+  RUN["lody daemon-runner<br/>Host 租约与托管升级"]
+  MAIN["Electron main"]
+
+  subgraph EXEC["执行平面：lodyd"]
+    API["应用接口"]
+    KERNEL["会话内核与准入日志"]
+    RES["机器资源：ACP、Worktree、PTY、监听"]
   end
 
-  CLI -->|本地 IPC| DAEMON
-  MCP -->|本地 IPC| DAEMON
-  RUN -->|监管与排空切换| DAEMON
+  ENGINE["数据平面：loro-repo-rs 引擎进程<br/>每个数据目录一个"]
+  BACKEND["控制平面：后端适配器<br/>仅联网组合"]
+  SIDE["独立进程：ACP 适配器、外围功能"]
 
-  DAEMON <-->|IPC 客户端 / 按 build 接管| REPO["loro-repo-engine<br/>共享原生 CRDT 与 Streams 同步宿主"]
-  DAEMON -->|ACP over stdio| ACP["外部 ACP Agent 进程与受管适配器"]
-  DAEMON -->|OS 进程组 / Job Object| EXT["用户终端 PTY 与按需隧道二进制"]
-  DAEMON --> DB[("lodyd 独占 SQLite 连接池与 TurnDiffStore")]
+  CLI --> API
+  MCP --> API
+  MAIN --> API
+  RUN -->|监管| EXEC
+  API --> KERNEL --> RES
+  RES --> SIDE
+  EXEC <-->|一条连接| ENGINE
+  MAIN <-->|一条连接| ENGINE
+  EXEC --> BACKEND
 ```
 
-- **Single-Owner Storage（本地存储单写者铁律）**：独立 CLI 命令进程与 MCP 工具进程严禁直接打开任何 SQLite 数据库或 CRDT 仓库。唯有 `lodyd` 拥有打开守护进程所属 SQLite 库与 `TurnDiffStore` 的权限。非离线命令统一通过本地 IPC 请求 `lodyd`（必要时按策略拉起带空闲租约的守护进程）；纯本地静态命令（如 `--version`、`lody review`）无状态直接执行。
-- **极薄 `daemon-runner` 子模式**：消除 V8 OOM 与 WASM Trap 后，`lody daemon-runner` 仅保留[托管 daemon 更新规范](daemon-upgrade-installation.zh.md)所要求的固定 Host 租约持有、候选版本健康校验、有界排空切换与失败回退职责。
-- **单进程原生并发**：内置 MCP HTTP 服务、FastCDC 快照分块、并行文件树扫描、Diff 计算与目录监听全部回归 `lodyd` 进程内部，由 Tokio 异步运行时与有界阻塞/Rayon 线程池承载，不再拆分独立 Node 子进程与 Worker 文件。
-- **支持无损双向回滚的 SQLite 管理**：灰度迁移期原样保留本地控制面库的文件名与表结构（`operations.sqlite3`、`schedules.sqlite`、`pr-poller-state.sqlite3`、历史 RPC 拒绝记录表，以及按工作区分文件的 `automations/<id>.sqlite`），仅在 `lodyd` 内收口为常驻连接池（单写 + 多读），无需任何手动迁移，保障新旧 CLI 随时无损回滚，并保留加密工作区移除/吊销时直接物理 `unlink` 单工作区文件的安全擦除边界。
+| 持久状态 | 所有者 |
+| --- | --- |
+| Workspace Meta、`wf`/`mf`/`sr` Flock、Session/Schedule/Preview 文档、上传 outbox、内容加解密 | 引擎进程 |
+| 准入日志、`operations.sqlite3`、`schedules.sqlite`、`pr-poller-state.sqlite3`、历史 RPC 拒绝记录、按工作区的 `automations/<id>.sqlite`、Turn Diff 库、E2EE 账本与密钥托管 | `lodyd` |
+| Roost 会话历史 | 目前 `lodyd`，是否移交见[待决定问题](#待决定问题) |
 
-## 六层架构划分与 Actor 解耦机制
+- **单一所有者**：除所有者之外，任何进程都不打开这些存储。这条同样约束 daemon 内部现在借用一次性命令路径写仓库的子系统（Automations、Schedules、PR 轮询）。
+- **渲染进程不直连引擎**：按已批准的 Spec，renderer 只经 Electron main 读明文，`lodyd` 和 main 各持一条连接。
+- **按需启动不等于上线**：一次性命令拉起的 `lodyd` 只开存储，不发布在线状态，也不接受派发；它不抢占已有的 Host 租约。
+- **`daemon-runner` 的职责不变**：Host 租约、发布包校验、通道与降级确认、候选版本健康检查、有界排空和失败回退，都按[托管 daemon 更新规范](daemon-upgrade-installation.zh.md)保留。只有 JS 堆和 WASM 运行时特有的重启原因消失。
+- **本地 SQLite 文件保留原名和表结构**（owner 已定），由 `lodyd` 内的常驻连接持有。新旧版本可互相回退的前提是：灰度期内这些表结构冻结，或两边同步变更；切换前先排空进行中的回合。
 
-Cargo Workspace 按以下六层严格保持自顶向下单向依赖：
+## 代码结构
 
-| 层级 | Crate 集合 | 核心职责 |
+依赖只允许沿下表自上而下；实现只在组合根出现。表中的名字是示意，不是最终 crate 名。
+
+| 角色 | 内容 | 允许依赖 |
 | --- | --- | --- |
-| L5 宿主入口 | `bins/lody` | CLI 参数解析与输出渲染、`mcp-stdio` 代理、`daemon-runner` 及 `lodyd` 启动装配 |
-| L4 接入网关 | `lody-gateway-local`, `lody-gateway-remote` | 本地 IPC、内置 MCP HTTP 服务、Loro Streams Machine RPC、原生 `lody-iroh` QUIC 监听与统一安全信封中间件 |
-| L3 核心编排 | `lody-daemon-core` | `FleetSupervisor` → `WorkspaceActor` → `SessionActor` 层级树、`OperationInbox` 协调器、`AutomationActor`（`rquickjs`）与运行配置校验 |
-| L2 领域服务 | `lody-acp`, `lody-worktree`, `lody-code-collab`, `lody-preview`, `lody-pr-poller` | 与传输无关的 ACP 客户端、Worktree 与 Git 凭证代理、并行文件索引、Loopback/远端预览网关及 PR 轮询对账 |
-| L1 端口与存储 | `lody-repo-port`, `lody-backend-ports`, `lody-e2ee`, `lody-db`, `lody-diff-store` | 外部 `loro-repo-rs` 与 Roost 端口、公有云/自部署统一后端端口、E2EE 账本与密钥托管、SQLite 连接池与 FastCDC 快照 |
-| L0 基础原语 | `lody-protocol`, `lody-os` | 协议 DTO、前向兼容 JSON/CBOR 编解码、跨平台路径分隔符契约、POSIX 进程组 / Windows Job Object、PTY、系统钥匙串与内存水位探测 |
+| 组合根 | `lody` 可执行文件：选择本地或联网组合，装配实现 | 全部 |
+| 入口 | CLI 渲染、`mcp-stdio`、本地 IPC、远端 RPC 与 Iroh、MCP HTTP | 应用接口 |
+| 运行时 | Actor 外壳、监管树、资源租约、执行内核产出的动作 | 应用接口、内核、端口 |
+| 应用接口 | 命令与查询、按调用者的授权判断、唯一的协议定义 | 内核、端口 |
+| 内核 | 会话、回合、准入的状态机；无 I/O、无时钟、无异步运行时 | 无 |
+| 端口 | 只有 trait 和数据类型：引擎、历史、后端、ACP、Worktree、存储 | 无 |
+| 实现 | 引擎客户端、Roost、联网后端、ACP 客户端、SQLite、OS 原语 | 端口 |
 
-### L4 安全信封中间件（终结全链路加密分支）
+这样切的理由：
 
-认证与 E2EE 信封验签加解密统一在 L4 网关入口一次终结，向 L3/L2 仅传递强类型的 `VerifiedPrincipal`：
+- 把现有的五个耦合中心搬进一个编排 crate，只会得到新的上帝模块。内核与运行时分开后，内核可以用事件序列确定性回放，也可以和现有 TypeScript 实现逐步对照。
+- 入口只依赖应用接口，所以“创建会话”这类动作只有一份实现。
+- 本地组合不链接联网后端的实现，公开默认构建因此无法发出认证云请求，这比运行时判断更可靠。
 
-- 本机受信 Socket 请求签发 `VerifiedPrincipal::LocalHost`；
-- 普通云工作区请求经 `ControlPlanePort` 访问校验后签发 `VerifiedPrincipal::CloudMember`；
-- 加密工作区请求在网关层统一完成账本新鲜度、机器共享策略代际（generation）与签名验证，解密载荷后产出 `VerifiedPrincipal::EncryptedMember`，并按请求方临时公钥自动封包响应。内部领域 Actor 不再感知底层传输来源或密文格式。
+## 会话内核
 
-### `SessionActor` 单信箱有限状态机
-
-每个活跃会话由独立的 `SessionActor` 承载，独占唯一的有界 `mpsc` 命令信箱与显式状态枚举：
+内核是一个转移函数：输入当前状态和一个事件，输出新状态和一组待执行的动作。
 
 ```text
-Idle（可选持有预热 AcpHandle）
-  ──► Preparing（派生独立 CancellationToken：Worktree + MCP + ACP 握手）
-  ──► RunningTurn（独占 TurnContext + AcpHandle：流式缓冲、权限挂起、Steer 判定）
-  ──► Draining（有界 turn-budgets：工作区 Diff 统计刷新 + 确认 ACP 结算）
-  ──► Idle
+Idle（保留上一个已释放回合、可选的预热 Agent）
+  → Preparing（Worktree、MCP、ACP 握手）
+  → Running（流式输出、权限等待、Steer）
+  → Settling（有界收尾）
+  → Idle
 ```
 
-本地 IPC 发送、远端 RPC 快路径回执、CRDT 元数据唤醒以及 `OperationInbox` / Automation 续跑统一归一化为 `SessionCommand` 串行消费。`TurnContext` 仅存在于 `RunningTurn` 分支并在状态离开时由编译器自动 Drop，从根源上消除跨回合异步回调串扰；`Fleet → Workspace → Session → Turn` 层级 `CancellationToken` 取代手写布尔销毁标志。
+- **已释放的回合不销毁**。Agent 在回合结束后被后台任务、定时唤醒或 cron 叫醒时，它的工作仍归属上一个回合冻结的调用上下文；`Idle` 必须保留它。
+- **迟到事件按代际丢弃**。每个 Agent 事件带代际号，与当前回合不符的不改变状态。
+- **控制输入不排在输出后面**。取消、权限答复、Steer 和关闭走独立通道，不会被流式 chunk 挡住。
+- **会话之间不互相等待**。委派、子会话准入、Fork 和编辑重发都是异步消息，答复作为事件回来；任何会话都不在持有自己信箱时等另一个会话。
+- **目标回合、子会话准入计数、收件箱执行归属**是内核状态，不是运行时的附加标志。
+- **不属于单个会话的状态放在上一级**：启动重试窗口、能力刷新和运行时安装的去重属于工作区；ACP 启动并发、PTY、文件监听和 Worktree 属于机器，以租约借给会话。
 
-### 本地 IPC 两阶段平滑切换
+一个会话失败不阻塞其他会话，每个用户路径上的等待都有上界；远端输入到达后，只有正确性必需的准备可以挡在 ACP `prompt` 之前。
 
-1. **灰度共存阶段**：`lodyd` 原生提供单一多路复用通道 `lody-mux.sock`（供 Rust 薄 CLI 与内置 MCP 使用），同时在隔离模块 `legacy_ipc_compat` 中继续监听 `probe`、`control`、`terminal` Socket 并维护既有 run 文件格式，使现有 Electron 主进程零改动无缝接入并支持随时回退 Node CLI。
-2. **彻底切换阶段**：待旧 Node CLI 退役后，将 Electron 主进程切至 `lody-mux.sock`，随后整块删除 `legacy_ipc_compat` 兼容模块。
+## 准入日志
 
-## 外部 `loro-repo-rs` 数据引擎预留边界
+每个会话有一本持久的输入日志。本地 IPC、远端 RPC 快路径、CRDT 文档观察、跨会话委派、Automations 和 Schedules 都只做一件事：往日志追加一条，以用户回合 ID 去重。会话按日志顺序消费，日志是“哪条输入算数、按什么顺序”的唯一答案。
 
-桌面共驻与无头服务器场景统一连接独立的 `loro-repo-engine` 宿主进程，复用基于能力集与递增 `build` 序号的排空接管机制：
+- 快路径只是让内容提前到达，不产生第二份输入。
+- 回复写入历史之前仍要等用户消息在数据平面落盘，但这个等待只在一处。
+- 被取消或撤回的条目永不启动；崩溃后状态不确定的回合由日志重放决定是恢复还是结算。
 
-- **归属 `loro-repo-rs` 负责（`lodyd` 不重复实现）**：`Meta`、`wf`/`mf`/`sr` Flock 及 `Session`/`Schedule`/`Preview` 文档持久化；有界条件筛选读取与增量订阅；Ephemeral Presence 收发；以及 Durable Streams 远端同步（Outbox POST 与多路复用 WebSocket / SSE / long-poll 下行传输）。桌面渲染进程直连 `loro-repo-engine`，不再由 `lodyd` 中转本地 Loro 数据面。
-- **保留在 `lodyd` 的职责**：通过 `RepoEnginePort` 带明确本地作者身份提交写入；维护并存的 `RoostHistoryPort` 并保持与引擎一致的会话读授权规则；独立承载非 CRDT 的 Machine RPC 与原生 `lody-iroh` QUIC 通道；以及由 `lody-e2ee` 独占管理设备身份与主密钥。引擎不持有主密钥，`lody-e2ee` 验证账本后向引擎装入工作区 Epoch 密钥，在收到引擎未知写入者/缺钥事件时触发账本与信箱补齐，并在确认成员移除或设备吊销后执行本地工作区数据擦除。
+## 安全边界
 
-## 企业私有化部署（Self-Hosted）与云端统一端口契约
+验证分两层，各管一件事：
 
-为使同一份公开发布的 `lody` 二进制无需重新编译即可运行于纯本地模式、官方云或企业内网私有化环境，`lody-backend-ports` 固化以下六项运行时契约：
+1. **传输信封在入口处理**。本机受信 Socket、普通云工作区访问校验、加密工作区的信封验签和解密，在入口得到一个已验证的调用者，响应按原通道封装。
+2. **每条输入在进入准入日志时再验证一次**。加密工作区的输入也会作为带签名的行经文档同步到达，入口看不到它们。日志按工作区的安全策略逐条判断：只认签名覆盖的内容，未签名的 `resume` 不作为请求目标，执行身份取自验证结果，条目里的 `userId` 只是显示数据。
 
-1. **运行时 `BackendProfile` 与 `.well-known` 自动发现**：废除编译期注入云端点常量及 `.convex.cloud` → `.convex.site` 域名替换推导。执行 `lody login --server <origin>` 自动拉取 `/.well-known/lody-configuration`（同时兼容 `profile.toml` 显式覆盖），获取控制面、认证站点、对象网关、运行时镜像源、Iroh 中继及实例能力集，并按规范化端点元组派生的 `profile_id` 物理隔离本地存储、凭证与加密锚点。
-2. **支持企业 TLS 与 OIDC 的 `ControlPlanePort`**：原生支持 OIDC Device / PKCE 免密登录流（消除无 SMTP 内网环境的邮件验证依赖），并统一支持自定义企业根证书 CA Bundle 与正向代理配置（同时对本地 Loopback MCP 与预览端口强制保留 `NO_PROXY`）。
-3. **协商式对象传输 `BlobTransferPort`**：以 `negotiate_upload` → `execute_upload` 两步契约（支持 `SingleStreamPut`、`PresignedMultipart`、`GatewayStagedChunks` 三种传输计划）取代绑定单一对象存储的跨请求分片假设，统一兼容云端对象存储与自托管 OpenDAL / S3 / 本地文件系统网关。
-4. **三级制品分发 `ArtifactRegistryPort`**：受管 Agent 二进制、剥离后的外部 ACP 适配器、辅助二进制与守护进程更新包统一支持公网 CDN、`BackendProfile` 下发的企业内网镜像源，以及纯气隙（Air-Gapped）本地离线包导入。
-5. **能力化插拔的 `ScmProviderPort` 与 `TunnelProviderPort`**：Git 凭证代理与 PR 轮询支持参数化配置公有 GitHub 或企业自建代码托管 API 端点（如 GitHub Enterprise Server / GitLab）；远端预览按实例下发能力在 `LocalLoopbackOnly`、`CloudflareQuickTunnel` 与企业内网反向代理网关间动态切换。
-6. **`EntitlementPort` 宽限期软降级契约**：区分 `Active`、`GracePeriod` 与 `ExpiredReadOnly` 状态；授权到期时仅拒绝新建远端协作派发并展示明确提示，永久保留本地历史读取、本地恢复与工作区全量导出能力。
+内核只接收已验证的输入，不出现加密分支。内容的封装、签名和解封由引擎完成；账本验证、密钥接收与分发、轮换和机器共享留在 `lodyd`。工作区模式未知时不授权任何明文外发。
 
-## 外部化 ACP 适配器与内嵌自动化脚本运行时
+## 联网后端与组合
 
-- **TS ACP 适配器剥离为独立受管制品**：现有的五个 TypeScript 内置适配器（`claude`、`codex`、`deepseek`、`devin`、`grok`）从 CLI 构建树拆出，作为独立版本化受管制品纳入 `ArtifactRegistryPort` 分发，并严格通过标准 `ACP over stdio` 协议调用；高频适配器可在后续独立演进为原生 Rust 实现。
-- **Automations 内嵌 `rquickjs` 沙箱**：`AutomationActor` 在进程内通过 `rquickjs` 执行 `CodeMode` 条件脚本，强制约束单次求值堆内存上限、30 秒超时以及有界的 `ctx.read` / `ctx.fetch` / `ctx.exec` 调用配额，彻底解除对外部 Node.js 的运行时依赖。
-- **跨语言黄金测试向量**：Rust 协议层与 TypeScript 共享包（`@lody/shared`、`@lody/e2ee-core`）在 CI 中共同校验同一组 JSON、CBOR 与 LSCE v2 逐字节测试向量。
+没有后端配置时，`lodyd` 按本地组合运行，不构造任何联网实现，也不发云请求；公开的受管运行时下载是既有例外。只有用户显式执行 `lody login --server <origin>` 才建立后端配置，它读取 `/.well-known/lody-configuration`（可被 `profile.toml` 覆盖），官方云和企业自部署走同一条路径。本地存储、凭证和加密锚点按后端配置隔离。
 
-## 后续子规范待细化问题
+CLI 现在是在运行时读取环境变量里的端点，认证站点地址由 `.convex.cloud` 替换推导而来；后端配置取代这两者，站点地址改为显式下发。
 
-- `lody-mux.sock` 多路复用帧的具体二进制头格式与单流背压窗口参数。
-- 剥离后的五个 TypeScript ACP 适配器在无预装系统 Node.js 主机上的独立打包载体与运行时锁定方式。
-- `/.well-known/lody-configuration` 发现文档的精确 JSON Schema 字段与客户端缓存刷新策略。
+端口保持与厂商无关，现在定下的有六个：控制面（含 OIDC 登录、自定义 CA 和代理）、协商式对象上传、制品源（公网、内网镜像、离线包）、代码托管、预览隧道、授权状态。授权到期只拒绝新建远端协作派发，本地历史读取、本地恢复和工作区导出始终可用。
+
+## 独立进程的边界
+
+- **ACP 适配器**：现有五个 TypeScript 适配器从 CLI 构建中拆出，作为独立受管制品经 ACP over stdio 调用（owner 已定）。它们仍需要 JavaScript 运行时，因此整体不是零依赖。
+- **外围功能**：iOS/Android 预览、设备串流和隧道这类依赖重、与内核无关的功能，可以长期留在带版本协议的独立进程里，不必随内核一起重写。
+- **Automations 脚本**：在 `lodyd` 内用 `rquickjs` 执行，限制内存、时长和调用次数（owner 已定）。已注册的脚本是用户数据，替换引擎前要证明它们的求值结果不变。
+
+## 跨语言只留一份定义
+
+Web、手机和 Electron 继续使用 TypeScript，`@lody/shared`、`@lody/e2ee-core` 这类包不会消失。协议类型由应用接口这一份定义生成 TypeScript，不手写两份。线上和持久化格式不变，由两种语言共同校验同一组逐字节向量。加密核心是否也收敛成一份实现，见待决定问题。
+
+## 迁移顺序与验收
+
+1. **先做与语言无关的部分**：在现有 CLI 里落实存储单一所有者；拆出 ACP 适配器；在进程边界（本地 IPC、ACP stdio、引擎连接）上建立一套黑盒行为测试，先让 Node daemon 通过。
+2. **Rust 薄客户端与 `mcp-stdio` 桥**，以及可与 TypeScript 对照回放的内核。
+3. **替换已有的进程和线程边界**：文件扫描、Diff、Turn Diff 库。
+4. **本地组合的 `lodyd`**，包含内置 MCP、Automations 和 Schedules；通过同一套黑盒测试后替换桌面内嵌的 CLI。Electron 的启动方式和打包需要改动，只有本地 Socket 协议在灰度期保持不变。
+5. **联网组合、加密工作区和 Iroh**；之后 Electron 切到单一多路复用通道，删除旧协议兼容模块。
+
+本地 IPC 分两阶段切换、引擎统一走独立进程，都是 owner 已定的决定，本文沿用。
+
+## 待决定问题
+
+- Roost 历史是否移交数据平面，使 `lodyd` 只保留可重建状态和准入日志。
+- 是否让常驻进程持有 Agent 的 stdio，使 `lodyd` 升级或崩溃时不终止进行中的回合。
+- 加密核心是保留两种语言的实现，还是只留一份并编译给客户端使用。
+- 现行的 Effect v4 迁移在重写期间继续、冻结，还是只保留能划定内核边界的单元。
+- 准入日志的存储格式，以及回退到旧版本时如何保证其中的输入不丢。
+- 无 Electron 的主机上引擎由谁启动和监管；升级时引擎与 `lodyd` 的排空顺序；引擎崩溃后会话如何恢复。
+- 授权状态端口是否适合留在公开仓库的 Spec 里。
+- 多路复用通道的帧格式与背压参数；适配器在没有预装 Node 的主机上的打包方式；发现文档的字段和缓存策略。
 
 ## 证据与核对入口
 
-- 已核查的现有 CLI/daemon 耦合热点与入口路径：
-  [`apps/cli/src/index.ts`](../apps/cli/src/index.ts)、
-  [`apps/cli/src/commands/daemon-runner.ts`](../apps/cli/src/commands/daemon-runner.ts)、
-  [`apps/cli/src/commands/start.ts`](../apps/cli/src/commands/start.ts)、
-  [`apps/cli/src/lib/lody-fleet.ts`](../apps/cli/src/lib/lody-fleet.ts)、
+- 已核查的现有实现：
   [`apps/cli/src/lib/message-handler.ts`](../apps/cli/src/lib/message-handler.ts)、
-  [`apps/cli/src/session/session-execution-service.ts`](../apps/cli/src/session/session-execution-service.ts)、
-  [`apps/cli/src/session/session-dispatch-watcher.ts`](../apps/cli/src/session/session-dispatch-watcher.ts)、
-  [`apps/cli/src/lib/loro/doc.ts`](../apps/cli/src/lib/loro/doc.ts) 及
+  [`apps/cli/src/session/session-execution-service.ts`](../apps/cli/src/session/session-execution-service.ts)（按会话的状态表、已释放回合的保留）、
+  [`apps/cli/src/session/session-dispatch-watcher.ts`](../apps/cli/src/session/session-dispatch-watcher.ts)（三路输入、加密输入的逐条判断）、
+  [`apps/cli/src/session/turn-history-gate.ts`](../apps/cli/src/session/turn-history-gate.ts)、
+  [`apps/cli/src/lib/command-runtime.ts`](../apps/cli/src/lib/command-runtime.ts)（一次性命令直接写仓库）、
+  [`apps/cli/src/mcp/lody-mcp-http-server.ts`](../apps/cli/src/mcp/lody-mcp-http-server.ts)（拆出子进程的原因）、
+  [`apps/cli/src/commands/daemon-runner.ts`](../apps/cli/src/commands/daemon-runner.ts)、
+  [`apps/cli/src/utils/const.ts`](../apps/cli/src/utils/const.ts)、
+  [`packages/shared/src/convex-site-url.ts`](../packages/shared/src/convex-site-url.ts)、
+  [`apps/electron/src/main/services/cli-service.ts`](../apps/electron/src/main/services/cli-service.ts) 和
   [`apps/cli/vite.config.ts`](../apps/cli/vite.config.ts)。
-- 已核查的既有平台抽象、原生传输与生命周期规范：
-  [`packages/platform/src/cloud-port.ts`](../packages/platform/src/cloud-port.ts)、
-  [`packages/platform/src/capabilities.ts`](../packages/platform/src/capabilities.ts)、
-  [`packages/iroh-native/README.md`](../packages/iroh-native/README.md)、
-  [`packages/e2ee-core/README.md`](../packages/e2ee-core/README.md)、
-  [`packages/turn-diff-store/AGENTS.md`](../packages/turn-diff-store/AGENTS.md) 及
-  [daemon 内存占用实测笔记](../.agents/notes/implemented/architecture/2026-11-21-daemon-memory-footprint.zh.md)。
-- 验证范围声明：本变更仅交付架构设计规范（Spec），尚未包含 Rust Cargo Workspace 代码实现或运行时基准实测。
+- 规模：`apps/cli/src` 非测试代码 604 个文件、约 19.5 万行，测试 352 个文件、约 18 万行；CLI 对 `@lody/shared` 有 939 处引用。
+- 未验证：本变更只有设计，没有 Rust 代码，也没有内存或性能测量。本仓库目前没有 native 引擎的接入代码，数据平面的描述只依据已批准的 Spec。`@opencode/codemode` 的内部实现未核查。
+- 配套的 `.ryugi/artifacts/` 文档、白板和 Crate 沙盘是早期方案的记录；与本文不一致处以本文为准。

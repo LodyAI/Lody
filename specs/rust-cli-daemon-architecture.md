@@ -7,227 +7,302 @@ Translation: current
 
 ## Scenario and decision
 
-The TypeScript CLI (`apps/cli`) has grown into a multi-role machine runtime: a daemon
-supervisor, collaborative document relay, local and remote RPC server, ACP process and
-worktree manager, built-in MCP server, automation host, and preview gateway. Under a
-single-threaded Node.js event loop and 32-bit WebAssembly CRDT memory, these duties
-split across seven or more cooperating Node processes and worker threads while core
-session state concentrated in tightly coupled hubs (`MessageHandler`,
-`SessionExecutionService`, `SessionDispatchWatcher`, and `LoroDocumentManager`),
-with compile-time cloud endpoints and scattered `if (encrypted)` branches.
+`apps/cli` is at once the machine's execution host, the local and cloud relay for
+collaborative documents, a local and remote RPC server, the ACP process and worktree
+manager, the built-in MCP server, the Automations host and the preview gateway. Its
+problems fall into two groups:
 
-Re-architect the CLI and daemon into a single zero-dependency Rust executable (`lody`)
-built from a six-layer unidirectional Cargo workspace:
+- **Tied to the language.** A single-threaded Node event loop and the WebAssembly
+  memory ceiling of Loro and Flock split one daemon into a watchdog, a Worker, an
+  HTTP MCP host, four kinds of Code Collab worker and several wrapper processes.
+- **Independent of the language.** Session state is spread across `MessageHandler`,
+  `SessionExecutionService` and `SessionDispatchWatcher`. One user action is
+  implemented separately in the CLI command, the MCP tool, local control and remote
+  RPC. One-shot commands and the daemon's own subsystems both write the workspace
+  repository directly. One input arrives over three paths that race each other.
 
-1. **One binary, three entry modes**: stateless RPC CLI subcommands (`lody <cmd>`),
-   a stateless `mcp-stdio` bridge, a minimal `daemon-runner` lease/upgrade supervisor
-   submode, and an in-process async/threaded daemon kernel (`lodyd`).
-2. **External `loro-repo-rs` engine seam**: `lodyd` does not reimplement CRDT storage,
-   room lifecycles, Presence transport, or Durable Streams room synchronization; it
-   consumes the external `loro-repo-rs` engine process through a narrow port alongside
-   a coexisting Roost history port.
-3. **First-class Self-Hosted and cloud abstraction**: replace compile-time endpoint
-   injection and vendor-specific storage/SCM/tunnel assumptions with runtime
-   `BackendProfile` discovery and vendor-neutral backend ports.
+A new language does not remove the second group. This Spec therefore decides how
+responsibilities are divided first, and that the implementation is Rust second:
 
-Existing scoped invariants in [`apps/cli/AGENTS.md`](../apps/cli/AGENTS.md),
-[`packages/platform/AGENTS.md`](../packages/platform/AGENTS.md), and
-[`packages/shared/AGENTS.md`](../packages/shared/AGENTS.md) remain binding across the
-migration.
+1. **Three planes, one owner each.** The data plane belongs to the separate
+   `loro-repo-rs` engine process, the execution plane to `lodyd`, and the control
+   plane is a replaceable backend adapter.
+2. **Session logic is a pure state machine that performs no I/O.** The runtime only
+   executes the actions it emits.
+3. **Every input enters one durable admission journal.** A session consumes only
+   from that journal.
+4. **One application interface.** The CLI, MCP, local IPC and remote RPC are
+   projections of it.
+5. **Ports, implementations and composition are separate.** The local composition
+   constructs no implementation of a connected backend.
 
-## Process topology and storage ownership
+The invariants in [`apps/cli/AGENTS.md`](../apps/cli/AGENTS.md),
+[`packages/platform/AGENTS.md`](../packages/platform/AGENTS.md),
+[`packages/shared/AGENTS.md`](../packages/shared/AGENTS.md) and the
+[failure-containment rules](../.agents/docs/failure-containment.md) remain binding
+during the migration. The data plane follows the approved
+[native engine Spec](native-engine-cloud-e2ee.md), which this document does not
+change.
+
+## Three planes and their processes
 
 ```mermaid
 flowchart TB
-  subgraph BIN["Single Rust executable: lody"]
-    CLI["lody <command><br/>Stateless local RPC client"]
-    MCP["lody mcp-stdio<br/>Stateless stdio-to-daemon bridge"]
-    RUN["lody daemon-runner<br/>Host lease & atomic upgrade handoff"]
-    DAEMON["lodyd kernel<br/>Tokio async + blocking/Rayon pools + MCP HTTP"]
+  subgraph ENTRY["Entry: the same lody executable"]
+    CLI["lody command<br/>thin client"]
+    MCP["lody mcp-stdio<br/>stdio bridge"]
+  end
+  RUN["lody daemon-runner<br/>Host lease and managed upgrade"]
+  MAIN["Electron main"]
+
+  subgraph EXEC["Execution plane: lodyd"]
+    API["Application interface"]
+    KERNEL["Session kernel and admission journal"]
+    RES["Machine resources: ACP, worktrees, PTY, watchers"]
   end
 
-  CLI -->|Local IPC| DAEMON
-  MCP -->|Local IPC| DAEMON
-  RUN -->|Supervises & drains| DAEMON
+  ENGINE["Data plane: loro-repo-rs engine process<br/>one per data directory"]
+  BACKEND["Control plane: backend adapter<br/>connected composition only"]
+  SIDE["Separate processes: ACP adapters, peripheral features"]
 
-  DAEMON <-->|IPC client / build takeover| REPO["loro-repo-engine<br/>Shared native CRDT & Streams sync host"]
-  DAEMON -->|ACP over stdio| ACP["External ACP Agents & managed adapters"]
-  DAEMON -->|OS process group / Job Object| EXT["User PTYs & optional tunnel binary"]
-  DAEMON --> DB[("Daemon-owned SQLite pool & TurnDiffStore")]
+  CLI --> API
+  MCP --> API
+  MAIN --> API
+  RUN -->|supervises| EXEC
+  API --> KERNEL --> RES
+  RES --> SIDE
+  EXEC <-->|one connection| ENGINE
+  MAIN <-->|one connection| ENGINE
+  EXEC --> BACKEND
 ```
 
-- **Single-owner local storage.** Standalone CLI invocations and MCP tool handlers
-  never open SQLite databases or CRDT repositories directly. `lodyd` is the sole
-  process permitted to open daemon-owned SQLite stores and `TurnDiffStore`. Non-offline
-  commands connect to `lodyd` over local IPC (or start an on-demand daemon when policy
-  permits); purely local static commands (`--version`, `lody review`) execute without
-  daemon state.
-- **Thin `daemon-runner` submode.** With V8 heap exhaustion and WebAssembly traps
-  eliminated, `lody daemon-runner` retains only the uninterrupted Host lease,
-  versioned candidate health verification, drained handoff, and rollback guarantees
-  defined in [managed daemon updates](daemon-upgrade-installation.md).
-- **In-process concurrency.** Built-in MCP HTTP serving, FastCDC snapshot chunking,
-  parallel file-tree indexing, diff computation, and filesystem watching run inside
-  `lodyd` on Tokio tasks and bounded blocking/Rayon pools rather than separate Node
-  subprocesses or worker files.
-- **Rollback-safe SQLite layout.** During migration, `lodyd` preserves existing local
-  control filenames and schemas (`operations.sqlite3`, `schedules.sqlite`,
-  `pr-poller-state.sqlite3`, history RPC rejections, and per-workspace
-  `automations/<id>.sqlite`) behind a persistent in-process connection pool. No manual
-  data migration is required, bidirectional rollback to the Node CLI remains lossless,
-  and per-workspace automation files remain physically unlinkable on E2EE removal or
-  device revocation.
+| Durable state | Owner |
+| --- | --- |
+| Workspace Meta, the `wf`/`mf`/`sr` Flock tables, Session/Schedule/Preview documents, the upload outbox, content encryption | Engine process |
+| Admission journal, `operations.sqlite3`, `schedules.sqlite`, `pr-poller-state.sqlite3`, history RPC rejection records, per-workspace `automations/<id>.sqlite`, the turn diff store, the E2EE ledger and key custody | `lodyd` |
+| Roost session history | `lodyd` today; see [open questions](#open-questions) for a transfer |
 
-## Layering and actor decoupling
+- **Single owner.** No process other than the owner opens these stores. This also
+  binds the daemon subsystems that currently borrow the one-shot command path to
+  write the repository (Automations, Schedules, the PR poller).
+- **The renderer does not connect to the engine.** Under the approved Spec the
+  renderer reads plaintext only through Electron main; `lodyd` and main each hold one
+  connection.
+- **Starting on demand is not going online.** A `lodyd` started by a one-shot command
+  opens storage only. It publishes no presence and accepts no dispatch, and it does
+  not take over an existing Host lease.
+- **`daemon-runner` keeps its duties.** The Host lease, release verification, channel
+  and downgrade confirmation, candidate health checks, bounded drain and failure
+  rollback all remain as the
+  [managed daemon update Spec](daemon-upgrade-installation.md) requires. Only the
+  restart reasons specific to the JS heap and the WASM runtime disappear.
+- **Local SQLite files keep their names and schemas** (owner decision), held by
+  long-lived connections inside `lodyd`. Old and new versions can replace each other
+  only if those schemas are frozen during the rollout or changed on both sides
+  together, and only after in-flight turns are drained.
 
-Dependencies point strictly downward across six Cargo workspace layers:
+## Code structure
 
-| Layer | Crates | Responsibility |
+Dependencies run only downward through this table, and implementations appear only
+at the composition root. The names are illustrative, not final crate names.
+
+| Role | Contents | May depend on |
 | --- | --- | --- |
-| L5 Entry | `bins/lody` | CLI parser/formatters, `mcp-stdio` proxy, `daemon-runner`, and `lodyd` bootstrap |
-| L4 Gateways | `lody-gateway-local`, `lody-gateway-remote` | Local IPC, built-in MCP HTTP server, Loro Streams Machine RPC, native `lody-iroh` QUIC listener, and Security Envelope Middleware |
-| L3 Core Actors | `lody-daemon-core` | `FleetSupervisor` → `WorkspaceActor` → `SessionActor`, `OperationInbox` coordinator, `AutomationActor` (`rquickjs`), and run-config validation |
-| L2 Domains | `lody-acp`, `lody-worktree`, `lody-code-collab`, `lody-preview`, `lody-pr-poller` | Transport-agnostic domain services, worktree/credential broker, parallel file index, loopback/remote preview, and PR reconciliation |
-| L1 Ports & Stores | `lody-repo-port`, `lody-backend-ports`, `lody-e2ee`, `lody-db`, `lody-diff-store` | External `loro-repo-rs` + Roost ports, cloud/Self-Hosted ports, E2EE ledger/custody, SQLite pools, and FastCDC snapshots |
-| L0 Primitives | `lody-protocol`, `lody-os` | Wire schemas, forward-compatible JSON/CBOR codecs, path-separator rules, OS process groups / Windows Job Objects, PTY, keyring, and memory pressure probes |
+| Composition root | The `lody` executable: selects the local or connected composition and assembles implementations | Everything |
+| Entry | CLI rendering, `mcp-stdio`, local IPC, remote RPC and Iroh, MCP HTTP | Application interface |
+| Runtime | Actor shells, the supervision tree, resource leases, executing the kernel's actions | Application interface, kernel, ports |
+| Application interface | Commands and queries, authorization by caller, the single protocol definition | Kernel, ports |
+| Kernel | Session, turn and admission state machines; no I/O, no clock, no async runtime | Nothing |
+| Ports | Traits and data types only: engine, history, backend, ACP, worktree, storage | Nothing |
+| Implementations | Engine client, Roost, connected backend, ACP client, SQLite, OS primitives | Ports |
 
-### Security envelope termination at L4
+The reasons for this division:
 
-Authentication and E2EE envelope verification terminate once in L4 gateway middleware
-before any command reaches L3 or L2:
+- Moving today's five coupled hubs into one orchestration crate only produces a new
+  god module. With the kernel separate from the runtime, the kernel can be replayed
+  deterministically from an event sequence and compared step by step with the
+  existing TypeScript implementation.
+- Entry code depends only on the application interface, so an action such as
+  creating a session has one implementation.
+- The local composition does not link the connected backend's implementation, so the
+  public default build cannot issue authenticated cloud requests. That is stronger
+  than a runtime check.
 
-- Local trusted sockets produce `VerifiedPrincipal::LocalHost`.
-- Plaintext remote requests verify workspace/machine access through `ControlPlanePort`
-  and produce `VerifiedPrincipal::CloudMember`.
-- Encrypted workspace requests verify ledger freshness, machine-sharing generation
-  policy, and request signatures at the gateway, decrypting payloads into
-  `VerifiedPrincipal::EncryptedMember` and sealing replies with the caller's ephemeral
-  response key. Domain actors never branch on transport origin or raw ciphertext.
+## Session kernel
 
-### Single-mailbox `SessionActor`
-
-Each active session runs as an isolated `SessionActor` owning one bounded `mpsc`
-command mailbox and an explicit algebraic state machine:
+The kernel is a transition function: it takes the current state and one event and
+returns the new state and a set of actions to execute.
 
 ```text
-Idle (optional warm AcpHandle)
-  ──► Preparing (scoped CancellationToken: worktree + MCP + ACP handshake)
-  ──► RunningTurn (exclusive TurnContext + AcpHandle: streaming, permissions, steer)
-  ──► Draining (bounded turn-budgets: workspace diff stats + confirmed ACP settlement)
-  ──► Idle
+Idle (keeps the last released turn and an optional warm Agent)
+  → Preparing (worktree, MCP, ACP handshake)
+  → Running (streamed output, permission waits, Steer)
+  → Settling (bounded wrap-up)
+  → Idle
 ```
 
-Local IPC sends, remote RPC fast-path receipts, CRDT metadata wakeups, and
-`OperationInbox` / Automation continuations all normalize into `SessionCommand`
-messages on that single mailbox. `TurnContext` exists only inside `RunningTurn` and is
-dropped on transition, preventing stale callbacks or late flushes from mutating a
-subsequent turn. Hierarchical cancellation tokens (`Fleet → Workspace → Session → Turn`)
-replace ad-hoc boolean disposal flags.
+- **A released turn is not destroyed.** When an Agent is woken after its turn by a
+  background task, a scheduled wake-up or a cron, that work still acts for the frozen
+  invocation of the previous turn, so `Idle` must keep it.
+- **Late events are dropped by generation.** Every Agent event carries a generation;
+  one that does not match the current turn changes no state.
+- **Control input never queues behind output.** Cancel, permission replies, Steer and
+  shutdown use a separate channel and cannot be held up by streamed chunks.
+- **Sessions do not wait on each other.** Delegation, child-session admission, fork
+  and edit-and-resend are asynchronous messages whose replies return as events. No
+  session waits on another while holding its own mailbox.
+- **Goal turns, child admission counts and inbox execution ownership** are kernel
+  state, not flags added by the runtime.
+- **State that does not belong to one session lives one level up.** The start-retry
+  window and the deduplication of capability refreshes and runtime installs belong to
+  the workspace. ACP start concurrency, PTYs, file watchers and worktrees belong to
+  the machine and are lent to sessions as leases.
 
-### Two-stage local IPC cutover
+One session's failure does not block another, and every wait on a user path is
+bounded. After a remote input arrives, only correctness-critical setup may stand
+before ACP `prompt`.
 
-1. **Coexistence stage**: `lodyd` exposes a unified multiplexed local socket
-   (`lody-mux.sock`) used by the Rust CLI and built-in MCP client, while an isolated
-   `legacy_ipc_compat` module continues serving `probe`, `control`, and `terminal`
-   sockets plus the existing run-file contract. Desktop Electron embeds or attaches to
-   `lodyd` with zero main-process code changes and full rollback to the Node CLI.
-2. **Cutover stage**: once the Node CLI retires, Electron main switches to
-   `lody-mux.sock` and `legacy_ipc_compat` is deleted in full.
+## Admission journal
 
-## External `loro-repo-rs` engine seam
+Every session has one durable input journal. Local IPC, the remote RPC fast path,
+observation of the CRDT document, cross-session delegation, Automations and Schedules
+each do one thing: append an entry, deduplicated by user turn ID. The session
+consumes the journal in order, and the journal is the only answer to which input
+counts and in what order.
 
-Both desktop-colocated and headless server deployments connect `lodyd` to an
-independent `loro-repo-engine` host process using capability and monotonic `build`
-sequence checks with drain-before-handoff takeover:
+- The fast path only delivers content earlier. It does not create a second input.
+- A reply still waits for the user message to be durable in the data plane before it
+  is written to history, but that wait exists in one place.
+- A cancelled or retired entry never starts. After a crash, a turn in an uncertain
+  state is recovered or settled by replaying the journal.
 
-- **Owned by `loro-repo-rs` (not reimplemented in `lodyd`)**: durable storage for
-  `Meta`, `wf`/`mf`/`sr` Flocks, and `Session`/`Schedule`/`Preview` documents; bounded
-  filtered reads and incremental subscriptions; Ephemeral Presence rooms; and Durable
-  Streams synchronization (outbox POST plus multiplexed WebSocket / SSE / long-poll
-  live transport). Desktop renderers talk directly to `loro-repo-engine` rather than
-  relaying CRDT frames through `lodyd`.
-- **Owned by `lodyd`**: explicit author-tagged writes into `RepoEnginePort`; coexisting
-  `RoostHistoryPort` reads/writes under identical session access rules; non-CRDT
-  Machine RPC and native `lody-iroh` QUIC streams; and `lody-e2ee` key custody. The
-  engine never holds device identity or master keys: `lody-e2ee` installs verified
-  workspace epoch keys into the engine, runs ledger and mailbox catch-up when the
-  engine reports an unknown writer or missing epoch, and executes deferred local
-  workspace erasure upon confirmed member removal or device revocation.
+## Security boundary
 
-## Self-Hosted and cloud backend port contracts
+Verification has two levels, each with one job:
 
-To allow a single published `lody` binary to run unmodified against local-only mode,
-Lody Cloud, or enterprise Self-Hosted deployments, `lody-backend-ports` enforces six
-runtime contracts:
+1. **The transport envelope is handled at entry.** The trusted local socket, the
+   access check of an ordinary cloud workspace, and signature verification and
+   decryption of an encrypted workspace's envelope yield a verified caller at entry.
+   The response is sealed for the channel it arrived on.
+2. **Every input is verified again when it enters the admission journal.** Inputs to
+   an encrypted workspace also arrive as signed rows through document sync, which
+   entry code never sees. The journal judges each entry under the workspace's
+   security policy: only signed content counts, an unsigned `resume` is not a
+   requested target, the executing identity comes from verification, and an entry's
+   `userId` is display data.
 
-1. **Runtime `BackendProfile` and `.well-known` discovery**: remove compile-time cloud
-   endpoint constants and `.convex.cloud` → `.convex.site` hostname derivation.
-   `lody login --server <origin>` fetches `/.well-known/lody-configuration` (with
-   optional `profile.toml` override) to resolve explicit control, auth, blob gateway,
-   runtime mirror, Iroh relay, and capability descriptors. Local storage, credentials,
-   and E2EE pins are namespaced by the canonical origin-tuple `profile_id`.
-2. **`ControlPlanePort` with enterprise TLS and OIDC**: support OIDC device and PKCE
-   authentication flows so intranet deployments without SMTP can sign in and pair
-   machines, alongside configurable custom root CA bundles and forward proxies (while
-   preserving mandatory `NO_PROXY` rules for loopback MCP and preview endpoints).
-3. **Negotiated `BlobTransferPort`**: replace storage-backend-specific multipart state
-   assumptions with a two-step `negotiate_upload` → `execute_upload` contract
-   supporting `SingleStreamPut`, `PresignedMultipart`, and `GatewayStagedChunks`,
-   allowing cloud object stores and self-hosted OpenDAL/S3/filesystem gateways to
-   interoperate with the same client.
-4. **Three-tier `ArtifactRegistryPort`**: resolve managed agent binaries, externalized
-   ACP adapters, helper binaries, and daemon updates from the public CDN, a
-   profile-advertised intranet mirror, or an air-gapped local bundle import.
-5. **Pluggable `ScmProviderPort` and `TunnelProviderPort`**: parameterize Git
-   credential brokering and PR polling across public GitHub and self-hosted SCM
-   endpoints (such as GitHub Enterprise Server or GitLab), and gate remote preview
-   tunnels (`LocalLoopbackOnly`, `CloudflareQuickTunnel`, or intranet reverse proxy)
-   via `BackendProfile` capabilities.
-6. **Graceful `EntitlementPort` degradation**: distinguish `Active`, `GracePeriod`,
-   and `ExpiredReadOnly` states so an expired enterprise license blocks only new
-   collaborative remote dispatches with an explicit notice while preserving local
-   history reads, local recovery, and workspace bundle export.
+The kernel receives only verified input and contains no encryption branch. Sealing,
+signing and opening content is done by the engine; ledger verification, key receipt
+and distribution, rotation and machine sharing stay in `lodyd`. An unknown workspace
+mode authorizes no plaintext egress.
 
-## Externalized ACP adapters and embedded automation runtime
+## Connected backends and composition
 
-- **ACP adapters as managed artifacts**: the five TypeScript ACP adapters (`claude`,
-  `codex`, `deepseek`, `devin`, `grok`) decouple from the CLI bundle into standalone
-  versioned artifacts distributed through `ArtifactRegistryPort` and invoked strictly
-  over `ACP over stdio`. High-frequency adapters may subsequently migrate to native
-  Rust independently of `lodyd`.
-- **Embedded `rquickjs` for Automations**: `AutomationActor` evaluates `CodeMode`
-  condition programs inside an in-process `rquickjs` sandbox with per-evaluation heap
-  ceilings, a 30-second deadline, bounded `ctx.read` / `ctx.fetch` / `ctx.exec` call
-  budgets, and zero external Node.js dependency.
-- **Cross-language golden vectors**: shared protocol crates and TypeScript packages
-  (`@lody/shared`, `@lody/e2ee-core`) verify wire compatibility against a shared suite
-  of JSON, CBOR, and LSCE v2 test vectors in CI.
+Without a backend profile, `lodyd` runs the local composition: it constructs no
+connected implementation and issues no cloud request. Public managed-runtime
+downloads are the existing exception. A profile is created only when the user
+explicitly runs `lody login --server <origin>`, which reads
+`/.well-known/lody-configuration` (a `profile.toml` may override it). The official
+cloud and an enterprise self-hosted instance take the same path. Local storage,
+credentials and encryption anchors are isolated per profile.
 
-## Open questions for implementation specs
+Today the CLI reads its endpoints from environment variables at run time and derives
+the auth site address by replacing `.convex.cloud`. The backend profile replaces
+both; the site address is delivered explicitly.
 
-- Exact binary framing and per-stream backpressure credits for `lody-mux.sock`.
-- Packaging format and runtime pin for the standalone TypeScript ACP adapter artifacts
-  on hosts without a preinstalled system Node.js.
-- Exact schema fields and cache TTL rules for `/.well-known/lody-configuration`.
+Ports stay vendor-neutral. Six are fixed now: the control plane (including OIDC
+sign-in, a custom CA and proxies), negotiated object upload, the artifact source
+(public, internal mirror, offline bundle), code hosting, the preview tunnel, and
+entitlement status. An expired entitlement refuses only new remote collaboration
+dispatch; reading local history, local recovery and workspace export always remain
+available.
+
+## Separate-process boundaries
+
+- **ACP adapters.** The five existing TypeScript adapters leave the CLI build and are
+  called as independently managed artifacts over ACP on stdio (owner decision). They
+  still need a JavaScript runtime, so the whole is not dependency-free.
+- **Peripheral features.** iOS/Android preview, device streaming and tunnels have
+  heavy dependencies and no relation to the kernel. They may stay in separate
+  processes behind a versioned protocol indefinitely instead of being rewritten with
+  the kernel.
+- **Automation programs.** `lodyd` evaluates them in-process with `rquickjs`, bounded
+  in memory, time and call count (owner decision). Registered programs are user
+  data: replacing the engine requires showing that they evaluate to the same result.
+
+## One definition across languages
+
+Web, mobile and Electron continue to use TypeScript, so packages such as
+`@lody/shared` and `@lody/e2ee-core` do not go away. Protocol types are generated for
+TypeScript from the application interface's single definition rather than written
+twice. Wire and persisted formats do not change, and both languages check the same
+byte-exact vectors. Whether the encryption core also becomes a single implementation
+is an open question.
+
+## Migration order and acceptance
+
+1. **Do the language-independent part first.** Establish single-owner storage in the
+   existing CLI, split out the ACP adapters, and build a black-box behavior suite at
+   the process boundaries (local IPC, ACP stdio, the engine connection) that the Node
+   daemon passes.
+2. **The Rust thin client and `mcp-stdio` bridge**, and a kernel that can be replayed
+   against the TypeScript implementation.
+3. **Replace the process and thread boundaries that already exist**: file scanning,
+   diffing and the turn diff store.
+4. **`lodyd` in the local composition**, including the built-in MCP server,
+   Automations and Schedules. It replaces the CLI embedded in the desktop after
+   passing the same black-box suite. Electron's launch path and packaging change;
+   only the local socket protocols stay the same during the rollout.
+5. **The connected composition, encrypted workspaces and Iroh.** Electron then moves
+   to the single multiplexed channel and the legacy protocol module is deleted.
+
+The two-stage local IPC cutover and the separate engine process for every host are
+owner decisions that this document keeps.
+
+## Open questions
+
+- Whether Roost history transfers to the data plane, leaving `lodyd` with only
+  rebuildable state and the admission journal.
+- Whether a long-lived process should hold each Agent's stdio so that upgrading or
+  crashing `lodyd` does not end turns in progress.
+- Whether the encryption core keeps an implementation in each language or becomes
+  one implementation compiled for the clients.
+- Whether the current Effect v4 migration continues during the rewrite, freezes, or
+  keeps only the units that define kernel boundaries.
+- The admission journal's storage format, and how its inputs survive a rollback to
+  the previous version.
+- Who starts and supervises the engine on a host without Electron, the drain order
+  of the engine and `lodyd` during an upgrade, and how sessions recover after an
+  engine crash.
+- Whether the entitlement port belongs in a Spec in the public repository.
+- The multiplexed channel's frame format and backpressure parameters, how adapters
+  are packaged for hosts without Node installed, and the discovery document's fields
+  and cache policy.
 
 ## Evidence
 
-- Inspected current CLI/daemon coupling and entrypoints:
-  [`apps/cli/src/index.ts`](../apps/cli/src/index.ts),
-  [`apps/cli/src/commands/daemon-runner.ts`](../apps/cli/src/commands/daemon-runner.ts),
-  [`apps/cli/src/commands/start.ts`](../apps/cli/src/commands/start.ts),
-  [`apps/cli/src/lib/lody-fleet.ts`](../apps/cli/src/lib/lody-fleet.ts),
+- Implementation inspected:
   [`apps/cli/src/lib/message-handler.ts`](../apps/cli/src/lib/message-handler.ts),
-  [`apps/cli/src/session/session-execution-service.ts`](../apps/cli/src/session/session-execution-service.ts),
-  [`apps/cli/src/session/session-dispatch-watcher.ts`](../apps/cli/src/session/session-dispatch-watcher.ts),
-  [`apps/cli/src/lib/loro/doc.ts`](../apps/cli/src/lib/loro/doc.ts), and
-  [`apps/cli/vite.config.ts`](../apps/cli/vite.config.ts).
-- Inspected existing platform, native transport, and lifecycle contracts:
-  [`packages/platform/src/cloud-port.ts`](../packages/platform/src/cloud-port.ts),
-  [`packages/platform/src/capabilities.ts`](../packages/platform/src/capabilities.ts),
-  [`packages/iroh-native/README.md`](../packages/iroh-native/README.md),
-  [`packages/e2ee-core/README.md`](../packages/e2ee-core/README.md),
-  [`packages/turn-diff-store/AGENTS.md`](../packages/turn-diff-store/AGENTS.md), and
-  [daemon memory footprint note](../.agents/notes/implemented/architecture/2026-11-21-daemon-memory-footprint.md).
-- Validation status: design specification only; no Rust workspace crates or runtime
-  changes are implemented or benchmarked in this change.
+  [`apps/cli/src/session/session-execution-service.ts`](../apps/cli/src/session/session-execution-service.ts)
+  (per-session state tables, the retained released turn),
+  [`apps/cli/src/session/session-dispatch-watcher.ts`](../apps/cli/src/session/session-dispatch-watcher.ts)
+  (three input paths, per-entry handling of encrypted input),
+  [`apps/cli/src/session/turn-history-gate.ts`](../apps/cli/src/session/turn-history-gate.ts),
+  [`apps/cli/src/lib/command-runtime.ts`](../apps/cli/src/lib/command-runtime.ts)
+  (one-shot commands write the repository directly),
+  [`apps/cli/src/mcp/lody-mcp-http-server.ts`](../apps/cli/src/mcp/lody-mcp-http-server.ts)
+  (why the host is a subprocess),
+  [`apps/cli/src/commands/daemon-runner.ts`](../apps/cli/src/commands/daemon-runner.ts),
+  [`apps/cli/src/utils/const.ts`](../apps/cli/src/utils/const.ts),
+  [`packages/shared/src/convex-site-url.ts`](../packages/shared/src/convex-site-url.ts),
+  [`apps/electron/src/main/services/cli-service.ts`](../apps/electron/src/main/services/cli-service.ts)
+  and [`apps/cli/vite.config.ts`](../apps/cli/vite.config.ts).
+- Size: `apps/cli/src` has 604 non-test files with about 195,000 lines and 352 test
+  files with about 180,000 lines; the CLI references `@lody/shared` 939 times.
+- Not validated: this change is design only, with no Rust code and no memory or
+  performance measurement. This repository currently contains no integration code
+  for the native engine, so the data plane is described from the approved Spec alone.
+  The internals of `@opencode/codemode` were not inspected.
+- The companion document, whiteboard and crate explorer under `.ryugi/artifacts/`
+  record the earlier proposal. Where they differ from this document, this document
+  governs.
