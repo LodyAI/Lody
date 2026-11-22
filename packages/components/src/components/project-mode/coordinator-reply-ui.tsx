@@ -8,7 +8,6 @@ import {
   Copy,
   CornerDownRight,
   MessageSquareText,
-  PencilLine,
   Reply,
   X,
 } from 'lucide-react';
@@ -323,13 +322,11 @@ export function CoordinatorBubbleSideActions({
   copyText,
   isHovered = false,
   alwaysRevealActions = false,
-  onEdit,
   onReply,
 }: {
   copyText: string;
   isHovered?: boolean;
   alwaysRevealActions?: boolean;
-  onEdit?: () => void;
   onReply?: () => void;
 }) {
   const { t } = useTranslation();
@@ -362,15 +359,6 @@ export function CoordinatorBubbleSideActions({
     onClick: () => void;
   }> = [];
 
-  if (onEdit) {
-    items.push({
-      key: 'edit',
-      label: t('sessions.editMessage', 'Edit message'),
-      dataAttr: { 'data-coordinator-bubble-edit': '' },
-      icon: <PencilLine size={13.5} aria-hidden="true" />,
-      onClick: onEdit,
-    });
-  }
   if (hasCopy) {
     const copyLabel = copied
       ? t('projectMode.reply.copied', 'Copied')

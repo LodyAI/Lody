@@ -4262,7 +4262,6 @@ const UserMessageRowView = ({
   const [didCopy, setDidCopy] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
-  const [isUserHovered, setIsUserHovered] = useState(false);
   const [resendDialogOpen, setResendDialogOpen] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(() => getTextContentFromMessageItems(message.items));
@@ -4378,12 +4377,6 @@ const UserMessageRowView = ({
           ),
           'group/usermsg'
         )}
-        onPointerEnter={(event) => {
-          if (event.pointerType !== 'touch') setIsUserHovered(true);
-        }}
-        onPointerLeave={(event) => {
-          if (event.pointerType !== 'touch') setIsUserHovered(false);
-        }}
         onClick={
           isMobile
             ? (event) => {
@@ -4523,48 +4516,11 @@ const UserMessageRowView = ({
                         }
                       />
                     ) : null}
-                    <div className="flex min-w-0 max-w-full items-start justify-end gap-2">
-                      {coordinator ? (
-                        <CoordinatorBubbleSideActions
-                          copyText={getCopyTextFromMessageItems(message.items, copyWorkspaceId)}
-                          isHovered={isUserHovered}
-                          alwaysRevealActions={isMobile && mobileActionsRevealed}
-                          onEdit={
-                            onEdit
-                              ? () => {
-                                  const draft = getMessageQuoteEditDraft(message.items);
-                                  setEditText(draft.text);
-                                  setEditQuoteDrafts(draft.drafts);
-                                  setIsEditing(true);
-                                }
-                              : undefined
-                          }
-                          onReply={
-                            coordinator.onReplyToBubble
-                              ? () =>
-                                  coordinator.onReplyToBubble!(
-                                    createCoordinatorReplyRef({
-                                      target: { kind: 'user_turn', turnId: message.id },
-                                      existingThreadRootId:
-                                        coordinator.activeThreadRootId ??
-                                        userReplyTo?.threadRootId,
-                                      author: 'user',
-                                      text: getCopyTextFromMessageItems(
-                                        message.items,
-                                        copyWorkspaceId
-                                      ),
-                                    })
-                                  )
-                              : undefined
-                          }
-                        />
-                      ) : null}
-                      <UserChatBubble
-                        sessionId={sessionId}
-                        message={message}
-                        conversationFontSize={conversationFontSize}
-                      />
-                    </div>
+                    <UserChatBubble
+                      sessionId={sessionId}
+                      message={message}
+                      conversationFontSize={conversationFontSize}
+                    />
                   </div>
                 )}
               </div>
@@ -6953,6 +6909,8 @@ function CoordinatorReplyBubble({
   const coordinator = useCoordinatorConversation();
   const isMobile = useIsMobile();
   const [isBubbleHovered, setIsBubbleHovered] = useState(false);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const sideActionsRef = useRef<HTMLDivElement>(null);
   const hasBody = entry.body.trim().length > 0;
   const hasImages = (entry.images?.length ?? 0) > 0;
   const hasFiles = (entry.files?.length ?? 0) > 0;
@@ -6974,17 +6932,26 @@ function CoordinatorReplyBubble({
     (!coordinator?.activeThreadRootId ||
       formatCoordinatorAnchorId(entry.replyTo!.target) !== coordinator.activeThreadRootId);
 
+  const handleInteractiveEnter = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') setIsBubbleHovered(true);
+  };
+  const handleInteractiveLeave = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch') return;
+    const nextTarget = event.relatedTarget as Node | null;
+    if (
+      nextTarget &&
+      (bubbleRef.current?.contains(nextTarget) || sideActionsRef.current?.contains(nextTarget))
+    ) {
+      return;
+    }
+    setIsBubbleHovered(false);
+  };
+
   return (
     <div
       {...stylex.props(coordinatorBubbleStyles.column)}
       data-coordinator-reply-bubble=""
       data-coordinator-anchor-id={anchorId}
-      onPointerEnter={(event) => {
-        if (event.pointerType !== 'touch') setIsBubbleHovered(true);
-      }}
-      onPointerLeave={(event) => {
-        if (event.pointerType !== 'touch') setIsBubbleHovered(false);
-      }}
       onClick={
         isMobile
           ? (event) => {
@@ -6994,7 +6961,12 @@ function CoordinatorReplyBubble({
       }
     >
       <div {...stylex.props(coordinatorBubbleStyles.row)}>
-        <div {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}>
+        <div
+          ref={bubbleRef}
+          onPointerEnter={handleInteractiveEnter}
+          onPointerLeave={handleInteractiveLeave}
+          {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}
+        >
           <div className="flex flex-col gap-2">
             {showInlineQuote && entry.replyTo ? (
               <CoordinatorInlineQuoteChip
@@ -7029,29 +7001,36 @@ function CoordinatorReplyBubble({
             ) : null}
           </div>
         </div>
-        <CoordinatorBubbleSideActions
-          copyText={entry.body}
-          isHovered={isBubbleHovered}
-          alwaysRevealActions={isMobile && mobileActionsRevealed}
-          onReply={
-            coordinator?.onReplyToBubble
-              ? () =>
-                  coordinator.onReplyToBubble!(
-                    createCoordinatorReplyRef({
-                      target: {
-                        kind: 'coordinator_bubble',
-                        turnId: messageId,
-                        bubbleId: entry.id,
-                      },
-                      existingThreadRootId:
-                        coordinator.activeThreadRootId ?? entry.replyTo?.threadRootId,
-                      author: 'coordinator',
-                      text: entry.body,
-                    })
-                  )
-              : undefined
-          }
-        />
+        <div
+          ref={sideActionsRef}
+          onPointerEnter={handleInteractiveEnter}
+          onPointerLeave={handleInteractiveLeave}
+          {...stylex.props(coordinatorBubbleStyles.sideActionsSlot)}
+        >
+          <CoordinatorBubbleSideActions
+            copyText={entry.body}
+            isHovered={isBubbleHovered}
+            alwaysRevealActions={isMobile && mobileActionsRevealed}
+            onReply={
+              coordinator?.onReplyToBubble
+                ? () =>
+                    coordinator.onReplyToBubble!(
+                      createCoordinatorReplyRef({
+                        target: {
+                          kind: 'coordinator_bubble',
+                          turnId: messageId,
+                          bubbleId: entry.id,
+                        },
+                        existingThreadRootId:
+                          coordinator.activeThreadRootId ?? entry.replyTo?.threadRootId,
+                        author: 'coordinator',
+                        text: entry.body,
+                      })
+                    )
+                : undefined
+            }
+          />
+        </div>
       </div>
       {replyCount > 0 && coordinator?.onOpenThread ? (
         <div {...stylex.props(coordinatorBubbleStyles.replyPillRow)}>
@@ -7326,21 +7305,22 @@ const coordinatorBubbleStyles = stylex.create({
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: 4,
-    width: 'fit-content',
-    maxWidth: '100%',
+    width: '100%',
   },
   row: {
     display: 'flex',
     alignItems: 'flex-start',
     justifyContent: 'flex-start',
-    gap: space[2],
-    maxWidth: '100%',
+    width: '100%',
   },
   bubble: {
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
-    maxWidth: 'calc(100% - 76px)',
+  },
+  sideActionsSlot: {
+    flexShrink: 0,
+    paddingInlineStart: space[2],
   },
   replyPillRow: {
     display: 'flex',
