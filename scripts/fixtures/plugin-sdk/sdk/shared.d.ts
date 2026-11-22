@@ -1,9 +1,9 @@
-import type { z } from 'zod';
+import type { z } from "zod";
 
 /**
  * Maximum UTF-8 byte length of a schema-validated plugin tool output stored inline
  * inside Loro Session History (`tool_call` plugin payload). Larger payloads write
- * full details to `ctx.sessionDataDir` or `ctx.dataDir` and return a summary + lookup key.
+ * full details to `ctx.dataDir` keyed by immutable `toolCallId` and return a summary + lookup key.
  */
 export const MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES = 16_384;
 
@@ -31,55 +31,54 @@ declare const sessionRefBrand: unique symbol;
  * when one machine is offline, and fan out per `MachineRef` when needed.
  */
 export interface WorkspaceRef {
-  readonly [workspaceRefBrand]: 'WorkspaceRef';
+  readonly [workspaceRefBrand]: "WorkspaceRef";
   readonly workspaceId: string;
 }
 
 export interface MachineRef {
-  readonly [machineRefBrand]: 'MachineRef';
+  readonly [machineRefBrand]: "MachineRef";
   readonly workspaceId: string;
   readonly machineId: string;
 }
 
 export interface ProjectRef {
-  readonly [projectRefBrand]: 'ProjectRef';
+  readonly [projectRefBrand]: "ProjectRef";
   readonly workspaceId: string;
   readonly machineId: string;
   readonly projectId: string;
 }
 
 export interface SessionRef {
-  readonly [sessionRefBrand]: 'SessionRef';
+  readonly [sessionRefBrand]: "SessionRef";
   readonly workspaceId: string;
   readonly machineId: string;
   readonly sessionId: string;
   readonly projectId?: string;
 }
 
-export type PluginScope = 'workspace' | 'machine' | 'project' | 'session';
-export type MachinePluginScope = 'machine' | 'project' | 'session';
+export type PluginScope = "workspace" | "machine" | "project" | "session";
+export type MachinePluginScope = "machine" | "project" | "session";
 
-export type ScopeTarget<S extends PluginScope> = S extends 'workspace'
+export type ScopeTarget<S extends PluginScope> = S extends "workspace"
   ? WorkspaceRef
-  : S extends 'machine'
-    ? MachineRef
-    : S extends 'project'
-      ? ProjectRef
-      : SessionRef;
+  : S extends "machine"
+  ? MachineRef
+  : S extends "project"
+  ? ProjectRef
+  : SessionRef;
 
 export type PluginCallErrorCode =
-  | 'untrusted_plugin'
-  | 'plugin_disabled'
-  | 'plugin_faulted'
-  | 'revision_mismatch'
-  | 'machine_offline'
-  | 'forbidden'
-  | 'not_found'
-  | 'idempotency_conflict'
-  | 'business_key_conflict'
-  | 'outcome_unknown'
-  | 'validation_failed'
-  | 'handler_error';
+  | "untrusted_plugin"
+  | "plugin_disabled"
+  | "plugin_faulted"
+  | "machine_offline"
+  | "forbidden"
+  | "not_found"
+  | "idempotency_conflict"
+  | "business_key_conflict"
+  | "outcome_unknown"
+  | "validation_failed"
+  | "handler_error";
 
 export interface PluginCallError extends Error {
   readonly code: PluginCallErrorCode;
@@ -90,7 +89,7 @@ export interface QueryDescriptor<
   TInput extends z.ZodType = z.ZodType,
   TOutput extends z.ZodType = z.ZodType,
 > {
-  readonly kind: 'query';
+  readonly kind: "query";
   readonly scope: S;
   readonly id: string;
   readonly input: TInput;
@@ -102,7 +101,7 @@ export interface MutationDescriptor<
   TInput extends z.ZodType = z.ZodType,
   TOutput extends z.ZodType = z.ZodType,
 > {
-  readonly kind: 'mutation';
+  readonly kind: "mutation";
   readonly scope: S;
   readonly id: string;
   readonly input: TInput;
@@ -113,7 +112,7 @@ export interface ToolDescriptor<
   TInput extends z.ZodType = z.ZodType,
   TOutput extends z.ZodType = z.ZodType,
 > {
-  readonly kind: 'tool';
+  readonly kind: "tool";
   readonly id: string;
   readonly title: string;
   readonly description: string;
@@ -135,27 +134,15 @@ export interface AttachmentSnapshot<TMeta = unknown> {
   readonly metadata?: TMeta;
 }
 
-export interface AttachmentSourceDescriptor<TMeta extends z.ZodType = z.ZodType> {
-  readonly kind: 'attachment-source';
+export interface AttachmentSourceDescriptor<
+  TMeta extends z.ZodType = z.ZodType,
+> {
+  readonly kind: "attachment-source";
   readonly id: string;
   readonly title: string;
   readonly placeholder?: string;
   readonly metadataSchema?: TMeta;
 }
-
-export interface ObservationDescriptor<
-  S extends MachinePluginScope = MachinePluginScope,
-  TInput extends z.ZodType = z.ZodType,
-  TOutput extends z.ZodType = z.ZodType,
-> {
-  readonly kind: 'observation';
-  readonly scope: S;
-  readonly id: string;
-  readonly input: TInput;
-  readonly output: TOutput;
-}
-
-export type BusinessKeyScope = 'user' | 'project';
 
 export interface CreateSessionRequest {
   /**
@@ -166,37 +153,20 @@ export interface CreateSessionRequest {
    */
   readonly requestId: string;
   /**
-   * Optional active-task identity within the calling plugin's namespace.
+   * Optional per-user active-task identity within `(workspace, user, target, pluginId, businessKey)`.
    * A different requestId with an already-active businessKey rejects with
    * `business_key_conflict`. Archive releases only this active-task reservation,
    * never the original request receipt. A new generation uses a new requestId.
    */
   readonly businessKey?: string;
-  /**
-   * Reservation scope for `businessKey`. Defaults to `'user'`. `'project'` shares the
-   * active-task reservation across authorized project collaborators when targeting a `ProjectRef`,
-   * while `requestId` receipts remain strictly isolated per calling user.
-   */
-  readonly businessKeyScope?: BusinessKeyScope;
   /** Workspace `AgentRole` ID to instantiate for this Session. */
   readonly roleId?: string;
-  /** Portable blueprint ID declared in this plugin's `manifest.agentRoles`, resolved to the user's bound target. */
-  readonly pluginRoleId?: string;
   /** Optional parent Session pointer recorded in `SessionMeta.openedBySessionId` / `openedByRootSessionId`. */
   readonly parentSession?: SessionRef;
   readonly prompt: string;
   readonly skillIds?: readonly string[];
-  /** Optional initial PR link so plaintext `github.*` observations have a bound PR target before Turn 1. */
+  /** Optional initial PR link recorded on Session creation. */
   readonly pullRequestUrl?: string;
-  readonly waitCondition?: {
-    /** Read-only CodeMode predicate (`ctx.exec` disabled for plugin-created waits). */
-    readonly program: string;
-    /** Structured JSON parameters exposed as `ctx.params` so callers never interpolate program strings. */
-    readonly params?: Readonly<Record<string, unknown>>;
-    readonly reason?: string;
-    readonly intervalMs?: number;
-    readonly expiresAt?: number;
-  };
 }
 
 export interface SendSessionMessageRequest {
@@ -204,12 +174,12 @@ export interface SendSessionMessageRequest {
   readonly idempotencyKey?: string;
   readonly prompt: string;
   readonly attachments?: readonly AttachmentSnapshot[];
-  readonly delivery?: 'queue' | 'steer';
+  readonly delivery?: "queue" | "steer";
 }
 
 export interface SendSessionMessageReceipt {
   readonly turnId: string;
-  readonly disposition: 'started' | 'queued' | 'steered';
+  readonly disposition: "started" | "queued" | "steered";
 }
 
 /**
@@ -218,7 +188,7 @@ export interface SendSessionMessageReceipt {
  * `? Input` or `Approval needed` states without N+1 detail queries.
  */
 export interface PendingInteractionSummary {
-  readonly kind: 'permission' | 'ask_user_question';
+  readonly kind: "permission" | "ask_user_question";
   readonly requestId: string;
 }
 
@@ -247,7 +217,7 @@ export interface ElicitationQuestion {
  */
 export interface PendingQuestionPrompt {
   readonly requestId: string;
-  readonly source: 'lody' | 'claude' | 'codex';
+  readonly source: "lody" | "claude" | "codex";
   readonly allowCustomAnswer: boolean;
   readonly questions: readonly ElicitationQuestion[];
   readonly autoResolveAt?: number;
@@ -259,23 +229,16 @@ export interface AnswerQuestionRequest {
 }
 
 export interface LodyQueryDescriptor<S extends PluginScope, TInput, TOutput> {
-  readonly kind: 'lody-query';
+  readonly kind: "lody-query";
   readonly scope: S;
   readonly id: string;
   readonly __types?: { readonly input: TInput; readonly output: TOutput };
 }
 
-/** Backwards-compatible alias for `LodyQueryDescriptor`. */
-export type HostQueryDescriptor<S extends PluginScope, TInput, TOutput> = LodyQueryDescriptor<
-  S,
-  TInput,
-  TOutput
->;
-
 export interface MachineSummary {
   readonly machine: MachineRef;
   readonly name: string;
-  readonly presence: 'online' | 'offline' | 'unknown';
+  readonly presence: "online" | "offline" | "unknown";
   readonly agentConfigs: readonly {
     readonly agentConfigId: string;
     readonly cliType: string;
@@ -294,11 +257,8 @@ export interface AgentRoleSummary {
   readonly name: string;
   readonly description?: string;
   readonly emoji?: string;
-  readonly visibility: 'private' | 'workspace';
-  readonly availability: 'ready' | 'unavailable' | 'unknown';
-  /** Present when materialized from a plugin's `manifest.agentRoles` blueprint. */
-  readonly pluginId?: string;
-  readonly pluginRoleId?: string;
+  readonly visibility: "private" | "workspace";
+  readonly availability: "ready" | "unavailable" | "unknown";
 }
 
 export interface WorkspaceMemberSummary {
@@ -319,15 +279,15 @@ export interface ScheduleSummary {
 
 /**
  * Raw visible `SessionMeta` + ephemeral presence record exposed directly through `lodyQueries.sessions`
- * so custom sidebars, row hover popovers, multi-Agent dashboards, and external peripherals can
- * reconstruct parent/child lineages (`openedBySessionId` / `openedByRootSessionId`), Role lanes
- * (`agentRoleId`), and waiting-input indicators (`pendingInteraction`) without bespoke host groups.
+ * so custom sidebars, row hover popovers, and multi-Agent dashboards can reconstruct parent/child
+ * lineages (`openedBySessionId` / `openedByRootSessionId`), Role lanes (`agentRoleId`), and
+ * waiting-input indicators (`pendingInteraction`) without bespoke host groups.
  */
 export interface SessionSummary {
   readonly session: SessionRef;
   readonly title: string;
-  readonly status: 'idle' | 'busy' | 'waiting' | 'stopped';
-  readonly machinePresence: 'online' | 'offline' | 'unknown';
+  readonly status: "idle" | "busy" | "waiting" | "stopped";
+  readonly machinePresence: "online" | "offline" | "unknown";
   readonly isMine: boolean;
   readonly userId: string;
   readonly archived: boolean;
@@ -339,7 +299,10 @@ export interface SessionSummary {
   readonly agentRoleId?: string;
   readonly agentRoleRevision?: number;
   readonly cliType?: string;
-  readonly lastModel?: { readonly modelId?: string; readonly name?: string } | null;
+  readonly lastModel?: {
+    readonly modelId?: string;
+    readonly name?: string;
+  } | null;
   readonly branchName?: string;
   readonly baseBranch?: string;
   readonly isWorktree?: boolean;
@@ -349,7 +312,10 @@ export interface SessionSummary {
   readonly snoozedUntil?: number;
   readonly settledAt?: number;
   readonly scheduleId?: string;
-  readonly contextWindowUsage?: { readonly usedTokens: number; readonly maxTokens?: number };
+  readonly contextWindowUsage?: {
+    readonly usedTokens: number;
+    readonly maxTokens?: number;
+  };
   /** Present when the Session is currently awaiting an elicitation answer or tool permission. */
   readonly pendingInteraction?: PendingInteractionSummary;
   /** Present when the Session was created by a plugin (`pluginId`). */
@@ -358,7 +324,7 @@ export interface SessionSummary {
   readonly businessKey?: string;
   readonly pullRequests: readonly {
     readonly url: string;
-    readonly state: 'open' | 'closed' | 'merged';
+    readonly state: "open" | "closed" | "merged";
     readonly draft: boolean;
     readonly project?: ProjectRef;
   }[];
@@ -366,7 +332,7 @@ export interface SessionSummary {
 
 export interface SessionTurnSummary {
   readonly turnId: string;
-  readonly role: 'user' | 'assistant';
+  readonly role: "user" | "assistant";
   readonly previewText: string;
   readonly createdAt: number;
   readonly finished: boolean;
@@ -396,7 +362,7 @@ export interface RepositoryGitState {
 export interface SessionDiffSummary {
   readonly files: readonly {
     readonly path: string;
-    readonly status: 'added' | 'modified' | 'deleted' | 'renamed';
+    readonly status: "added" | "modified" | "deleted" | "renamed";
     readonly additions: number;
     readonly deletions: number;
   }[];
@@ -404,7 +370,7 @@ export interface SessionDiffSummary {
 
 export interface FilePreviewEntry {
   readonly path: string;
-  readonly kind: 'file' | 'directory';
+  readonly kind: "file" | "directory";
   readonly content?: string;
   readonly truncated?: boolean;
 }
@@ -420,10 +386,13 @@ export interface PullRequestSummary {
   readonly number: number;
   readonly url: string;
   readonly headSha: string;
-  readonly state: 'open' | 'closed' | 'merged';
+  readonly state: "open" | "closed" | "merged";
   readonly draft: boolean;
-  readonly ciStatus: 'success' | 'failure' | 'pending' | 'unknown';
-  readonly reviewDecision?: 'approved' | 'changes_requested' | 'review_required';
+  readonly ciStatus: "success" | "failure" | "pending" | "unknown";
+  readonly reviewDecision?:
+    | "approved"
+    | "changes_requested"
+    | "review_required";
   readonly unresolvedCommentCount?: number;
   readonly observedAt: number;
 }
@@ -432,7 +401,7 @@ export interface SkillSummary {
   readonly skillId: string;
   readonly name: string;
   readonly description?: string;
-  readonly source: 'repository' | 'user' | 'plugin' | 'system';
+  readonly source: "repository" | "user" | "plugin" | "system";
 }
 
 /**
@@ -443,35 +412,35 @@ export interface SkillSummary {
  */
 export declare const lodyQueries: {
   readonly machines: LodyQueryDescriptor<
-    'workspace',
+    "workspace",
     { readonly limit?: number } | void,
     { readonly items: readonly MachineSummary[] }
   >;
   readonly projects: LodyQueryDescriptor<
-    'workspace',
+    "workspace",
     { readonly limit?: number; readonly cursor?: string } | void,
     { readonly items: readonly ProjectSummary[]; readonly nextCursor?: string }
   >;
   readonly agentRoles: LodyQueryDescriptor<
-    'workspace',
-    { readonly pluginId?: string } | void,
+    "workspace",
+    void,
     { readonly items: readonly AgentRoleSummary[]; readonly synced: boolean }
   >;
   readonly members: LodyQueryDescriptor<
-    'workspace',
+    "workspace",
     void,
     { readonly items: readonly WorkspaceMemberSummary[] }
   >;
   readonly schedules: LodyQueryDescriptor<
-    'workspace' | 'machine' | 'project',
+    "workspace" | "machine" | "project",
     { readonly enabledOnly?: boolean } | void,
     { readonly items: readonly ScheduleSummary[] }
   >;
   readonly sessions: LodyQueryDescriptor<
-    'workspace' | 'machine' | 'project',
+    "workspace" | "machine" | "project",
     {
       readonly archived?: boolean;
-      readonly status?: 'idle' | 'busy' | 'waiting' | 'stopped';
+      readonly status?: "idle" | "busy" | "waiting" | "stopped";
       readonly createdByMe?: boolean;
       /** Filter to Sessions created by the calling plugin (`pluginId`). */
       readonly createdByPlugin?: boolean;
@@ -488,40 +457,41 @@ export declare const lodyQueries: {
     { readonly items: readonly SessionSummary[]; readonly nextCursor?: string }
   >;
   readonly sessionDetail: LodyQueryDescriptor<
-    'session',
+    "session",
     { readonly recentTurnLimit?: number } | void,
     SessionDetail
   >;
-  readonly gitState: LodyQueryDescriptor<'project' | 'session', void, RepositoryGitState>;
+  readonly gitState: LodyQueryDescriptor<
+    "project" | "session",
+    void,
+    RepositoryGitState
+  >;
   readonly worktrees: LodyQueryDescriptor<
-    'project',
+    "project",
     { readonly limit?: number; readonly cursor?: string } | void,
     { readonly items: readonly WorktreeEntry[]; readonly nextCursor?: string }
   >;
   readonly sessionDiff: LodyQueryDescriptor<
-    'session',
+    "session",
     { readonly turnId?: string } | void,
     SessionDiffSummary
   >;
   readonly filePreview: LodyQueryDescriptor<
-    'project' | 'session',
+    "project" | "session",
     { readonly path: string; readonly maxBytes?: number },
     FilePreviewEntry
   >;
   readonly pullRequests: LodyQueryDescriptor<
-    'project',
+    "project",
     { readonly number: number } | { readonly url: string },
     PullRequestSummary | null
   >;
   readonly skills: LodyQueryDescriptor<
-    'machine' | 'project',
+    "machine" | "project",
     void,
     { readonly items: readonly SkillSummary[] }
   >;
 };
-
-/** Alias of `lodyQueries` retained for symmetry with `MachineHostPort.read`. */
-export declare const hostQueries: typeof lodyQueries;
 
 export declare function defineQuery<
   S extends MachinePluginScope,
@@ -530,7 +500,7 @@ export declare function defineQuery<
 >(
   scope: S,
   id: string,
-  schemas: { readonly input: TInput; readonly output: TOutput }
+  schemas: { readonly input: TInput; readonly output: TOutput },
 ): QueryDescriptor<S, TInput, TOutput>;
 
 export declare function defineMutation<
@@ -540,34 +510,29 @@ export declare function defineMutation<
 >(
   scope: S,
   id: string,
-  schemas: { readonly input: TInput; readonly output: TOutput }
+  schemas: { readonly input: TInput; readonly output: TOutput },
 ): MutationDescriptor<S, TInput, TOutput>;
 
-export declare function defineTool<TInput extends z.ZodType, TOutput extends z.ZodType>(
+export declare function defineTool<
+  TInput extends z.ZodType,
+  TOutput extends z.ZodType,
+>(
   id: string,
   spec: {
     readonly title: string;
     readonly description: string;
     readonly input: TInput;
     readonly output: TOutput;
-  }
+  },
 ): ToolDescriptor<TInput, TOutput>;
 
-export declare function defineAttachmentSource<TMeta extends z.ZodType = z.ZodUnknown>(
+export declare function defineAttachmentSource<
+  TMeta extends z.ZodType = z.ZodUnknown,
+>(
   id: string,
   spec: {
     readonly title: string;
     readonly placeholder?: string;
     readonly metadataSchema?: TMeta;
-  }
+  },
 ): AttachmentSourceDescriptor<TMeta>;
-
-export declare function defineObservation<
-  S extends MachinePluginScope,
-  TInput extends z.ZodType,
-  TOutput extends z.ZodType,
->(
-  scope: S,
-  id: string,
-  schemas: { readonly input: TInput; readonly output: TOutput }
-): ObservationDescriptor<S, TInput, TOutput>;

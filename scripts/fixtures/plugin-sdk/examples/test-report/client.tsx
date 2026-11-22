@@ -1,8 +1,12 @@
-import { defineClientPlugin, useHost, type ToolRenderProps } from '@lody/plugin-sdk/client';
-import { Badge, Button, Switch, Table, type TableColumn } from '@lody/ui';
-import { useState } from 'react';
-import type { z } from 'zod';
-import { runSuiteTool, type TestCaseResult } from './shared';
+import {
+  defineClientPlugin,
+  useLody,
+  type ToolRenderProps,
+} from "@lody/plugin-sdk/client";
+import { Badge, Button, Switch, Table, type TableColumn } from "@lody/ui";
+import { useState } from "react";
+import type { z } from "zod";
+import { runSuiteTool, type TestCaseResult } from "./shared";
 
 type ReportProps = ToolRenderProps<
   z.infer<typeof runSuiteTool.input>,
@@ -10,20 +14,31 @@ type ReportProps = ToolRenderProps<
 >;
 
 const columns: readonly TableColumn<TestCaseResult>[] = [
-  { key: 'suite', header: 'Suite', cell: (row) => row.suite },
-  { key: 'name', header: 'Test', cell: (row) => row.name, wrap: true },
+  { key: "suite", header: "Suite", cell: (row) => row.suite },
+  { key: "name", header: "Test", cell: (row) => row.name, wrap: true },
   {
-    key: 'status',
-    header: 'Status',
+    key: "status",
+    header: "Status",
     cell: (row) => (
       <Badge
-        tone={row.status === 'failed' ? 'danger' : row.status === 'passed' ? 'success' : 'neutral'}
+        tone={
+          row.status === "failed"
+            ? "danger"
+            : row.status === "passed"
+            ? "success"
+            : "neutral"
+        }
       >
         {row.status}
       </Badge>
     ),
   },
-  { key: 'duration', header: 'Time', numeric: true, cell: (row) => `${row.durationMs} ms` },
+  {
+    key: "duration",
+    header: "Time",
+    numeric: true,
+    cell: (row) => `${row.durationMs} ms`,
+  },
 ];
 
 function CompletedTestReport({
@@ -32,30 +47,36 @@ function CompletedTestReport({
   appendToDraft,
 }: {
   output: z.infer<typeof runSuiteTool.output>;
-  session: ReportProps['session'];
-  appendToDraft: ReportProps['appendToDraft'];
+  session: ReportProps["session"];
+  appendToDraft: ReportProps["appendToDraft"];
 }) {
-  const host = useHost();
+  const lody = useLody();
   const [failedOnly, setFailedOnly] = useState(output.failed > 0);
   const [selected, setSelected] = useState<string[]>([]);
 
   const visible = failedOnly
-    ? output.cases.filter((item) => item.status === 'failed')
+    ? output.cases.filter((item) => item.status === "failed")
     : output.cases;
 
   const addSelectedFailuresToDraft = () => {
     const picked = output.cases.filter((item) => selected.includes(item.id));
     if (picked.length === 0) return;
     const summary = picked
-      .map((item) => `- ${item.suite} > ${item.name}: ${item.failureMessage ?? 'failed'}`)
-      .join('\n');
-    appendToDraft({ kind: 'text', text: `Investigate failing tests:\n${summary}` });
+      .map(
+        (item) =>
+          `- ${item.suite} > ${item.name}: ${item.failureMessage ?? "failed"}`,
+      )
+      .join("\n");
+    appendToDraft({
+      kind: "text",
+      text: `Investigate failing tests:\n${summary}`,
+    });
   };
 
   return (
     <div>
       <div>
-        <Badge tone={output.failed > 0 ? 'danger' : 'success'}>
+        <Badge tone={output.failed > 0 ? "danger" : "success"}>
           {output.failed} failed / {output.passed} passed
         </Badge>
         <Switch checked={failedOnly} onCheckedChange={setFailedOnly} />
@@ -72,7 +93,9 @@ function CompletedTestReport({
             size="small"
             variant="ghost"
             onClick={() =>
-              host.panels.openSession(session, 'suite-inspector', { caseId: selected[0]! })
+              lody.panels.openSession(session, "suite-inspector", {
+                caseId: selected[0]!,
+              })
             }
           >
             Inspect case
@@ -92,11 +115,11 @@ function CompletedTestReport({
 }
 
 function TestReportCard(props: ReportProps) {
-  if (props.status === 'running') {
+  if (props.status === "running") {
     return (
       <div>
         <Badge tone="running">
-          Running suite{props.input.filter ? ` (${props.input.filter})` : ''}…
+          Running suite{props.input.filter ? ` (${props.input.filter})` : ""}…
         </Badge>
       </div>
     );

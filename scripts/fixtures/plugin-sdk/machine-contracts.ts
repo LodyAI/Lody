@@ -1,27 +1,22 @@
-import { defineMutation, defineObservation, defineQuery, lodyQueries } from '@lody/plugin-sdk';
-import { defineMachinePlugin } from '@lody/plugin-sdk/machine';
-import { z } from 'zod';
-import { runSuiteTool } from './examples/test-report/shared';
+import { defineMutation, defineQuery, lodyQueries } from "@lody/plugin-sdk";
+import { defineMachinePlugin } from "@lody/plugin-sdk/machine";
+import { z } from "zod";
+import { runSuiteTool } from "./examples/test-report/shared";
 
 // @ts-expect-error Machine plugins cannot import browser client hooks or registries.
-import('@lody/plugin-sdk/client');
+import("@lody/plugin-sdk/client");
 
-const machineDigestQuery = defineQuery('machine', 'daemon.digest', {
+const machineDigestQuery = defineQuery("machine", "daemon.digest", {
   input: z.object({ limit: z.number().int().default(10) }),
   output: z.object({ count: z.number().int() }),
 });
 
-const sessionMonitorQuery = defineQuery('session', 'monitor.state', {
+const sessionMonitorQuery = defineQuery("session", "monitor.state", {
   input: z.object({}),
   output: z.object({ activeStep: z.string().nullable() }),
 });
 
-const queueDepthObservation = defineObservation('project', 'queue.depth', {
-  input: z.object({}),
-  output: z.object({ ready: z.boolean() }),
-});
-
-const recoverReviewMutation = defineMutation('project', 'review.ensure', {
+const recoverReviewMutation = defineMutation("project", "review.ensure", {
   input: z.object({
     requestId: z.string().uuid(),
     prNumber: z.number().int(),
@@ -31,63 +26,40 @@ const recoverReviewMutation = defineMutation('project', 'review.ensure', {
 });
 
 export const machineContractChecks = defineMachinePlugin((machine) => {
+  // @ts-expect-error Pre-Turn prompt injection (`beforeSessionTurn`) was removed to preserve E2EE prompt integrity.
+  void machine.beforeSessionTurn;
+
   machine.query(machineDigestQuery, (ctx, input) => {
     const limit: number = input.limit;
     const machineId: string = ctx.target.machineId;
-    const absentSessionDir: undefined = ctx.sessionDataDir;
+    const dataDir: string = ctx.dataDir;
     void machineId;
-    void absentSessionDir;
+    void dataDir;
     // @ts-expect-error Machine-scoped context does not expose projectId.
     void ctx.target.projectId;
+    // @ts-expect-error Separate `sessionDataDir` was collapsed into `ctx.dataDir` keyed by immutable IDs.
+    void ctx.sessionDataDir;
     return { count: limit };
   });
 
   machine.query(sessionMonitorQuery, async (ctx) => {
-    const sessionDir: string = ctx.sessionDataDir;
-    void sessionDir;
+    // @ts-expect-error Machine daemon port never exposes client-only `answerQuestion` or permission bypasses.
+    void ctx.lody.sessions.answerQuestion;
     const detail = await ctx.lody.read(ctx.target, lodyQueries.sessionDetail, {
       recentTurnLimit: 3,
     });
     return { activeStep: detail.recentTurns[0]?.previewText ?? null };
   });
 
-  machine.observation(queueDepthObservation, async () => ({
-    value: { ready: true },
-    observedAt: Date.now(),
-    revision: 'depth-v1',
-  }));
-
-  machine.beforeSessionTurn(async (ctx, event) => {
-    if (!event.project) return;
-    const gitState = await ctx.lody.read(event.project, lodyQueries.gitState);
-    if (gitState.dirty) {
-      return {
-        appendContextMarkdown: `Note: worktree branch \`${gitState.branch}\` has uncommitted changes.`,
-      };
-    }
-  });
-
-  machine.onSessionEvent((ctx, event) => {
-    // @ts-expect-error Machine daemon port never exposes client-only `answerQuestion` or permission bypasses.
-    void ctx.lody.sessions.answerQuestion;
-    if (event.kind === 'turn.completed') {
-      const rootId: string | undefined = event.openedByRootSessionId;
-      void rootId;
-      ctx.invalidate(sessionMonitorQuery, ctx.target);
-    }
-  });
-
   machine.mutation(recoverReviewMutation, async (ctx, input) => {
     const key = `review/${input.prNumber}/${input.headSha}`;
-    // Push-assist wakeup hint for waiting Sessions watching this project observation.
-    ctx.invalidate(queueDepthObservation, ctx.target);
+    ctx.invalidate(sessionMonitorQuery);
     // Replaying the original request also recovers an archived Session; an active-only
     // catalog lookup must not decide whether this operation has already been accepted.
     const created = await ctx.lody.sessions.create(ctx.target, {
       requestId: input.requestId,
       businessKey: key,
-      businessKeyScope: 'project',
-      pluginRoleId: 'reviewer',
+      roleId: "role_reviewer",
       pullRequestUrl: `https://github.com/lodyai/lody/pull/${input.prNumber}`,
       prompt: `Review PR #${input.prNumber} at ${input.headSha}.`,
     });
@@ -100,5 +72,5 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
   // @ts-expect-error Tool handler return type must satisfy the tool output schema.
   machine.tool(runSuiteTool, () => ({ wrongField: true }));
 
-  return () => {};
+  return async () => {};
 });

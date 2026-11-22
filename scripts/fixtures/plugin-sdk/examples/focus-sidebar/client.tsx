@@ -10,9 +10,9 @@ import {
   type SessionSummary,
   type SidebarItemProps,
   type SidebarViewProps,
-} from '@lody/plugin-sdk/client';
-import { Alert, Badge, Button, Card, Input } from '@lody/ui';
-import { useState } from 'react';
+} from "@lody/plugin-sdk/client";
+import { Alert, Badge, Button, Card, Input } from "@lody/ui";
+import { useState } from "react";
 
 /**
  * Layer 1 (`sidebar.sessionRow.decorate`): Composable row-level enhancement.
@@ -23,20 +23,30 @@ import { useState } from 'react';
 function WaitingQuestionBadge({ session }: SessionRowSlotProps) {
   if (!session.pendingInteraction) return null;
   return (
-    <Badge tone={session.pendingInteraction.kind === 'ask_user_question' ? 'running' : 'warning'}>
-      {session.pendingInteraction.kind === 'ask_user_question' ? '? Input' : 'Approval'}
+    <Badge
+      tone={
+        session.pendingInteraction.kind === "ask_user_question"
+          ? "running"
+          : "warning"
+      }
+    >
+      {session.pendingInteraction.kind === "ask_user_question"
+        ? "? Input"
+        : "Approval"}
     </Badge>
   );
 }
 
 function HoverQuickAnswerBody({ session }: { session: SessionSummary }) {
   const lody = useLody();
-  const detail = useLodyQuery(session.session, lodyQueries.sessionDetail, { recentTurnLimit: 1 });
+  const detail = useLodyQuery(session.session, lodyQueries.sessionDetail, {
+    recentTurnLimit: 1,
+  });
   const [step, setStep] = useState(0);
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
-  const [customAnswer, setCustomAnswer] = useState('');
+  const [customAnswer, setCustomAnswer] = useState("");
 
-  if (detail.status !== 'ready' || !detail.data.pendingQuestion) {
+  if (detail.status !== "ready" || !detail.data.pendingQuestion) {
     return <div>Loading question…</div>;
   }
 
@@ -78,7 +88,11 @@ function HoverQuickAnswerBody({ session }: { session: SessionSummary }) {
               size="mini"
               variant="ghost"
               disabled={step >= prompt.questions.length - 1}
-              onClick={() => setStep((index) => Math.min(prompt.questions.length - 1, index + 1))}
+              onClick={() =>
+                setStep((index) =>
+                  Math.min(prompt.questions.length - 1, index + 1),
+                )
+              }
             >
               Next
             </Button>
@@ -93,7 +107,11 @@ function HoverQuickAnswerBody({ session }: { session: SessionSummary }) {
             <Button
               key={option.label}
               size="small"
-              variant={draftAnswers[current.answerKey] === option.label ? 'primary' : 'secondary'}
+              variant={
+                draftAnswers[current.answerKey] === option.label
+                  ? "primary"
+                  : "secondary"
+              }
               onClick={() => chooseAnswer(option.label)}
             >
               {option.label}
@@ -108,9 +126,9 @@ function HoverQuickAnswerBody({ session }: { session: SessionSummary }) {
               placeholder="Or type your own answer…"
               onChange={(event) => setCustomAnswer(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && customAnswer.trim()) {
+                if (event.key === "Enter" && customAnswer.trim()) {
                   chooseAnswer(customAnswer.trim());
-                  setCustomAnswer('');
+                  setCustomAnswer("");
                 }
               }}
             />
@@ -122,7 +140,7 @@ function HoverQuickAnswerBody({ session }: { session: SessionSummary }) {
 }
 
 function HoverQuickAnswerCard({ session }: SessionRowSlotProps) {
-  if (session.pendingInteraction?.kind !== 'ask_user_question') return null;
+  if (session.pendingInteraction?.kind !== "ask_user_question") return null;
   return <HoverQuickAnswerBody session={session} />;
 }
 
@@ -134,29 +152,39 @@ function SwarmHubHeaderEntry({ workspace }: SidebarItemProps) {
   const lody = useLody();
   const running = useLodyQuery(workspace, lodyQueries.sessions, {
     archived: false,
-    status: 'busy',
+    status: "busy",
     limit: 50,
   });
-  const runningCount = running.status === 'ready' ? running.data.items.length : 0;
+  const runningCount =
+    running.status === "ready" ? running.data.items.length : 0;
 
   return (
     <SidebarRow
       label="Swarm Hub"
-      trailing={runningCount > 0 ? <Badge tone="running">{runningCount}</Badge> : undefined}
-      onClick={() => lody.screens.open(workspace, 'swarm-hub')}
+      trailing={
+        runningCount > 0 ? (
+          <Badge tone="running">{runningCount}</Badge>
+        ) : undefined
+      }
+      onClick={() => lody.screens.open(workspace, "swarm-hub")}
     />
   );
 }
 
 function SwarmHubScreen({ workspace }: ScreenProps) {
   const lody = useLody();
-  const sessions = useLodyQuery(workspace, lodyQueries.sessions, { archived: false, limit: 60 });
+  const sessions = useLodyQuery(workspace, lodyQueries.sessions, {
+    archived: false,
+    limit: 60,
+  });
 
-  if (sessions.status === 'loading') return <div>Loading active agents…</div>;
-  if (sessions.status !== 'ready') {
+  if (sessions.status === "loading") return <div>Loading active agents…</div>;
+  if (sessions.status !== "ready") {
     return (
       <Alert.Root tone="warning">
-        <Alert.Description>Unable to load workspace sessions.</Alert.Description>
+        <Alert.Description>
+          Unable to load workspace sessions.
+        </Alert.Description>
       </Alert.Root>
     );
   }
@@ -167,7 +195,9 @@ function SwarmHubScreen({ workspace }: ScreenProps) {
         <Card.Root key={item.session.sessionId}>
           <Card.Header>
             <Card.Title>{item.title}</Card.Title>
-            <Badge tone={item.status === 'busy' ? 'running' : 'neutral'}>{item.status}</Badge>
+            <Badge tone={item.status === "busy" ? "running" : "neutral"}>
+              {item.status}
+            </Badge>
           </Card.Header>
           <Card.Footer>
             <Button
@@ -177,7 +207,7 @@ function SwarmHubScreen({ workspace }: ScreenProps) {
             >
               Open
             </Button>
-            {item.status === 'busy' && (
+            {item.status === "busy" && (
               <Button
                 size="small"
                 variant="ghost"
@@ -199,13 +229,19 @@ function SwarmHubScreen({ workspace }: ScreenProps) {
  */
 function SwarmTreeSidebarView({ workspace, activeSession }: SidebarViewProps) {
   const lody = useLody();
-  const sessions = useLodyQuery(workspace, lodyQueries.sessions, { archived: false, limit: 100 });
+  const sessions = useLodyQuery(workspace, lodyQueries.sessions, {
+    archived: false,
+    limit: 100,
+  });
   const roles = useLodyQuery(workspace, lodyQueries.agentRoles);
 
-  if (sessions.status !== 'ready') return <div>Loading workspace sessions…</div>;
+  if (sessions.status !== "ready")
+    return <div>Loading workspace sessions…</div>;
 
   const roleById = new Map(
-    roles.status === 'ready' ? roles.data.items.map((role) => [role.roleId, role]) : []
+    roles.status === "ready"
+      ? roles.data.items.map((role) => [role.roleId, role])
+      : [],
   );
   const childrenByRoot = new Map<string, SessionSummary[]>();
   const roots: SessionSummary[] = [];
@@ -233,14 +269,18 @@ function SwarmTreeSidebarView({ workspace, activeSession }: SidebarViewProps) {
               onClick={() => lody.sessions.open(root.session)}
             />
             {subagents.map((child) => {
-              const role = child.agentRoleId ? roleById.get(child.agentRoleId) : undefined;
+              const role = child.agentRoleId
+                ? roleById.get(child.agentRoleId)
+                : undefined;
               return (
                 <SessionRow
                   key={child.session.sessionId}
                   session={child}
                   indent={1}
                   leading={role?.emoji ? <span>{role.emoji}</span> : undefined}
-                  selected={activeSession?.sessionId === child.session.sessionId}
+                  selected={
+                    activeSession?.sessionId === child.session.sessionId
+                  }
                   onClick={() => lody.sessions.open(child.session)}
                 />
               );
@@ -254,25 +294,25 @@ function SwarmTreeSidebarView({ workspace, activeSession }: SidebarViewProps) {
 
 export default defineClientPlugin((lody) => {
   lody.sidebar.sessionRow.decorate({
-    id: 'hover-quick-answer',
+    id: "hover-quick-answer",
     trailing: WaitingQuestionBadge,
     hoverCard: HoverQuickAnswerCard,
   });
 
   lody.sidebar.headerItems.add({
-    id: 'swarm-hub-entry',
+    id: "swarm-hub-entry",
     Component: SwarmHubHeaderEntry,
   });
 
   lody.screens.add({
-    id: 'swarm-hub',
-    title: 'Swarm Hub',
+    id: "swarm-hub",
+    title: "Swarm Hub",
     Component: SwarmHubScreen,
   });
 
   lody.sidebar.views.add({
-    id: 'swarm-tree',
-    title: 'Agent Tree',
+    id: "swarm-tree",
+    title: "Agent Tree",
     Component: SwarmTreeSidebarView,
   });
 });

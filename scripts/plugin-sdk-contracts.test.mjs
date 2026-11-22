@@ -1,28 +1,41 @@
-import assert from 'node:assert/strict';
-import * as fs from 'node:fs/promises';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import os from 'node:os';
-import path from 'node:path';
-import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import assert from "node:assert/strict";
+import * as fs from "node:fs/promises";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const fixtureDir = path.join(repoRoot, 'scripts/fixtures/plugin-sdk');
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
+const fixtureDir = path.join(repoRoot, "scripts/fixtures/plugin-sdk");
 const require = createRequire(import.meta.url);
-const requireShared = createRequire(path.join(repoRoot, 'packages/shared/package.json'));
+const requireShared = createRequire(
+  path.join(repoRoot, "packages/shared/package.json"),
+);
 
 function verifyTsconfig(configFileName, minFiles) {
   const configPath = path.join(fixtureDir, configFileName);
   const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
   assert.equal(configFile.error, undefined, `Failed to read ${configFileName}`);
 
-  const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, fixtureDir);
-  assert.deepEqual(parsed.errors, [], `Unexpected ${configFileName} parse errors`);
+  const parsed = ts.parseJsonConfigFileContent(
+    configFile.config,
+    ts.sys,
+    fixtureDir,
+  );
+  assert.deepEqual(
+    parsed.errors,
+    [],
+    `Unexpected ${configFileName} parse errors`,
+  );
   assert.ok(
     parsed.fileNames.length >= minFiles,
-    `Expected at least ${minFiles} files in ${configFileName}, got ${parsed.fileNames.length}`
+    `Expected at least ${minFiles} files in ${configFileName}, got ${parsed.fileNames.length}`,
   );
 
   const program = ts.createProgram({
@@ -35,18 +48,20 @@ function verifyTsconfig(configFileName, minFiles) {
     const formatted = ts.formatDiagnosticsWithColorAndContext(diagnostics, {
       getCanonicalFileName: (fileName) => fileName,
       getCurrentDirectory: () => repoRoot,
-      getNewLine: () => '\n',
+      getNewLine: () => "\n",
     });
-    assert.fail(`Plugin SDK typecheck failed (${configFileName}):\n${formatted}`);
+    assert.fail(
+      `Plugin SDK typecheck failed (${configFileName}):\n${formatted}`,
+    );
   }
 }
 
-test('plugin SDK browser-pure client contracts and dogfood UI examples typecheck cleanly', () => {
-  verifyTsconfig('tsconfig.json', 8);
+test("plugin SDK browser-pure client contracts and dogfood UI examples typecheck cleanly", () => {
+  verifyTsconfig("tsconfig.json", 8);
 });
 
-test('plugin SDK Node machine contracts and durable dataDir examples typecheck without DOM globals', () => {
-  verifyTsconfig('tsconfig.machine.json', 7);
+test("plugin SDK Node machine contracts and durable dataDir examples typecheck without DOM globals", () => {
+  verifyTsconfig("tsconfig.machine.json", 7);
 });
 
 // The runtime SDK is still a proposal. Supply its registration functions while
@@ -57,14 +72,13 @@ function loadIssueMachine(io = fs) {
   const sdk = {
     defineQuery: (scope, id, schemas) => ({ scope, id, ...schemas }),
     defineMutation: (scope, id, schemas) => ({ scope, id, ...schemas }),
-    defineObservation: (scope, id, schemas) => ({ scope, id, ...schemas }),
     defineAttachmentSource: (id, spec) => ({ id, ...spec }),
   };
   function load(file) {
     if (modules.has(file)) return modules.get(file).exports;
     const module = { exports: {} };
     modules.set(file, module);
-    const source = readFileSync(file, 'utf8');
+    const source = readFileSync(file, "utf8");
     const compiled = ts.transpileModule(source, {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
@@ -73,43 +87,50 @@ function loadIssueMachine(io = fs) {
       },
     }).outputText;
     const fixtureRequire = (id) => {
-      if (id === 'node:fs/promises') return io;
-      if (id.startsWith('node:')) return require(id);
-      if (id === 'zod') return requireShared('zod');
-      if (id === '@lody/plugin-sdk') return sdk;
-      if (id === '@lody/plugin-sdk/machine') {
+      if (id === "node:fs/promises") return io;
+      if (id.startsWith("node:")) return require(id);
+      if (id === "zod") return requireShared("zod");
+      if (id === "@lody/plugin-sdk") return sdk;
+      if (id === "@lody/plugin-sdk/machine") {
         return { defineMachinePlugin: (register) => ({ register }) };
       }
-      if (id.startsWith('./')) return load(path.resolve(path.dirname(file), `${id}.ts`));
+      if (id.startsWith("./"))
+        return load(path.resolve(path.dirname(file), `${id}.ts`));
       throw new Error(`Unexpected fixture dependency: ${id}`);
     };
-    new Function('require', 'module', 'exports', compiled)(fixtureRequire, module, module.exports);
+    new Function("require", "module", "exports", compiled)(
+      fixtureRequire,
+      module,
+      module.exports,
+    );
     return module.exports;
   }
-  load(path.join(fixtureDir, 'examples/issue-context/machine.ts')).default.register({
+  load(
+    path.join(fixtureDir, "examples/issue-context/machine.ts"),
+  ).default.register({
     query() {},
-    observation() {},
     attachmentSource() {},
-    beforeSessionTurn() {},
-    onSessionEvent() {},
+    tool() {},
     mutation(descriptor, handler) {
       mutations.set(descriptor.id, handler);
     },
   });
-  return mutations.get('issues.togglePin');
+  return mutations.get("issues.togglePin");
 }
 
 async function issueStateFixture(t) {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-plugin-issue-state-'));
+  const dataDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "lody-plugin-issue-state-"),
+  );
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   return {
     dataDir,
-    file: path.join(dataDir, 'issue-context-state.json'),
-    context: { dataDir, target: { projectId: 'p' }, invalidate() {} },
+    file: path.join(dataDir, "issue-context-state.json"),
+    context: { dataDir, target: { projectId: "p" }, invalidate() {} },
   };
 }
 
-test('issue plugin initializes missing state and preserves all concurrent project pin changes', async (t) => {
+test("issue plugin initializes missing state and preserves all concurrent project pin changes", async (t) => {
   const { dataDir, file, context } = await issueStateFixture(t);
   // Immediate completions deterministically expose uncoordinated read/modify/write:
   // without the per-file queue, concurrent handlers all read before any writes.
@@ -129,31 +150,37 @@ test('issue plugin initializes missing state and preserves all concurrent projec
     },
   });
   const legacyTemp = `${file}.tmp`;
-  await fs.writeFile(legacyTemp, 'unrelated temporary file');
+  await fs.writeFile(legacyTemp, "unrelated temporary file");
   const results = await Promise.all([
-    mutate(context, { issueId: 'A', pinned: true }),
-    mutate(context, { issueId: 'B', pinned: true }),
-    mutate({ ...context, target: { projectId: 'q' } }, { issueId: 'C', pinned: true }),
+    mutate(context, { issueId: "A", pinned: true }),
+    mutate(context, { issueId: "B", pinned: true }),
+    mutate(
+      { ...context, target: { projectId: "q" } },
+      { issueId: "C", pinned: true },
+    ),
   ]);
   assert.deepEqual(results, [{ ok: true }, { ok: true }, { ok: true }]);
-  assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), {
-    pinnedByProject: { p: ['A', 'B'], q: ['C'] },
+  assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), {
+    pinnedByProject: { p: ["A", "B"], q: ["C"] },
     linkedBySession: {},
   });
-  assert.equal(await fs.readFile(legacyTemp, 'utf8'), 'unrelated temporary file');
+  assert.equal(
+    await fs.readFile(legacyTemp, "utf8"),
+    "unrelated temporary file",
+  );
   assert.deepEqual(
     (await fs.readdir(dataDir)).sort(),
-    [path.basename(file), path.basename(legacyTemp)].sort()
+    [path.basename(file), path.basename(legacyTemp)].sort(),
   );
 });
 
-test('issue plugin preserves stored state on read or parse failures', async (t) => {
-  for (const code of ['EACCES', 'EIO']) {
+test("issue plugin preserves stored state on read or parse failures", async (t) => {
+  for (const code of ["EACCES", "EIO"]) {
     await t.test(code, async (t) => {
       const { file, context } = await issueStateFixture(t);
       const original = JSON.stringify({
-        pinnedByProject: { p: ['A'] },
-        linkedBySession: { s: 'ISSUE-A' },
+        pinnedByProject: { p: ["A"] },
+        linkedBySession: { s: "ISSUE-A" },
       });
       await fs.writeFile(file, original);
       const failure = Object.assign(new Error(`Injected ${code}`), { code });
@@ -169,60 +196,68 @@ test('issue plugin preserves stored state on read or parse failures', async (t) 
         },
       });
       await assert.rejects(
-        mutate(context, { issueId: 'B', pinned: true }),
-        (error) => error === failure
+        mutate(context, { issueId: "B", pinned: true }),
+        (error) => error === failure,
       );
-      assert.equal(await fs.readFile(file, 'utf8'), original);
+      assert.equal(await fs.readFile(file, "utf8"), original);
       // Failure must release the queue and keep the original state available.
-      await mutate(context, { issueId: 'B', pinned: true });
-      assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), {
-        pinnedByProject: { p: ['A', 'B'] },
-        linkedBySession: { s: 'ISSUE-A' },
+      await mutate(context, { issueId: "B", pinned: true });
+      assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), {
+        pinnedByProject: { p: ["A", "B"] },
+        linkedBySession: { s: "ISSUE-A" },
       });
     });
   }
-  for (const original of ['invalid JSON', '{"pinnedByProject":{"p":42},"linkedBySession":{}}']) {
+  for (const original of [
+    "invalid JSON",
+    '{"pinnedByProject":{"p":42},"linkedBySession":{}}',
+  ]) {
     await t.test(original, async (t) => {
       const { file, context } = await issueStateFixture(t);
       await fs.writeFile(file, original);
-      await assert.rejects(loadIssueMachine()(context, { issueId: 'B', pinned: true }));
-      assert.equal(await fs.readFile(file, 'utf8'), original);
+      await assert.rejects(
+        loadIssueMachine()(context, { issueId: "B", pinned: true }),
+      );
+      assert.equal(await fs.readFile(file, "utf8"), original);
     });
   }
 });
 
-test('issue plugin preserves committed data and remains usable after failed temporary writes or replacement', async (t) => {
-  for (const operation of ['writeFile', 'rename']) {
+test("issue plugin preserves committed data and remains usable after failed temporary writes or replacement", async (t) => {
+  for (const operation of ["writeFile", "rename"]) {
     await t.test(operation, async (t) => {
       const { dataDir, file, context } = await issueStateFixture(t);
       const original = JSON.stringify({
-        pinnedByProject: { p: ['A'] },
-        linkedBySession: { s: 'ISSUE-A' },
+        pinnedByProject: { p: ["A"] },
+        linkedBySession: { s: "ISSUE-A" },
       });
       await fs.writeFile(file, original);
-      const failure = Object.assign(new Error(`Injected ${operation} failure`), { code: 'EIO' });
+      const failure = Object.assign(
+        new Error(`Injected ${operation} failure`),
+        { code: "EIO" },
+      );
       let fail = true;
       const mutate = loadIssueMachine({
         ...fs,
         async [operation](...args) {
           if (fail) {
             fail = false;
-            if (operation === 'writeFile') await fs.writeFile(...args);
+            if (operation === "writeFile") await fs.writeFile(...args);
             throw failure;
           }
           return fs[operation](...args);
         },
       });
       await assert.rejects(
-        mutate(context, { issueId: 'B', pinned: true }),
-        (error) => error === failure
+        mutate(context, { issueId: "B", pinned: true }),
+        (error) => error === failure,
       );
-      assert.equal(await fs.readFile(file, 'utf8'), original);
+      assert.equal(await fs.readFile(file, "utf8"), original);
       assert.deepEqual(await fs.readdir(dataDir), [path.basename(file)]);
-      await mutate(context, { issueId: 'B', pinned: true });
-      assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), {
-        pinnedByProject: { p: ['A', 'B'] },
-        linkedBySession: { s: 'ISSUE-A' },
+      await mutate(context, { issueId: "B", pinned: true });
+      assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), {
+        pinnedByProject: { p: ["A", "B"] },
+        linkedBySession: { s: "ISSUE-A" },
       });
     });
   }
