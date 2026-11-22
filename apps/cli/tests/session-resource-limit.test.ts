@@ -21,11 +21,7 @@ import {
   type SessionSandbox,
 } from '../src/session/session-sandbox';
 import type { Logger } from '../src/utils/logger';
-import {
-  captureGitWorkingTreeDiffBaseline,
-  getCurrentCommitHash,
-  type GitRunner,
-} from '../src/lib/git/git-diff-stats';
+import { getCurrentCommitHash, type GitRunner } from '../src/lib/git/git-diff-stats';
 
 // Sessions borrow the same explicit application owner as production launchers.
 let shellOwner: ReturnType<typeof makeApplicationRuntime<LoginShellCache, never>>;
@@ -374,7 +370,7 @@ describe('Session command execution', () => {
     expect(onSessionError).not.toHaveBeenCalled();
   });
 
-  it('lets best-effort Git baselines fall back without a session error', async () => {
+  it('keeps best-effort Git observations from setting a session error', async () => {
     const spawnError = Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' });
     const sandbox = createSandbox([]);
     sandbox.spawn.mockRejectedValue(spawnError);
@@ -384,7 +380,6 @@ describe('Session command execution', () => {
     const runGit: GitRunner = (args) => session.exec('git', args, process.cwd(), false);
 
     await expect(getCurrentCommitHash(runGit)).resolves.toBeNull();
-    await expect(captureGitWorkingTreeDiffBaseline(runGit)).resolves.toBeNull();
     expect(onSessionError).not.toHaveBeenCalled();
   });
 

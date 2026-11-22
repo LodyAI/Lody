@@ -47,20 +47,6 @@ function makeSession(overrides: Partial<SessionMeta> & { id: string }): SessionM
   } as SessionMeta;
 }
 
-test('names a sidebar row by its group title, independent of the root tab title', () => {
-  const rows = buildSessionListRows(
-    [
-      makeSession({ id: 'named', title: 'Root tab', groupTitle: 'Group name' }),
-      makeSession({ id: 'legacy', title: 'Root tab only' }),
-    ],
-    { scope: 'team', currentUserId: 'user-1', defaultTitle: 'Untitled' }
-  );
-  expect(Object.fromEntries(rows.map((row) => [row.sessionId, row.title]))).toEqual({
-    named: 'Group name',
-    legacy: 'Root tab only',
-  });
-});
-
 describe('buildSessionListRows child-time aggregation', () => {
   test("parent task's latestMessageAt reflects the most recent child activity", () => {
     const parent = makeSession({ id: 'parent', lastMessageAt: 1_000, title: 'Parent' });
@@ -184,8 +170,60 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
       isWorking: false,
       isWaitingPermission: false,
       hasUnreadMessages: false,
+      hasFailedTurn: false,
       latestMessageAt: parent.lastMessageAt,
     });
+  });
+
+  test('shows a failed latest turn until a later turn finishes, rolling in child Tabs', () => {
+    const failed = makeSession({
+      id: 'failed',
+      title: 'Failed',
+      lastFailedUserMsgId: 'turn-2',
+      lastHandledUserMsgId: 'turn-2',
+    });
+    // A later turn that succeeded or was canceled moved the handled pointer past the failure.
+    const recovered = makeSession({
+      id: 'recovered',
+      title: 'Recovered',
+      lastFailedUserMsgId: 'turn-2',
+      lastHandledUserMsgId: 'turn-3',
+    });
+    const parent = makeSession({ id: 'parent', title: 'Parent', lastHandledUserMsgId: 'turn-1' });
+    const failedTab = makeSession({
+      id: 'failed-tab',
+      parentSessionId: parent.id,
+      lastFailedUserMsgId: 'tab-turn',
+      lastHandledUserMsgId: 'tab-turn',
+    });
+
+    const rows = buildSessionListRows(
+      [failed, recovered, parent],
+      { scope: 'my', currentUserId: 'user-1', defaultTitle: 'Untitled' },
+      [failed, recovered, parent, failedTab]
+    );
+
+    expect(
+      Object.fromEntries(rows.map((row) => [row.sessionId, Boolean(row.hasFailedTurn)]))
+    ).toEqual({ failed: true, recovered: false, parent: true });
+  });
+});
+
+test('marks only the row whose Auto delivery stopped', () => {
+  const at = { updatedAt: 1, prUrl: 'https://github.com/example/api/pull/7' };
+  const stalled = makeSession({
+    id: 'stalled',
+    autoDelivery: { ...at, state: 'stalled', reason: 'ci_limit' },
+  });
+  const waiting = makeSession({ id: 'waiting', autoDelivery: { ...at, state: 'ci' } });
+  const rows = buildSessionListRows([stalled, waiting], {
+    scope: 'my',
+    currentUserId: 'user-1',
+    defaultTitle: 'Untitled',
+  });
+  expect(Object.fromEntries(rows.map((row) => [row.sessionId, row.deliveryStalled]))).toEqual({
+    stalled: true,
+    waiting: false,
   });
 });
 
@@ -296,3 +334,19 @@ describe.each([getEffectiveSessionActivitySummary, getTaskActivitySummary])(
     });
   }
 );
+
+test('My rows exclude other members even on my machines', () => {
+  const rows = buildSessionListRows(
+    [
+      makeSession({ id: 'assigned', userId: 'me', machineId: 'other' as MachineId }),
+      makeSession({ id: 'transferred', userId: 'colleague' }),
+      makeSession({ id: 'unrelated', userId: 'colleague', machineId: 'other' as MachineId }),
+    ],
+    {
+      scope: 'my',
+      currentUserId: 'me',
+      defaultTitle: 'Chat',
+    }
+  );
+  expect(rows.map((row) => row.sessionId)).toEqual(['assigned']);
+});

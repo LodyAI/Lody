@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, useState } from 'react';
 import { Provider, createStore } from 'jotai';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
@@ -71,6 +69,40 @@ describe('AttachmentAddMenu', () => {
 
     await act(async () => items[0]!.click());
     expect(onAddAttachment).toHaveBeenCalledOnce();
+  });
+
+  // iOS dismisses the file picker the moment focus returns to the prompt (the
+  // keyboard comes back instead), so choosing the picker must not refocus it.
+  it('leaves composer focus alone when the file picker is opened', async () => {
+    const onAddAttachment = vi.fn();
+    await act(async () => {
+      root.render(
+        <>
+          <textarea data-keyboard-nav="composer" aria-label="Prompt" />
+          <AttachmentAddMenu isMobile onAddAttachment={onAddAttachment} />
+        </>
+      );
+    });
+    const composer = container.querySelector('textarea')!;
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Add attachment"]'
+    )!;
+    await act(async () => {
+      trigger.dispatchEvent(
+        new TestPointerEvent('mousedown', { bubbles: true, button: 0, pointerType: 'touch' })
+      );
+      await vi.advanceTimersByTimeAsync(40);
+    });
+    const item = document.body.querySelector<HTMLElement>('[role="menuitem"]')!;
+    await act(async () => {
+      item.focus();
+      item.click();
+      await vi.advanceTimersByTimeAsync(400);
+    });
+
+    expect(onAddAttachment).toHaveBeenCalledOnce();
+    expect(document.body.querySelector('[role="menuitem"]')).toBeNull();
+    expect(document.activeElement).not.toBe(composer);
   });
   it.each([false, true])(
     'permits encrypted attachments and schedule send (mobile %s)',

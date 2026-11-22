@@ -1,6 +1,20 @@
+import {
+  commands,
+  getCommandKeybindings,
+  registerBuiltInCommands,
+  unregisterBuiltInCommands,
+} from '@/lib/commands';
+import { __resetPlatformCacheForTests } from '@/lib/commands/platform';
 import type { Meta, StoryObj } from '@storybook/react';
+import { TodayColumnSash, TodayPinnedCard } from '@/components/today/today-pinned-column';
+import { TodayToolbar } from '@/components/today/today-view';
+import todayDayStreamMeta, { TodayWithEarlierDay } from './TodayDayStream.stories';
+
+const TodayDayStreamDemo = todayDayStreamMeta.component!;
+import { E2eeOfflineSummaryText } from '@/components/e2ee-offline-window';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { FolderPlus } from 'lucide-react';
+import { useAtom } from 'jotai';
+import { CalendarDays, FolderPlus, MoreHorizontal, PinOff } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import type {
@@ -11,6 +25,8 @@ import type {
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import { WorkspaceCard } from '@/components/workspace-frame';
+import { sidebarLastWidthAtom } from '@/atoms/sidebar-state';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import { buildSidebarOpenerRowResolver } from '@/components/sessions/session-list-rows';
@@ -283,10 +299,12 @@ type Story = StoryObj<typeof meta>;
 
 type StoryLayoutProps = Parameters<typeof LoroSidebar>[0] & {
   storyContent?: ReactNode;
+  /** Between the sidebar and the page card, as the shell places pinned Today. */
+  besideSidebar?: ReactNode;
   fullApp?: boolean;
 };
 
-function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProps) {
+function StoryLayout({ storyContent, besideSidebar, fullApp = false, ...args }: StoryLayoutProps) {
   const [activeNav, setActiveNav] = useState<LoroSidebarNavKey>(args.activeNav ?? 'home');
   const [workspaceId, setWorkspaceId] = useState(args.currentWorkspaceId);
   const baseSessionListProps = args.sessionListProps ?? demoTaskListProps;
@@ -461,6 +479,7 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-sidebar text-foreground">
       {sidebar}
+      {besideSidebar}
       <WorkspaceCard>
         {fullApp ? <main className="min-w-0 flex-1 overflow-hidden">{content}</main> : content}
       </WorkspaceCard>
@@ -580,6 +599,113 @@ export const Default: Story = {
   },
 };
 
+/** The current workspace is end-to-end encrypted: a lock beside its name, explained on hover. */
+export const EncryptedWorkspace: Story = {
+  ...Default,
+  args: {
+    ...Default.args,
+    workspaceName: 'Cipher Lab',
+    workspaces: [
+      { id: 'ws-e2ee', name: 'Cipher Lab', memberCount: 3, encrypted: true },
+      { id: 'ws-1', name: 'Loro', planTier: 'plus' },
+      { id: 'ws-2', name: 'Lody' },
+    ],
+    currentWorkspaceId: 'ws-e2ee',
+  },
+};
+
+/** The encrypted workspace cannot reach the server: hover "离线" for how long, and how
+ * long this machine can keep working from its outage window. */
+export const EncryptedWorkspaceOffline: Story = {
+  ...EncryptedWorkspace,
+  args: {
+    ...EncryptedWorkspace.args,
+    connectionUiState: 'offline',
+    offlineDetail: (
+      <E2eeOfflineSummaryText
+        window={{ executionUntilMs: 3 * 3_600_000 + 12 * 60_000, offlineSinceMs: -48 * 60_000 }}
+        now={0}
+      />
+    ),
+  },
+};
+
+function NarrowThreeColumnLayout(args: Parameters<typeof LoroSidebar>[0]) {
+  const [width, setWidth] = useAtom(sidebarLastWidthAtom);
+  return (
+    <div className="max-w-[867px]">
+      <WorkspaceSidebarHarness
+        {...args}
+        fullApp
+        defaultWidth={width || undefined}
+        onWidthChange={setWidth}
+        storyContent={
+          <DesktopSessionDetailLayout
+            defaultSizes={{ main: 50, sidebar: 50 }}
+            topBar={null}
+            chatSurfaces={
+              <section aria-label="Conversation" className="h-full p-4">
+                Conversation
+              </section>
+            }
+            secondaryPanel={
+              <section aria-label="iOS Simulator" className="h-full p-4">
+                iOS Simulator
+              </section>
+            }
+            terminalDock={null}
+            sidebarOpen
+            onSidebarCollapse={() => {}}
+            deleteConfirmDialog={null}
+          />
+        }
+      />
+    </div>
+  );
+}
+
+export const NarrowThreeColumn: Story = {
+  render: (args) => <NarrowThreeColumnLayout {...args} />,
+  args: Default.args,
+};
+
+/**
+ * Today pinned beside the sidebar: its own page card, set into the window
+ * ground like the main card, with 4px of ground between the two.
+ */
+export const PinnedToday: Story = {
+  render: (args) => (
+    <StoryLayout
+      {...args}
+      besideSidebar={
+        <TodayPinnedCard
+          width={360}
+          anchored
+          label="Today"
+          sash={<TodayColumnSash width={360} onWidthChange={() => {}} label="Resize Today" />}
+        >
+          <TodayToolbar pinned title={null}>
+            <Button variant="ghost" size="small" icon aria-label="Pick a date">
+              <CalendarDays size={16} strokeWidth={1.5} />
+            </Button>
+            <Button variant="ghost" size="small" icon aria-label="Unpin Today">
+              <PinOff size={16} strokeWidth={1.5} />
+            </Button>
+            <Button variant="ghost" size="small" icon aria-label="More">
+              <MoreHorizontal size={16} strokeWidth={1.5} />
+            </Button>
+          </TodayToolbar>
+          <TodayDayStreamDemo dates={TodayWithEarlierDay.args!.dates!} />
+        </TodayPinnedCard>
+      }
+    />
+  ),
+  args: {
+    ...Default.args!,
+    onTodayClicked: () => {},
+  },
+};
+
 export const WorkspaceSyncing: Story = {
   render: (args) => <StoryLayout {...args} />,
   args: {
@@ -636,6 +762,55 @@ export const ElectronMacOSCollapseToggle: Story = {
     // Pins the collapse toggle to the macOS traffic-light centerline (y=23,
     // see `trafficLightPosition` in apps/electron/src/main/window.ts).
     isElectronMacOS: true,
+  },
+};
+
+/**
+ * Desktop macOS with the registry's built-in commands, so navigation rows have
+ * live bindings: hover New chat, Today or Search to see the shortcut pill.
+ */
+function WithDesktopCommands(props: { children: ReactNode }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const host = window as {
+      __LODY_ELECTRON__?: boolean;
+      __LODY_PLATFORM__?: { os?: string };
+    };
+    const previous = { electron: host.__LODY_ELECTRON__, platform: host.__LODY_PLATFORM__ };
+    host.__LODY_ELECTRON__ = true;
+    host.__LODY_PLATFORM__ = { os: 'darwin' };
+    __resetPlatformCacheForTests();
+    registerBuiltInCommands();
+    // As TodayCommandPlaceholder does with the experiment on.
+    const releaseToday = commands.register({
+      id: 'today.open',
+      title: 'Open Today',
+      category: 'Navigation',
+      keybindings: getCommandKeybindings('today.open'),
+      when: () => false,
+      run: () => {},
+    });
+    setReady(true);
+    return () => {
+      releaseToday();
+      unregisterBuiltInCommands();
+      host.__LODY_ELECTRON__ = previous.electron;
+      host.__LODY_PLATFORM__ = previous.platform;
+      __resetPlatformCacheForTests();
+    };
+  }, []);
+  return ready ? props.children : null;
+}
+
+export const NavigationShortcuts: Story = {
+  render: (args) => (
+    <WithDesktopCommands>
+      <WithProjectsLayout {...args} />
+    </WithDesktopCommands>
+  ),
+  args: {
+    ...Default.args!,
+    onTodayClicked: () => {},
   },
 };
 
@@ -849,6 +1024,19 @@ export const UpdatedMode: Story = {
     organizeMode: 'updated',
     chatScope: 'my',
     sessionListProps: demoUpdatedTaskListProps,
+  },
+};
+
+/**
+ * The "Status" organize mode: the Updated rows split into Needs you, Just
+ * finished, Open pull requests, Running and Idle, as on mobile Home. Empty
+ * groups are skipped; only Idle folds behind "Show all".
+ */
+export const StatusMode: Story = {
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...UpdatedMode.args!,
+    organizeMode: 'status',
   },
 };
 
@@ -1189,7 +1377,6 @@ function ProductionLikeTopContent({
               <SidebarSectionHeader
                 label={group.label}
                 collapsed={groupCollapsed}
-                count={group.projects.length}
                 isMobile={isMobile}
                 toggleLabel="Toggle"
                 onToggleCollapsed={() =>
@@ -1276,7 +1463,6 @@ function ProductionLikeTopContent({
         <SidebarSectionHeader
           label="GitHub Worktrees"
           collapsed={githubCollapsed}
-          count={githubWorktreeCount}
           isMobile={isMobile}
           toggleLabel="Toggle"
           onToggleCollapsed={() => setGithubCollapsed((v) => !v)}

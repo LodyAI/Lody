@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2316](https://github.com/LodyAI/Lody/pull/2316)
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756), [#2765](https://github.com/LodyAI/Lody/pull/2765), [#2891](https://github.com/LodyAI/Lody/pull/2891)
 
 [中文](2026-10-31-remote-diff-transport.zh.md)
 
@@ -48,6 +48,37 @@ this also conservatively bounds the encrypted feature result, whose codec enforc
 its own complete-result and sealed-frame limits.
 
 ### Sources and authority
+
+Current Git comparisons distinguish content identity from file-change identity.
+Binary/oversize placeholders do not establish equal contents, and equal text does
+not exclude an executable-mode change. Before current readers report equal text
+or legacy binary pairs as `not_changed`, they check Git file state in the resolved
+repository against the same pinned base, with literal path matching and external
+diff/text conversion disabled. Reusing blob keys remains valid for equal text;
+it must not hide the changed file. This stays private to the daemon and adds no
+wire fields. A failed check returns legacy `deferred` (single-file `transient_io`)
+or a manifest per-file `unavailable`, allowing later reads to recover. It never
+becomes `not_changed`. Historical turn comparisons use retained evidence only.
+
+Historical reads retain that scope on Web, Electron, and native iOS/Android, even
+when the requested evidence is unavailable. Native runtimes preserve the returned
+reason/message for their existing notice UI. Automatically requesting the current
+workspace diff was rejected because its readable contents can include later edits
+and do not reconstruct the requested turn. Explicit current/All Changes reads
+remain independent. This establishes failure behavior, not the cause of missing
+historical evidence or a new capture/retention policy.
+
+New per-turn file cards and their before/after contents share the same retained
+ACP editing evidence. Turn finalization does not synthesize `history.fileDiff`
+from Git statistics when evidence is absent or fails to save. The removed Git
+summary fallback could create clickable cards without stored contents, and its
+workspace comparisons cannot prove that every change belongs to this Agent turn.
+Without editing evidence, terminal-only changes therefore have no new turn card;
+current All Changes still reads them from Git. Existing metadata-only history is
+not backfilled or deleted, and unavailable historical reads retain the notice above.
+Git dirty/unpushed observations, PR discovery, evidence retries, finalization
+budgets and release ownership remain independent. No new capture or storage
+format is introduced; the existing Promise evidence/history boundary is retained.
 
 A handle is issued only by an authorized manifest and keyed by requested session
 and content key, with resolved owner, workspace and source. Every page reauthorizes
@@ -120,7 +151,9 @@ correctness without retransmitting unchanged bodies.
 
 The provider owns the live Branch list and its listeners for that provider's
 lifetime. Successful complete comparisons notify the summary hook; a request-start
-sequence rejects older completions, and cancellation/cache disposal prevents late
+sequence prevents older completions from replacing an accepted complete list;
+the first complete comparison can replace the bounded index while a newer read is pending.
+Cancellation/cache disposal prevents late
 publication. The list is local presentation metadata, never a renderer write to the
 shared index. Provider replacement returns to the new index until its next live
 comparison completes. Live Changes remains available without the optional history
@@ -149,7 +182,9 @@ memory caches; an epoch prevents a late read from repopulating a cleared cache. 
 corrupt cached bytes are discarded and reread. Partial or unverified blobs are never
 cached. The parsed viewer key includes both content keys and the path.
 
-Above 256 KiB combined raw size, remote manifests carry a unified patch with three
+Whole-list manifests carry descriptors and statistics without patches. Large-file
+opens revalidate a single-file manifest to obtain its bounded patch on demand.
+Above 256 KiB combined raw size, remote single-file manifests carry a unified patch with three
 context lines and at most 256 KiB. Patch work is also bounded at 600 line edits;
 a larger rewrite falls back to verified full blobs, as does an encoded patch that
 exceeds its page budget. Only the raw content cap makes text unavailable. Local
@@ -224,11 +259,19 @@ owners. A read-worker shutdown error is reported after the writer, tunnels and d
 
 Behavioral evidence lives in:
 
+- `apps/cli/tests/session-execution-service.test.ts`: turns without edit evidence
+  do not acquire Git-only file cards, captured content settles before successor
+  edits, and cancelled or older Git observations cannot overwrite newer flags.
+- `apps/mobile/ios/apps/ios/tests/native/files-rpc.test.mjs` and
+  `apps/mobile/android/runtime/test/contract-bridge.test.mjs`: unavailable turns
+  remain unavailable while current workspace contents are readable; retained turn
+  bodies and explicit current reads preserve their distinct comparison scopes.
 - `apps/cli/src/lib/code-collab/code-collab-v2-service.test.ts`: real SHA-1/SHA-256
   Git and disk bytes, BOM/CRLF/Unicode, session binding, path escape, expiry, page
   clamping, moved-base cursors, historical/non-Git worker reads, local/remote hunk
   policy and unchanged-stats invalidation, deleted files, capture-time edits and
-  hunk-budget fallback.
+  hunk-budget fallback, binary replacements and mode-only changes across both
+  scopes and Project Members, and per-file Git comparison failure/recovery.
 - `packages/turn-diff-store/tests/sqlite-store.test.ts`: read-only descriptor/byte
   selection, owner separation, retention, full reconstruction and worker messages. A separate smoke of the emitted CLI `turn-diff-store-worker.js` opens an existing database read-only and verifies descriptor-addressed BOM/CRLF/Unicode bytes.
   The earlier unchanged-store probe restored 400,020 UTF-8 bytes across four chunks

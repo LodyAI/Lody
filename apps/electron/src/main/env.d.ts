@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_PUBLIC_POSTHOG_HOST?: string
   readonly VITE_LODY_ENV?: string
   readonly VITE_LODY_PLATFORM?: string
+  readonly VITE_IROH_RELAYS?: string
+  readonly VITE_IROH_RELAY_TOKEN?: string
 }
 
 interface ImportMeta {

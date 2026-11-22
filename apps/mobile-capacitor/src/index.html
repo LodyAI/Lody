@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlaps-content"
+    />
+    <title>Lody</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+        margin: 0;
+      }
+
+      #root {
+        height: 100%;
+        overflow: hidden;
+      }
+    </style>
+    <script>
+      /*
+       * Boot guard — runs before the app bundle evaluates.
+       *
+       * The React error boundary (and any module-level error handler) can only
+       * catch failures that happen *after* the bundle has evaluated. The white
+       * screens we actually see on mobile (cold start, first login, resume from
+       * background) frequently come from the bundle failing to evaluate at all —
+       * a failed dynamic import or WASM/top-level-await init — which leaves the
+       * page blank with nothing running to report it. This inline guard installs
+       * global error listeners + a watchdog + a last-resort error UI so those
+       * cases show diagnostics instead of a white screen.
+       *
+       * main.tsx upgrades `render` to the styled fallback and calls markBooted()
+       * once React has committed; on a synchronous boot throw it calls fail().
+       */
+      (function () {
+        // Capacitor injects native plugins before page scripts. Keep this here,
+        // not in main.tsx: imports/WASM may fail before that module executes.
+        var capacitor = window.Capacitor;
+        var resetPlugin = capacitor && capacitor.Plugins && capacitor.Plugins.LodyNativeReset;
+        if (capacitor && capacitor.isNativePlatform() && resetPlugin) {
+          window.__LODY_NATIVE_RESET__ = {
+            version: 1,
+            resetAllData: function () {
+              var installId = window.__LODY_APP_INFO__ && window.__LODY_APP_INFO__.install_id;
+              try {
+                installId = installId || window.localStorage.getItem('lody_install_id');
+              } catch (e) {
+                /* WebKit storage may be inaccessible — native reset must still work. */
+              }
+              return resetPlugin.resetAllData({ installId: installId || undefined });
+            },
+          };
+        }
+
+        function appendResetButton(parent, styled) {
+          if (!parent || !window.__LODY_NATIVE_RESET__) return;
+          var reset = document.createElement('button');
+          reset.type = 'button';
+          reset.textContent = 'Reset app data';
+          reset.style.cssText =
+            'cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#0f172a;font-size:14px;' +
+            'font-weight:600;padding:10px 16px;border-radius:10px;';
+          if (styled) {
+            reset.style.cssText = '';
+            reset.className = 'bf-button bf-secondary';
+          }
+          reset.addEventListener('click', function () {
+            if (
+              !window.confirm('Clear all local app data and sign out? Unsynced data will be lost.')
+            ) {
+              return;
+            }
+            reset.disabled = true;
+            reset.textContent = 'Resetting…';
+            // No auth bundle is available on this path. Native credentials are
+            // removed locally; normal React recovery also revokes the session.
+            return Promise.resolve()
+              .then(function () {
+                return window.__LODY_NATIVE_RESET__.resetAllData();
+              })
+              .catch(function () {
+                reset.disabled = false;
+                reset.textContent = 'Reset failed — try again';
+              });
+          });
+          parent.appendChild(reset);
+        }
+
+        var HARD_TIMEOUT_MS = 12000;
+        var ERROR_GRACE_MS = 1500;
+        var handled = false;
+        var firstError = null;
+        var hardTimer = null;
+        var errorTimer = null;
+
+        function booted() {
+          return !!(window.__LODY_BOOT__ && window.__LODY_BOOT__.booted);
+        }
+
+        function resolveRoot() {
+          var el = document.getElementById('root');
+          if (!el && document.body) {
+            el = document.createElement('div');
+            el.id = 'root';
+            document.body.appendChild(el);
+          }
+          return el;
+        }
+
+        function describe(error) {
+          if (!error) return 'Lody failed to start.';
+          if (error.stack) return String(error.stack);
+          if (error.message) {
+            return error.name ? error.name + ': ' + error.message : error.message;
+          }
+          return String(error);
+        }
+
+        function minimalFallback(error) {
+          var root = resolveRoot();
+          if (!root) return;
+          var text = describe(error);
+          root.innerHTML = '';
+          var wrap = document.createElement('div');
+          wrap.setAttribute('role', 'alert');
+          wrap.style.cssText =
+            'min-height:100vh;box-sizing:border-box;display:flex;flex-direction:column;' +
+            'justify-content:center;gap:14px;padding:24px;background:#f8fafc;color:#0f172a;' +
+            "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;";
+          var title = document.createElement('div');
+          title.textContent = 'Lody could not start';
+          title.style.cssText = 'font-size:18px;font-weight:700;';
+          var hint = document.createElement('div');
+          hint.textContent = 'Copy the error and send it to us, then reload.';
+          hint.style.cssText = 'font-size:13px;color:#475569;';
+          var pre = document.createElement('pre');
+          pre.textContent = text;
+          pre.style.cssText =
+            'margin:0;white-space:pre-wrap;word-break:break-word;max-height:40vh;overflow:auto;' +
+            'background:#fff1f2;color:#7f1d1d;border-radius:12px;padding:12px;font-size:12px;line-height:1.5;';
+          var row = document.createElement('div');
+          row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+          var reload = document.createElement('button');
+          reload.type = 'button';
+          reload.textContent = 'Reload app';
+          reload.style.cssText =
+            'cursor:pointer;border:none;background:#0f172a;color:#f8fafc;font-size:14px;' +
+            'font-weight:600;padding:10px 16px;border-radius:10px;';
+          reload.addEventListener('click', function () {
+            window.location.reload();
+          });
+          var copy = document.createElement('button');
+          copy.type = 'button';
+          copy.textContent = 'Copy error';
+          copy.style.cssText =
+            'cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#0f172a;font-size:14px;' +
+            'font-weight:600;padding:10px 16px;border-radius:10px;';
+          copy.addEventListener('click', function () {
+            try {
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text);
+              }
+            } catch (e) {
+              /* clipboard unavailable */
+            }
+            copy.textContent = 'Copied';
+          });
+          row.appendChild(reload);
+          row.appendChild(copy);
+          appendResetButton(row);
+          wrap.appendChild(title);
+          wrap.appendChild(hint);
+          wrap.appendChild(pre);
+          wrap.appendChild(row);
+          root.appendChild(wrap);
+        }
+
+        function clearTimers() {
+          if (hardTimer) {
+            clearTimeout(hardTimer);
+            hardTimer = null;
+          }
+          if (errorTimer) {
+            clearTimeout(errorTimer);
+            errorTimer = null;
+          }
+        }
+
+        function hideNativeSplash() {
+          // The native splash stays up until the app bundle reports its theme
+          // (src/startup-theme.ts). If the bundle never evaluates, this guard is
+          // the only code that can take it down so the fallback below is seen.
+          // Capacitor injects its bridge before any page script runs.
+          try {
+            var plugins = window.Capacitor && window.Capacitor.Plugins;
+            if (plugins && plugins.SplashScreen) plugins.SplashScreen.hide();
+          } catch (e) {
+            /* no native bridge (browser preview) */
+          }
+        }
+
+        function fail(error) {
+          if (handled) return;
+          handled = true;
+          clearTimers();
+          hideNativeSplash();
+          var err = error || firstError;
+          var controller = window.__LODY_BOOT__;
+          // Prefer the styled renderer registered by main.tsx; fall back to the
+          // self-contained UI when the bundle never loaded (the case the guard
+          // exists for) or the renderer itself throws.
+          if (controller && typeof controller.render === 'function') {
+            try {
+              controller.render(resolveRoot(), err);
+              if (window.__LODY_NATIVE_RESET__) {
+                var actions = resolveRoot().querySelector('.bf-actions');
+                if (!actions) throw new Error('Boot recovery actions unavailable');
+                appendResetButton(actions, true);
+              }
+              return;
+            } catch (e) {
+              /* fall through to minimal fallback */
+            }
+          }
+          minimalFallback(err);
+        }
+
+        function isResourceError(event) {
+          // Resource load errors (img/script/link) target the element, not window;
+          // they should not trigger the boot fallback.
+          return !!(event && event.target && event.target !== window);
+        }
+
+        function record(error) {
+          if (!firstError) firstError = error;
+        }
+
+        window.addEventListener(
+          'error',
+          function (event) {
+            if (handled || isResourceError(event)) return;
+            var error =
+              event && event.error
+                ? event.error
+                : new Error((event && event.message) || 'Script error during boot.');
+            record(error);
+            // Uncaught script/module-eval errors during boot are almost always
+            // fatal; show the fallback soon, but leave a short grace window so a
+            // late markBooted() can cancel it.
+            if (!booted() && !errorTimer) {
+              errorTimer = setTimeout(function () {
+                if (!booted()) fail(firstError);
+              }, ERROR_GRACE_MS);
+            }
+          },
+          true
+        );
+
+        window.addEventListener('unhandledrejection', function (event) {
+          if (handled) return;
+          var reason = event ? event.reason : null;
+          record(
+            reason instanceof Error
+              ? reason
+              : new Error('Unhandled promise rejection during boot: ' + String(reason))
+          );
+        });
+
+        hardTimer = setTimeout(function () {
+          if (!booted()) {
+            fail(firstError || new Error('Lody did not finish loading in time. Please reload.'));
+          }
+        }, HARD_TIMEOUT_MS);
+
+        window.__LODY_BOOT__ = {
+          booted: false,
+          render: null,
+          getFirstError: function () {
+            return firstError;
+          },
+          markBooted: function () {
+            this.booted = true;
+            handled = true;
+            clearTimers();
+          },
+          fail: fail,
+        };
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/bootstrap.ts"></script>
+  </body>
+</html>

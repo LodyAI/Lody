@@ -19,7 +19,13 @@ export const AndroidEmulatorCommandSchema = z.discriminatedUnion('action', [
     })
     .strict(),
   z.object({ action: z.literal('status'), operationId: id.optional() }).strict(),
-  z.object({ action: z.literal('stop'), operationId: id }).strict(),
+  z
+    .object({
+      action: z.literal('stop'),
+      operationId: id,
+      shutdownDevice: z.boolean().optional(),
+    })
+    .strict(),
 ]);
 export const AndroidEmulatorRequestSchema = z
   .object({ sessionId: id, requestedByUserId: id, command: AndroidEmulatorCommandSchema })

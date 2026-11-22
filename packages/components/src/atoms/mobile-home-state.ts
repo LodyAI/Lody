@@ -23,14 +23,15 @@ import { atomWithStorage } from 'jotai/utils';
    (rather than imported) so this atoms file stays free of React-only
    imports — keeping atoms framework-agnostic makes them cheaper to
    test and avoids a circular-import risk between atoms ↔ components. */
-/* Home Chat Group pill: Project or Date only (No Group removed).
-   `'none'` is not a valid stored value; older localStorage entries
-   are coerced to `'project'` at the read site. */
-export type MobileChatViewModeValue = 'project' | 'date';
+/**
+ * Home Chat Group pill. Status is the default for an install with no stored
+ * choice; a stored Project or Date is kept, and retired values read as Project.
+ */
+export type MobileChatViewModeValue = 'status' | 'project' | 'date';
 
 export const mobileHomeChatViewModeAtom = atomWithStorage<MobileChatViewModeValue>(
   'lody-mobile-home-chat-view-mode',
-  'project'
+  'status'
 );
 
 /* Each "excluded set" atom holds the option ids the user has explicitly

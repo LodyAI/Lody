@@ -2,7 +2,11 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { coverageMatchesRegistry, loadJourneyRegistry } from './journey-registry.mjs';
+import {
+  coverageMatchesRegistry,
+  journeyTargets,
+  loadJourneyRegistry,
+} from './journey-registry.mjs';
 
 const e2eRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const featureDir = join(e2eRoot, 'src', 'features');
@@ -99,6 +103,10 @@ for (const pickle of pickles) {
   if (previous) fail(`${location} duplicates ${id} already used by ${previous}`);
   stableIds.set(id, `${location} ${pickle.name}`);
   scenarioContracts.set(id.slice(1), {
+    targets: tags
+      .filter((tag) => tag.startsWith('@target-'))
+      .map((tag) => tag.slice('@target-'.length))
+      .sort(),
     feature: pickle.uri,
     priority: priorities[0]?.slice(1),
     runtime: runtimes[0]?.replace('@runtime-', ''),
@@ -146,6 +154,13 @@ for (const journey of activeJourneys) {
   if (contract.runtime !== journey.runtime) {
     fail(
       `${journey.id} uses @runtime-${contract.runtime} but registry runtime is ${journey.runtime}`
+    );
+  }
+  const registryTargets = [...journeyTargets(journey)].sort();
+  const scenarioTargets = contract.targets.length > 0 ? contract.targets : ['oss-local'];
+  if (scenarioTargets.join(',') !== registryTargets.join(',')) {
+    fail(
+      `${journey.id} uses targets ${scenarioTargets.join(', ')} but registry targets are ${registryTargets.join(', ')}`
     );
   }
   if (contract.feature !== journey.feature) {

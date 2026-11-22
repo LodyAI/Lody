@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-
 /**
  * The composer's selector options are built FROM the selection (the
  * `useSessionAcpSelectorContext` cycle), and the regression these tests pin
@@ -19,7 +18,6 @@
  * and resolves the runtime-omitted key once, so this must mount and settle.
  */
 
-// @vitest-environment jsdom
 /**
  * The composer's selector options are built FROM the selection (the
  * `useSessionAcpSelectorContext` cycle), and the regression these tests pin

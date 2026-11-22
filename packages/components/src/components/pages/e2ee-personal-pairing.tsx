@@ -10,13 +10,15 @@ import { Card } from '@lody/ui/card';
 import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
-import { LedgerQrCode } from './e2ee-ledger-verification';
+import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
+import { ScanLine } from 'lucide-react';
 
 const styles = stylex.create({
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
   code: { overflowWrap: 'anywhere', userSelect: 'all', fontFamily: 'monospace', margin: 0 },
   qr: { backgroundColor: '#ffffff', padding: space[2], alignSelf: 'flex-start' },
   error: { color: colors.secondaryLabel },
+  video: { width: '100%', maxWidth: 320 },
 });
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
@@ -100,6 +102,26 @@ function PersonalPairingSession({
   const [custodyMessage, setCustodyMessage] = useState<string>();
   const [offer, setOffer] = useState<E2eePersonalPairingOffer | null>(null);
   const [input, setInput] = useState('');
+  const [camera, setCamera] = useState(false);
+  const [inputError, setInputError] = useState<string>();
+  const cameraSupported =
+    typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
+  const { video, state: cameraState } = useQrCamera(camera, (scanned) => {
+    setCamera(false);
+    setInput(scanned);
+    try {
+      const value = JSON.parse(scanned);
+      setInputError(
+        value?.version !== 1 || typeof value?.workspaceId !== 'string'
+          ? 'e2ee.pair.invalidOffer'
+          : value.workspaceId !== workspaceId
+            ? 'e2ee.pair.wrongWorkspace'
+            : undefined
+      );
+    } catch {
+      setInputError('e2ee.pair.invalidOffer');
+    }
+  });
   const [joining, setJoining] = useState<{
     pairingSessionId: string;
     signingPublicKey?: string;
@@ -225,8 +247,26 @@ function PersonalPairingSession({
     });
   const prepare = (retainedOffer?: E2eePersonalPairingOffer) =>
     work(async () => {
-      const value: E2eePersonalPairingOffer = retainedOffer ?? JSON.parse(input);
-      if (value.workspaceId !== workspaceId) throw new Error('wrong_workspace');
+      setCamera(false);
+      let value: E2eePersonalPairingOffer;
+      try {
+        value = retainedOffer ?? JSON.parse(input);
+      } catch {
+        setInputError('e2ee.pair.invalidOffer');
+        setPhase('idle');
+        return;
+      }
+      if (value?.version !== 1 || typeof value?.workspaceId !== 'string') {
+        setInputError('e2ee.pair.invalidOffer');
+        setPhase('idle');
+        return;
+      }
+      if (value.workspaceId !== workspaceId) {
+        setInputError('e2ee.pair.wrongWorkspace');
+        setPhase('idle');
+        return;
+      }
+      setInputError(undefined);
       let result;
       try {
         result = await submit(runtime, accountId, value).result;
@@ -327,7 +367,9 @@ function PersonalPairingSession({
         <Card.Title>
           {t(canEndorse ? 'e2ee.pair.title' : 'e2ee.pair.desktopApprovalRequired')}
         </Card.Title>
-        <Card.Description>{t('e2ee.pair.help')}</Card.Description>
+        <Card.Description>
+          {t(canEndorse ? 'e2ee.pair.help' : 'e2ee.pair.joinHelp')}
+        </Card.Description>
       </Card.Header>
       <div {...stylex.props(styles.actions)}>
         {canEndorse && !offer && (
@@ -365,12 +407,38 @@ function PersonalPairingSession({
       )}
       {canRequest && !canEndorse && !joining && (
         <>
+          {cameraSupported &&
+            (camera ? (
+              <>
+                <video ref={video} muted playsInline {...stylex.props(styles.video)} />
+                <Button variant="ghost" onClick={() => setCamera(false)}>
+                  {t('common.cancel')}
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="secondary"
+                disabled={phase === 'busy' || recovering}
+                onClick={() => setCamera(true)}
+              >
+                <ScanLine size={16} aria-hidden="true" />
+                {t('e2ee.pair.scan')}
+              </Button>
+            ))}
+          {cameraState === 'unavailable' && (
+            <p role="status">{t('e2ee.verify.cameraUnavailable')}</p>
+          )}
           <Textarea
             aria-label={t('e2ee.pair.code')}
+            placeholder={t('e2ee.pair.pasteOffer')}
             value={input}
             maxLength={20000}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={(event) => {
+              setInput(event.target.value);
+              setInputError(undefined);
+            }}
           />
+          {inputError && <p role="alert">{t(inputError)}</p>}
           <Button
             variant="secondary"
             disabled={!input || phase === 'busy' || recovering}

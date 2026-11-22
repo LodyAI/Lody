@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import type { MessageQueueItem, SessionId, WorkspaceId } from '@lody/shared';
 
+import { queueTask } from '../src/components/sessions/message-queue/queue-task';
 import { MessageQueueDisplay } from '../src/components/sessions/message-queue';
 import { currentWorkspaceIdAtom } from '../src/atoms';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
@@ -74,6 +73,43 @@ describe('queued message editing commits', () => {
     }
     container?.remove();
     container = undefined;
+  });
+
+  it('offers Send for each retained row while idle and sends only the selected row', async () => {
+    const sent: string[] = [];
+    const items = ['B', 'C', 'D', 'E', 'F'].map((name) => ({
+      ...makeItem(),
+      $cid: `cid-${name}`,
+      task: name,
+      userTurnId: name,
+      paused: true,
+    }));
+    function StoppedQueue() {
+      const [queued, setQueued] = useState(items);
+      return createElement(MessageQueueDisplay, {
+        sessionId: 'session-test' as SessionId,
+        items: queued,
+        showSteerAction: true,
+        sendWhileIdle: true,
+        onRemove: () => {},
+        onReorder: () => {},
+        onEditStart: () => {},
+        onEditCancel: () => {},
+        onEditSave: () => {},
+        onSteer: (item) => {
+          sent.push(item.task);
+          setQueued((rows) => rows.filter((row) => row.$cid !== item.$cid));
+        },
+      });
+    }
+    await act(async () => root?.render(createElement(StoppedQueue)));
+    const sends = container!.querySelectorAll<HTMLButtonElement>('[aria-label="Send"]');
+    expect(sends).toHaveLength(5);
+    expect(sent).toEqual([]);
+    await act(async () => sends[1]!.click());
+    expect(sent).toEqual(['C']);
+    expect(container!.querySelectorAll('[aria-label="Send"]')).toHaveLength(4);
+    for (const name of ['B', 'D', 'E', 'F']) expect(container!.textContent).toContain(name);
   });
 
   it('renders dedicated scheduled rows in a final section without queue affordances', async () => {
@@ -180,8 +216,12 @@ describe('queued message editing commits', () => {
 
   // The save promise stays pending until the test releases it, so the row is
   // observable in its mid-write state instead of racing a microtask.
-  const renderQueue = async (options?: { holdSave?: boolean; failSaveOnce?: boolean }) => {
-    const items = [makeItem()];
+  const renderQueue = async (options?: {
+    holdSave?: boolean;
+    failSaveOnce?: boolean;
+    item?: MessageQueueItem;
+  }) => {
+    const items = [options?.item ?? makeItem()];
     await act(async () => {
       root?.render(
         createElement(MessageQueueDisplay, {
@@ -235,6 +275,33 @@ describe('queued message editing commits', () => {
     });
     return event;
   };
+
+  it.each(['', 'Please read this'])(
+    'keeps a queued file separate from its editable caption (%s)',
+    async (caption) => {
+      const file = {
+        type: 'local_attachment',
+        machineId: 'machine',
+        kind: 'file',
+        path: '/tmp/synthetic.data',
+        fileName: 'pasted-text.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 50_000,
+      } as const;
+      const blocks = caption ? [file, { type: 'text' as const, text: caption }] : [file];
+      const item = makeItem();
+      item.acpSessionConfig = { ...item.acpSessionConfig!, prompt: caption, inputBlocks: blocks };
+      item.task = queueTask(blocks);
+      const view = await renderQueue({ item });
+      expect(view.textContent).toContain(caption || 'pasted-text.txt');
+      const textarea = await startEditing(view);
+      expect(textarea.value).toBe(caption);
+      const nextCaption = caption ? '' : 'Read the file';
+      await act(async () => setTextareaValue(textarea, nextCaption));
+      await pressEnter(textarea);
+      expect(saved).toEqual([{ cid: item.$cid, task: nextCaption }]);
+    }
+  );
 
   it('folds and reopens without committing or losing an editing draft', async () => {
     const view = await renderQueue();
@@ -505,6 +572,86 @@ describe('queued message images', () => {
     expect(container!.querySelector('[aria-label="Continue sending"]')).toBeTruthy();
   });
 
+  it('shows why a queued send failed and gives visible feedback while it is retried', async () => {
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'workspace-test' as WorkspaceId);
+    const reason = "Lody on this computer couldn't prepare this attachment (request_timeout).";
+    let records = [
+      {
+        id: 'held',
+        error: reason,
+        sessionId: 'session-test',
+        workspaceId: 'workspace-test',
+        sequence: 1,
+        attachments: [],
+        delivery: { kind: 'queue' },
+        queue: { task: 'Remove these three metrics' },
+        entry: { id: 'held', role: 'user', items: [] },
+      } as unknown as PendingSessionSend,
+    ];
+    const listeners = new Set<() => void>();
+    const publish = (error: string | undefined) => {
+      records = records.map((send) => ({ ...send, error }));
+      listeners.forEach((listener) => listener());
+    };
+    let attempts = 0;
+    store.set(runtimeAtom, {
+      workspaceId: 'workspace-test',
+      pendingSends: {
+        getSnapshot: () => records,
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        // The cause persists: the retried attempt fails again at once.
+        retry: () => {
+          attempts += 1;
+          publish(undefined);
+          publish(reason);
+        },
+      },
+    } as unknown as WorkspaceRuntime);
+    vi.useFakeTimers();
+    try {
+      await act(async () =>
+        root?.render(
+          createElement(
+            Provider,
+            { store },
+            createElement(MessageQueueDisplay, {
+              sessionId: 'session-test' as SessionId,
+              items: [],
+              onRemove: () => undefined,
+              onReorder: () => undefined,
+              onEditStart: () => undefined,
+              onEditCancel: () => undefined,
+              onEditSave: () => undefined,
+              onSteer: () => undefined,
+            })
+          )
+        )
+      );
+      const row = () => container!.querySelector<HTMLElement>('[data-pending-queue-row="held"]')!;
+      const retryButton = () =>
+        row().querySelector<HTMLButtonElement>('[aria-label="Continue sending"]');
+      expect(row().querySelector('[role="alert"]')?.textContent).toBe(reason);
+
+      await act(async () => retryButton()!.click());
+      expect(attempts).toBe(1);
+      // The click is acknowledged even though the attempt already failed again.
+      expect(retryButton()).toBeNull();
+      expect(row().querySelector('[role="alert"]')).toBeNull();
+      expect(row().querySelector('[role="status"]')?.textContent).toBe('Sending');
+
+      await act(async () => vi.advanceTimersByTime(600));
+      expect(row().querySelector('[role="alert"]')?.textContent).toBe(reason);
+      await act(async () => retryButton()!.click());
+      expect(attempts).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('opens the full-size image in the viewer without editing the row', async () => {
     const store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace-test' as WorkspaceId);
@@ -556,5 +703,42 @@ describe('queued message images', () => {
     expect(images).toContain('blob:original/image-1');
     expect(editsStarted).toEqual([]);
     expect(container!.querySelector('textarea')).toBeNull();
+  });
+
+  it('keeps the scroll fade off the scroller and clamps a phone row to one line', async () => {
+    const long =
+      '暂时只写代码，不需要改任何的约定或者是 agent 的提示，后面还有很多不会发出去的说明。';
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items: [{ ...makeItem(), $cid: 'cid-long', task: long }],
+          onRemove: () => undefined,
+          onReorder: () => undefined,
+          onEditStart: () => undefined,
+          onEditCancel: () => undefined,
+          onEditSave: () => undefined,
+          onSteer: () => undefined,
+          roomy: true,
+          footerPosition: 'inline',
+        })
+      );
+    });
+
+    const scroller = container!.querySelector<HTMLElement>('.overflow-y-auto');
+    expect(scroller).toBeTruthy();
+    expect(scroller!.style.maxHeight).toBe('min(25vh, 240px)');
+    // Unset mask properties are '' in some jsdom builds and undefined in others.
+    expect(scroller!.style.getPropertyValue('mask-image')).toBe('');
+    expect(scroller!.style.getPropertyValue('-webkit-mask-image')).toBe('');
+    expect(scroller!.parentElement?.style.overflow).toBe('hidden');
+    expect(scroller!.parentElement?.style.maxHeight).toBe('min(25vh, 240px)');
+
+    // The row wrapper has the same text. The clamp lives on the preview itself.
+    const preview = [...container!.querySelectorAll('div')].find(
+      (node) => node.textContent === long && node.style.whiteSpace === 'nowrap'
+    );
+    expect(preview).toBeTruthy();
+    expect(preview?.style.display).not.toBe('-webkit-box');
   });
 });

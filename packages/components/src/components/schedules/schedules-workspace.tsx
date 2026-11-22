@@ -1,3 +1,4 @@
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { ScheduleMentionForm } from './schedule-mention-form';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
@@ -22,7 +23,7 @@ import {
   machineSupportsSchedulesProtocol,
   machineSupportsScheduledMessagesProtocol,
   scheduleOwnSessionId,
-  ScheduleRepository,
+  type ScheduleRepository,
   type SessionId,
   type SessionMeta,
   type AgentConfigId,
@@ -178,6 +179,7 @@ function SupportedSchedulesWorkspace({
   const runtime =
     scope.enabled && scope.workspaceId === activeRuntime?.workspaceId ? activeRuntime : null;
   const user = useAtomValue(userAtom);
+  const { members } = useWorkspaceMembers();
   const slug = useAtomValue(currentWorkspaceSlugAtom);
   const navigate = useNavigate();
   const setReturnTab = useSetAtom(mobileHomeReturnTabAtom);
@@ -213,15 +215,30 @@ function SupportedSchedulesWorkspace({
     confirmLabel?: string;
   }>();
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
-  const repository = useMemo(
-    () =>
-      runtime
-        ? new ScheduleRepository(runtime.repo, runtime.workspaceId, {
-            protectedContent: runtime.contentMode === 'e2ee',
-          })
-        : null,
-    [runtime]
-  );
+  // ScheduleRepository builds a Mirror over the schedule doc, so the class is
+  // lazy-loaded: a static import would keep `loro-crdt` (WASM) in the boot
+  // chunk. The repository is null until the module resolves; every consumer
+  // already guards on it.
+  const [repository, setRepository] = useState<ScheduleRepository | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!runtime) {
+      setRepository(null);
+      return;
+    }
+    void import('@lody/shared/schedule-repository').then(({ ScheduleRepository }) => {
+      if (cancelled) return;
+      setRepository(
+        new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+          protectedContent: runtime.contentMode === 'e2ee',
+          signDeclaration: runtime.signScheduleDeclaration,
+        })
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [runtime]);
   // Phone list lives on the home schedules tab (workspace switch, search,
   // settings, bottom bar). Closing or saving replaces this page with that
   // tab. Desktop still returns to the schedules route.
@@ -400,6 +417,7 @@ function SupportedSchedulesWorkspace({
     };
   };
   const contextForRow = (item: ScheduleRegistryRow): ScheduleRowContext => ({
+    owner: members.find((member) => member.userId === item.ownerId)?.name ?? item.ownerId,
     machine: machines.get(item.machineId as never)?.name ?? item.machineId,
     timeZone: machines.get(item.machineId as never)?.timeZone,
     agent: agents.find((a) => a.id === item.agentConfigId)?.name ?? item.agentConfigId,
@@ -601,6 +619,7 @@ function SupportedSchedulesWorkspace({
   );
   const list = (
     <ScheduleListView
+      currentUserId={user?.id}
       {...registry}
       selectedId={scheduleId}
       onOpen={open}
@@ -866,11 +885,13 @@ function ScheduleEditor({
     setSaving(true);
     setError(undefined);
     try {
+      const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
       await runtime.withScheduleStore(
         identity.scheduleId,
         () =>
           new ScheduleRepository(runtime.repo, runtime.workspaceId, {
             protectedContent: runtime.contentMode === 'e2ee',
+            signDeclaration: runtime.signScheduleDeclaration,
           }).save({
             ...identity,
             actorId: user.id,

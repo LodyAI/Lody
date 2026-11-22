@@ -74,10 +74,6 @@ export type BufferedACPUpdate = {
   materializedContents?: MessageContent[];
 };
 
-// ---------------------------------------------------------------------------
-// Turn state model
-// ---------------------------------------------------------------------------
-
 export type TurnPhase =
   | { phase: 'idle' }
   | {
@@ -101,12 +97,7 @@ export type TurnPhase =
       userTurnId?: string;
     };
 
-// ---------------------------------------------------------------------------
-// Per-session state bag
-// ---------------------------------------------------------------------------
-
 export interface SessionState {
-  // ── Turn state ──────────────────────────────────────────────────────────
   turn: TurnPhase;
   /**
    * Ordering barrier for RPC fast-path turns: turn-scoped history list writes
@@ -119,46 +110,33 @@ export interface SessionState {
   suppressAcpReplayUntilTurnStart: boolean;
   suppressedAcpReplayCount: number;
 
-  // ── ACP update buffering ────────────────────────────────────────────────
   acpUpdateBuffer: BufferedACPUpdate[];
   acpFlushInFlight: Promise<void> | null;
   acpFlushTimer: NodeJS.Timeout | null;
   acpFlushCountInTurn: number;
   acpFlushConsecutiveFailures: number;
 
-  // ── Context window usage (throttled) ────────────────────────────────────
   contextWindowUsageBuffer: SessionContextWindowUsage | null;
   contextWindowUsageTimer: NodeJS.Timeout | null;
+  contextWindowUsageLastQueued: SessionContextWindowUsage | null;
+  contextWindowUsageLastQueuedAt: number;
   pendingContextWindowHandlers: Set<Promise<void>>;
 
-  // ── Usage tracking ──────────────────────────────────────────────────────
   pendingUsageHandlers: Set<Promise<void>>;
 
-  // ── Session notice history persistence (goals, agent warnings) ───────────
   pendingHistoryNoticeHandlers: Set<Promise<void>>;
   historyNoticePersistChain: Promise<void>;
 
-  // ── Codex image generation uploads ──────────────────────────────────────
-  // Session-scoped on purpose: image_generation_end may arrive after prompt return,
-  // and clearing this with turn state would detach the generated image from its turn.
   imageGenerationTurnTargets: Map<string, AssistantTurnACPUpdateTarget | null>;
-  // callId -> in-flight upload promise. Doubles as the dedupe set (callId presence
-  // means an upload is in flight) and the drainable set (values() for flush).
   imageGenerationUploads: Map<string, Promise<void>>;
   imageGenerationUploadedCallIds: Set<string>;
   imageGenerationActiveCallIds: Set<string>;
 
-  // ── Permission timing (per-turn, accumulated) ───────────────────────────
   permissionWaitMs: number;
 
-  // ── Session-scoped (survives turn boundaries) ───────────────────────────
   lastActivityMs: number;
   logger: Logger | null;
 }
-
-// ---------------------------------------------------------------------------
-// Factory for fresh state
-// ---------------------------------------------------------------------------
 
 function createSessionState(): SessionState {
   return {
@@ -175,6 +153,8 @@ function createSessionState(): SessionState {
     acpFlushConsecutiveFailures: 0,
     contextWindowUsageBuffer: null,
     contextWindowUsageTimer: null,
+    contextWindowUsageLastQueued: null,
+    contextWindowUsageLastQueuedAt: 0,
     pendingContextWindowHandlers: new Set(),
     pendingUsageHandlers: new Set(),
     pendingHistoryNoticeHandlers: new Set(),
@@ -188,10 +168,6 @@ function createSessionState(): SessionState {
     logger: null,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Store
-// ---------------------------------------------------------------------------
 
 export class SessionTransientStore {
   private readonly sessions = new Map<SessionId, SessionState>();
@@ -215,8 +191,6 @@ export class SessionTransientStore {
   sessionIds(): SessionId[] {
     return Array.from(this.sessions.keys());
   }
-
-  // ── Turn lifecycle ──────────────────────────────────────────────────────
 
   /**
    * Begin a new conversation turn. Transitions turn from 'idle' → 'prompting'.
@@ -328,12 +302,6 @@ export class SessionTransientStore {
   private getFreshLateACPUpdateTarget(
     state: SessionState
   ): AssistantTurnACPUpdateTarget | undefined {
-    // The finalized-turn routing target intentionally never expires by time: agent
-    // sessions can stay alive and emit events long after a turn's stopReason (cron
-    // jobs, ScheduleWakeup, other deferred/background work). Those late updates must
-    // still be routed to the owning assistant entry and written to the Loro doc.
-    // The target is only cleared when a new turn starts (beginTurn) or when ACP
-    // replay suppression begins — never on a wall-clock deadline.
     return state.lateACPUpdateTarget;
   }
 
@@ -404,8 +372,6 @@ export class SessionTransientStore {
     );
   }
 
-  // ── Cleanup ─────────────────────────────────────────────────────────────
-
   /**
    * Clear turn-scoped state. Called after a conversation turn finishes
    * (either successfully or on error).
@@ -421,12 +387,6 @@ export class SessionTransientStore {
     state.turnHistoryGate = null;
     state.suppressAcpReplayUntilTurnStart = false;
     state.suppressedAcpReplayCount = 0;
-    // The ACP update buffer is NOT turn-scoped: every entry carries the target
-    // it was enqueued against, so entries buffered during the finalization tail
-    // (agents keep emitting after cancel) must survive the turn clear and flush
-    // to their stamped targets. Wiping them here silently dropped the last
-    // window of streamed output at the Stop boundary. Only drop the batch timer
-    // when there is nothing left to flush.
     if (state.acpUpdateBuffer.length === 0 && state.acpFlushTimer) {
       clearTimeout(state.acpFlushTimer);
       state.acpFlushTimer = null;
@@ -435,17 +395,11 @@ export class SessionTransientStore {
     if (state.acpUpdateBuffer.length === 0) {
       state.acpFlushConsecutiveFailures = 0;
     }
-    // Note: acpFlushInFlight is NOT nulled here. In-flight flushes must complete
-    // naturally (they self-clean in their finally callback). cleanup() relies on
-    // collecting these promises to await them before shutdown. Only full session
-    // deletion (deleteSession) should discard them.
     if (state.contextWindowUsageTimer) {
       clearTimeout(state.contextWindowUsageTimer);
       state.contextWindowUsageTimer = null;
     }
     state.contextWindowUsageBuffer = null;
-    // Note: pending async handlers are NOT cleared here. They are drained explicitly by
-    // finalizeACPState()/flushSessionUsage(). Clearing them prematurely would drop writes.
     state.imageGenerationActiveCallIds.clear();
     state.permissionWaitMs = 0;
   }
@@ -460,7 +414,6 @@ export class SessionTransientStore {
     const state = this.sessions.get(sessionId);
     if (!state) return;
 
-    // Cancel any lingering timer
     state.turnHistoryGate?.dispose();
     if (state.contextWindowUsageTimer) {
       clearTimeout(state.contextWindowUsageTimer);

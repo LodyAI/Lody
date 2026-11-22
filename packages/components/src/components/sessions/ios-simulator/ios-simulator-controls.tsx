@@ -20,6 +20,7 @@ import {
   Smartphone,
   Sun,
   SunMoon,
+  TextCursorInput,
   Vibrate,
   Volume1,
   Volume2,
@@ -217,9 +218,15 @@ function useControlGroups(props: IosSimulatorControlsProps) {
       keepAt: 'wide',
       items: [
         item(
+          'software-keyboard',
+          t('sessions.iosSimulator.controls.toggleKeyboard', 'Show/hide simulator keyboard'),
+          Keyboard,
+          button('software-keyboard')
+        ),
+        item(
           'text',
           t('sessions.iosSimulator.controls.typeText', 'Type text…'),
-          Keyboard,
+          TextCursorInput,
           onTypeText
         ),
         item(

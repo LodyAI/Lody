@@ -1,11 +1,19 @@
 # E2EE foundation boundary
 
-Status: approved
+Status: draft
 Translation: current
 
-Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
-Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
-(session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894).
+Approved revision: [`122dfeaf`](https://github.com/LodyAI/Lody/blob/122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1/specs/e2ee-foundations.md)
+Approval: 2026-11-10, the owner approved the mobile seed handoff (WebView portable host
+to one purpose-limited native iroh plugin);
+[approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#mobile-seed-handoff).
+Approval: 2026-11-10, the owner approved the signed execution intent revision;
+[revision and approval record](https://github.com/LodyAI/Lody/pull/2510).
+Previous: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.md)
+(2026-11-10, iroh preferred route); earlier
+[`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+([PR #2487](https://github.com/LodyAI/Lody/pull/2487)); original approval 2026-10-28,
+[PR #1894](https://github.com/LodyAI/Lody/pull/1894).
 
 [中文](e2ee-foundations.zh.md)
 
@@ -51,10 +59,11 @@ mandatory caller responsibilities; HPKE validity does not establish sender ident
 ## Realtime RPC and presence (M5 review draft)
 
 Remote execution needs the same authority and execution evidence whichever route
-wins. For the MVP, use **encrypted Streams RPC → encrypted history/Meta durable
-dispatch** as the final fallback. Keep that durable path available when Streams
-RPC fails; it must reach the same actual-start claim, not a second execution path.
-Iroh is a later acceleration layer, outside the MVP. Ordinary workspaces keep
+wins. The route order is **iroh → encrypted Streams RPC → encrypted history/Meta durable
+dispatch** as the final fallback. Keep every later route available when an earlier
+one fails; all of them reach the same actual-start claim, not a second execution
+path. Iroh is the preferred route where the host supports it
+([route decision](#preferred-route-iroh)). Ordinary workspaces keep
 their existing behavior. RPC and durable content never fall back to plaintext;
 MVP presence is the separately approved minimal plaintext metadata channel below.
 
@@ -169,6 +178,39 @@ Request IDs are host-generated secure random 16-byte values. RPC timestamps are
 nonnegative Unix UTC milliseconds. Expired means `now >= expiresAt`. The RPC body
 codec does not check current time, replay state, permissions or request freshness.
 
+**Signed execution intents (approved by the owner on 2026-11-10; [approval record](https://github.com/LodyAI/Lody/pull/2510)).** Every encrypted input that may run carries one signature stored beside its
+content in the same commit: a sent turn row, a queue item (which promotion copies) and a
+schedule declaration. The signing device signs a domain-separated message
+(`lody-e2ee/execution-intent/v1`) over the kind (member input, machine input or
+schedule declaration), genesis, workspace, target machine, scope (session or schedule),
+message ID and the SHA-256 of the canonical content: the whole input configuration as
+the history writer stores it, without the `resume` that promotion supplies, plus
+`derivedFrom` or `scheduleRun` for machine inputs; a declaration signs its definition
+fingerprint. The signed bytes depend on no document operation, frame or epoch, so a
+snapshot, a trimmed stream or a key rotation cannot invalidate them, and a different
+document engine can keep the same meaning. The session document stores no exact
+encrypted request originals.
+
+At start the machine recomputes the digest from what will run and verifies the
+signature for this workspace, machine, session and message. It then checks the signer
+against its current verified ledger; an unknown signer is refused only after an
+authenticated latest read, and waits while no read can complete. Refusals carry their
+reason: `e2ee_signature_missing`, `e2ee_signature_invalid`, `e2ee_scope_mismatch`,
+`e2ee_sender_not_authorized` (the only one shown as a sender without rights),
+`e2ee_machine_not_member` and `e2ee_machine_not_shared`. A row's display account never
+selects the requester, and an encrypted row never chooses its resume target. Nothing on
+the execution path judges a message by time: a dispatch request's `expiresAt` is always
+0 (its opener rejects any other value; every other method still requires a real
+deadline and rejects 0), and a machine that was offline for days still starts a message
+once. The execution journal identifies a start by message ID and content digest: an ID
+starts at most once, a different content under a started ID is refused, and an input
+cancelled before it started is retired so that it never starts later. An edit keeps the
+message ID and is signed again by the editor. Accepted consequences, also per the owner:
+an empty journal (for example after reinstalling) does not know earlier IDs, the server
+can delay delivery, revocation takes effect through this machine's ledger reads, and
+waiting inputs persist with event-driven rechecks and a fallback of at most five
+minutes. E2EE has no production data, so this format has no compatibility path.
+
 Method params, success/progress and error details remain exact opaque bytes for
 the authorized method codec; JSON methods use their explicit UTF-8 JSON codec,
 without reserialization for hashing. Binary output requires an explicit codec.
@@ -177,7 +219,9 @@ Error detail is an explicitly permitted encrypted method DTO; raw exceptions,
 paths, stacks and provider output stay in the trusted host's diagnostics unless
 explicitly part of that DTO.
 
-`requestDigest` is SHA-256 of the **entire original signed encrypted request**.
+`requestDigest` is SHA-256 of the **entire original signed encrypted request**. It
+correlates one transport exchange only; execution identity is the signed intent above
+(approved).
 Sequence starts at zero and strictly increases per request without u32 wrapping;
 exact duplicate frames are ignored, different bytes at the same sequence
 conflict. A terminal frame ends progress; gaps allow lost progress but never
@@ -241,7 +285,7 @@ a new root/resource even for the same member/machineId. The old generation remai
 terminal. New sharing requires new explicit owner intent and starts at revision
 1/null parent, without importing old grants, pins or deleted policy history.
 
-Signed current-only policy v2 binds workspace ID, pinned genesis, machineId,
+Signed current-only policy v3 binds workspace ID, pinned genesis, machineId,
 owner membership instance, generation, revision/previous original-frame digest,
 requestId, complete state, personal signer and descriptive issuedAt. A distinct
 business signature/AAD domain and generation-qualified resource use existing
@@ -255,9 +299,16 @@ substitute for verified pins. Exact retry receipts never resurrect cleaned frame
 
 Before each start and later authorized action, check current ledger eligibility,
 actual machine key/generation and the current owner-personal policy; actual local
-projects also need their own switch. A revoked signer invalidates execution on
-its old policy. Historical owner-personal data may preserve state for a new
-explicit same-generation intent, but cannot grant execution or skip history.
+projects also need their own switch. Verify only the latest original: its signature,
+resource/binding/generation, and a revision no lower than the local pin; equal
+revisions require equal digests. Intermediate policy history is not required.
+The latest service-accepted policy signed by a historically admitted owner-personal
+device keeps authorizing after that device is revoked. Settings show a nonblocking
+review-and-re-sign reminder; a current personal device re-signs the complete list
+unchanged, or edits it first. This relies on the service checking current device
+eligibility at commit time, refusing revoked devices, and not maliciously accepting
+or withholding policies. That is an owner-accepted service-trust premise, not a
+cryptographic proof of signing time.
 Withdrawal blocks new starts/later actions without killing already running tasks.
 A separate account display query returns only ciphertext/untrusted metadata.
 
@@ -277,13 +328,16 @@ product enablement remains separate. See the [proposed sharing decision](../.age
 work that a shared member's turn derives through the machine (child Sessions, chat,
 Roles, continuations, agent control) by reusing the signed-original chain. The machine
 writes such an input with `derivedFrom: { sessionId, userTurnId }` inside the signed
-row, only while that origin turn is active and only for this machine. At start, the
+row, only while its driving turn is active and only for this machine. At start, the
 machine verifies the origin as the member's own signed, non-derived Turn and authorizes
-the member's rights ∩ the owner's sharing policy ∩ every reached project. The start
-deadline is the origin's signed deadline plus 15 minutes. Derivation is one level deep,
-with at most 20 inputs per origin. Owner work is unchanged. Cross-machine derivation is
-not implemented and fails closed; a future version would use a user-approved signature
-from the originating member's personal device. See [derived work](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md).
+the member's rights ∩ the owner's sharing policy ∩ every reached project. Per the owner
+decision of 2026-11-10 (approved), no start deadline applies; only the active-turn and
+per-origin bounds do. Member hops inherit the same human-signed root and share
+at most 20 durable starts across restarts. Owner same-machine delegation retains
+and rechecks its root, has no such quota and may steer. Owner cross-machine delegation
+rechecks the root before sending, then retains the existing machine-signed path
+without local-only provenance. Member cross-machine derivation remains unsupported; a future version would use a user-approved signature
+from the originating member's personal device. See [derived work](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md).
 
 ### Permission freshness and the separate durable expiry clock
 
@@ -306,52 +360,86 @@ it. When a read gets no answer, the machine's own member keeps the longer window
 counted from the same start. Intersect with request/upstream deadlines and reserve clock/stop margin;
 never wait on network under a global account lock. Restart discards this grant
 and requires online authenticated revalidation before new remote execution.
-Rollback or uncertain suspend/resume elapsed time invalidates the live cache.
+Use the greater wall/monotonic elapsed time, as specified in the outage decision;
+suspend or a wall-clock correction alone does not invalidate the live cache.
 Retained checkpoints and journal timestamps cannot restore execution freshness.
 Offline documents/editing and retained results remain available; expired freshness
 blocks new remote execution, not unrelated local work. Revalidation never restarts
 an uncertain operation.
 
 The journal's **persistent expiry clock is a different mechanism**, not an
-execution grant. Current schema 3 retains a nondecreasing floor per
-`(genesis, workspaceId)` across reopen. With an independently authenticated current
-reference, claim rejects local time or the retained floor more than 600,000 ms
+execution grant. Per the owner decision of 2026-11-10 (approved), it applies only to
+feature requests: execution records carry no deadline, so no clock, skew check or floor
+applies to them. Current schema 3 retains an observation per `(genesis, workspaceId)` across
+reopen. With an independently authenticated current reference, claim rejects local time or the retained floor more than 600,000 ms
 ahead; accepted claims use `max(reference, retainedFloor)`. Without a reference,
-use `max(localNow, retainedFloor)` in that workspace. Never use frame timestamps
+use `localNow` and replace the observation, so an untrusted local peak cannot
+lock new requests after clock correction. A corrected clock may admit a previously
+unclaimed frame again within its original deadline; durable IDs still prevent
+any already-started request from executing twice. Never use frame timestamps
 as trusted time. Explicit evidence-preserving reset can clear a poisoned floor
 while retaining retired request IDs; it neither renews original deadlines nor
 restores freshness or replay authority. Follow the public
 [journal recovery decision](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
 
-### MVP routes and latency acceptance
+### Routes and latency acceptance
 
-The MVP uses encrypted Streams RPC as its realtime path. If it is unusable, retain
-**encrypted history/Meta durable dispatch as the final fallback**. Retry the
-original ID and exact signed ciphertext. Durable dispatch retains the same
-business identity (`userTurnId` where applicable) and original request correlation;
-both routes pass the same actual-start claim and current authorization. A durable
-arrival does not refresh the original deadline or start a second operation.
-MVP delivery and acceptance must not depend on an iroh connection or SDK.
+Iroh carries realtime frames when a connection to the target device exists;
+otherwise, and whenever iroh fails, encrypted Streams RPC carries them. If both are
+unusable, retain **encrypted history/Meta durable dispatch as the final fallback**. A
+transport retry reuses the original ID and exact signed ciphertext. All three routes carry
+the same signed execution intent (approved, above) for the same message ID, pass the same
+actual-start claim and current authorization, and a durable arrival never starts a second
+operation. Delivery never depends on an iroh connection or native module being available.
 
 The acceptance target is **send-to-actual-execution-start ≤1 second**, measured
 from sender acceptance of the send to the machine's actual-start boundary, not
 to a receipt ACK or business completion. Measure ordinary/encrypted paths and
 transport/fallback selection separately under stated conditions. Offline durable
-catch-up has no one-second delivery guarantee; a passed deadline still forbids
-a new start. No latency result is claimed by this documentation revision.
+catch-up has no one-second delivery guarantee; per the owner decision of 2026-11-10
+(approved), no deadline applies to an execution input, however late it arrives. No latency
+result is claimed by this documentation revision.
 
-### Later acceleration: iroh (outside the MVP)
+### Preferred route: iroh
 
-The owner deferred iroh from the MVP on **2026-10-28**. The identity decision is
-retained for that later layer: iroh reuses the workspace device's Ed25519
-identity, so EndpointId equals its signing public key. Only the trusted host supplies the private key, with no renderer
-export or arbitrary-sign IPC. A connected peer still passes shared-frame,
-verified-binding, current-permission, freshness and execution-journal checks.
-The 2026-10-28 owner decision records that the domain-separation review found no
-confusion between the signing protocols. That finding is not native SDK/key
-lifetime or installed-platform acceptance. A later iroh accelerator must preserve
-the same original ID/ciphertext, authorization and actual-start claim, and must
-not delay usable encrypted Streams RPC or its durable fallback.
+The owner deferred iroh from the MVP on 2026-10-28 and made it the preferred route
+on **2026-11-10**. Iroh is only a transport: it carries the same signed frames and the
+same signed execution intent (approved, above), with the same request ID and signed
+ciphertext, and a connected peer still passes shared-frame, verified-binding,
+current-permission and execution-journal checks. An execution input is identified by
+message ID and content digest and has no deadline on any route; only feature requests
+keep their own freshness checks. Transport authentication is never authority.
+
+- **Identity.** Iroh reuses the workspace ledger device's Ed25519 identity, so
+  EndpointId equals its signing public key. Only the trusted host hands the seed to
+  the native transport, which wipes its copy when the endpoint closes: the Electron
+  main process and the CLI in-process, and on mobile the WebView portable host, which
+  already holds the seed, once per session over one purpose-limited native plugin
+  that exposes only open, connection status, send and receive. That bridge call
+  serializes the seed into a JavaScript string that cannot be wiped and lives until
+  garbage collection; bridge logging stays off. There is no desktop renderer export,
+  no seed returned to JavaScript and no arbitrary-sign interface. One device key has at most one live
+  endpoint per process. The key signs only TLS 1.3 handshakes and relay handshakes,
+  both domain-separated; address-lookup records are not used.
+- **Reachability without the control plane.** A dialer addresses the target with
+  every configured relay, so the first packets reach the peer on whichever relay it
+  chose as home; no address is published to the backend. Direct paths follow from
+  hole punching. Until Lody operates its own relays, the official build configures
+  n0's public relays (owner decision, 2026-11-10). They carry only end-to-end
+  encrypted traffic but can observe device public keys, IP addresses and which
+  devices communicate; they are rate limited and carry no availability guarantee,
+  so Streams RPC and durable dispatch remain the fallback.
+- **Optional capability.** Hosts without the native transport or relay configuration,
+  including the local-only desktop, keep encrypted Streams RPC and durable dispatch.
+  Establishing an iroh connection never delays a usable later route: without a live
+  connection a request uses Streams RPC while the connection is prepared.
+- **Retiring Streams RPC.** Encrypted Streams RPC stays until every supported platform
+  has migrated to iroh and compatibility is verified; removing it needs a further
+  revision of this Spec. Browser iroh is out of scope; the mobile WebView reaches
+  iroh only through its native plugin.
+
+Implementation rationale and evidence:
+[iroh transport decision](../.agents/notes/implemented/architecture/2026-11-10-e2ee-iroh-transport.md).
 
 ### Durable identities, actual start and retained outcomes
 
@@ -359,7 +447,8 @@ Before a realtime send, retain the exact signed ciphertext and fixed ID. Before
 receipt ACK, save the original in the shared journal. Identity is
 `(genesis, workspace, targetMachineId, requestId)`; requester, original bytes and
 original expiry are immutable. Another requester or another original at that
-identity is a conflict, not another execution. Forwarding never renews expiry.
+identity is a conflict, not another execution. Forwarding never renews expiry. The
+actual start is keyed by message ID with its content digest (approved, above).
 
 The journal retains received, started, completed and uncertain outcomes. Atomically
 claim received **immediately before the first business side effect**; one winner
@@ -432,7 +521,7 @@ Only one device may currently bind a machineId within one workspace. Replacing i
 requires the existing same-member personal-device authority and revokes the exact
 old key while admitting the new one in the same record. Historical keys stay
 non-reusable; rotationRequired advises administrators to update keys without blocking
-new seals or workspace use. Snapshot, retained and digest version 4 preserve the binding
+new seals or workspace use. Snapshot, retained and digest version 5 preserve the binding
 and historical device kind.
 Old developer machine records require workspace recreation, without a legacy reader
 or migration. The independent v1 vector is regenerated under this explicit pre-freeze
@@ -603,7 +692,7 @@ Full replay costs about 5.4 ms per record on an idle desktop-class host (4,096 r
 - **One state encoding.** Retained state, endorsed snapshots and the comparison digest share one authorization-state encoding, so all three sources (full replay, qualified snapshot import, retained restore) agree on the state, its digest and every author at the same position. The retained envelope adds only the verification source, which survives a round trip and is never upgraded; verified hashes before the restore point are not kept. Layout and acceptance: [compact state note](../.agents/notes/proposed/architecture/2026-10-20-e2ee-compact-ledger-state.md).
 - **Digest use.** `stateDigest` identifies a state for cross-party comparison (comparison notes) and for background audits. Restore checks it only when the caller supplies it, which costs one hash and no re-verification.
 - **Background audit (deferred).** A full replay from genesis compared with the retained digest can catch bugs or storage corruption. It is optional, not part of this change, and may run outside the host's request runtime (for example a separate worker that reads the stored ledger and the retained digest). If added, a mismatch is an incident that stops writes for that ledger until resolved.
-- **Format.** The retained encoding is current-format only and versioned: retained envelope version 4, snapshot body version 4 and the `snapshot-digest/v4` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
+- **Format.** The retained encoding is current-format only and versioned: retained envelope version 5, snapshot body version 5 and the `snapshot-digest/v5` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
 - **Reads.** A host serving history pages needs no verification on the read path; clients verify what they receive. Host verification belongs to write admission.
 - **Local stores.** If adopted, clients may restore their local retained state on open instead of revalidating all stored records, which supersedes the full revalidation described below.
 
@@ -669,3 +758,64 @@ transaction, retaining offset, signer, SHA-256 digest, original credential windo
 and phase. Archived identities remain idempotent, reject different bytes at the
 same offset and can never become current again. Capacity budgets count retained
 bodies rather than archived identities.
+
+## Automatic current-workspace pairing (draft increment, 2026-11-10)
+
+The approved UI removes manual code transfer: a native device opening a workspace automatically requests access; on an existing personal device the person enters the six-digit code the new device shows and approves once; that device signs only when the entered code equals its own, and three wrong entries end the request (owner decision, 2026-11-11). Approval grants only that workspace. A committed ephemeral key exchange derives the secret for the existing authenticated pairing protocol; the relay receives public messages only. Both clients bind account, workspace, genesis and the original ten-minute expiry, and retain exact originals on retry. The comparison cannot be skipped: six decimal digits provide approximately 20 bits of substitution detection, rather than the manual protocol’s 128-bit out-of-band authentication. This protocol increment is draft and has no independent cryptographic approval. The existing approved manual protocol remains unchanged. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10) records ordering, lifetime and validation limits.
+
+**Instant QR join (draft revision, owner decision 2026-11-12).** In the reverse direction an existing personal device shows a fresh one-time pairing code as a QR code. A computer shows it in the approval window as soon as a new device's request arrives, with no click; a phone shows it when the person asks, and the console's Add device action shows it at once. Scanning it is the approval: once a request submitted under that code verifies, the device that showed it signs every workspace it can approve, without the warning and workspace selection of the manual confirmation, and names the requested workspaces it cannot approve. Session recording stays paused while the code is visible. A new computer also shows its automatic comparison code as a QR code for a phone to scan; scanning only replaces typing, and the approver still compares the code and counts wrong entries. Residual risk, accepted by the owner over a click-to-reveal alternative: anyone who sees the shown code within its ten-minute lifetime, for example through screen sharing or a camera, can admit their own device to every listed workspace and its history, and with the account password they can make the code appear by sending a request. The new-device notice and revocation remain the remedy. This revision changes the approved manual confirmation and stays draft until the increment is approved. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#instant-qr-join-2026-11-12) records the decision and its limits.
+
+## Whitepaper technical appendix
+
+The two sections below were moved verbatim from the [Security Whitepaper](e2ee/whitepaper.md) on 2026-11-11; the whitepaper body keeps only the properties. Their approval status follows the whitepaper's original approval records and does not change with the move.
+
+### Content frame and API details
+
+Former whitepaper §4.2:
+
+Updates use experimental v0 at batch granularity, without wrapping individual CRDT operations. A packet is `version(1B, value 0) | orgEpoch(u32be) | docEpoch(u16be, value 0) | signerPublicKey(32B) | nonce(24B) | sealed | signature(64B)`. `sealed` includes the single XChaCha20-Poly1305 16B tag, giving 143B fixed overhead before SDK wrapping. Document generation appears once per batch/snapshot; omitted API values normalize to 0 and nonzero/invalid values fail. API `epoch` retains its organization meaning. Genesis, resource, purpose and claimed authors are not repeated on wire.
+
+Both parties supply independently trusted organization genesis, stable logical document ID and purpose; URLs route content only. Canonical document context is `D = genesis(raw32) || epoch(u32be) || docEpoch(u16be) || resourceLength(u16be) || resource(1..1024 printable non-whitespace ASCII bytes)`, with full authentication context `C = D || purposeCode(u8)`. Codes 1..9 distinguish Loro update/snapshot, Flock update/snapshot, blob, epoch-history, reserved encrypted presence and RPC request/response. Purpose 7 is unused by the MVP minimal-plaintext presence channel. Document HKDF-SHA-256 uses salt `lody-content-hkdf/v0\0`, info `lody-document-key/v0\0 || D`, and length 32B; other resources use info `lody-content-key/v0\0 || C`. AEAD AAD is `lody-content-aad/v0\0 || C || fixed packet prefix`, and signing input is `lody-content-signature/v0\0 || C || complete unsigned packet`. Integers are big-endian; domains include the trailing zero byte. Purpose substitution fails signatures; re-signing unchanged ciphertext cannot bypass AEAD binding.
+
+`ContentCipher.deriveDocumentKey` returns an immutable scoped document key. `exportDocumentKey` / `importDocumentKey` copy leaf bytes; `sealDocument` / `openDocument` use the leaf directly without a second HKDF or organization root. The same policy and strict signature checks apply; key possession does not admit an unregistered external signer. Providers require exactly one local source, `readKey(epoch)` or `readDocumentKey(epoch, docEpoch)`, without hidden network fetches. Resolved leaf scope must match the fixed organization/resource and generations. The current Streams provider supplies epoch keys through `readKey`; a provider holding only document leaf keys (`readDocumentKey`) is not yet integrated.
+
+Exact SDK AAD stays external to ciphertext. For nonempty `B = u16be(additionalData.length) || additionalData` (at most 1024B), AEAD uses `lody-content-aad-bound/v0\0 || C || B || fixed packet prefix`, and signing uses `lody-content-signature-bound/v0\0 || C || B || complete unsigned packet`. SDK outer version and its `loro-streams-crdt-payload-protection/v2\0` domain stay unchanged. The 51B AAD is reconstructed by hosts from the envelope. Provider headers remain 3/4, rejecting old 1/2. Snapshot continuationOffset stays authenticated and encrypted. An update POST body is the length-framed batch plus 158B, only 2B above optimized v2's 156B for the reserved generation; single/five-update samples measure 244→246B and 600→602B, excluding HTTP/TLS. The reader accepts only the current v0 format. Earlier experimental formats are unsupported; no old reader, fallback or migration is shipped.
+
+### Realtime route and presence approval record
+
+Former whitepaper §7:
+
+The [M5 realtime review draft](#realtime-rpc-and-presence-m5-review-draft)
+sets the concrete bytes and route order: iroh where the host supports it, then
+encrypted Streams RPC, then encrypted history/Meta durable dispatch as the final
+fallback. The owner deferred iroh from the MVP on 2026-10-28 and made it the
+preferred route on 2026-11-10.
+All routes share current authorization and one durable actual-start claim;
+realtime retries retain the exact original ciphertext and ID. The merged ledger
+binds machineId in admission and possession; old developer ledgers are recreated
+current-only, without a compatibility path. `rotationRequired` only advises key
+rotation and alone blocks neither sealing, sending nor execution. Machine-obtained
+execution freshness is memory-only, at most 15 minutes from before its own
+authenticated latest read (longer for the machine's own member during a
+[backend outage](e2ee/execution-freshness-outage.md)), and requires online revalidation
+after restart; the
+journal's persistent workspace expiry floor is not that grant. Execution evidence
+is not automatically collected. The send-to-actual-start target is ≤1 second,
+with no measurement claimed here. The owner approved whole-frame 1 MiB RPC sizing
+(including 143 bytes) and canonical unpadded-base64url machine resources on
+2026-10-28. Iroh reuses the ledger device key; the reported domain-separation
+review found no signing-protocol confusion, and the key signs only TLS and relay
+handshakes. Native key lifetime and product acceptance remain separate work. The full Spec revision `e4351fda` was approved on
+2026-10-28 through the owner-authorized coordinator review recorded in the [whitepaper revision history](e2ee/whitepaper.md#revision-history).
+
+**Presence option A — owner approved (2026-10-28):** encrypted workspaces use the
+existing plaintext presence channel with its 90-second TTL. Publish only actual
+machineId/instanceId/sessionId/userId, fixed kind/status enums and timestamps,
+according to the [closed field allowlist](#mvp-presence-minimal-plaintext-owner-approved-2026-10-28).
+Strip all free-text details and unknown nested fields before any publication,
+including `status.detail`, names, paths, prompts and content snippets. The service
+can infer these metadata from connections, traffic and accounts; encryption adds
+little privacy but increases complexity and availability risk. Encrypted presence
+is outside the MVP; #1990's merged purpose-7 presence body codec and its ≤60-second
+TTL are reserved/unused, not the MVP's 90-second channel contract. This exception
+does not change RPC encryption, bytes or authorization.

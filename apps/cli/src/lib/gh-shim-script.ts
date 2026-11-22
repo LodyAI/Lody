@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import {
   accessSync,
   constants,
@@ -694,6 +695,24 @@ async function* ghEnvironments(ghCommand, args) {
     yield { env: attemptEnv, source: candidate.source, target };
   }
 }
+// Tell the daemon which PR this Session created, from whatever directory or
+// branch. Bounded, never replayed, and never changes gh's stdout or exit code;
+// the daemon resolves the Session from the host-authored context token.
+const reportCreatedPullRequest = async (url) => {
+  try {
+    const response = await requestBroker('/pull-request/report', { contextToken: getContext().contextToken, url }, 2000);
+    const body = await response.json();
+    if (response.ok && body?.linked === true) {
+      console.error('[Lody] Linked ' + url + ' to this Session.');
+      return;
+    }
+  } catch {}
+  console.error('[Lody] ' + url + ' was not linked to this Session. It can be linked with lody_session_manage action pr_link.');
+};
+const createdPullRequestUrl = (stdout) => {
+  const matches = stdout.match(/https:[/][/]github[.]com[/][^\\s/]+[/][^\\s/]+[/]pull[/][0-9]+/g);
+  return matches ? matches[matches.length - 1] : null;
+};
 ${ghPrCreateScript}
 const main = async () => {
   const ghCommand = resolveRealGhCommand();
@@ -716,13 +735,22 @@ const main = async () => {
       const child = spawnGh(ghCommand, attempt.args || args, { stdio: ['inherit', 'pipe', 'pipe'], env: attempt.env });
       let output = false;
       let stderr = '';
-      child.stdout.on('data', chunk => { output = true; process.stdout.write(chunk); });
+      let stdout = '';
+      child.stdout.on('data', chunk => {
+        output = true;
+        process.stdout.write(chunk);
+        if (parsedCreate?.command === 'create') stdout += String(chunk).slice(0, Math.max(0, 20000 - stdout.length));
+      });
       child.stderr.on('data', chunk => { process.stderr.write(chunk); stderr += String(chunk).slice(0, Math.max(0, 20000 - stderr.length)); });
       child.on('error', error => resolve({ error, code: 1, output, stderr }));
-      child.on('close', (code, signal) => resolve({ code, signal, output, stderr }));
+      child.on('close', (code, signal) => resolve({ code, signal, output, stderr, stdout }));
     });
     if (result.signal) { process.kill(process.pid, result.signal); return; }
-    if (result.code === 0) return;
+    if (result.code === 0) {
+      const createdUrl = parsedCreate?.command === 'create' && attempt.source !== 'help' ? createdPullRequestUrl(result.stdout) : null;
+      if (createdUrl) await reportCreatedPullRequest(createdUrl);
+      return;
+    }
     if (result.error) throw result.error;
     // A single unpaginated REST API request with no hooks has a clear rejection
     // boundary. Other commands may have completed an earlier write: stop.
@@ -793,7 +821,7 @@ const buildGhShimSource = (realGhPath: string | null, brokerStateFilePath?: stri
 const buildWindowsLauncherSource = (): string =>
   windowsLauncherSourceTemplate
     .split(NODE_EXEC_PATH_PLACEHOLDER)
-    .join(escapeForDoubleQuotedCmdString(process.execPath));
+    .join(escapeForDoubleQuotedCmdString(getCliNodeExecutable()));
 
 const resolveRealGhPath = (brokerStateFilePath?: string): string | null =>
   resolveExecutableFromPath('gh', getGhShimHostPath(brokerStateFilePath));

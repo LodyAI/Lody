@@ -133,7 +133,12 @@ export function createSessionInputStorage(
   ): Promise<T> => {
     if (closed) throw new Error('Input storage is closed');
     const db = await open();
-    const tx = db.transaction([INPUTS, ORDER], mode);
+    // A pending input can be the only copy. Wait for disk before acknowledging a write.
+    const tx = db.transaction(
+      [INPUTS, ORDER],
+      mode,
+      mode === 'readwrite' ? { durability: 'strict' } : undefined
+    );
     const done = new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onabort = () => reject(tx.error ?? new Error('Input storage transaction aborted'));

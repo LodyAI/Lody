@@ -212,7 +212,6 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       case 'session/image-upload':
       case 'session/history-read':
       case 'session/history-write':
-      case 'session/code-collab-host-start':
       case 'session/preview-candidate-report':
       case 'session/preview-create':
       case 'session/preview-revoke':
@@ -252,8 +251,6 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
         return `session:${message.sessionId}:history`;
       case 'session/image-upload':
         return `session:${message.sessionId}:image-upload`;
-      case 'session/code-collab-host-start':
-        return `session:${message.sessionId}:code-collab`;
       case 'session/preview-candidate-report':
       case 'session/preview-create':
       case 'session/preview-revoke':

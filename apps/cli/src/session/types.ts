@@ -1,5 +1,6 @@
 import {
   type AgentConfigId,
+  type AgentRoleId,
   type AgentConfigCliType,
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
@@ -98,6 +99,8 @@ export interface SessionConfig {
 
   /** Parent session ID for child tab sessions. When set, reuse the parent's workspace directory. */
   parentSessionId?: SessionId;
+  agentRoleId?: AgentRoleId;
+  openedBySessionId?: SessionId;
 
   /** Git commit author name (from session creator) */
   userName: string;

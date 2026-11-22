@@ -36,6 +36,184 @@ afterEach(() => {
 });
 
 describe('useSessionConversationDiffData', () => {
+  it('loads the full paged Changes list on opening and reopening, without fetching bodies', async () => {
+    let files = Array.from({ length: 1_025 }, (_, index) => `src/file-${index}.ts`);
+    const secondPage = createDeferred<void>();
+    const entered = createDeferred<void>();
+    let holdPage = true;
+    let bodyReads = 0;
+    const provider = new CodeCollabSessionFileProvider({
+      allChanges: { 'stale-index.ts': { diff: [1, 1] } },
+      runtime: {
+        sessionId: 'summary-test' as SessionId,
+        diffBlobTransportOptions: async () => ({ supported: true, scope: 'test', persist: false }),
+        openDiffManifest: async ({ cursor }: { cursor?: string }) => {
+          const offset = Number(cursor ?? 0);
+          if (offset === 64 && holdPage) {
+            entered.resolve();
+            await secondPage.promise;
+          }
+          return {
+            status: 'ok',
+            base: 'base',
+            entries: files.slice(offset, offset + 64).map((path) => ({
+              path,
+              status: 'ok',
+              base: null,
+              head: {
+                key: `sha256:${'1'.repeat(64)}`,
+                rawBytes: 6,
+                format: { encoding: 'utf8' },
+              },
+              add: 1,
+              del: 0,
+            })),
+            nextCursor: offset + 64 < files.length ? String(offset + 64) : null,
+          };
+        },
+        readDiffBlob: async () => {
+          bodyReads++;
+          throw new Error('Opening the list must not fetch bodies.');
+        },
+      } as unknown as CodeCollabSessionFileProviderRuntime,
+    });
+    const store = createStore();
+    let state: ReturnType<typeof useSessionDiffSummary> | undefined;
+    function Harness({ visible }: { visible: boolean }) {
+      state = useSessionDiffSummary('summary-test' as SessionId, {
+        fileProvider: provider,
+        refreshChanges: visible,
+      });
+      return null;
+    }
+    const view = (visible: boolean) => (
+      <Provider store={store}>
+        <Harness visible={visible} />
+      </Provider>
+    );
+    render(view(false));
+    await flushMicrotasks();
+    expect(state?.summary.changeFilePaths).toEqual(['stale-index.ts']);
+    rerender(view(true));
+    await act(async () => {
+      await entered.promise;
+    });
+    expect(state?.changesReady).toBe(false);
+    expect(state?.ready).toBe(true);
+    expect(bodyReads).toBe(0);
+    await act(async () => {
+      secondPage.resolve();
+    });
+    expect(state?.summary.changeFilePaths).toHaveLength(1_025);
+    expect(state?.liveDiffStat).toEqual({ add: 1_025, del: 0, files: 1_025 });
+    expect(state?.synced).toBe(true);
+    expect(bodyReads).toBe(0);
+
+    rerender(view(false));
+    holdPage = false;
+    files = ['newly-saved.ts'];
+    rerender(view(true));
+    await flushMicrotasks();
+    expect(state?.summary.changeFilePaths).toEqual(['newly-saved.ts']);
+    expect(state?.liveDiffStat).toEqual({ add: 1, del: 0, files: 1 });
+    expect(bodyReads).toBe(0);
+  });
+
+  it('keeps a partial manifest out of the sidebar and recovers when reopened', async () => {
+    let failed = true;
+    const provider = new CodeCollabSessionFileProvider({
+      allChanges: { 'stale-index.ts': true },
+      runtime: {
+        sessionId: 'summary-test' as SessionId,
+        diffBlobTransportOptions: async () => ({ supported: true, scope: 'test', persist: false }),
+        openDiffManifest: async ({ cursor }: { cursor?: string }) => {
+          if (cursor)
+            return { status: 'error', code: 'permission_denied', message: 'Synthetic refusal.' };
+          return {
+            status: 'ok',
+            entries: [{ path: 'live.ts', status: 'binary', base: null, head: null }],
+            nextCursor: failed ? 'page-2' : null,
+          };
+        },
+        readDiffBlob: async () => {
+          throw new Error('No bodies needed.');
+        },
+      } as unknown as CodeCollabSessionFileProviderRuntime,
+    });
+    let state: ReturnType<typeof useSessionDiffSummary> | undefined;
+    function Harness({ visible }: { visible: boolean }) {
+      state = useSessionDiffSummary('summary-test' as SessionId, {
+        fileProvider: provider,
+        refreshChanges: visible,
+      });
+      return null;
+    }
+    render(<Harness visible />);
+    await flushMicrotasks();
+    expect(state?.changesUnavailableMessage).toBe('Synthetic refusal.');
+    expect(state?.liveDiffStat).toBeUndefined();
+    expect(await provider.listChangedFiles()).toMatchObject({
+      files: [{ path: 'stale-index.ts' }],
+    });
+    rerender(<Harness visible={false} />);
+    failed = false;
+    rerender(<Harness visible />);
+    await flushMicrotasks();
+    expect(state?.unavailableMessage).toBeUndefined();
+    expect(state?.summary.changeFilePaths).toEqual(['live.ts']);
+    expect(state?.liveDiffStat).toEqual({ add: 0, del: 0, files: 1 });
+  });
+
+  it('ignores a pending list after closing and reopening Changes', async () => {
+    const old = createDeferred<unknown>();
+    const entered = createDeferred<void>();
+    let pending = true;
+    const provider = new CodeCollabSessionFileProvider({
+      allChanges: { 'stale-index.ts': true },
+      runtime: {
+        sessionId: 'summary-test' as SessionId,
+        diffBlobTransportOptions: async () => ({ supported: true, scope: 'test', persist: false }),
+        openDiffManifest: async () => {
+          if (pending) {
+            entered.resolve();
+            return old.promise;
+          }
+          return { status: 'ok', entries: [], nextCursor: null };
+        },
+        readDiffBlob: async () => {
+          throw new Error('No bodies needed.');
+        },
+      } as unknown as CodeCollabSessionFileProviderRuntime,
+    });
+    let state: ReturnType<typeof useSessionDiffSummary> | undefined;
+    function Harness({ visible }: { visible: boolean }) {
+      state = useSessionDiffSummary('summary-test' as SessionId, {
+        fileProvider: provider,
+        refreshChanges: visible,
+      });
+      return null;
+    }
+    render(<Harness visible />);
+    await act(async () => {
+      await entered.promise;
+    });
+    rerender(<Harness visible={false} />);
+    pending = false;
+    rerender(<Harness visible />);
+    await flushMicrotasks();
+    await act(async () => {
+      old.resolve({
+        status: 'ok',
+        entries: [{ path: 'obsolete.ts', status: 'binary', base: null, head: null }],
+        nextCursor: null,
+      });
+    });
+    expect(state?.ready).toBe(true);
+    expect(state?.summary.changeFilePaths).toEqual([]);
+    expect(state?.liveDiffStat).toEqual({ add: 0, del: 0, files: 0 });
+    expect(await provider.listChangedFiles()).toMatchObject({ files: [] });
+  });
+
   it('updates the sidebar summary from a completed live Branch manifest without waiting for history', async () => {
     let current = ['live.ts'];
     const provider = new CodeCollabSessionFileProvider({

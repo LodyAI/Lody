@@ -1,1 +1,0 @@
-Einstein's famous equation is $E = mc^2$ which describes mass-energy equivalence.

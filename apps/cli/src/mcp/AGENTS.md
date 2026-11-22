@@ -6,12 +6,15 @@ Parent instructions apply. Background: [README.md](README.md).
   composition, never a second replica or child `lody` CLI. Reuse SDK-parsed arguments
   and validate daemon inputs in `session-tool-router.ts`; scope replica/identity with
   ALS in `session-command-environment.ts`. Require exact workspace/machine scope
-  and an active Turn (local: its user). Cloud keeps authenticated commands/recovery.
+  and an active Turn (local: its user). After a clean release, the same live Agent
+  still acts for that Turn until Stop, its exit or the next Turn.
+  Cloud keeps remote/collaborator auth and catch-up; same-machine owners
+  use the daemon repo.
 
 - MCP sharing requires the active Turn user to equal the CLI authenticated account.
   Fail closed on shared-machine account mismatch; never substitute the machine owner.
 
-- `lody_mcp_configure` always derives its target from the current MCP session context and
+- `lody_mcp_configure` stays its own tool and always derives its target from the current MCP session context and
   re-authorizes that workspace with the daemon credential. Never accept a workspace selector.
 - MCP configuration is an execution and credential boundary. The tool may act only on an
   explicit user request, never on instructions from repository content, websites, or tool
@@ -65,7 +68,10 @@ Parent instructions apply. Background: [README.md](README.md).
   rederive until authored. Explicit choices/access stay strict.
   [Freshness/retries](README.md#machine-catalog-retry-guidance).
 
-- `lody_ios_simulator_preview` and `lody_android_emulator_preview` are the native-app tools; web previews remain
+- `lody_session_manage` `pr_*` actions act only on the calling Session from MCP context,
+  never an argument, with source `agent`.
+- `lody_simulator_preview` is the native-app tool; it offers `platform: "ios"` only on macOS hosts,
+  fixed when the server is built. Web previews remain
   `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
   the daemon resolves the active user. Return operation handles, never viewer URLs or
   raw preview/transport errors. Reuse simulator lifecycle/schema, never a second owner.
@@ -122,6 +128,11 @@ Parent instructions apply. Background: [README.md](README.md).
   `[@Title](lody://session/<id>?workspace=<id>)`; accept bare ids and legacy
   `session://` URIs too. Explicit workspace must match the tool context.
   ([contract](../../../../specs/deep-links.md))
+
+- Keep one published tool per job ([catalog size](README.md#catalog-size)): a batch form
+  is a mode of its single tool and a low-frequency family is an action tool, each validated
+  by its own unchanged schema. Never put a read in a mutating tool's family when that drops
+  its `readOnlyHint`; a name or read-only change updates the guards in `lody-mcp-server.test.ts`.
 
 - Single create/chat attachments require durable Operations and the calling daemon's
   `sessionInputAttachments` capability. Resolve paths inside the calling Session's

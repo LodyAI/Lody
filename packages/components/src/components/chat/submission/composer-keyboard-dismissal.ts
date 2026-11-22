@@ -1,5 +1,6 @@
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 /** Let the committed message surface paint before starting native keyboard motion. */
-export function dismissComposerKeyboardAfterPaint(input: HTMLTextAreaElement) {
+export function dismissComposerKeyboardAfterPaint(input: ComposerInputElement) {
   const document = input.ownerDocument;
   const window = document.defaultView;
   if (!window) return () => {};

@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Ground truth for the rewrite: specs/code-collab-v2.md.
+Current behavior and protocol references: [file surfaces](../../../../../.agents/docs/sessions-file-surfaces.md).
 File-by-file responsibilities: [README.md](README.md).
 
 ## Invariants
@@ -34,8 +34,10 @@ File-by-file responsibilities: [README.md](README.md).
   and the named Flock bridge in `apps/cli/src/lib/loro/doc.ts` lets Electron
   invalidate and refresh its Machine RPC snapshot. Both streams have 180-day TTL and
   must not enter repo meta. Root activation and terminal turn refresh may mirror only
-  compact aggregate add/del `diffStats`; file/diff watcher refreshes stay Flock-only, and PR
-  sessions retain committed compare totals. The injected `observeWorkspaceGit` observer
+  compact aggregate file counts and text add/del `diffStats` from the complete All Changes set before index
+  trimming, including uncommitted work even with an associated PR. Statistics reconciliation
+  must run when requested even if the index is unchanged. Unknown line counts preserve prior line totals while complete path counts still update; confirmed binary files contribute no text lines.
+  File/diff watcher refreshes stay Flock-only. The injected `observeWorkspaceGit` observer
   runs only on activation/explicit root refresh, never file watcher or terminal diff refresh;
   it must not gate file snapshots.
 - The whole published file index stays within `CODE_COLLAB_FILE_INDEX_LIMITS`
@@ -79,6 +81,10 @@ File-by-file responsibilities: [README.md](README.md).
   and 8 MiB of cached raw snapshots per request by default. Over-limit paths stay
   deferred for single-file loading. Never collect unbounded candidates or
   reconstruct deferred paths twice.
+- Git-backed current diffs must check file state against the same resolved repository and
+  pinned base before declaring equal text or binary placeholders unchanged. Content
+  equality does not rule out mode changes. Comparison failures stay retryable per file;
+  historical turn diffs use only stored evidence.
 - File RPCs convert absolute paths to workspace-relative paths only inside the
   target's registered session roots. Reject other paths as `invalid_path`;
   frontend path stripping never grants filesystem access.
@@ -106,6 +112,7 @@ File-by-file responsibilities: [README.md](README.md).
   a snapshot database or migrate it. Encrypted calls retain writer authority and
   execution claims. Reauthorize each page and serve only session-issued handles;
   never resolve a caller's hash as global authority.
+  Whole-list manifests omit patches; single-file requests prepare bounded remote hunks.
   Generation rows contain no content hashes. Disk identity and non-Git base metadata
   stay daemon-local and invalidate generations even when line counts are unchanged.
   [Decision](../../../../../.agents/notes/implemented/architecture/2026-10-31-remote-diff-transport.md).

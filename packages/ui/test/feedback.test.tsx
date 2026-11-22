@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, describe, expect, test } from 'vitest';
+import { act } from 'react';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Alert } from '../src/feedback/alert';
 import { Progress } from '../src/feedback/progress';
 
@@ -24,6 +25,7 @@ let mounted: Mounted | undefined;
 afterEach(async () => {
   await mounted?.unmount();
   mounted = undefined;
+  vi.useRealTimers();
 });
 
 describe('Alert', () => {
@@ -56,6 +58,89 @@ describe('Progress', () => {
 });
 
 describe('Toast', () => {
+  test('a timed message disappears without interacting with it', async () => {
+    vi.useFakeTimers();
+    const manager = Toast.createManager();
+    mounted = await mount(<Toast.Provider manager={manager} />);
+    await act(async () => {
+      manager.add({ title: 'Copied' });
+    });
+    expect(document.body.textContent).toContain('Copied');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(document.body.textContent).not.toContain('Copied');
+  });
+
+  test.each(['pointerup', 'pointercancel'])(
+    'touch compatibility mouse events do not leave the timeout paused after %s',
+    async (endEvent) => {
+      vi.useFakeTimers();
+      const manager = Toast.createManager();
+      mounted = await mount(<Toast.Provider manager={manager} />);
+      await act(async () => {
+        manager.add({ title: 'Copied' });
+      });
+      const toast = one('[role="dialog"]');
+      await act(async () => {
+        toast.dispatchEvent(
+          new PointerEvent('pointerover', { bubbles: true, pointerType: 'touch' })
+        );
+        toast.dispatchEvent(
+          new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' })
+        );
+        toast.dispatchEvent(new PointerEvent(endEvent, { bubbles: true, pointerType: 'touch' }));
+        toast.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        toast.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(document.body.textContent).not.toContain('Copied');
+    }
+  );
+
+  test('a persistent message stays until dismissed', async () => {
+    vi.useFakeTimers();
+    const manager = Toast.createManager();
+    mounted = await mount(<Toast.Provider manager={manager} />);
+    await act(async () => {
+      manager.add({ title: 'Copied', timeout: 0 });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(document.body.textContent).toContain('Copied');
+    await act(async () => {
+      one('button[aria-label="Close"]').click();
+    });
+    expect(document.body.textContent).not.toContain('Copied');
+  });
+
+  test('mouse hover still pauses the timeout until the pointer leaves', async () => {
+    vi.useFakeTimers();
+    const manager = Toast.createManager();
+    mounted = await mount(<Toast.Provider manager={manager} />);
+    await act(async () => {
+      manager.add({ title: 'Copied' });
+    });
+    const toast = one('[role="dialog"]');
+    await act(async () => {
+      toast.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(document.body.textContent).toContain('Copied');
+    await act(async () => {
+      toast.dispatchEvent(
+        new PointerEvent('pointerout', {
+          bubbles: true,
+          pointerType: 'mouse',
+          relatedTarget: document.body,
+        })
+      );
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(document.body.textContent).not.toContain('Copied');
+  });
+
   const report = async (
     manager: ReturnType<typeof Toast.createManager>,
     options: Parameters<ReturnType<typeof Toast.createManager>['add']>[0]

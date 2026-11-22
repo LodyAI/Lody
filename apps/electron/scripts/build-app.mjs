@@ -31,4 +31,8 @@ function run(entry, args) {
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
 
-run(electronViteEntry, ['build', '--mode', 'oss'])
+run(electronViteEntry, [
+  'build',
+  '--mode',
+  process.env.VITE_LODY_PLATFORM === 'cloud' ? process.env.LODY_ENV || 'production' : 'oss'
+])

@@ -22,6 +22,13 @@ export interface JoinRequest {
 /** Unverified decoded ordinary operation. */
 export type Operation =
   | {
+      readonly type: 'abandonEpoch';
+      readonly epoch: Bytes.EpochNumber;
+      readonly commitment: Bytes.EpochCommitment;
+      readonly baseEpoch: Bytes.EpochNumber;
+      readonly previousEpochKey: Uint8Array;
+    }
+  | {
       readonly type: 'admitMember';
       readonly membershipId: Bytes.MembershipId;
       readonly request: JoinRequest;
@@ -228,6 +235,20 @@ function parseOperation(value: CborValue): Result.Result<Operation, LedgerError>
           type: 'removeMember',
           membershipId: yield* lift(Bytes.membershipId(p[1])),
         });
+      case 11: {
+        yield* array(p, 5);
+        const epoch = yield* lift(Bytes.epochNumber(p[1]));
+        const baseEpoch = yield* lift(Bytes.epochNumber(p[3]));
+        if (epoch === 0 || !(p[4] instanceof Uint8Array) || p[4].length !== 72)
+          return yield* fail('invalid-operation');
+        return Object.freeze({
+          type: 'abandonEpoch',
+          epoch,
+          baseEpoch,
+          commitment: yield* lift(Bytes.epochCommitment(p[2])),
+          previousEpochKey: new Uint8Array(p[4]),
+        });
+      }
       default:
         return yield* fail('unknown-operation');
     }

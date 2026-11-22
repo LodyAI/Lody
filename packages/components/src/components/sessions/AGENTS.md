@@ -16,8 +16,8 @@ Read parent rules and linked context.
   may replace the current choice with a neighbour or local draft. Close writes
   `isTabClosed`, never archive/delete; reopen clears only it, never unarchives.
 - Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md).
-- `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
-  they stay separate actions.
+- `Change owner` writes the OWNER `SessionMeta.userId`, never sharing;
+  candidates need machine/project access.
 
 ## [Shell, side panel, side chats](../../../../../.agents/docs/sessions-side-panel.md)
 
@@ -42,9 +42,13 @@ Read parent rules and linked context.
   (`fromPageContent`) never opens private LAN; only the address bar may.
 - Preload one bounded frame after live confirmation; require atomic moves, no
   polling, and cleanup safe after Browser takeover.
-- Static HTML requires policy-owned `srcdoc`. Scripts require credentialless and
-  `allow-scripts` only; otherwise use navigation-stripped HTML with an empty sandbox.
-  Never preview truncated text; static frames die with their tab.
+- Static HTML requires policy-owned `srcdoc`. Scripts follow
+  `getExecutableHtmlPreviewSupport()` plus `scriptsOptedIn` via
+  `useManagedPreviewFrame` only (see sessions-browser.md); else use
+  navigation-stripped HTML with an empty sandbox.
+  The only other executable frame is the consented desktop direct preview in
+  `local-html-preview.tsx` (same doc).
+  Paged HTML may open from disk after consent. Never render partial text; static frames die with their tab.
 - Encrypted remote preview controls require the existing protected feature host
   and verified write role; never fall back to ordinary preview proofs. Explain
   that page bytes pass through the tunnel service as plaintext.
@@ -56,9 +60,9 @@ Read parent rules and linked context.
   `nativeKeyboardInset`. Wide sessions inherit root padding once.
 - Message-list crash fallback preserves the composer and copies the shared report
   with the original error and React component stacks.
-- Read receipts require per-surface `isVisible`, never mere mounting.
+- Read receipts require per-surface `isVisible`, active foreground window, and page interaction, never mere mounting.
 - Every user management action uses `useSessionActions`; its shared guard checks current Repo metadata for every affected target before side effects, including contained/opened sessions.
-- Encrypted history uses the bound runtime's document access without expanding machine/project execution indexes. Unavailable targets mount only the document reader, without machine probes or RPC. [Boundary](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#member-visibility-a4).
+- Read-only sessions require authoritative root grants matching the current Meta machine. Mount only the independent reader, preserving preferences, Markdown and references. Never expose machine controls or management. [Boundary](../../../../../specs/session-access.md).
 - Window-top history headers reuse the shared drag-region helper and exempt interactive controls, so workspace drag strips cannot cover their buttons.
 - Keep question drafts on navigation and IME Enter; show failures.
 - Markdown copy uses `buildConversationMarkdown`, not `buildReplayPromptFromHistory`:
@@ -97,20 +101,13 @@ Read parent rules and linked context.
 - No presence: queue behind unfinished turns; never relight Working.
 - Busy composer without authoritative steer uses Queue.
 - Interrupt-and-send cancels with `{ interrupt: true }`, never the Stop identity:
-  an Inbox-aware Stop pauses and cancels every queued input, losing the guidance (#2050).
+  Stop retains paused drafts; only explicit queue actions reissue them.
 - Uploads: [contract](../../../../../specs/composer-send-during-upload.md).
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
 
-- Keep cluster order and one nonempty stage when items exist. Hide only without
-  items or ambient content. Machine (desktop name/mobile icon) stays unstaged;
-  ownership appears only in details. Scheduled drafts live in the composer, never the bar.
-- Stage icons stay inert; reserve colour for genuine status; no pulses.
-- Reported preview requests enable simulator actions. One platform opens directly;
-  iOS + Android share a chooser on desktop and mobile, targeting the main conversation.
-- Open preview stays gated on a real reported target; repository actions are
-  priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
-  below the reply.
+Follow the linked composer contract for cluster visibility, stage interaction,
+preview admission, repository-action priority and workspace diff presentation.
 
 ## [Session status slot](../../../../../.agents/docs/sessions-auto-review.md)
 
@@ -132,6 +129,7 @@ Read parent rules and linked context.
 
 ## [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 
+- Visible Changes lists fetch the complete Branch manifest on opening; hidden lists cancel paging, and file bodies load on demand.
 - File actions use `hooks/use-session-file-actions.ts` + `lib/session-file-actions.ts`;
   never duplicate capability checks or expose unavailable local-host actions.
 - A failed conversation file-link index must release its optional cache lease and

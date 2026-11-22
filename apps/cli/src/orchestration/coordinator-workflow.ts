@@ -15,7 +15,7 @@ import {
   getOperationProgressTurnId,
   type OperationProgressStatusByTarget,
 } from '@lody/shared/session-data';
-import { Cause, Context, Effect, Exit, Layer, Scope } from 'effect';
+import { Cause, Context, Effect, Exit, FiberMap, Layer, Scope, Semaphore } from 'effect';
 import { CoordinatorActivity } from './coordinator-activity';
 import {
   assistantOutputPreview,
@@ -23,9 +23,15 @@ import {
   isTerminalAssistantEntry,
   MAX_STEER_HANDOFF_HOPS,
   progressIsSettled,
+  resolveOperationTargetMachineId,
   targetFailureError,
 } from './coordinator-model';
-import { CoordinatorPorts, type CoordinatorHistory } from './coordinator-ports';
+import {
+  CoordinatorPorts,
+  TARGET_CATCH_UP_TIMEOUT_MS,
+  TargetCatchUpTimeoutError,
+  type CoordinatorHistory,
+} from './coordinator-ports';
 import { OperationRepository } from './operation-repository';
 
 /** Where a delegated target's work stands after following applied steer handoffs. */
@@ -58,8 +64,28 @@ export class CoordinatorWorkflow {
     private readonly ports: CoordinatorPorts['Service'],
     private readonly operations: OperationRepository['Service'],
     private readonly activity: CoordinatorActivity['Service'],
-    private readonly scope: Scope.Scope
+    private readonly scope: Scope.Scope,
+    private readonly materializations: FiberMap.FiberMap<string, void, never>,
+    private readonly materializationPermits: Semaphore.Semaphore
   ) {}
+  drain = Effect.gen(
+    function* (this: CoordinatorWorkflow) {
+      for (;;) {
+        yield* this.activity.drain;
+        const inFlight = yield* FiberMap.size(this.materializations);
+        if (inFlight === 0 && !this.activity.hasPending()) return;
+        if (inFlight > 0) yield* FiberMap.awaitEmpty(this.materializations);
+      }
+    }.bind(this)
+  );
+  stopDrain = Effect.gen(
+    function* (this: CoordinatorWorkflow) {
+      yield* FiberMap.clear(this.materializations);
+      yield* this.activity.drain;
+      yield* FiberMap.clear(this.materializations);
+    }.bind(this)
+  );
+  cancelInactiveOperations = (activeKeys: Set<string>) => this.dropInactiveResources(activeKeys);
   private get started() {
     return this.ports.active();
   }
@@ -153,12 +179,10 @@ export class CoordinatorWorkflow {
         Date.parse(operation.deadlineAt) - this.now(),
         'deadline'
       );
-      const key = this.operationKey(operation);
-      const controller = yield* this.ports.operation(key);
       const isAtDeadline = () => this.now() >= Date.parse(operation.deadlineAt);
       const reconciled = yield* Effect.exit(
         this.mapItemsWithConcurrency(operation.items, 5, (item, index) =>
-          this.reconcileItem(operation, item, index, isAtDeadline, controller.signal)
+          this.reconcileItem(operation, item, index, isAtDeadline)
         )
       );
       if (Exit.isFailure(reconciled)) {
@@ -347,19 +371,132 @@ export class CoordinatorWorkflow {
     }
     return { _tag: 'Done', assistant: current };
   });
+  runItemMaterialization = Effect.fn('Coordinator.materializeItem')(
+    function* (
+      this: CoordinatorWorkflow,
+      operation: StoredLodyOperation,
+      item: Extract<LodyOperationItemResult, { status: 'active' }>,
+      index: number
+    ): Effect.fn.Return<void, never> {
+      const isAtDeadline = () => this.now() >= Date.parse(operation.deadlineAt);
+      const target = item.target;
+      yield* this.materializationPermits
+        .withPermits(1)(
+          Effect.gen(
+            function* (this: CoordinatorWorkflow) {
+              if (!this.started) return;
+              const reason = `orchestration.materialize:${operation.operationId}:${index}`;
+              const targetMetaRecord = yield* this.ports.metadata(target.sessionId);
+              const requesterMetaRecord =
+                !targetMetaRecord?.meta &&
+                (operation.kind === 'session_create' || operation.kind === 'session_create_many')
+                  ? yield* this.ports.metadata(operation.requesterSessionId)
+                  : undefined;
+              const targetMachineId = resolveOperationTargetMachineId({
+                operation,
+                index,
+                targetMeta: targetMetaRecord?.meta,
+                requesterMeta: requesterMetaRecord?.meta,
+              });
+              const caughtUp = yield* Effect.exit(
+                this.ports.confirmReadable(target.sessionId, reason, targetMachineId).pipe(
+                  Effect.timeoutOrElse({
+                    duration: TARGET_CATCH_UP_TIMEOUT_MS,
+                    orElse: () =>
+                      Effect.fail(
+                        new TargetCatchUpTimeoutError({
+                          sessionId: target.sessionId,
+                          reason,
+                          timeoutMs: TARGET_CATCH_UP_TIMEOUT_MS,
+                        })
+                      ),
+                  })
+                )
+              );
+              if (Exit.isFailure(caughtUp)) {
+                if (Cause.hasInterrupts(caughtUp.cause))
+                  return yield* Effect.failCause(caughtUp.cause);
+                if (!isAtDeadline()) {
+                  const delayMs = yield* this.armMaterializationFailureRetry(operation, index);
+                  yield* this.ports.warn(
+                    `[orchestration] Target document catch-up was not confirmed (${operation.operationId}:${index}); retrying in ${delayMs}ms: ${String(Cause.squash(caughtUp.cause))}`,
+                    caughtUp.cause
+                  );
+                  return;
+                }
+                yield* this.activity.signal('materialization-deadline');
+                return;
+              }
+              if (!this.started) return;
+              let alreadyMaterialized = yield* this.isTargetInputDurable(
+                target.sessionId,
+                target.userTurnId
+              );
+              if (!alreadyMaterialized && !isAtDeadline()) {
+                const materialized = yield* Effect.exit(
+                  this.ports.materialize(operation, item, index)
+                );
+                if (Exit.isFailure(materialized)) {
+                  if (Cause.hasInterrupts(materialized.cause))
+                    return yield* Effect.failCause(materialized.cause);
+                  const delayMs = yield* this.armMaterializationFailureRetry(operation, index);
+                  yield* this.ports.warn(
+                    `[orchestration] Target materialization failed (${operation.operationId}:${index}); retrying in ${delayMs}ms: ${String(Cause.squash(materialized.cause))}`,
+                    materialized.cause
+                  );
+                  return;
+                }
+                if (!this.started) return;
+                alreadyMaterialized = true;
+              }
+              if (!alreadyMaterialized) {
+                yield* this.activity.signal('materialization-deadline');
+                return;
+              }
+              const materializedOperation = yield* this.operations.markItemInputDurable(
+                operation.requesterSessionId,
+                operation.operationId,
+                index,
+                this.materializationClaimToken
+              );
+              // Publish each recovered child without waiting for slower batch siblings.
+              yield* this.writeOperationProgress(materializedOperation);
+              yield* this.clearMaterializationRetry(operation, index);
+              yield* this.activity.signal('materialized');
+            }.bind(this)
+          )
+        )
+        .pipe(
+          Effect.catchCause((cause) => {
+            if (Cause.hasInterrupts(cause)) return Effect.interrupt;
+            return Effect.gen(
+              function* (this: CoordinatorWorkflow) {
+                if (!this.started) return;
+                if (isAtDeadline()) {
+                  yield* this.activity.signal('materialization-deadline');
+                  return;
+                }
+                const delayMs = yield* this.armMaterializationFailureRetry(operation, index);
+                yield* this.ports.warn(
+                  `[orchestration] Target materialization failed (${operation.operationId}:${index}); retrying in ${delayMs}ms: ${String(Cause.squash(cause))}`,
+                  cause
+                );
+              }.bind(this)
+            );
+          })
+        );
+    }.bind(this)
+  );
   reconcileItem = Effect.fnUntraced(
     function* (
       this: CoordinatorWorkflow,
       operation: StoredLodyOperation,
       item: LodyOperationItemResult,
       index: number,
-      isAtDeadline: () => boolean,
-      signal: {
-        readonly aborted: boolean;
-      }
+      isAtDeadline: () => boolean
     ): Effect.fn.Return<LodyOperationItemResult, unknown> {
       if (item.status !== 'active') return item;
-      if (signal.aborted) return item;
+      if (!this.started) return item;
       const target = item.target;
       // Local Stop is authoritative even if cancellation history has not flushed yet.
       if (
@@ -368,28 +505,50 @@ export class CoordinatorWorkflow {
           target.sessionId,
           target.userTurnId
         )) === 'user_stop'
-      )
+      ) {
+        yield* FiberMap.remove(this.materializations, this.materializationKey(operation, index));
         return {
           status: 'cancelled',
           cancellationReason: 'user_stop',
           target,
           ...(item.label ? { label: item.label } : {}),
         };
+      }
       if (!item.inputDurable) {
-        let alreadyMaterialized = yield* this.isTargetInputDurable(
+        const materialKey = this.materializationKey(operation, index);
+        const alreadyMaterialized = yield* this.isTargetInputDurable(
           target.sessionId,
           target.userTurnId
         );
-        let claimedMaterialization = false;
-        if (
-          !alreadyMaterialized &&
-          !isAtDeadline() &&
-          this.hasMaterializationRetry(operation, index)
-        ) {
-          return item;
-        }
-        if (!alreadyMaterialized && !isAtDeadline()) {
-          if (signal.aborted) return item;
+        if (alreadyMaterialized) {
+          const materializedOperation = yield* this.operations.markItemInputDurable(
+            operation.requesterSessionId,
+            operation.operationId,
+            index
+          );
+          yield* this.writeOperationProgress(materializedOperation);
+          yield* this.clearMaterializationRetry(operation, index);
+          item = { ...item, inputDurable: true };
+        } else if (isAtDeadline()) {
+          yield* FiberMap.remove(this.materializations, materialKey);
+          yield* this.clearMaterializationRetry(operation, index);
+          return {
+            status: 'failed',
+            ...(item.label ? { label: item.label } : {}),
+            target: item.target,
+            error: makeLodyError(
+              'TARGET_TIMEOUT',
+              'Target input was not durably materialized before the Operation deadline.',
+              false
+            ),
+          };
+        } else {
+          if (
+            (yield* FiberMap.has(this.materializations, materialKey)) ||
+            this.hasMaterializationRetry(operation, index)
+          ) {
+            return item;
+          }
           const claim = yield* this.operations.claimItemMaterialization(
             operation.requesterSessionId,
             operation.operationId,
@@ -402,66 +561,15 @@ export class CoordinatorWorkflow {
             }
             return item;
           }
-          claimedMaterialization = true;
-          const reason = `orchestration.materialize:${operation.operationId}:${index}`;
-          const caughtUp = yield* Effect.exit(this.ports.confirmReadable(target.sessionId, reason));
-          if (Exit.isFailure(caughtUp)) {
-            if (Cause.hasInterrupts(caughtUp.cause)) return yield* Effect.failCause(caughtUp.cause);
-            if (signal.aborted) return item;
-            if (!isAtDeadline()) {
-              const delayMs = yield* this.armMaterializationFailureRetry(operation, index);
-              yield* this.ports.warn(
-                `[orchestration] Target document catch-up was not confirmed (${operation.operationId}:${index}); retrying in ${delayMs}ms: ${String(Cause.squash(caughtUp.cause))}`,
-                caughtUp.cause
-              );
-              return item;
-            }
-          }
-          if (signal.aborted) return item;
-          alreadyMaterialized = yield* this.isTargetInputDurable(
-            target.sessionId,
-            target.userTurnId
+          if (!this.started) return item;
+          yield* FiberMap.run(
+            this.materializations,
+            materialKey,
+            this.runItemMaterialization(operation, item, index),
+            { onlyIfMissing: true }
           );
+          return item;
         }
-        if (!alreadyMaterialized && !isAtDeadline()) {
-          const materialized = yield* Effect.exit(this.ports.materialize(operation, item, index));
-          if (Exit.isFailure(materialized)) {
-            if (Cause.hasInterrupts(materialized.cause))
-              return yield* Effect.failCause(materialized.cause);
-            if (signal.aborted) return item;
-            const delayMs = yield* this.armMaterializationFailureRetry(operation, index);
-            yield* this.ports.warn(
-              `[orchestration] Target materialization failed (${operation.operationId}:${index}); retrying in ${delayMs}ms: ${String(Cause.squash(materialized.cause))}`,
-              materialized.cause
-            );
-            return item;
-          }
-          if (signal.aborted) return item;
-          alreadyMaterialized = true;
-        }
-        if (!alreadyMaterialized) {
-          yield* this.clearMaterializationRetry(operation, index);
-          return {
-            status: 'failed',
-            ...(item.label ? { label: item.label } : {}),
-            target: item.target,
-            error: makeLodyError(
-              'TARGET_TIMEOUT',
-              'Target input was not durably materialized before the Operation deadline.',
-              false
-            ),
-          };
-        }
-        const materializedOperation = yield* this.operations.markItemInputDurable(
-          operation.requesterSessionId,
-          operation.operationId,
-          index,
-          claimedMaterialization ? this.materializationClaimToken : undefined
-        );
-        // Publish each recovered child without waiting for slower batch siblings.
-        yield* this.writeOperationProgress(materializedOperation);
-        yield* this.clearMaterializationRetry(operation, index);
-        item = { ...item, inputDurable: true };
       }
       const metaRecord = yield* this.ports.metadata(item.target.sessionId);
       if (!metaRecord?.meta) {
@@ -506,7 +614,8 @@ export class CoordinatorWorkflow {
         cancellationReason: SessionHistoryInput['cancellationReason']
       ): LodyOperationItemResult => ({
         status: 'cancelled',
-        ...(cancellationReason ? { cancellationReason } : {}),
+        // Operation results record only a manual Stop; an update interruption is not one.
+        ...(cancellationReason === 'user_stop' ? { cancellationReason } : {}),
         ...(item.label ? { label: item.label } : {}),
         target: item.target,
       });
@@ -631,19 +740,27 @@ export class CoordinatorWorkflow {
     function* (this: CoordinatorWorkflow, op: StoredLodyOperation) {
       const prefix = 'material:' + this.operationKey(op) + '\0';
       yield* this.activity.cancelWhere((key) => key.startsWith(prefix));
+      for (const [key] of [...this.materializations]) {
+        if (key.startsWith(prefix)) yield* FiberMap.remove(this.materializations, key);
+      }
       for (const key of this.materializationRetryAttempts.keys())
         if (key.startsWith(prefix)) this.materializationRetryAttempts.delete(key);
     }.bind(this)
   );
   dropInactiveResources = Effect.fnUntraced(
     function* (this: CoordinatorWorkflow, keys: Set<string>) {
+      const isInactiveMaterialKey = (key: string) =>
+        key.startsWith('material:') &&
+        ![...keys].some((op) => key.startsWith('material:' + op + '\0'));
       yield* this.activity.cancelWhere((key) =>
-        key.startsWith('deadline:')
-          ? !keys.has(key.slice(9))
-          : key.startsWith('material:') &&
-            ![...keys].some((op) => key.startsWith('material:' + op + '\0'))
+        key.startsWith('deadline:') ? !keys.has(key.slice(9)) : isInactiveMaterialKey(key)
       );
-      yield* this.ports.cancelInactive(keys);
+      for (const [key] of [...this.materializations]) {
+        if (isInactiveMaterialKey(key)) yield* FiberMap.remove(this.materializations, key);
+      }
+      for (const key of this.materializationRetryAttempts.keys()) {
+        if (isInactiveMaterialKey(key)) this.materializationRetryAttempts.delete(key);
+      }
     }.bind(this)
   );
 }
@@ -670,7 +787,17 @@ export class CoordinatorScope extends Context.Service<
             const operations = yield* OperationRepository;
             const activity = yield* CoordinatorActivity;
             const scope = yield* Effect.scope;
-            core = new CoordinatorWorkflow(options, ports, operations, activity, scope);
+            const materializations = yield* FiberMap.make<string, void, never>();
+            const materializationPermits = yield* Semaphore.make(5);
+            core = new CoordinatorWorkflow(
+              options,
+              ports,
+              operations,
+              activity,
+              scope,
+              materializations,
+              materializationPermits
+            );
             return { core, activity };
           })
         ).pipe(Layer.provideMerge(activityLayer));

@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -170,8 +168,10 @@ describe('ElectronSessionCompletionNotifier', () => {
     await updateSessions([createSession('s1', { type: 'idle' })]);
     expect(showSessionCompletionNotification).not.toHaveBeenCalled();
 
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(5000);
+      // Notification formatting resolves through a lazy import.
+      await vi.dynamicImportSettled();
     });
 
     expect(showSessionCompletionNotification).toHaveBeenCalledTimes(1);

@@ -93,7 +93,7 @@ export function ensureLodyDataDir(platform?: PlatformKind, homeDir?: string): st
   const dataDir =
     homeDir === undefined ? getLodyDataDir(platform) : getLodyDataDir(platform, homeDir);
   try {
-    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   } catch (error) {
     throw new LodyDataDirUnavailableError(dataDir, error);
   }

@@ -55,7 +55,27 @@ export function envelopeFixture(
     ok(encodeCbor([body, signer.signBytes(tag('sig/v1', ok(encodeCbor(body))))]));
   const member = new Uint8Array(16).fill(10);
   const records = [
-    signed([1, owner.raw, ownerUser, member, new Uint8Array(32).fill(org), commitment.toBytes()]),
+    signed([
+      1,
+      owner.raw,
+      ownerUser,
+      member,
+      new Uint8Array(
+        createPublicKey(
+          createPrivateKey({
+            key: Buffer.concat([
+              Buffer.from('302e020100300506032b656e04220420', 'hex'),
+              Buffer.alloc(32, org),
+            ]),
+            format: 'der',
+            type: 'pkcs8',
+          })
+        )
+          .export({ format: 'der', type: 'spki' })
+          .subarray(-32)
+      ),
+      commitment.toBytes(),
+    ]),
   ];
   const genesis = ok(Public.Bytes.genesisHash(Ledger.hashRecordBytes(records[0]!).toBytes()));
   const view = () =>

@@ -92,6 +92,32 @@ record showing this process wrote the entry from the current inputs (see below),
 `ACP_CAPABILITY_REFRESH_CACHE_TTL_MS`. `decideAcpCapabilityRefreshCache` in `@lody/shared` owns
 that decision and names each miss reason, which the machine logs.
 
+### Follow-up: degraded entries never hit (2026-11-08, #2441)
+
+The cache trusted any persisted entry whose versions, provenance, launch inputs and age checked
+out — including the pathological one where the probe itself succeeded but the agent advertised a
+model-typed select option with zero choices (Devin 3000.11.3 serving `options: []` from a cold
+`model_configs_v6` cache, #2440). Once persisted, that empty model list answered every refresh
+for the entry's full lifetime, and `getAcpCapabilityCacheEntryAuthority` called it authoritative,
+so onboarding and Provider Settings could report a verified provider whose picker was empty.
+
+`getAcpCapabilityCacheStaleReason` now misses with `empty-model-catalog` when the persisted
+`configOptions` show an empty model select — read directly off the row, no persisted flag — which
+covers rows written before the rule existed. The same predicate feeds
+`getAcpCapabilityCacheEntryAuthority`, which now returns a new `degraded` tier for such entries:
+every `=== 'authoritative'` verification check (onboarding status, provider test, session fork,
+steer) stops accepting them, while selector building treats `degraded` like `provisional` and
+keeps the currently selected model visible instead of an empty list. The agent-config dialog and
+onboarding provider test additionally surface the empty catalog as a verification failure with a
+dedicated reason instead of "passed". An earlier revision of this fix persisted a `modelsDegraded`
+flag and excluded entries whose `models` list was populated; review dropped both — the flag is
+fully derivable and the picker renders the select directly, so a covered `models` array does not
+make an empty select usable.
+
+Cost analysis: a degraded entry re-probes on each non-forced refresh until it heals. Forced
+requests already re-probed; automatic startup refresh is latched per config per runtime pass, so
+a stuck-degraded config costs at most one probe per renderer start.
+
 Resolving "the version a probe would stamp" is the non-obvious part. The stored version is the one
 the *launcher* produced, and for managed builtins that includes the installed runtime version
 (`builtin-kimi:0.36.0`), which `getAcpCapabilitySourceVersion(input)` alone cannot reproduce.
@@ -132,6 +158,35 @@ starts at least one session per 12 hours has its entry renewed before it can exp
 initial probe has confirmed the command preview and launch inputs. A threshold equal to the TTL would bound writes the same way but let an
 entry used every 20 hours still lapse; a smaller one only adds writes. Probes after expiry always
 renew, since an expired entry is by definition past half its lifetime.
+
+### Machine Flock volume and mixed versions
+
+Capability comparison includes `goalActions`. Same-source option structures retain the stored
+`currentValue` defaults; session model/mode/effort selections do not replace that baseline.
+The incoming model answer is recorded first. Per-model pointers share a same-source shape
+when only current values differ; unreferenced shapes are removed. New sources or changed
+choices still publish their declarations.
+
+The complete `['acpCapability', configId]` value remains readable without joining new keys.
+Flock currently replaces whole JSON values; there is no field patch operation. Half-TTL
+renewal and real `authMethods` changes therefore still rewrite the complete row. Splitting
+fields while mirroring the old row saves no bytes; stopping the mirror gives old Web/CLI/Mobile
+readers stale freshness or sign-in methods. References replacing options or commands likewise
+remove understood data from old readers. A cache-version bump cannot teach them to join keys.
+
+Future splitting requires readers deployed first and an explicit minimum-reader boundary
+before retiring the complete row, source-bound references, and atomic generation publication.
+Old full-row writers must remain on the legacy format or invalidate the new generation when
+they write, so readers cannot combine stale split fields with a fresh legacy row. This change
+uses existing-format deduplication and does not activate that migration or compact Streams history.
+
+Quota rows also retain their format. Unchanged usage, scope, plan, wallet and window multisets
+skip writes when only resets differ by at most two seconds from the persisted baseline (less
+for very short windows). A persisted baseline prevents consecutive small drifts from hiding
+real changes indefinitely. Null transitions, usage changes and cycle rollovers are published.
+`machine-document-capabilities.test.ts` checks native Flock checkpoints; shared
+`machine-flock.test.ts` covers shape reuse and quota publication boundaries. These tests do
+not establish acceptance by installed old clients or deployed transport behavior.
 
 ### Why the TTL is 24 hours
 

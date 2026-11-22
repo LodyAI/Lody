@@ -165,14 +165,14 @@ function SettingsInnerContent({
  *     outer drill is already animating; skip the inner one.
  *   - `hasMounted === true` and `consumeMobileBackNavigation()`
  *     returns true → this mount is the destination of a back-nav
- *     (the back chip / edge swipe set the flag), so skip the
- *     forward-direction slide-in.
+ *     (the back chip / edge swipe set the flag): play the parallax
+ *     reveal under the sliding-off page instead of a forward push.
  *   - Otherwise → forward navigation, run the drill.
  */
 function SettingsInnerBody({ children, hasMounted }: { children: ReactNode; hasMounted: boolean }) {
-  const [skipDrill] = useState(() => {
-    if (!hasMounted) return true;
-    return consumeMobileBackNavigation();
+  const [entrance] = useState<'none' | 'reveal' | 'push'>(() => {
+    if (!hasMounted) return 'none';
+    return consumeMobileBackNavigation() ? 'reveal' : 'push';
   });
 
   return (
@@ -186,7 +186,8 @@ function SettingsInnerBody({ children, hasMounted }: { children: ReactNode; hasM
            Pages with their own scroll regions (agent-config) opt out
            by overriding inside their own component. */
         'pb-safe-4',
-        !skipDrill && 'mobile-drill-in'
+        entrance === 'push' && 'mobile-drill-in',
+        entrance === 'reveal' && 'mobile-drill-reveal'
       )}
     >
       {children}

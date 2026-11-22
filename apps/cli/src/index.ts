@@ -3,7 +3,18 @@
 // the SQLite binding cannot load — Node-API < 10 segfaults rather than throwing, and
 // 32-bit ARM has no prebuild. See utils/sqlite-runtime-support.ts.
 import './utils/sqlite-runtime-support';
+import { releaseScopedMallocArenaLimit } from './utils/malloc-arena';
+
+releaseScopedMallocArenaLimit();
+
+const { forwardToSelectedManagedInstallation } = await import('./lib/managed-daemon-forwarding');
+if (await forwardToSelectedManagedInstallation()) process.exit(process.exitCode ?? 0);
+
 import './instrument';
+import {
+  configureManagedProcessObservation,
+  getManagedWorkerLaunchContext,
+} from './lib/managed-process-observation';
 import { Command } from 'commander';
 import { Cause, Effect, Layer } from 'effect';
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
@@ -11,21 +22,14 @@ import {
   LoginShellCacheLive,
   LoginShellCacheReporter,
   loginShellEnvLayer,
+  recoverLoginShellCacheShutdown,
 } from '@lody/shared/node/login-shell-env';
 import {
   bindLoginShellCacheLegacy,
   closeLoginShellApplicationLegacy,
 } from './agent/login-shell-env';
 import { toShared } from './platform/process-options';
-import { presencePlatformLayer } from './platform/presence';
-import { WorkspacePresenceOwnersLive } from './lib/loro/workspace-presence';
-import {
-  bindWorkspacePresenceApplicationLegacy,
-  recoverCliPresenceApplicationShutdown,
-  WorkspacePresenceLegacyFailure,
-} from './lib/loro/presence-legacy';
 import { version } from '@/pkg';
-import { internalCommand } from './commands/internal';
 import { loadEnv } from './utils/const';
 import { getLogger } from './utils/logger';
 import { registerProcessErrorHandlers, reportError } from './utils/telemetry';
@@ -34,6 +38,8 @@ import { applyDefaultDnsResultOrder } from './utils/dns-result-order';
 
 // Internal MCP processes use the same runtime and cleanup policy without retaining
 // the daemon, interactive commands and their unrelated implementation modules.
+configureManagedProcessObservation(getManagedWorkerLaunchContext().protocol);
+
 const registerUserCommands =
   process.argv[2] === '__internal'
     ? undefined
@@ -62,18 +68,17 @@ const shellCache = LoginShellCacheLive.pipe(
     )
   )
 );
-const application = makeApplicationRuntime(
-  Layer.merge(
-    shellCache,
-    WorkspacePresenceOwnersLive.pipe(Layer.provide(presencePlatformLayer(cliLogger)))
-  ),
-  {
-    recover: recoverCliPresenceApplicationShutdown,
-    project: (cause) => new WorkspacePresenceLegacyFailure(cause),
-  }
-);
+const application =
+  process.argv[2] === 'daemon-runner'
+    ? makeApplicationRuntime(shellCache, {
+        recover: recoverLoginShellCacheShutdown,
+        project: (cause) => Cause.squash(cause),
+      })
+    : (await import('./cli-presence-application')).makeCliPresenceApplication(
+        shellCache,
+        cliLogger
+      );
 bindLoginShellCacheLegacy(application);
-bindWorkspacePresenceApplicationLegacy(application);
 
 const program = new Command();
 
@@ -86,7 +91,7 @@ program
 if (registerUserCommands) {
   registerUserCommands(program);
 } else {
-  program.addCommand(internalCommand);
+  program.addCommand((await import('./commands/internal')).internalCommand);
 }
 // Configure commander to show help when no arguments provided
 program.configureHelp({

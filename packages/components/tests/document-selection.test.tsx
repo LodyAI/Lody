@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,10 +8,9 @@ import {
   DocumentSelectionSurface,
   useDocumentSelection,
 } from '../src/components/sessions/document-selection-surface';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
-}));
+const testI18n = createTestI18n();
 
 describe('document selection ownership', () => {
   let root: Root, container: HTMLDivElement;
@@ -45,9 +43,17 @@ describe('document selection ownership', () => {
   ) => {
     await act(async () =>
       root.render(
-        <DocumentSelectionSurface path="report.xlsx" source={source} active={active} onAdd={onAdd}>
-          {child}
-        </DocumentSelectionSurface>
+        withTestI18n(
+          <DocumentSelectionSurface
+            path="report.xlsx"
+            source={source}
+            active={active}
+            onAdd={onAdd}
+          >
+            {child}
+          </DocumentSelectionSurface>,
+          testI18n
+        )
       )
     );
   };

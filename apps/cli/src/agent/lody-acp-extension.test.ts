@@ -7,39 +7,27 @@ describe('Core usage accounting boundary', () => {
   it('scopes Core-marked snapshots for any provider and keeps the native routing session', () => {
     const usage = { inputTokens: 2000, outputTokens: 0, cacheReadInputTokens: 0 };
     const update = { sessionId: 'native', usage, modelUsage: { 'model-b': usage } };
-    const parse = (provider: string, _meta: Record<string, unknown>) =>
+    const parse = (_meta: Record<string, unknown>) =>
       parseLodyExtensionMessage({
         method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
         params: { ...update, _meta },
         sessionId: 'native',
-        provider,
       });
-    for (const provider of ['claude', 'codex', 'kimi']) {
-      expect(parse(provider, { lody: { usageScopeId: 'result/1' } })).toEqual({
-        type: 'usage',
-        accountingId: 'native:scope:result%2F1',
-        update,
-      });
-    }
+    expect(parse({ lody: { usageScopeId: 'result/1' } })).toEqual({
+      type: 'usage',
+      accountingId: 'native:scope:result%2F1',
+      update,
+    });
     expect(
       parseLodyExtensionMessage({
         method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
         params: { ...update, _meta: { lody: { usageScopeId: 'result/1' } } },
         sessionId: 'lody-session',
-        provider: 'claude',
       })
     ).toEqual({ type: 'usage', accountingId: 'native:scope:result%2F1', update });
-    // Legacy Codex spelling maps to the same identity; other providers ignore it.
-    expect(parse('codex', { codex: { usageTurnId: 'turn-b' } })).toEqual({
-      type: 'usage',
-      accountingId: 'native:scope:turn-b',
-      update,
-    });
-    expect(parse('claude', { codex: { usageTurnId: 'turn-b' } })).toEqual({
-      type: 'usage',
-      update,
-    });
-    expect(parse('claude', { lody: { usageScopeId: '' } })).toEqual({ type: 'usage', update });
+    // The Codex adapter's duplicate `codex.usageTurnId` spelling is not an accounting scope.
+    expect(parse({ codex: { usageTurnId: 'turn-b' } })).toEqual({ type: 'usage', update });
+    expect(parse({ lody: { usageScopeId: '' } })).toEqual({ type: 'usage', update });
   });
 });
 

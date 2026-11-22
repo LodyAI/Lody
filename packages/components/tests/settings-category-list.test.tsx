@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -15,6 +13,8 @@ import {
   experimentalFeaturesEnabledAtom,
   roostHistoryExperimentEnabledAtom,
   roostHistoryFeatureEnabledAtom,
+  todayExperimentEnabledAtom,
+  todayFeatureEnabledAtom,
 } from '../src/atoms/settings';
 
 import { SettingsCategoryList } from '../src/components/settings/settings-category-list';
@@ -207,6 +207,30 @@ describe('SettingsCategoryList', () => {
     expect(container.querySelector('[role="switch"]')).toBeNull();
   });
 
+  it('offers Today under the experimental master switch and keeps the opt-in when it is off', async () => {
+    store?.set(experimentalFeaturesEnabledAtom, true);
+    store?.set(todayExperimentEnabledAtom, false);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <ExperimentalFeaturesSection />
+        </Provider>
+      );
+    });
+    const todaySwitch = () =>
+      container?.querySelector<HTMLElement>('[role="switch"][aria-label="Today"]') ?? null;
+    await act(async () => todaySwitch()?.click());
+    expect(store?.get(todayFeatureEnabledAtom)).toBe(true);
+
+    await act(async () => store?.set(experimentalFeaturesEnabledAtom, false));
+    expect(store?.get(todayFeatureEnabledAtom)).toBe(false);
+    expect(todaySwitch()).toBeNull();
+    expect(store?.get(todayExperimentEnabledAtom)).toBe(true);
+  });
+
   it('keeps Roost in developer features without an experimental master gate', async () => {
     store?.set(experimentalFeaturesEnabledAtom, false);
     store?.set(developerModeEnabledAtom, true);
@@ -327,6 +351,20 @@ describe('SettingsCategoryList', () => {
 
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/$workspaceName/settings/billing',
+      params: { workspaceName: 'acme' },
+      search: expect.any(Function),
+    });
+  });
+
+  it('lists Machines in a workspace without other members', async () => {
+    await renderList();
+
+    await act(async () => {
+      getButton('Machines').click();
+    });
+
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/$workspaceName/settings/machines',
       params: { workspaceName: 'acme' },
       search: expect.any(Function),
     });

@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -132,6 +131,7 @@ describe('useCachedAvatarSrc', () => {
 
   afterEach(() => {
     clearAvatarImageCache();
+    localStorage.clear();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -306,6 +306,43 @@ describe('useCachedAvatarSrc', () => {
         expect(commits[0]).toBe(expected);
         expect(container.querySelector('span')?.getAttribute('data-src')).toBe(expected ?? null);
       }
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it('loads UserAvatar from persistent cache on a new page before startup rehydrate finishes without firing any remote image or fetch request', async () => {
+    const requestedImageSrcs: string[] = [];
+    class TrackingImage extends ControlledImage {
+      override set src(value: string) {
+        requestedImageSrcs.push(value);
+        super.src = value;
+      }
+    }
+    vi.stubGlobal('Image', TrackingImage);
+    ControlledImage.loaded.clear();
+    ControlledImage.pending.clear();
+
+    await getAvatarBlobUrl(AVATAR_URL);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    clearAvatarImageCache({ memory: true, persistent: false });
+    fetchMock.mockClear();
+    fetchMock.mockRejectedValue(new Error('offline'));
+    requestedImageSrcs.length = 0;
+
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(UserAvatar, { user: { name: 'Maya', image: AVATAR_URL } }));
+      });
+      await act(async () => {});
+      await act(async () => ControlledImage.settleLoads());
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(requestedImageSrcs).not.toContain(AVATAR_URL);
+      expect(container.querySelector('img')?.getAttribute('src')).toMatch(/^blob:/);
     } finally {
       await act(async () => root.unmount());
     }

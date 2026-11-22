@@ -100,9 +100,10 @@ Work, wait, unread and send status is still the end slot's alone; +/- totals sta
 
 The opener and unrelated top-level rows keep the exact flat-list alignment; only a child
 widens the shared leading slot from 14px to 26px, which produces the 12px title indent
-without shifting the row background. The node and its hover menu share a 7px centre:
-replacing a disclosure or connector with ⋯ therefore leaves the title in place. The
-context-menu expand/collapse action uses the disclosure's callback, so either route
+without shifting the row background. The slot used to lend that same centre to the row's
+⋯ on hover; the menu now reveals in the end slot immediately before Archive, so a
+disclosure or connector keeps the 7px centre to itself and stays drawn while hovering.
+The context-menu expand/collapse action uses the disclosure's callback, so either route
 changes the same tree state.
 
 The connector is drawn from the slot, but its length encodes the ROW, and it reads the
@@ -145,6 +146,14 @@ end slot still shows one thing at a time: a running row reads `[├─ title ...
 with nothing competing for the right edge and more room for the title. Nothing is lost —
 the diff, branch, and PR detail were already in the desktop hover info card, which is
 where a user goes when they want numbers rather than a glance.
+
+The end slot reserves a 20px column per revealed action (⋯ parks left of Archive).
+That reservation is what keeps the actions off the title: the title is a flex sibling
+that truncates (or, while its marquee runs, clips inside its own container) before the
+slot. The slot paints no background of its own. An earlier slot fill tried to match the
+row's hover or selection fill, but any mismatch (a selected `group/row` row whose
+selection override never compiled, or the fill's transition lagging the row's) showed
+as a separate grey block around the icons; the ⋯'s pressed tint is an inset shadow.
 
 The mobile chat rows still keep status on their leading node; their geometry (48px
 indent, a selection checkbox in the same slot, a chevron that has to sit outside the row

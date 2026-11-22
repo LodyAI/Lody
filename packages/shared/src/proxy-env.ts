@@ -16,9 +16,16 @@
  * `NO_PROXY=` proxies loopback anyway — the exact shape observed on Grok
  * sessions whose MCP initialize died as `hyper::Error(IncompleteMessage)`.
  *
- * So whenever a proxy is configured we write BOTH spellings to the same
- * union, which removes the disagreement regardless of which one a given
- * client prefers.
+ * So we write BOTH spellings to the same union, which removes the
+ * disagreement regardless of which one a given client prefers.
+ *
+ * This happens even when the environment carries no proxy variable: the
+ * agent can apply a proxy Lody never sees — its own settings file (Claude's
+ * `settings.json` `env`) or the OS proxy its HTTP client reads directly. A
+ * proxy that cannot reach the client's loopback answers in the host's place
+ * (observed as an empty `HTTP 503`), and the agent reports the built-in MCP
+ * as failed to start.
+ * Without a proxy the bypass list is inert, so adding loopback costs nothing.
  */
 
 export const PROXY_ENV_KEYS = [
@@ -42,8 +49,7 @@ const isSet = (value: string | undefined): boolean =>
   typeof value === 'string' && value.trim().length > 0;
 
 /** True when any proxy variable holds a non-empty value. An empty string is
- * not a proxy — treating it as one would rewrite `NO_PROXY` on machines that
- * never proxy anything. */
+ * not a proxy — treating it as one would skip filling a real system proxy. */
 export function hasProxyEnvValue(env: Record<string, string | undefined>): boolean {
   return PROXY_ENV_KEYS.some((key) => isSet(env[key]));
 }
@@ -52,10 +58,7 @@ export function hasProxyEnvValue(env: Record<string, string | undefined>): boole
  * Union of the two `NO_PROXY` spellings plus the loopback hosts, in a form
  * both spellings can be set to. A `*` wildcard collapses to `*`.
  */
-export function mergeLoopbackNoProxy(
-  upper: string | undefined,
-  lower: string | undefined
-): string {
+export function mergeLoopbackNoProxy(upper: string | undefined, lower: string | undefined): string {
   const entries: string[] = [];
   const seen = new Set<string>();
   // Union rather than "first non-empty wins": the two spellings may carry
@@ -88,14 +91,11 @@ export function mergeLoopbackNoProxy(
 }
 
 /**
- * Returns an environment in which loopback is guaranteed to bypass the proxy,
- * or the input unchanged when no proxy is configured (nothing to bypass) or
- * both spellings already agree on the right value.
+ * Returns an environment in which loopback is guaranteed to bypass any proxy
+ * the child applies, or the input unchanged when both spellings already agree
+ * on the right value.
  */
 export function withLoopbackNoProxy<T extends Record<string, string | undefined>>(env: T): T {
-  if (!hasProxyEnvValue(env)) {
-    return env;
-  }
   const merged = mergeLoopbackNoProxy(env.NO_PROXY, env.no_proxy);
   if (env.NO_PROXY === merged && env.no_proxy === merged) {
     return env;

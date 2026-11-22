@@ -1,7 +1,9 @@
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
+import { LoroRepo } from 'loro-repo';
+import { v4 as uuidv4 } from 'uuid';
+import { SessionDocument } from '../src/lib/loro/doc';
 import { type MessageContent, type SessionHistoryInput, type SessionId } from '@lody/shared';
-import type { SessionDocument } from '../src/lib/loro/doc';
 import { createWorktreeScriptHistoryRecorder } from '../src/session/worktree/worktree-script-history';
 import type { Logger } from '../src/utils/logger';
 
@@ -181,5 +183,77 @@ describe('worktree script history recorder', () => {
     expect(history[0]?.items[0]?.type).toBe('worktree_script');
     expect(history[1]?.id).toBe('turn-1');
     expect(history[1]?.role).toBe('assistant');
+  });
+  it('does not churn LoroText oplog across 250ms flushes once step output exceeds 128k', async () => {
+    vi.useFakeTimers();
+    const repo = await LoroRepo.create({});
+    const sessionId = uuidv4() as SessionId;
+    const doc = new SessionDocument(repo, sessionId);
+    await doc.initOffline();
+
+    try {
+      const recorder = createWorktreeScriptHistoryRecorder({
+        sessionDoc: doc,
+        backend: doc.sessionData.commands,
+        sessionId,
+        phase: 'setup',
+        logger: testLogger,
+      });
+
+      await recorder.onStart?.({
+        phase: 'setup',
+        shell: 'bash',
+        displayCommand: 'yes',
+        command: 'bash',
+        args: ['-l'],
+        workdir: '/tmp/worktree',
+      });
+      await recorder.onStepStart?.({
+        phase: 'setup',
+        shell: 'bash',
+        stepIndex: 0,
+        displayCommand: 'yes',
+        workdir: '/tmp/worktree',
+      });
+
+      let fullOutput = '';
+      for (let tick = 0; tick < 40; tick += 1) {
+        const chunk = `[${String(tick).padStart(2, '0')}]${String.fromCharCode(65 + (tick % 26)).repeat(7995)}\n`;
+        fullOutput += chunk;
+        recorder.onOutput?.({
+          phase: 'setup',
+          stepIndex: 0,
+          stream: 'stdout',
+          chunk,
+        });
+        await vi.advanceTimersByTimeAsync(250);
+      }
+
+      await recorder.onStepEnd?.({
+        phase: 'setup',
+        stepIndex: 0,
+        status: 'completed',
+        exitStatus: { exitCode: 0, signal: null },
+      });
+      await recorder.onEnd?.({
+        phase: 'setup',
+        status: 'completed',
+        exitStatus: { exitCode: 0, signal: null },
+      });
+
+      const history = await doc.sessionData.history.readAll();
+      const scriptItem = history[0]?.items?.[0];
+      expect(scriptItem?.type).toBe('worktree_script');
+      if (scriptItem?.type !== 'worktree_script') {
+        throw new Error('Expected worktree_script item');
+      }
+      expect(scriptItem.steps[0]?.truncated).toBe(true);
+      expect(scriptItem.steps[0]?.output).toBe(fullOutput.slice(-128_000));
+      // Without freezing once truncated, 24 overlapping 128k sliding rewrites would bloat the LoroDoc to multi-MB.
+      expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(350 * 1024);
+    } finally {
+      vi.useRealTimers();
+      await repo.destroy();
+    }
   });
 });

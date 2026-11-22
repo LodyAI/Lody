@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { STATIC_HTML_PREVIEW_DOCUMENT_MARKER } from '@lody/shared';
 

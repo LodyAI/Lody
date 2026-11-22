@@ -10,7 +10,8 @@ Translation: current
 Text masking does not remove replay DOM attributes. Encrypted and unknown workspace
 scopes therefore disable replay and reduce automatic exceptions to a fixed error
 vocabulary. Confirmed ordinary scopes retain recording and ordinary exception
-behavior. Local diagnostics remain available for explicit user submission.
+behavior, except ErrorBoundary diagnostics, which always use fixed categories.
+Local diagnostics remain available for explicit user submission.
 
 ## Decision and constraints
 
@@ -38,6 +39,12 @@ before yielding, allowing an encoded body to outlive a scope change. Already
 sent requests cannot be recalled. SDK upgrades must run the real browser suite;
 missing recorder controls leave recording disabled.
 
+ErrorBoundary owns one fixed diagnostic per mounted failure episode, including
+failed user retries; only a healthy commit permits another. It has no companion
+analytics event or message-derived hash. Capture and final transport both reject
+the retired `app/error_boundary_triggered` event and reproject boundary exceptions
+in every scope. Detailed local support reports remain available.
+
 Deferred exceptions are redacted before queuing in an unknown scope, so delayed
 initialization cannot restore their originals. Main and daemon processes always
 use fixed diagnostics because they serve multiple workspaces. Pre-React beacons
@@ -45,6 +52,8 @@ use fixed error types. [Expected auth exceptions](2026-10-09-posthog-auth-error-
 are still filtered before this policy. The supported replay `blockSelector` hides
 images and elements with `alt`, `title` or `aria-label` as additional protection;
 this SDK does not expose replay attribute masking.
+
+A pairing approval can appear above an ordinary workspace. Each actually mounted private page or portal holds an independent private-surface lease; route commitment cannot override it. The UI releases its lease after React removes the DOM, including portal exit, so restarting the recorder cannot snapshot the closing approval. Nested surfaces release only themselves. The owning provider test verifies replay refusal and exception redaction while held, and the real pairing dialog test verifies Later/inbox transitions restore ordinary capture only after the private content leaves.
 
 ## Evidence and limits
 

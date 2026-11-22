@@ -11,11 +11,11 @@ Builtin Claude task lifecycle events use standard ACP `session/update` messages.
 
 ## Ownership and decision
 
-`packages/acp-extension-claude/src/acp-agent.ts` owns `createClaudeTaskLifecycleUpdate`. Background tasks that do not negotiate async-task events reach `emitTaskLifecycle`, which sends standard ACP updates through `sendUpdate`. `AgentClient.sessionUpdate` forwards those updates to CLI history; the legacy `_claude/taskLifecycle` handler is a separate compatibility input and does not receive the current builtin producer's standard messages.
+`packages/acp-extension-claude/src/acp-agent.ts` owns `createClaudeTaskLifecycleUpdate`. Background tasks that do not negotiate async-task events reach `emitTaskLifecycle`, which sends standard ACP updates through `sendUpdate`. `AgentClient.sessionUpdate` forwards those updates to CLI history.
 
 The adapter writes `_meta.lody.task.actor` only when `subagent_type`, `workflow_name`, or `task_type` supplies one. Its ACP tool-call title still falls back to `Claude task`. Shared history therefore merges completion and late-progress fields by task id while retaining the earlier `local_bash` actor and `toolUseId`; no new task-type schema or history branch is needed.
 
-The CLI continues to consume `_claude/taskLifecycle` for older adapters, so its converter remains covered as a legacy path. The shared converter's optional `taskMetaFallbackActor` also remains: the Kimi test verifies its existing `Kimi task` fallback, while explicit event types continue to update the actor.
+Correction (2026-11-16): the CLI no longer consumes the legacy `_claude/taskLifecycle` and `_kimi/taskLifecycle` extension methods. No pinned Claude or Kimi adapter emits them, so their converter (`claude-task-lifecycle.ts`, with its Kimi `taskMetaFallbackActor` variant) was removed; the standard-update path above is the only producer.
 
 ## Verification and ablation
 

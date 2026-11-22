@@ -666,6 +666,50 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       expect(text(evicted)).toBe('');
     });
   });
+
+  describe('F10: join-reply export failure must notify the peer instead of stalling connecting for 120s', () => {
+    it('emits a non-terminal error frame for the active join requestId so the adapter immediately enters error and recovers on retry', async () => {
+      const harness = new RelayHarness();
+      const doc = harness.serverDoc('ws', 'doc-export-fail');
+      insert(doc, 0, 'server-initial');
+
+      let failOnce = true;
+      const originalExport = doc.export.bind(doc);
+      vi.spyOn(doc, 'export').mockImplementation(((...args: Parameters<LoroDoc['export']>) => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error('synthetic export failure');
+        }
+        return originalExport(...args);
+      }) as LoroDoc['export']);
+
+      const renderer = harness.createAdapter('ws', 'renderer:export-fail');
+      const clientDoc = new LoroDoc();
+      const sub = renderer.joinDocRoom('doc-export-fail', clientDoc);
+      await harness.settle();
+
+      // Without a server error frame on join-reply failure, the adapter stayed
+      // parked in 'connecting' until joinAttemptTimeoutMs (120_000 ms).
+      expect(sub.status).toBe('error');
+      const errorFrames = harness.pushed.filter(
+        (m) => m.type === 'error' && m.peerId === 'renderer:export-fail'
+      );
+      expect(errorFrames).toHaveLength(1);
+      expect(errorFrames[0]).toMatchObject({
+        type: 'error',
+        code: 'data_plane_error',
+        peerId: 'renderer:export-fail',
+        room: { scope: 'doc', docId: 'doc-export-fail' },
+      });
+      expect((errorFrames[0] as { terminal?: boolean }).terminal).toBeFalsy();
+
+      // A reconnect retry now succeeds cleanly because the room was not marked terminal.
+      await renderer.reconnect();
+      await harness.settle();
+      expect(sub.status).toBe('joined');
+      expect(text(clientDoc)).toBe('server-initial');
+    });
+  });
 });
 
 let writerLegacy: LocalLoroWriterLegacy;

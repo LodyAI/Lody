@@ -193,6 +193,7 @@ type AuthorizedRequestOptions = {
       Authorization?: string
       authorization?: string
     }
+    signal?: AbortSignal
   }
 }
 
@@ -973,9 +974,17 @@ export class AuthService {
     })
   }
 
-  async convexToken(options?: unknown) {
+  /** `signal` cancels the token request itself, so a caller that stops (E2EE quit or a
+   * host stop) does not wait on a slow auth server or leave the request running. The
+   * session lookup before it is already bounded by its own network timeout. */
+  async convexToken(options?: unknown, signal?: AbortSignal) {
+    signal?.throwIfAborted()
     const sessionToken = await this.getSessionToken(options)
-    return await authClient.convex.token(withAuthorization({}, sessionToken))
+    signal?.throwIfAborted()
+    const request = withAuthorization({}, sessionToken)
+    return await authClient.convex.token(
+      signal ? { ...request, fetchOptions: { ...request.fetchOptions, signal } } : request
+    )
   }
 
   async crossDomainVerifyOneTimeToken(input: unknown) {

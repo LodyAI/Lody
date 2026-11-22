@@ -1,4 +1,4 @@
-import { afterEach, beforeEach } from 'vitest';
+import { afterAll, afterEach, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -111,6 +111,35 @@ export const toFileUrl = (localPath: string): string => {
   return pathToFileURL(normalized).toString();
 };
 
+let templateRootDir: string | undefined;
+let localRepoTemplateDir: string | undefined;
+const remoteRepoTemplates = new Map<
+  'main' | 'master',
+  { sourceTemplateDir: string; remoteBareTemplateDir: string }
+>();
+
+const ensureTemplateRoot = (): string => {
+  if (!templateRootDir) {
+    templateRootDir = fs.realpathSync.native(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'lody-wt-tpl-'))
+    );
+  }
+  return templateRootDir;
+};
+
+afterAll(() => {
+  if (templateRootDir) {
+    try {
+      fs.rmSync(templateRootDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+    templateRootDir = undefined;
+    localRepoTemplateDir = undefined;
+    remoteRepoTemplates.clear();
+  }
+});
+
 /**
  * Creates a bare "remote" repo plus a working repo, pushes an initial commit, and returns both paths.
  */
@@ -118,27 +147,53 @@ export const createRemoteRepo = (
   rootDir: string,
   defaultBranch: 'main' | 'master'
 ): { sourceDir: string; remoteBareDir: string } => {
+  let cached = remoteRepoTemplates.get(defaultBranch);
+  if (!cached) {
+    const tplRoot = ensureTemplateRoot();
+    const sourceTemplateDir = path.join(tplRoot, `source-${defaultBranch}`);
+    const remoteBareTemplateDir = path.join(tplRoot, `remote-${defaultBranch}.git`);
+
+    fs.mkdirSync(sourceTemplateDir, { recursive: true });
+    runGit(sourceTemplateDir, ['init', '-b', defaultBranch]);
+    fs.writeFileSync(path.join(sourceTemplateDir, 'README.md'), `# ${defaultBranch}\n`, 'utf8');
+    gitCommit(sourceTemplateDir, 'init');
+
+    runGit(tplRoot, ['init', '--bare', remoteBareTemplateDir]);
+    runGit(sourceTemplateDir, ['remote', 'add', 'origin', remoteBareTemplateDir]);
+    runGit(sourceTemplateDir, ['push', '-u', 'origin', defaultBranch]);
+
+    cached = { sourceTemplateDir, remoteBareTemplateDir };
+    remoteRepoTemplates.set(defaultBranch, cached);
+  }
+
   const sourceDir = path.join(rootDir, `source-${defaultBranch}`);
   const remoteBareDir = path.join(rootDir, `remote-${defaultBranch}.git`);
+  fs.cpSync(cached.sourceTemplateDir, sourceDir, { recursive: true });
+  fs.cpSync(cached.remoteBareTemplateDir, remoteBareDir, { recursive: true });
 
-  fs.mkdirSync(sourceDir, { recursive: true });
-  runGit(sourceDir, ['init', '-b', defaultBranch]);
-
-  fs.writeFileSync(path.join(sourceDir, 'README.md'), `# ${defaultBranch}\n`, 'utf8');
-  gitCommit(sourceDir, 'init');
-
-  runGit(rootDir, ['init', '--bare', remoteBareDir]);
-  runGit(sourceDir, ['remote', 'add', 'origin', remoteBareDir]);
-  runGit(sourceDir, ['push', '-u', 'origin', defaultBranch]);
+  const gitConfigPath = path.join(sourceDir, '.git', 'config');
+  const configText = fs.readFileSync(gitConfigPath, 'utf8');
+  fs.writeFileSync(
+    gitConfigPath,
+    configText.replaceAll(cached.remoteBareTemplateDir, remoteBareDir),
+    'utf8'
+  );
 
   return { sourceDir, remoteBareDir };
 };
 
 export const createLocalRepo = (rootDir: string): string => {
+  if (!localRepoTemplateDir) {
+    const tplRoot = ensureTemplateRoot();
+    const tplDir = path.join(tplRoot, 'local-source');
+    fs.mkdirSync(tplDir, { recursive: true });
+    runGit(tplDir, ['init', '-b', 'main']);
+    fs.writeFileSync(path.join(tplDir, 'README.md'), '# local\n', 'utf8');
+    gitCommit(tplDir, 'init');
+    localRepoTemplateDir = tplDir;
+  }
+
   const sourceDir = path.join(rootDir, 'local-source');
-  fs.mkdirSync(sourceDir, { recursive: true });
-  runGit(sourceDir, ['init', '-b', 'main']);
-  fs.writeFileSync(path.join(sourceDir, 'README.md'), '# local\n', 'utf8');
-  gitCommit(sourceDir, 'init');
+  fs.cpSync(localRepoTemplateDir, sourceDir, { recursive: true });
   return sourceDir;
 };

@@ -78,6 +78,50 @@ grok——既产生不了观测到的 `pi-acp`/`opencode`/`kimi` 请求，也不
 且年龄在 `ACP_CAPABILITY_REFRESH_CACHE_TTL_MS` 之内。该判定由
 `@lody/shared` 的 `decideAcpCapabilityRefreshCache` 拥有，并给出每种 miss 的原因，机器会记录它。
 
+### Machine Flock 写入量与混合版本
+
+能力比较包含 `goalActions`。同一 source、相同选项结构保留已存 `currentValue` 默认值；
+会话的模型、模式和推理强度不替换基线。先记录传入模型的选项声明，再保留旧基线。
+模型指针复用同版本、仅当前值不同的结构行，无引用结构行会删除。新 source 或真实选项
+变化仍写入新声明。
+
+`['acpCapability', configId]` 保持完整，读取不需要拼接新键。当前 Flock 替换整份 JSON，
+没有字段补丁，因此半个 TTL 续期和真实 `authMethods` 变化仍重写完整行。拆字段后继续镜像
+完整旧行不会省字节；停止镜像会使旧 Web/CLI/Mobile 读取到过期的缓存时间或认证方式。
+把选项、命令替换为引用同样会让旧读取方失去已理解的数据。提高 cache version 不能教会旧读取方拼接键。
+
+未来拆键需要先部署读取方，明确最低读取版本后才能停止完整旧行，并使用绑定 source 的引用
+和原子发布的代次。旧写入方必须继续使用旧格式，或者让其整行写入使新代次失效，避免旧的
+拆分字段与新的完整行混用。本次只落地现有格式内去重，没有启动迁移，也不会压缩已有 Streams 历史。
+
+配额行保持原格式。窗口集合及用量、账户范围、套餐、钱包不变时，仅重置时间相对持久化基线
+偏差最多两秒则跳过写入，极短窗口使用更小容差。持久化基线避免连续小漂移无限掩盖真实变化。
+空值切换、用量变化和跨周期重置正常写入。`machine-document-capabilities.test.ts` 检查真实
+Flock 版本；共享 `machine-flock.test.ts` 覆盖结构复用与配额写入边界。这些测试不代表已安装
+旧客户端或已部署传输的验收。
+
+### 后续修复：降级条目永不命中缓存（2026-11-08，#2441）
+
+此前只要版本、provenance、启动输入与寿命都吻合，缓存就会信任持久化条目——包括"探测本身成功但
+Agent 声明了一个 model 类型 select configOption、选项数为零"这种病态结果（Devin 3000.11.3 在
+`model_configs_v6` 缓存冷启动时返回 `options: []`，见 #2440）。这样的空模型列表一旦持久化，会在
+条目整个寿命内应答所有刷新请求；同时 `getAcpCapabilityCacheEntryAuthority` 仍称其为
+authoritative，于是 onboarding 和 Provider Settings 可能把模型选择器为空的 provider 显示为已
+验证。
+
+`getAcpCapabilityCacheStaleReason` 现在会在持久化 `configOptions` 显示空 model select 时以
+`empty-model-catalog` miss——直接读行，不持久化任何 flag——因此该规则出现之前写入的行同样生效。
+同一谓词也喂给 `getAcpCapabilityCacheEntryAuthority`：此类条目返回新增的 `degraded` 档位——所有
+`=== 'authoritative'` 的验证检查（onboarding 状态、provider test、session fork、steer）都不再
+接受它，而选择器构建把 `degraded` 当 `provisional` 处理，保留当前已选模型而不是渲染空列表。
+agent config 弹窗与 onboarding provider test 还会把空目录显示为验证失败（带专门的原因文案），
+而不是"passed"。此修复的早期版本持久化了 `modelsDegraded` flag、并在 `models` 非空时不判降级；
+评审后两者都被移除——flag 完全可派生，且选择器直接渲染 select，`models` 有值并不能让空 select
+可用。
+
+开销分析：降级条目在每次非强制刷新时重探，直到自愈。强制请求本来就重探；自动的启动刷新按
+config、按 runtime 生命周期做 latch，因此一个持续降级的 config 至多每次渲染端启动探一次。
+
 不显然的一点是如何算出"一次探测会打上的版本"。存下的版本是*启动器*产生的，对 managed builtin
 还包含已安装的 runtime 版本（`builtin-kimi:0.36.0`），单靠
 `getAcpCapabilitySourceVersion(input)` 复现不出来。因此
@@ -188,15 +232,15 @@ CLI 的进程内调用方——`session-execution-service.ts` 里认证后的校
 
 ## 全部调用方，以及各自是否 force
 
-| 调用方 | 是否 force | 原因 |
-| --- | --- | --- |
-| `create-workspace-runtime.ts` 启动扫描 | 否 | 它要的就是缓存；被消除的正是这项开销 |
-| `use-agent-role-schema-reconciliation.ts` | 否 | 它对照的是当前条目，不关心是谁产生的 |
-| `machine-agent-settings.tsx` 设置页刷新 | 是 | 有人改了启动输入之外的东西 |
-| `providers-screen.tsx` 引导 Provider 测试 | 是 | 它存在就是为了证明 Agent 能启动 |
-| `commands/agent-config.ts` `refresh-capabilities` | 是 | 与设置页同一意图；第一版漏掉了 |
-| `session-execution-service.ts` 认证后 | 是 | 新凭据会改变权限授予 |
-| `provider-setup-manager.ts` 校验 | 是 | 证明刚安装的 runtime 能启动 |
+| 调用方                                            | 是否 force | 原因                                 |
+| ------------------------------------------------- | ---------- | ------------------------------------ |
+| `create-workspace-runtime.ts` 启动扫描            | 否         | 它要的就是缓存；被消除的正是这项开销 |
+| `use-agent-role-schema-reconciliation.ts`         | 否         | 它对照的是当前条目，不关心是谁产生的 |
+| `machine-agent-settings.tsx` 设置页刷新           | 是         | 有人改了启动输入之外的东西           |
+| `providers-screen.tsx` 引导 Provider 测试         | 是         | 它存在就是为了证明 Agent 能启动      |
+| `commands/agent-config.ts` `refresh-capabilities` | 是         | 与设置页同一意图；第一版漏掉了       |
+| `session-execution-service.ts` 认证后             | 是         | 新凭据会改变权限授予                 |
+| `provider-setup-manager.ts` 校验                  | 是         | 证明刚安装的 runtime 能启动          |
 
 这是请求构造点的完整集合；该清查可用 `grep -rn "'machine/acp-capabilities-refresh'"` 过滤出
 请求字面量来复现。

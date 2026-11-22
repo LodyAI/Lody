@@ -1,4 +1,3 @@
-import { runEagerSyncWorkerTask } from './eager-sync-worker-task';
 import type {
   EagerSyncWorkerInput,
   EagerSyncWorkerOutput,
@@ -28,42 +27,48 @@ worker.onmessage = ({ data }) => {
   } else if (!started) {
     started = true;
     connected = data.connected;
-    void runEagerSyncWorkerTask(data, {
-      connection: {
-        send: (message) => worker.postMessage({ type: 'local-send', message }),
-        isConnected: () => connected,
-        onMessage: (listener) => {
-          messageListeners.add(listener);
-          return () => {
-            messageListeners.delete(listener);
-          };
-        },
-        onStatusChange: (listener) => {
-          statusListeners.add(listener);
-          listener(connected);
-          return () => {
-            statusListeners.delete(listener);
-          };
-        },
-      },
-      auth: (context) =>
-        new Promise((resolve) => {
-          const id = ++authId;
-          authRequests.set(id, resolve);
-          // Forward the whole context, not just `reason`: without
-          // `previousToken` the host provider cannot tell which token was
-          // rejected and hands the rejected one straight back.
-          worker.postMessage({
-            type: 'auth',
-            id,
-            context: context
-              ? { reason: context.reason, previousToken: context.previousToken }
-              : undefined,
-          });
-        }),
-    }).then(
-      (outcome) => worker.postMessage({ type: 'complete', outcome }),
-      () => worker.postMessage({ type: 'complete', outcome: 'failed' })
-    );
+    // Install the message handler before loading the WASM task module: messages
+    // sent during a module worker's top-level awaits must not be dropped.
+    void import('./eager-sync-worker-task')
+      .then(({ runEagerSyncWorkerTask }) =>
+        runEagerSyncWorkerTask(data, {
+          connection: {
+            send: (message) => worker.postMessage({ type: 'local-send', message }),
+            isConnected: () => connected,
+            onMessage: (listener) => {
+              messageListeners.add(listener);
+              return () => {
+                messageListeners.delete(listener);
+              };
+            },
+            onStatusChange: (listener) => {
+              statusListeners.add(listener);
+              listener(connected);
+              return () => {
+                statusListeners.delete(listener);
+              };
+            },
+          },
+          auth: (context) =>
+            new Promise((resolve) => {
+              const id = ++authId;
+              authRequests.set(id, resolve);
+              // Forward the whole context, not just `reason`: without
+              // `previousToken` the host provider cannot tell which token was
+              // rejected and hands the rejected one straight back.
+              worker.postMessage({
+                type: 'auth',
+                id,
+                context: context
+                  ? { reason: context.reason, previousToken: context.previousToken }
+                  : undefined,
+              });
+            }),
+        })
+      )
+      .then(
+        (outcome) => worker.postMessage({ type: 'complete', outcome }),
+        () => worker.postMessage({ type: 'complete', outcome: 'failed' })
+      );
   }
 };

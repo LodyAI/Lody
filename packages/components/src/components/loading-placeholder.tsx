@@ -22,6 +22,7 @@ export function LoadingPlaceholder({
   title = 'Loading',
   description = '',
   variant = 'viewport',
+  startsNow = false,
 }: {
   title?: string;
   description?: string;
@@ -33,13 +34,21 @@ export function LoadingPlaceholder({
    * sidebar and workspace identity remain stable during scoped synchronization.
    */
   variant?: 'boot' | 'viewport' | 'content';
+  /**
+   * A `content` wait that begins inside a running page rather than continuing the
+   * boot frame: the mark fades in after a beat, so a wait that ends quickly shows
+   * only the empty pane instead of flashing the mark.
+   */
+  startsNow?: boolean;
 }) {
   if (variant === 'boot') {
     return (
       <BootShell
         status={
           <>
-            <div data-testid="workspace-loading" className="lody-boot-shell__status-title">{title}</div>
+            <div data-testid="workspace-loading" className="lody-boot-shell__status-title">
+              {title}
+            </div>
             {description ? <div>{description}</div> : null}
           </>
         }
@@ -51,9 +60,12 @@ export function LoadingPlaceholder({
     return (
       <div {...stylex.props(styles.content)} data-loading-placeholder-scope="content">
         <BootLoadingIndicator
+          elapsedMs={startsNow ? 0 : undefined}
           status={
             <>
-              <div data-testid="workspace-loading" className="lody-boot-shell__status-title">{title}</div>
+              <div data-testid="workspace-loading" className="lody-boot-shell__status-title">
+                {title}
+              </div>
               {description ? <div>{description}</div> : null}
             </>
           }

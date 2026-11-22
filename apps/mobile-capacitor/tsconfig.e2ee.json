@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "incremental": false
+  },
+  "include": ["src/e2ee", "tests/e2ee", "src/vite-env.d.ts"]
+}

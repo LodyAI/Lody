@@ -15,6 +15,7 @@ import {
   makeLoroStreamsTokenProvider,
   makeLoroStreamsTokenWebPorts,
   type LoroStreamsTokenProviderOptions,
+  type LoroStreamsTokenProviderEvent,
 } from '../src/loro-streams-auth';
 
 type LocalStorageMock = {
@@ -653,7 +654,9 @@ function tokenHttpFixture(settleOnAbort = false) {
   let settle: ((response: Response) => void) | undefined;
   let signal: AbortSignal | null | undefined;
   let alive = false;
+  let requests = 0;
   const fetchImpl = (_url: string, init?: RequestInit) => {
+    requests++;
     signal = init?.signal;
     alive = true;
     signal?.addEventListener(
@@ -679,6 +682,7 @@ function tokenHttpFixture(settleOnAbort = false) {
     aborted: Deferred.await(aborted),
     fetchImpl,
     alive: () => alive,
+    requests: () => requests,
     signal: () => signal,
     finish: (token = 'jwt') => {
       if (!settle) throw new Error('HTTP fixture not started');
@@ -695,6 +699,175 @@ const nativeProvider = (
   makeLoroStreamsTokenProvider(options).pipe(Effect.provideService(LoroStreamsTokenPorts, ports));
 
 describe('native shared Streams token ownership', () => {
+  effectIt.effect(
+    'handled owner release records only a fixed cancellation after raw I/O settles',
+    () =>
+      Effect.gen(function* () {
+        const http = tokenHttpFixture(true);
+        const events: LoroStreamsTokenProviderEvent[] = [];
+        const provider = yield* nativeProvider(
+          makeLoroStreamsTokenWebPorts({
+            credential: Effect.succeed('auth'),
+            fetchImpl: http.fetchImpl,
+          }),
+          {
+            ...tokenOptions,
+            onEvent: (event) => {
+              events.push(event);
+            },
+          }
+        );
+        const waiter = yield* Effect.forkChild(provider.getToken());
+        yield* http.started;
+        yield* provider.close;
+        const result = yield* Fiber.await(waiter);
+        // Cancellation remains observable to the waiter; it is never a successful token/write receipt.
+        expect(Exit.isFailure(result)).toBe(true);
+        expect(events.filter((event) => event.type === 'fetch-cancelled')).toEqual([
+          { type: 'fetch-cancelled', reason: 'owner_released' },
+        ]);
+        expect(events.some((event) => event.type === 'fetch-failure')).toBe(false);
+        expect(http.alive()).toBe(false);
+        expect(http.requests()).toBe(1);
+        expect(yield* provider.health).toMatchObject({
+          state: 'closed',
+          activeReads: 0,
+          leases: 0,
+          pendingRawWork: false,
+          hasCachedToken: false,
+        });
+      })
+  );
+
+  effectIt.effect(
+    'an unknown last-waiter cancellation stays a failure even after owner close',
+    () =>
+      Effect.gen(function* () {
+        const http = tokenHttpFixture();
+        const events: LoroStreamsTokenProviderEvent[] = [];
+        const provider = yield* nativeProvider(
+          makeLoroStreamsTokenWebPorts({
+            credential: Effect.succeed('auth'),
+            fetchImpl: http.fetchImpl,
+          }),
+          {
+            ...tokenOptions,
+            onEvent: (event) => {
+              events.push(event);
+            },
+          }
+        );
+        const waiter = yield* Effect.forkChild(provider.getToken());
+        yield* http.started;
+        const cancelled = yield* Effect.forkChild(Fiber.interrupt(waiter));
+        yield* http.aborted;
+        const closing = yield* Effect.forkChild(provider.close, { startImmediately: true });
+        expect((yield* provider.health).closed).toBe(true);
+        // Close races pending raw release; it must not overwrite the first reason.
+        http.finish();
+        yield* Fiber.join(cancelled);
+        yield* Fiber.join(closing);
+        expect(events.some((event) => event.type === 'fetch-failure')).toBe(true);
+        expect(events.some((event) => event.type === 'fetch-cancelled')).toBe(false);
+        expect(http.alive()).toBe(false);
+        expect(http.requests()).toBe(1);
+      })
+  );
+
+  for (const [label, fail] of [
+    [
+      'AbortError without an owner reason',
+      () => {
+        throw new DOMException('aborted', 'AbortError');
+      },
+    ],
+    [
+      'deadline-shaped transport error',
+      () => {
+        throw new DOMException('deadline', 'TimeoutError');
+      },
+    ],
+    [
+      'network failure',
+      () => {
+        throw new TypeError('Failed to fetch');
+      },
+    ],
+    [
+      'unknown disconnected error',
+      () => {
+        throw new Error('Client disconnected');
+      },
+    ],
+    ['rate limit', () => new Response('', { status: 429 })],
+    ['server capacity failure', () => new Response('', { status: 503 })],
+  ] as const) {
+    effectIt.effect(`Streams token ${label} remains reportable without adding a retry`, () =>
+      Effect.gen(function* () {
+        const events: LoroStreamsTokenProviderEvent[] = [];
+        let requests = 0;
+        const provider = yield* nativeProvider(
+          makeLoroStreamsTokenWebPorts({
+            credential: Effect.succeed('auth'),
+            fetchImpl: async () => {
+              requests++;
+              return fail();
+            },
+          }),
+          {
+            ...tokenOptions,
+            onEvent: (event) => {
+              events.push(event);
+            },
+          }
+        );
+        expect(Exit.isFailure(yield* Effect.exit(provider.getToken()))).toBe(true);
+        yield* provider.close;
+        expect(events.some((event) => event.type === 'fetch-failure')).toBe(true);
+        expect(events.some((event) => event.type === 'fetch-cancelled')).toBe(false);
+        expect(requests).toBe(1);
+      })
+    );
+  }
+
+  effectIt.effect('owner close preserves a mixed interruption and cleanup defect as failure', () =>
+    Effect.gen(function* () {
+      const started = Deferred.makeUnsafe<void>();
+      const events: LoroStreamsTokenProviderEvent[] = [];
+      const ports = makeLoroStreamsTokenWebPorts({ credential: Effect.succeed('auth') });
+      const provider = yield* nativeProvider(
+        {
+          ...ports,
+          request: () =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(Effect.die(new Error('cleanup failed')))
+            ),
+        },
+        {
+          ...tokenOptions,
+          onEvent: (event) => {
+            events.push(event);
+          },
+        }
+      );
+      const waiter = yield* Effect.forkChild(provider.getToken());
+      yield* Deferred.await(started);
+      expect(Exit.isFailure(yield* Effect.exit(provider.close))).toBe(true);
+      expect(Exit.isFailure(yield* Fiber.await(waiter))).toBe(true);
+      const failure = events.find((event) => event.type === 'fetch-failure');
+      expect(failure).toBeDefined();
+      if (failure?.type === 'fetch-failure')
+        expect(
+          describeLoroStreamsTokenCause(failure.error as Cause.Cause<unknown>).kinds
+        ).toContain('defect');
+      expect(events.some((event) => event.type === 'fetch-cancelled')).toBe(false);
+      expect(yield* provider.health).toMatchObject({ state: 'release-failed' });
+      yield* provider.retryCleanup;
+      yield* provider.close;
+    })
+  );
+
   effectIt.effect('one cancelled waiter preserves the other lease and the HTTP work', () =>
     Effect.gen(function* () {
       const http = tokenHttpFixture(true);
@@ -726,9 +899,13 @@ describe('native shared Streams token ownership', () => {
   effectIt.effect('deadline is failure, cancels raw HTTP, and does not become auth undefined', () =>
     Effect.gen(function* () {
       const http = tokenHttpFixture();
+      const events: LoroStreamsTokenProviderEvent[] = [];
       const provider = yield* makeLoroStreamsTokenProvider({
         ...tokenOptions,
         requestTimeoutMs: 100,
+        onEvent: (event) => {
+          events.push(event);
+        },
       }).pipe(
         Effect.provideService(
           LoroStreamsTokenPorts,
@@ -754,6 +931,9 @@ describe('native shared Streams token ownership', () => {
       expect(http.alive()).toBe(false);
       expect(provider.getGatewayBaseUrl()).toBeUndefined();
       yield* provider.close;
+      expect(events.some((event) => event.type === 'fetch-failure')).toBe(true);
+      expect(events.some((event) => event.type === 'fetch-cancelled')).toBe(false);
+      expect(http.requests()).toBe(1);
     })
   );
 

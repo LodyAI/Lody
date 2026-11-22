@@ -6,13 +6,13 @@ Translation: current
 
 [English](2026-10-22-streams-persistence-failure-bandwidth.md)
 
-发布更新（2026-10-23）：[正式 SDK 接入](2026-10-23-storage-recovery-release-adoption.zh.md) 使用 streams-crdt 0.19.2 和 Repo 0.25.0，取代下文未发布依赖和临时补丁的限制。
+发布更新（2026-10-23）：[正式 SDK 接入](../../implemented/bug-fix/2026-10-23-storage-recovery-release-adoption.zh.md) 使用 streams-crdt 0.19.2 和 Repo 0.25.0，取代下文未发布依赖和临时补丁的限制。
 
 ## 摘要
 
 一位桌面端用户在数据盘 99% 满的情况下，一晚上下载了约 76 GB（约每小时 10 GB）。本地保存同步状态持续失败后，每个持久化房间大约每秒重启一次实时读取，并重新下载上次保存游标之后的全部内容；对很大的 Session 转录来说，就是整个文档。循环由两个上游缺陷造成，第三个缺陷让被替换的副本一直留在循环里；它们正在 loro-streams 和 loro-repo 修复，Lody 通过升级 catalog 版本采用。本次改动修复 Lody 侧的伴随问题：父进程管道关闭的 CLI 在五分钟内写了 2.46 GB 每日日志且一直不退出。上游修复尚未发布，所以 Lody 中的流量循环仍未修复。
 
-相关：[本地持久化失败后实时读取循环空转](2026-10-19-streams-read-loop-spin.zh.md)，同一触发条件下更早的那个不发请求的循环。
+相关：[本地持久化失败后实时读取循环空转](../../implemented/bug-fix/2026-10-19-streams-read-loop-spin.zh.md)，同一触发条件下更早的那个不发请求的循环。
 
 ## 报告中的证据
 

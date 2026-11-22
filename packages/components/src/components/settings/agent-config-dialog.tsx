@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from '@/lib/toast';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   computeTitleGenerationDefaults,
   DEEPSEEK_HARNESS_API_KEY_ENV,
@@ -27,6 +27,7 @@ import {
   getBuiltinTitleGenerationDefaults,
   getRegistryAcpLaunchKind,
   hasBuiltinRuntimeOverrideValues,
+  hasEmptyModelSelectOption,
   machineSupportsProviderSetupProtocol,
   machineSupportsProtocolCapability,
   getDeepSeekHarnessProviderConfigPath,
@@ -35,6 +36,7 @@ import {
   CodexAuthProfileSchema,
   type CodexAuthProfile,
   machineSupportsPiExtensions,
+  machineSupportsAntigravitySkipPermissions,
   type MachinePiExtensionsResponse,
   isManagedBuiltinAgentType,
   isAcpCapabilityCacheEntryCurrent,
@@ -82,6 +84,7 @@ import {
   Lock,
   RefreshCw,
   Search,
+  ShieldOff,
   Sparkles,
   SquareTerminal,
   X,
@@ -98,6 +101,7 @@ import { Collapsible } from '@lody/ui/collapsible';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Textarea } from '@lody/ui/textarea';
+import { Switch } from '@lody/ui/switch';
 import { Select } from '@lody/ui/select';
 import { Tabs } from '@lody/ui/tabs';
 import { OptionSelector } from '@/components/shared/option-selector';
@@ -131,12 +135,9 @@ import {
   deleteProviderSetupAtom,
 } from '@/atoms/agents';
 import { settingsType as type } from './type.stylex';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 type Translate = ReturnType<typeof useTranslation>['t'];
-
-// =============================================================================
-// Styles
-// =============================================================================
 
 const SM = '@media (min-width: 640px)';
 /** A block inside the dialog: the region rung, a fill with no edge. */
@@ -375,6 +376,17 @@ const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
   stackTight: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
   actionRow: { display: 'flex', alignItems: 'center', gap: space[2] },
+  /** A setting named on the left with its switch on the right. */
+  switchRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: space[3],
+    minWidth: 0,
+  },
+  switchText: { display: 'flex', flexDirection: 'column', gap: space[1], minWidth: 0 },
+  switchControl: { flexShrink: 0 },
+  switchWarning: { margin: 0, fontSize: '11px', lineHeight: 1.375, color: colors.warning },
   /** A field and the one button that checks it, on one row. */
   inputWithTest: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
   /** Two glyphs in one box, cross-faded: the button changes what it says, not where. */
@@ -469,6 +481,12 @@ const styles = stylex.create({
     transitionTimingFunction: ease.standard,
   },
   footerNarrow: { paddingInline: space[4], paddingBottom: space[3] },
+  /**
+   * Lets the Tooltip trigger wrapper stretch its Button to full width when
+   * `Dialog.Footer` stacks in `column-reverse` on narrow viewports while
+   * staying content-sized in the desktop row.
+   */
+  footerAction: { display: 'flex', flexDirection: 'column' },
   footerNote: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -616,7 +634,9 @@ const styles = stylex.create({
     flexDirection: 'column',
     gap: space[2],
     paddingInline: space[3],
-    paddingBlockStart: focus.ringWidth,
+    // `Collapsible.Panel` clips overflow, and `focus.ringWidth` collapses to 0px
+    // on pointer modality while text controls still paint their ring on focus.
+    paddingBlockStart: space[1],
     paddingBottom: space[3],
   },
   sectionHint: {
@@ -636,12 +656,6 @@ const styles = stylex.create({
   optionList: { display: 'flex', flexDirection: 'column', gap: space[2], paddingTop: space[1] },
 });
 
-// =============================================================================
-// Preset definitions
-// =============================================================================
-
-export const DEEPSEEK_CLAUDE_PRESET_ID = 'deepseek-over-claude-code';
-export const DEEPSEEK_REASONIX_PRESET_ID = 'deepseek-reasonix';
 const LEGACY_DSH_MODELS_ENV = 'ACP_EXTENSION_DSH_MODELS';
 type DeepSeekEndpointMode = 'official' | 'custom';
 export const MIMO_CLAUDE_PRESET_ID = 'mimo-over-claude-code';
@@ -654,8 +668,6 @@ export const GLM_BIGMODEL_CREDENTIAL_MODE_ID = 'bigmodel';
 export const GLM_ZAI_CREDENTIAL_MODE_ID = 'zai';
 
 type PresetId =
-  | typeof DEEPSEEK_CLAUDE_PRESET_ID
-  | typeof DEEPSEEK_REASONIX_PRESET_ID
   | typeof MIMO_CLAUDE_PRESET_ID
   | typeof MINIMAX_CLAUDE_PRESET_ID
   | typeof GLM_CLAUDE_PRESET_ID;
@@ -728,56 +740,6 @@ type PresetDefinition = {
   credentialModeGroupLabelDefault?: string;
   credentialModeGroupHintKey?: string;
   credentialModeGroupHintDefault?: string;
-};
-
-const DEEPSEEK_CLAUDE_PRESET: PresetDefinition = {
-  id: DEEPSEEK_CLAUDE_PRESET_ID,
-  brandId: 'deepseek',
-  label: 'DeepSeek over Claude Code',
-  labelKey: 'settings.agent.dialog.preset.deepseekClaude.label',
-  descriptionKey: 'settings.agent.dialog.preset.deepseekClaude.description',
-  descriptionDefault: 'Route Claude Code through DeepSeek — just paste your API token.',
-  cliType: 'builtin',
-  agentType: 'claude',
-  badge: 'Preset',
-  tokenLabelKey: 'settings.agent.dialog.preset.deepseekClaude.tokenLabel',
-  tokenLabelDefault: 'DeepSeek API token',
-  tokenPlaceholderKey: 'settings.agent.dialog.preset.deepseekClaude.tokenPlaceholder',
-  tokenPlaceholderDefault: 'sk-XXXXXXXXXXXX',
-  tokenHelpKey: 'settings.agent.dialog.preset.deepseekClaude.tokenHelp',
-  tokenHelpDefault: 'Create or copy one at platform.deepseek.com.',
-  tokenEnvKey: 'ANTHROPIC_AUTH_TOKEN',
-  fixedEnv: {
-    ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
-    ANTHROPIC_MODEL: 'deepseek-v4-pro[1m]',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash',
-    CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-v4-pro',
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-    CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: '1',
-    CLAUDE_CODE_EFFORT_LEVEL: 'max',
-  },
-};
-
-const DEEPSEEK_REASONIX_PRESET: PresetDefinition = {
-  id: DEEPSEEK_REASONIX_PRESET_ID,
-  brandId: 'deepseek',
-  label: 'DeepSeek Reasonix',
-  labelKey: 'settings.agent.dialog.preset.deepseekReasonix.label',
-  descriptionKey: 'settings.agent.dialog.preset.deepseekReasonix.description',
-  descriptionDefault: 'Run DeepSeek Reasonix through ACP — just paste your API token.',
-  cliType: 'registry',
-  agentType: 'reasonix',
-  badge: 'Preset',
-  tokenLabelKey: 'settings.agent.dialog.preset.deepseekReasonix.tokenLabel',
-  tokenLabelDefault: 'DeepSeek API token',
-  tokenPlaceholderKey: 'settings.agent.dialog.preset.deepseekReasonix.tokenPlaceholder',
-  tokenPlaceholderDefault: 'sk-XXXXXXXXXXXX',
-  tokenHelpKey: 'settings.agent.dialog.preset.deepseekReasonix.tokenHelp',
-  tokenHelpDefault: 'Create or copy one at platform.deepseek.com.',
-  tokenEnvKey: 'DEEPSEEK_API_KEY',
-  fixedEnv: {},
 };
 
 const MIMO_TOKEN_PLAN_BASE_URL_OPTIONS: PresetBaseUrlOption[] = [
@@ -976,20 +938,10 @@ const GLM_CLAUDE_PRESET: PresetDefinition = {
   ],
 };
 
-const PRESETS: PresetDefinition[] = [
-  DEEPSEEK_CLAUDE_PRESET,
-  DEEPSEEK_REASONIX_PRESET,
-  MIMO_CLAUDE_PRESET,
-  MINIMAX_CLAUDE_PRESET,
-  GLM_CLAUDE_PRESET,
-];
+const PRESETS: PresetDefinition[] = [GLM_CLAUDE_PRESET, MIMO_CLAUDE_PRESET, MINIMAX_CLAUDE_PRESET];
 const PRESETS_BY_ID: Record<string, PresetDefinition> = Object.fromEntries(
   PRESETS.map((p) => [p.id, p])
 );
-
-// =============================================================================
-// Agent type options (left rail)
-// =============================================================================
 
 type AgentTypeOption = {
   kind: 'builtin' | 'preset' | 'registry' | 'custom';
@@ -1009,13 +961,64 @@ type AgentTypeOption = {
 const BUILTIN_OPTIONS: AgentTypeOption[] = [
   {
     kind: 'builtin',
-    value: 'builtin:sorbet',
-    label: 'Lody Agent',
-    descriptionKey: 'settings.agent.dialog.option.sorbet.description',
-    descriptionDefault: 'An agent harness for work that outlives one conversation. Built for Lody.',
+    value: 'builtin:codex',
+    label: 'Codex',
+    descriptionKey: 'settings.agent.dialog.option.codex.description',
+    descriptionDefault: 'OpenAI Codex runtime',
     cliType: 'builtin',
-    agentType: 'sorbet',
-    searchKeys: 'lody agent sorbet',
+    agentType: 'codex',
+    searchKeys: 'codex openai',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:claude',
+    label: 'Claude',
+    descriptionKey: 'settings.agent.dialog.option.claude.description',
+    descriptionDefault: 'Anthropic Claude Code runtime',
+    cliType: 'builtin',
+    agentType: 'claude',
+    searchKeys: 'claude anthropic',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:antigravity',
+    label: 'Antigravity',
+    descriptionKey: 'settings.agent.dialog.option.antigravity.description',
+    descriptionDefault: 'Google Antigravity CLI with automatic installation',
+    cliType: 'builtin',
+    agentType: 'antigravity',
+    searchKeys: 'google antigravity agy',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:deepseek',
+    label: 'DeepSeek Harness',
+    descriptionKey: 'settings.agent.dialog.option.deepseek.description',
+    descriptionDefault: 'DeepSeek coding agent over ACP (developer preview)',
+    cliType: 'builtin',
+    agentType: 'deepseek',
+    experimental: true,
+    searchKeys: 'deepseek harness dsh acp',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:grok',
+    label: 'Grok',
+    descriptionKey: 'settings.agent.dialog.option.grok.description',
+    descriptionDefault: 'xAI Grok coding agent runtime',
+    cliType: 'builtin',
+    agentType: 'grok',
+    searchKeys: 'grok xai',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:pi',
+    label: 'Pi',
+    descriptionKey: 'settings.agent.dialog.option.pi.description',
+    descriptionDefault: 'Lody-managed Pi ACP runtime',
+    cliType: 'builtin',
+    agentType: 'pi',
+    searchKeys: 'pi acp',
   },
   {
     kind: 'builtin',
@@ -1039,54 +1042,13 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
-    value: 'builtin:grok',
-    label: 'Grok',
-    descriptionKey: 'settings.agent.dialog.option.grok.description',
-    descriptionDefault: 'xAI Grok coding agent runtime',
+    value: 'builtin:bub',
+    label: 'Bub',
+    descriptionKey: 'settings.agent.dialog.option.bub.description',
+    descriptionDefault: 'Bub agent runtime over ACP (install the bub-acp-server plugin)',
     cliType: 'builtin',
-    agentType: 'grok',
-    searchKeys: 'grok xai',
-  },
-  {
-    kind: 'builtin',
-    value: 'builtin:claude',
-    label: 'Claude',
-    descriptionKey: 'settings.agent.dialog.option.claude.description',
-    descriptionDefault: 'Anthropic Claude Code runtime',
-    cliType: 'builtin',
-    agentType: 'claude',
-    searchKeys: 'claude anthropic',
-  },
-  {
-    kind: 'builtin',
-    value: 'builtin:codex',
-    label: 'Codex',
-    descriptionKey: 'settings.agent.dialog.option.codex.description',
-    descriptionDefault: 'OpenAI Codex runtime',
-    cliType: 'builtin',
-    agentType: 'codex',
-    searchKeys: 'codex openai',
-  },
-  {
-    kind: 'builtin',
-    value: 'builtin:deepseek',
-    label: 'DeepSeek Harness',
-    descriptionKey: 'settings.agent.dialog.option.deepseek.description',
-    descriptionDefault: 'DeepSeek coding agent over ACP (developer preview)',
-    cliType: 'builtin',
-    agentType: 'deepseek',
-    experimental: true,
-    searchKeys: 'deepseek harness dsh acp',
-  },
-  {
-    kind: 'builtin',
-    value: 'builtin:pi',
-    label: 'Pi',
-    descriptionKey: 'settings.agent.dialog.option.pi.description',
-    descriptionDefault: 'Lody-managed Pi ACP runtime',
-    cliType: 'builtin',
-    agentType: 'pi',
-    searchKeys: 'pi acp',
+    agentType: 'bub',
+    searchKeys: 'bub bubbuild acp',
   },
   {
     kind: 'builtin',
@@ -1100,13 +1062,13 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
-    value: 'builtin:bub',
-    label: 'Bub',
-    descriptionKey: 'settings.agent.dialog.option.bub.description',
-    descriptionDefault: 'Bub agent runtime over ACP (install the bub-acp-server plugin)',
+    value: 'builtin:sorbet',
+    label: 'Lody Agent',
+    descriptionKey: 'settings.agent.dialog.option.sorbet.description',
+    descriptionDefault: 'An agent harness for work that outlives one conversation. Built for Lody.',
     cliType: 'builtin',
-    agentType: 'bub',
-    searchKeys: 'bub bubbuild acp',
+    agentType: 'sorbet',
+    searchKeys: 'lody agent sorbet',
   },
 ];
 
@@ -1154,10 +1116,6 @@ const ALL_OPTIONS: AgentTypeOption[] = [
   CUSTOM_OPTION,
   ...REGISTRY_OPTIONS,
 ];
-
-// =============================================================================
-// Form data
-// =============================================================================
 
 export type AgentConfigFormData = {
   codexAuth?: CodexAuthProfile;
@@ -1522,12 +1480,12 @@ function resolveInitialTestedCustomKey(
   if (entry.sourceVersion !== `custom:${serializeCustomAcpLaunchSpec(config.customAcp)}`) {
     return null;
   }
+  // A degraded persisted entry (e.g. an empty model catalog) never proves a
+  // working provider — the config needs a fresh test instead of inheriting the
+  // degraded verification.
+  if (hasEmptyModelSelectOption(entry.configOptions)) return null;
   return formatCustomAcpCommandLine(config.customAcp);
 }
-
-// =============================================================================
-// Main dialog
-// =============================================================================
 
 export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const reason = useMachineRpcFeatureReason(props.machine.id);
@@ -1799,19 +1757,21 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
-      : formData.agentType === 'codex'
-        ? 'codexPath'
-        : formData.agentType === 'claude'
-          ? 'claudeCodeExecutable'
-          : formData.agentType === 'kimi'
-            ? 'kimiPath'
-            : formData.agentType === 'devin'
-              ? 'devinPath'
-              : formData.agentType === 'grok'
-                ? 'grokPath'
-                : formData.agentType === 'pi'
-                  ? 'piPath'
-                  : null;
+      : formData.agentType === 'antigravity'
+        ? 'antigravityPath'
+        : formData.agentType === 'codex'
+          ? 'codexPath'
+          : formData.agentType === 'claude'
+            ? 'claudeCodeExecutable'
+            : formData.agentType === 'kimi'
+              ? 'kimiPath'
+              : formData.agentType === 'devin'
+                ? 'devinPath'
+                : formData.agentType === 'grok'
+                  ? 'grokPath'
+                  : formData.agentType === 'pi'
+                    ? 'piPath'
+                    : null;
   const builtinRuntimeOverrideValue = builtinRuntimeOverrideKey
     ? (formData.runtimeOverrides?.[builtinRuntimeOverrideKey] ?? '')
     : '';
@@ -2021,8 +1981,8 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           'settings.agent.dialog.nodeVersionRequired',
           'Kimi Code requires Node ≥{{required}}; this machine is using {{current}}.',
           {
-            required: effectiveBinaryState?.required ?? t('common.unknown', 'unknown'),
-            current: effectiveBinaryState?.current ?? t('common.unknown', 'unknown'),
+            required: effectiveBinaryState?.required ?? t('common.unknown', 'Unknown'),
+            current: effectiveBinaryState?.current ?? t('common.unknown', 'Unknown'),
           }
         )
       : null;
@@ -2153,6 +2113,20 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           );
           return;
         }
+        if (hasEmptyModelSelectOption(response.capability?.configOptions)) {
+          // The probe succeeded but the agent advertised an empty model
+          // catalog: unusable for real sessions and never a verified state.
+          setAuthRequired(false);
+          setManuallyTested(false);
+          setVerifiedBuiltinContext(null);
+          setProbeError(
+            t(
+              'settings.agent.dialog.emptyModelCatalog',
+              'Provider responded but reported no usable models — try verifying again.'
+            )
+          );
+          return;
+        }
         setAuthRequired(false);
         setManuallyTested(true);
         if (requiresBuiltinVerification) {
@@ -2213,9 +2187,20 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           response.error ?? t('settings.agent.dialog.probeFailed', 'Provider verification failed.')
         );
       }
+      if (hasEmptyModelSelectOption(response.capability?.configOptions)) {
+        throw new Error(
+          t(
+            'settings.agent.dialog.emptyModelCatalog',
+            'Provider responded but reported no usable models — try verifying again.'
+          )
+        );
+      }
       setAuthRequired(false);
       setTestedCustomKey(probedKey);
     } catch (error) {
+      // Any failed verification invalidates the prior tested key for the same
+      // command — the provider may have degraded since then.
+      setTestedCustomKey(null);
       setProbeError(error instanceof Error ? error.message : String(error));
     } finally {
       setProbing(false);
@@ -2447,6 +2432,24 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       } else {
         delete nextOverrides[builtinRuntimeOverrideKey];
       }
+      return {
+        ...prev,
+        runtimeOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
+      };
+    });
+  };
+
+  const isAntigravityBuiltin =
+    formData.cliType === 'builtin' && formData.agentType === 'antigravity';
+  const antigravitySkipPermissionsSupported = machineSupportsAntigravitySkipPermissions(machine);
+  const antigravitySkipPermissions = formData.runtimeOverrides?.antigravitySkipPermissions === true;
+  // A launch policy, not a runtime replacement: the managed runtime and its
+  // capabilities stay valid, so toggling it never invalidates verification.
+  const updateAntigravitySkipPermissions = (enabled: boolean) => {
+    setFormData((prev) => {
+      const nextOverrides = { ...(prev.runtimeOverrides ?? {}) };
+      if (enabled) nextOverrides.antigravitySkipPermissions = true;
+      else delete nextOverrides.antigravitySkipPermissions;
       return {
         ...prev,
         runtimeOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
@@ -2737,7 +2740,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         )}
         {filteredOptions.length === 0 && (
           <div {...stylex.props(styles.railEmpty)}>
-            {t('settings.agent.dialog.noResults', 'No agents match that search')}
+            {t('settings.agent.dialog.noResults', 'No providers match that search')}
           </div>
         )}
       </nav>
@@ -2863,7 +2866,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   setTestingBuiltinSetup(false);
                 } catch (error) {
                   toast.error(
-                    t('settings.agent.setup.deleteFailed', 'Could not delete provider setup')
+                    t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup')
                   );
                   throw error;
                 }
@@ -2877,14 +2880,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           // `hidden` alone loses to a stylesheet's `display`.
           {...stylex.props(styles.groups, waitingForBuiltinSetup && styles.hidden)}
         >
-          <Field
-            htmlFor="agent-config-name"
-            label={t('agents.configName', 'Name')}
-            hint={t(
-              'settings.agent.dialog.nameHint',
-              'Shown in the provider list and session menus.'
-            )}
-          >
+          <Field htmlFor="agent-config-name" label={t('agents.configName', 'Name')}>
             <Input
               id="agent-config-name"
               value={formData.name}
@@ -2919,7 +2915,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           {managedCodexForm && codexAuth ? (
             <Field
               label={t('settings.agent.codex.authentication', 'Authentication')}
-              hint={t(
+              info={t(
                 'settings.agent.codex.storage',
                 'Credentials stay on the selected machine. Each provider has its own account.'
               )}
@@ -2960,7 +2956,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 <Field
                   htmlFor="codex-base-url"
                   label={t('settings.agent.codex.baseUrl', 'Base URL')}
-                  hint={t(
+                  info={t(
                     'settings.agent.codex.keyNext',
                     'Enter the API Key securely during sign-in. To change the destination, add a new provider.'
                   )}
@@ -3004,9 +3000,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <Field
                 htmlFor="custom-acp-command"
                 label={t('settings.agent.dialog.custom.commandLabel', 'Launch command')}
-                hint={t(
+                info={t(
                   'settings.agent.dialog.custom.commandHint',
-                  'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not.'
+                  'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not. Custom providers are only probed when you click Test, so re-test after changing the command.'
                 )}
                 icon={<SquareTerminal aria-hidden="true" {...stylex.props(catalog.icon)} />}
               >
@@ -3034,12 +3030,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   />
                 </div>
               </Field>
-              <p {...stylex.props(styles.hint)}>
-                {t(
-                  'settings.agent.dialog.custom.testHint',
-                  'Custom providers are only probed when you click Test — re-test after changing the command.'
-                )}
-              </p>
             </div>
           )}
 
@@ -3048,7 +3038,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <Field
                 htmlFor="builtin-runtime-path"
                 label={t('settings.agent.dialog.runtimeOverride.label', 'Runtime binary path')}
-                hint={t(
+                info={t(
                   'settings.agent.dialog.runtimeOverride.hint',
                   'Advanced: leave empty to let Lody install and verify the managed runtime. Filling this is not recommended unless you need a local enterprise mirror or are debugging runtime startup.'
                 )}
@@ -3060,35 +3050,40 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                     value={builtinRuntimeOverrideValue}
                     onChange={(event) => updateBuiltinRuntimeOverride(event.target.value)}
                     placeholder={
-                      formData.agentType === 'codex'
+                      formData.agentType === 'antigravity'
                         ? t(
-                            'settings.agent.dialog.runtimeOverride.codexPlaceholder',
-                            '/path/to/codex'
+                            'settings.agent.dialog.runtimeOverride.antigravityPlaceholder',
+                            '/path/to/agy'
                           )
-                        : formData.agentType === 'kimi'
+                        : formData.agentType === 'codex'
                           ? t(
-                              'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
-                              '/path/to/kimi'
+                              'settings.agent.dialog.runtimeOverride.codexPlaceholder',
+                              '/path/to/codex'
                             )
-                          : formData.agentType === 'devin'
+                          : formData.agentType === 'kimi'
                             ? t(
-                                'settings.agent.dialog.runtimeOverride.devinPlaceholder',
-                                '/path/to/devin'
+                                'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
+                                '/path/to/kimi'
                               )
-                            : formData.agentType === 'grok'
+                            : formData.agentType === 'devin'
                               ? t(
-                                  'settings.agent.dialog.runtimeOverride.grokPlaceholder',
-                                  '/path/to/grok'
+                                  'settings.agent.dialog.runtimeOverride.devinPlaceholder',
+                                  '/path/to/devin'
                                 )
-                              : formData.agentType === 'pi'
+                              : formData.agentType === 'grok'
                                 ? t(
-                                    'settings.agent.dialog.runtimeOverride.piPlaceholder',
-                                    '/path/to/pi'
+                                    'settings.agent.dialog.runtimeOverride.grokPlaceholder',
+                                    '/path/to/grok'
                                   )
-                                : t(
-                                    'settings.agent.dialog.runtimeOverride.claudePlaceholder',
-                                    '/path/to/claude'
-                                  )
+                                : formData.agentType === 'pi'
+                                  ? t(
+                                      'settings.agent.dialog.runtimeOverride.piPlaceholder',
+                                      '/path/to/pi'
+                                    )
+                                  : t(
+                                      'settings.agent.dialog.runtimeOverride.claudePlaceholder',
+                                      '/path/to/claude'
+                                    )
                     }
                     autoComplete="off"
                     spellCheck={false}
@@ -3114,6 +3109,43 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   />
                 </div>
               </Field>
+            </div>
+          ) : null}
+
+          {isAntigravityBuiltin && !activePreset ? (
+            <div {...stylex.props(styles.switchRow)}>
+              <div {...stylex.props(styles.switchText)}>
+                <Field
+                  htmlFor="antigravity-skip-permissions"
+                  label={t(
+                    'settings.agent.dialog.antigravitySkipPermissions.label',
+                    'Skip permission requests'
+                  )}
+                  icon={<ShieldOff aria-hidden="true" {...stylex.props(catalog.icon)} />}
+                  hint={t(
+                    'settings.agent.dialog.antigravitySkipPermissions.hint',
+                    'Starts agy with --dangerously-skip-permissions, so it approves file edits, commands and MCP tool calls without asking. Applies when the next agy process starts.'
+                  )}
+                >
+                  {null}
+                </Field>
+                {!antigravitySkipPermissionsSupported ? (
+                  <p {...stylex.props(styles.switchWarning)}>
+                    {t(
+                      'settings.agent.dialog.antigravitySkipPermissions.unsupported',
+                      'Update Lody on this machine to use this option.'
+                    )}
+                  </p>
+                ) : null}
+              </div>
+              <span {...stylex.props(styles.switchControl)}>
+                <Switch
+                  id="antigravity-skip-permissions"
+                  checked={antigravitySkipPermissions}
+                  disabled={!antigravitySkipPermissionsSupported && !antigravitySkipPermissions}
+                  onCheckedChange={(checked) => updateAntigravitySkipPermissions(checked)}
+                />
+              </span>
             </div>
           ) : null}
 
@@ -3333,7 +3365,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   disabled={!capabilitiesReady}
                   disabledHint={
                     probing
-                      ? t('settings.agent.dialog.probing', 'Probing…')
+                      ? t('settings.agent.dialog.probing', 'Probing capabilities…')
                       : t(
                           'settings.agent.dialog.testToRefreshCapabilities',
                           'Click Test to refresh available options.'
@@ -3402,7 +3434,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 <p {...stylex.props(styles.note)}>
                   {t(
                     'settings.agent.dialog.presetEnvHint',
-                    'Preset variables (shown above) are injected automatically and cannot be overridden here.'
+                    'Preset variables are injected automatically and cannot be overridden here.'
                   )}
                 </p>
               ) : null}
@@ -3486,7 +3518,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           <Tooltip.Root>
             <Tooltip.Trigger
               render={
-                <span>
+                <span {...stylex.props(styles.footerAction)}>
                   <Button
                     size="small"
                     onClick={() => void submit()}
@@ -3574,10 +3606,6 @@ function useNarrowDialogLayout() {
   }, []);
   return narrow;
 }
-
-// =============================================================================
-// Presentational helpers
-// =============================================================================
 
 function isAutoGeneratedName(name: string) {
   const n = name.trim();
@@ -3727,7 +3755,7 @@ function ProbeStatus({
     return (
       <span {...stylex.props(styles.probing)}>
         <Spinner size="small" aria-hidden="true" />
-        {t('settings.agent.dialog.probing', 'Probing…')}
+        {t('settings.agent.dialog.probing', 'Probing capabilities…')}
       </span>
     );
   }
@@ -3813,7 +3841,7 @@ function DeepSeekApiKeyField({
     <Field
       htmlFor="deepseek-api-key"
       label={label ?? t('settings.agent.dialog.deepseek.apiKeyLabel', 'DeepSeek API Key')}
-      hint={t(
+      info={t(
         'settings.agent.dialog.deepseek.apiKeyHelp',
         'Saved with this provider and injected as DEEPSEEK_API_KEY when DSH starts.'
       )}
@@ -3862,7 +3890,7 @@ function DeepSeekHarnessPanel({
           {t('settings.agent.dialog.deepseek.officialTab', 'DeepSeek official')}
         </Tabs.Tab>
         <Tabs.Tab value="custom">
-          {t('settings.agent.dialog.deepseek.customTab', 'Custom Endpoint')}
+          {t('settings.agent.dialog.deepseek.customTab', 'Custom endpoint')}
         </Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="official">
@@ -3872,8 +3900,8 @@ function DeepSeekHarnessPanel({
         <div {...stylex.props(styles.stack)}>
           <Field
             htmlFor="deepseek-endpoint"
-            label={t('settings.agent.dialog.deepseek.endpointLabel', 'API Endpoint')}
-            hint={t(
+            label={t('settings.agent.dialog.deepseek.endpointLabel', 'API endpoint')}
+            info={t(
               'settings.agent.dialog.deepseek.endpointHelp',
               'Required HTTP or HTTPS URL. Saved as DEEPSEEK_BASE_URL without adding or removing /v1.'
             )}
@@ -4233,7 +4261,7 @@ function InlineCopyButton({ value, ariaLabel }: { value: string; ariaLabel: stri
       onClick={(event) => {
         event.stopPropagation();
         if (!value) return;
-        void navigator.clipboard.writeText(value).catch(() => {});
+        void copyTextToClipboard(value).catch(() => {});
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}

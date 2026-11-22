@@ -1,5 +1,5 @@
-import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 // @vitest-environment jsdom
+import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

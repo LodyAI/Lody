@@ -3,6 +3,8 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
 Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-options.ts`.
+StyleX rules must land in the initial renderer stylesheet: `index` for Web and
+`main` for Electron, including hashed filenames, never a lazy feature chunk.
 
 - Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge` or
   `@source` scanning here. Component props own visual variants, sizes, tones and
@@ -72,6 +74,8 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
   is a tint and a mark, never a fill — mark in `tone.ts`, tint in `surface.ts`;
   `disabled` is Base UI state. A Spinner's turn rides an HTML wrapper — svg
   can't composite at DPR≠1 (crbug 1186312) — and `className` lands on that box.
+- Toast presses must not dismiss underlying drawers. Touch release and cancellation
+  resume auto-dismiss; compatibility mouse events must not pause it as hover.
 - `Table` and `Pagination` are one `table` family. **A column is stated once**:
   `Table` takes `columns` and owns width, ordering, selection (a `Checkbox`,
   never `aria-selected`), the empty row's span, the sticky head and the narrow

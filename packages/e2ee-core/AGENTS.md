@@ -52,3 +52,21 @@ Product content seals prefer installed current keys. Only genuine missing-key
 results permit retained published keys inside the durable fifteen-minute first-observation
 budget; uncertain timing fails closed. Membership/device/role checks remain mandatory.
 See the [owner tradeoff](../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
+
+Immutable recovery-package reads borrow independent short-lived master-key copies;
+never hold the index mutex across their network waits. Vault close stops new reads
+and drains admitted reads before returning; index mutations retain their mutex and CAS.
+
+The reference mailbox limits each sender to 16 non-rejected envelopes per current
+slot revision; repairs retain historical originals and rejected-digest entries.
+
+Recovery admission may use the highest authenticated committed epoch and its history,
+or the authenticated recovery identity at epoch zero. Report partial key recovery;
+never equate restored governance with current-key readiness. New owner transfers
+require a successor personal device, and last-personal revocation requires explicit
+recovery-loss confirmation in the workflow. Preserve v1 replay rules.
+
+Password unlock reads the eight bounded ciphertext slots through optional
+`readEntries`, otherwise with at most four individual reads in flight. It still waits for the complete scan, tests the same two newest
+candidates and authenticates the active index and rollback pin before returning.
+It does not cache password wraps or reduce Argon2id parameters.

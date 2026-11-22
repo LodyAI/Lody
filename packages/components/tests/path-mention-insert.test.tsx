@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+let sessionItems: Array<{ sessionId: string; title: string; slug: string; activityAt: number }> =
+  [];
 
 vi.mock('../src/components/mentions/mention-project-file-source', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -25,7 +26,7 @@ vi.mock('../src/components/mentions/mention-skill-source', async (importOriginal
 
 vi.mock('../src/components/mentions/mention-session-source', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  useSessionMentionItems: () => [],
+  useSessionMentionItems: () => sessionItems,
 }));
 
 vi.mock('../src/components/mentions/mention-agent-role-source', async (importOriginal) => ({
@@ -39,6 +40,7 @@ import {
 } from '../src/components/mentions/combined-mention-textarea';
 import type { Mention as MentionRange } from '../src/ui/mention/index';
 import { initI18n } from '../src/i18n';
+import { composerIn } from './composer-test-utils';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -59,6 +61,7 @@ describe('inserting a path mention from outside the composer', () => {
 
   beforeEach(async () => {
     await initI18n('en');
+    sessionItems = [];
     handle = null;
     value = '';
     ranges = [];
@@ -133,8 +136,8 @@ describe('inserting a path mention from outside the composer', () => {
     });
     await render(value);
     expect(value).toBe('look at @/existing @/first @/second folder ');
-    const input = container.querySelector('textarea')!;
-    expect(document.activeElement).toBe(input);
+    const input = composerIn(container);
+    expect(document.activeElement).toBe(input.element);
     expect(input.selectionStart).toBe(value.length);
     expect(input.selectionEnd).toBe(value.length);
     expect(
@@ -148,5 +151,91 @@ describe('inserting a path mention from outside the composer', () => {
       { text: '@/first', value: '/first/', kind: 'dir' },
       { text: '@/second folder', value: '/second folder/', kind: 'dir' },
     ]);
+  });
+});
+
+/**
+ * A session mention written from OUTSIDE the composer — the drop target of a
+ * dragged sidebar row.
+ */
+describe('inserting a session mention from outside the composer', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+  let handle: CombinedMentionTextareaHandle | null;
+  let value: string;
+  let ranges: MentionRange[];
+
+  beforeEach(async () => {
+    await initI18n('en');
+    sessionItems = [
+      { sessionId: 'sess_ci', title: 'Fix CI', slug: 'fix-ci', activityAt: 2 },
+      { sessionId: 'sess_docs', title: 'Docs pass', slug: 'docs-pass', activityAt: 1 },
+    ];
+    handle = null;
+    value = '';
+    ranges = [];
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  async function render(next = value) {
+    value = next;
+    await act(async () => {
+      root.render(
+        <CombinedMentionTextarea
+          value={value}
+          onValueChange={(text) => {
+            value = text;
+          }}
+          mentionSource={{ kind: 'local', localProjectId: 'p1' } as never}
+          mentionActionsRef={(instance) => {
+            handle = instance;
+          }}
+          onMentionRangesChange={(nextRanges) => {
+            ranges = nextRanges;
+          }}
+          resetOnEmpty={false}
+        />
+      );
+    });
+  }
+
+  async function insert(sessionId: string) {
+    let inserted = false;
+    await act(async () => {
+      inserted = handle?.insertSessionMention(sessionId) ?? false;
+    });
+    await render(value);
+    return inserted;
+  }
+
+  it('writes the slug and a range carrying the session id', async () => {
+    await render('');
+
+    expect(await insert('sess_ci')).toBe(true);
+    expect(value).toBe('@fix-ci ');
+    expect(ranges).toEqual([{ value: 'sess_ci', start: 0, end: 7, kind: 'session' }]);
+  });
+
+  it('is idempotent — a session already mentioned is not mentioned twice', async () => {
+    await render('');
+    expect(await insert('sess_ci')).toBe(true);
+
+    expect(await insert('sess_ci')).toBe(false);
+    expect(value).toBe('@fix-ci ');
+    expect(ranges).toHaveLength(1);
+  });
+
+  it('reports failure for a session that is not mentionable', async () => {
+    await render('hello');
+    expect(await insert('sess_missing')).toBe(false);
+    expect(value).toBe('hello');
+    expect(ranges).toHaveLength(0);
   });
 });

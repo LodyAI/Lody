@@ -20,6 +20,7 @@ import {
   type E2eeMachineSharingReplies,
   type E2eeMachineSharingHeadState,
   type E2eeMachineSharingRemovedHead,
+  type E2eeMachineSharingVersion,
   DEFAULT_RUNTIME_ARTIFACTS_BASE_URL,
   resolveRuntimeArtifactsBaseUrl,
   resolvePlatformKind,
@@ -34,9 +35,17 @@ it('keeps machine sharing tombstones and account display outside execution crede
     E2eeMachineSharingRequests['commit']['expectedHead']
   >().toEqualTypeOf<E2eeMachineSharingHeadState | null>();
   expectTypeOf<E2eeMachineSharingRequests['commit']>().toMatchTypeOf<{ credential: string }>();
+  // Only an active head may inline its original; removal barriers never carry one.
+  expectTypeOf<E2eeMachineSharingReplies['readHead']>().toEqualTypeOf<
+    | (Extract<E2eeMachineSharingHeadState, { status: 'active' }> & {
+        version?: E2eeMachineSharingVersion;
+      })
+    | E2eeMachineSharingRemovedHead
+    | null
+  >();
   expectTypeOf<
-    E2eeMachineSharingReplies['readHead']
-  >().toEqualTypeOf<E2eeMachineSharingHeadState | null>();
+    Extract<keyof Extract<E2eeMachineSharingReplies['readHead'], { status: 'removed' }>, 'version'>
+  >().toEqualTypeOf<never>();
   expectTypeOf<
     Extract<E2eeMachineSharingReplies['readRequest'], { status: 'removed' }>
   >().toEqualTypeOf<E2eeMachineSharingRemovedHead>();

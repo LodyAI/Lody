@@ -58,7 +58,7 @@ export class TextAttachmentPage {
 
   async expectCancelledPickerLeavesEmptyComposer(): Promise<void> {
     await expect(this.composerRemoveAttachment()).toHaveCount(0);
-    await expect(this.composerPrompt()).toHaveValue('');
+    await expect(this.composerPrompt()).toHaveText('');
     await expect(this.sendButton()).toBeDisabled();
   }
 
@@ -83,7 +83,7 @@ export class TextAttachmentPage {
     await expect(this.historyAttachment()).toHaveCount(1);
     await expect(this.historyAttachment()).toBeVisible();
     await expect(this.historyPrompt(ATTACHMENT_PROMPT)).toBeVisible();
-    await expect(this.composerPrompt()).toHaveValue('');
+    await expect(this.composerPrompt()).toHaveText('');
   }
 
   async sendPlainTextFollowUp(): Promise<void> {

@@ -13,8 +13,10 @@ Local Session tools now enter the daemon's existing repo through bounded IPC and
 share validated handlers, Role resolution and Operation persistence with Cloud.
 A scoped command environment supplies local identity, access checks and host
 operations; recovery receives explicit authority confirmation. Cloud retains its
-existing authentication and remote catch-up requirements. This avoids a second
-local replica, with an additional IPC hop for local MCP callers.
+existing authentication and remote catch-up for remote/unverified targets (Cloud
+same-machine recovery later adopted local daemon flush in
+[availability-first Cloud same-machine recovery](2026-11-21-cloud-same-machine-recovery-authority.md)).
+This avoids a second local replica, with an additional IPC hop for local MCP callers.
 
 ## Responsibilities
 
@@ -24,8 +26,8 @@ MCP Session/catalog registration + validation
   Local -> session/call-tool -> daemon scope/active-Turn check
     -> scoped SessionCommandEnvironment -> same handler + Operation store
 Operation coordinator -> authority confirmation -> frozen target materialization
-  Cloud: remote Streams catch-up
-  Local: flush authoritative daemon repo, then recheck fixed Turn
+  Cloud (remote/unresolved): remote Streams catch-up
+  Local and Cloud same-machine daemon: flush authoritative daemon repo, then recheck fixed Turn
 ```
 
 `session-tool-router.ts` registers both MCP handlers and the daemon allowlist;

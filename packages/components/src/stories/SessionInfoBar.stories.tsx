@@ -14,6 +14,10 @@ import {
   type SessionPullRequestCiState,
 } from '@lody/shared';
 import { getSessionGitHubState } from '@/lib/session-github-state';
+import {
+  linkedPullRequestsMeta,
+  useStoryPullRequestLinks,
+} from './SessionPullRequestLinks.stories';
 import { resolveSessionInfoBarGitHubActionIds } from '@/components/sessions/session-info-action-state';
 import { SessionInfoBar, type SessionInfoBarProps } from '@/components/sessions/session-info-bar';
 import type { SessionMachineInfo } from '@/components/sessions/session-machine-info';
@@ -114,6 +118,8 @@ function StoryHarness({
   branch = 'feat/presence-machine-online-session-status',
   workspaceLocation = null,
   pr = openPr,
+  prHistory,
+  prLinks,
   diffStat = { add: 128, del: 42 },
   width = 760,
   initialStage,
@@ -139,7 +145,9 @@ function StoryHarness({
     path?: string | null;
   } | null;
   pr?: SessionPullRequestMeta | null;
-  diffStat?: { add: number; del: number } | null;
+  prHistory?: SessionInfoBarProps['prHistory'];
+  prLinks?: SessionInfoBarProps['prLinks'];
+  diffStat?: SessionInfoBarProps['diffStat'];
   width?: number;
   initialStage?: 'status' | 'goal' | 'schedule' | 'context';
   withPreview?: boolean;
@@ -196,6 +204,9 @@ function StoryHarness({
         workspaceLocation={workspaceLocation}
         pr={pr}
         onOpenPr={fn()}
+        prHistory={prHistory}
+        prLinks={prLinks}
+        onOpenHistoryPr={fn()}
         contextActions={contextActions}
         onOpenAllChanges={fn()}
         onOpenBrowser={withPreview ? fn() : undefined}
@@ -228,6 +239,20 @@ type Story = StoryObj<typeof meta>;
 /* ── Context / status matrix ─────────────────────────────────────────── */
 
 export const ContextOnly: Story = { args: {} };
+
+/** Binary, empty-file and permission changes retain the workspace review entry. */
+export const ZeroLineChanges: Story = {
+  args: { pr: null, projectName: null, branch: null, diffStat: { add: 0, del: 0, files: 2 } },
+};
+
+export const ZeroLineChangesMobile: Story = {
+  args: { ...ZeroLineChanges.args, compactMachineInfo: true, width: 375 },
+};
+
+/** Mixed comparisons keep the ordinary text line summary. */
+export const MixedTextAndBinaryChanges: Story = {
+  args: { pr: null, diffStat: { add: 12, del: 3, files: 3 } },
+};
 
 const LOCAL_MACHINE: SessionMachineInfo = {
   machineId: 'story-machine' as SessionMachineInfo['machineId'],
@@ -345,6 +370,44 @@ export const ContextWithMachineRemoved: Story = {
 };
 
 export const NoPr: Story = { args: { pr: null } };
+
+/** A conversation that created several PRs: the marker shows the current one and lists all. */
+const prHistoryMeta = {
+  pullRequests: [
+    { url: 'https://github.com/loro-dev/lody/pull/2850', status: 'closed' },
+    { url: 'https://github.com/loro-dev/lody/pull/2871', status: 'merged' },
+    { url: 'https://github.com/loro-dev/lody/pull/2894', status: 'open' },
+  ],
+} as SessionMeta;
+export const PrHistory: Story = {
+  args: {
+    pr: prHistoryMeta.pullRequests![2],
+    prHistory: getSessionGitHubState(prHistoryMeta).pullRequestHistory,
+  },
+};
+
+/** Linked pull requests: the PR marker lists every PR the Session holds, with link and unlink. */
+function LinkedPullRequestsBar(props: Parameters<typeof StoryHarness>[0]) {
+  const links = useStoryPullRequestLinks(linkedPullRequestsMeta);
+  const state = getSessionGitHubState(linkedPullRequestsMeta);
+  return (
+    <StoryHarness
+      {...props}
+      projectName="LodyAI/Lody"
+      branch="session/68583a0c"
+      pr={state.latestPr}
+      prCiState={state.latestPrState?.s}
+      prLinks={links}
+    />
+  );
+}
+export const LinkedPullRequests: Story = {
+  render: (args) => <LinkedPullRequestsBar {...args} />,
+};
+export const LinkedPullRequestsDark: Story = {
+  ...LinkedPullRequests,
+  globals: { theme: 'dark' },
+};
 
 function ObservationHarness({ ownerMeta }: { ownerMeta: SessionMeta }) {
   const { t } = useTranslation();

@@ -3,6 +3,7 @@ import {
   MachineSharingError,
   type SharingRemote
 } from '@lody/e2ee-machine-sharing'
+import { openSqliteMachineSharingStore } from '@lody/e2ee-machine-sharing/sqlite'
 import { makeDesktopRemotePairing } from './e2ee-remote-pairing.mjs'
 import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services'
 import {
@@ -36,6 +37,7 @@ import {
   type WorkspaceRecoveryInput
 } from '@lody/e2ee-core'
 import {
+  epochHistoryPacket,
   Bytes,
   ContentError,
   LedgerError,
@@ -50,6 +52,7 @@ import {
   getCommittedEpochStagingKey,
   verifyLedgerEffect,
   extendLedgerEffect,
+  signExecutionIntent,
   type RetainedLedgerState
 } from '@lody/e2ee-core/protocol'
 import {
@@ -80,7 +83,15 @@ import {
   makeRealtimeContentBinding
 } from '@lody/e2ee-core/adapters/loro-streams'
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native'
+import type { E2eeIntentSigningRequest } from '@lody/loro-streams-rpc/e2ee-client'
+import { makeDesktopIrohClient, type DesktopIrohClient } from './e2ee-iroh.mjs'
+import type { IrohNative } from '@lody/iroh-native'
 import type { E2eeDispatchInput } from '@lody/shared/e2ee-rpc'
+import {
+  encodeE2eeIntentRecord,
+  scheduleDeclarationSubject
+} from '@lody/shared/e2ee-execution-intent'
+import type { ScheduleDocument } from '@lody/shared'
 import { encryptedWorkspaceRoom } from '@lody/shared/workspace-streams-content'
 type E2eeWorkspaceHistoryPage = Parameters<E2eeWorkspaceRuntime['ingestLedgerRecords']>[1]
 import type { E2eeRuntimeLedgerView, E2eeRuntimeStatus } from '@lody/platform'
@@ -113,6 +124,11 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'sharing_storage'
     | 'invalid-ledger'
     | 'member_removed'
+    | 'member_invitation_invalid'
+    | 'member_invitation_endorser_ineligible'
+    | 'member_invitation_expired'
+    | 'member_invitation_mismatch'
+    | 'member_invitation_used'
     | 'device_revoked'
     | 'missing-binding'
     | 'conflict'
@@ -129,8 +145,18 @@ const historyFailure = (error: unknown) =>
   )
     ? fail('local-history-recovery-required')
     : error
+/** How far ahead of this device's verified epoch an unverified frame may point and still
+ * be treated as ledger lag (Streams faster than the ledger feed) rather than forgery. */
+const LEDGER_LOOKAHEAD_EPOCHS = 4
+/** At most this many other members' machines are warmed when a workspace opens. */
+const SHARING_PREWARM_LIMIT = 16
+/** A frame the ledger has not caught up with yet: a bounded future epoch, or an author the
+ * current epoch does not know (`unauthorized` at an epoch the ledger already holds). */
+const ledgerLag = (code: string, epoch: number, current: number) =>
+  epoch <= current + LEDGER_LOOKAHEAD_EPOCHS &&
+  (epoch > current || (epoch === current && code === 'unauthorized'))
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
-type KeyRoundMode = 'full' | 'receive' | 'distribute'
+type KeyRoundMode = 'full' | 'receive' | 'distribute' | 'receive-preview'
 const unhex = (value: string) => {
   if (typeof value !== 'string' || !/^(?:[0-9a-f]{2})+$/.test(value)) throw fail('invalid-input')
   return new Uint8Array(Buffer.from(value, 'hex'))
@@ -182,6 +208,15 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
       if (reason === 'key-update-required') return fail('key-update-required')
       if (reason === 'missing-binding') return fail('missing-binding')
       if (reason === 'conflict') return fail('conflict')
+      // Automatic-admission refusals keep their precise code for the administrator.
+      if (
+        reason === 'member_invitation_invalid' ||
+        reason === 'member_invitation_endorser_ineligible' ||
+        reason === 'member_invitation_expired' ||
+        reason === 'member_invitation_mismatch' ||
+        reason === 'member_invitation_used'
+      )
+        return fail(reason)
       if (reason === 'invalid-input') return fail('invalid-input')
       return fail(
         reason === 'local-evidence-conflict' || reason === 'rollback'
@@ -235,6 +270,12 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
     readonly removeObsoleteCache?: typeof unlink
     readonly custody: DesktopE2eeCustody
     readonly bootstrap: Effect.Success<ReturnType<typeof makeDesktopE2eeBootstrap>>
+    /** Optional iroh route for encrypted RPC; absent keeps Streams RPC only. */
+    readonly iroh?: {
+      readonly native: IrohNative
+      readonly relays: import('@lody/platform').E2eeIrohRelays
+      readonly proxyUrl?: string
+    }
   }) {
     const serial = yield* Semaphore.make(1)
     let stopping = false
@@ -262,7 +303,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         >
         manage: (
           command: DesktopE2eeManagementCommand,
-          ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
+          ports: (
+            signal: AbortSignal,
+            feed: {
+              position: () => Effect.Effect<string | undefined, unknown>
+              ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<unknown, unknown>
+            }
+          ) => DesktopE2eeManagementRemote
         ) => Effect.Effect<unknown, unknown>
         managementState: () => Effect.Effect<import('@lody/platform').E2eeManagementState, unknown>
         scope: Scope.Closeable
@@ -272,6 +319,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         memberApprovals: ReturnType<typeof makeDesktopMemberApprovals>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
+        prepareKeyDelivery: (
+          recipient: string,
+          mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+        ) => Effect.Effect<{ id: string; frameHex: string } | null, unknown>
         keyDeliveryTarget: (device: string) => Effect.Effect<boolean, unknown>
         keyDeliveryEvidence: (
           recipient: string
@@ -291,7 +342,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
           staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
           refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history'],
-          mode?: KeyRoundMode
+          mode?: KeyRoundMode,
+          recipients?: readonly string[]
         ) => Effect.Effect<void, unknown>
         seal: (
           input: E2eeContentSeal
@@ -300,8 +352,12 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         refreshSharingLedger: (
           readHistory: DesktopE2eeManagementRemote['history']
         ) => Effect.Effect<void, unknown>
+        sharedMachineTargets: () => Effect.Effect<string[], unknown>
         sharing: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>>
         rpc: ReturnType<typeof makeE2eeRpcNative>
+        /** This device's execution intent signature over one already-computed subject. */
+        signIntent: (request: E2eeIntentSigningRequest) => Effect.Effect<Uint8Array, unknown>
+        iroh: DesktopIrohClient | undefined
         ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<E2eeRuntimeStatus, unknown>
       }
     >()
@@ -895,12 +951,24 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           ),
           scope
         )
-        let maintenance: Context.Context<KeyDistributor | KeyReceiver | KeyRepair> | undefined
+        let maintenancePorts:
+          | Context.Context<
+              | KeyMailbox
+              | VerifiedLedger
+              | InstalledEpochKeys
+              | EpochPublicationSource
+              | Layer.Success<typeof base>
+            >
+          | undefined
+        let receiverContext: Context.Context<KeyReceiver> | undefined
+        let distributorContext: Context.Context<KeyDistributor> | undefined
+        let repairContext: Context.Context<KeyRepair> | undefined
         let maintainKeys: Effect.Success<ReturnType<typeof makeDesktopKeyMaintenance>> | undefined
         let round: Deferred.Deferred<void, unknown> | undefined
         // The running round's mode: `receive` installs this device's key only; `distribute`
         // only reconciles and sends deliveries; `full` is the maintenance round.
         let roundMode: KeyRoundMode = 'full'
+        let roundRecipients: Set<string> | undefined
         let managing: Deferred.Deferred<void, unknown> | undefined
         let managementStores: Context.Context<EpochCandidateStore | SubmissionJournal> | undefined
         const localManagement = Effect.fnUntraced(function* () {
@@ -912,6 +980,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return managementStores
         })
         let manager: Effect.Success<ReturnType<typeof makeDesktopE2eeManagement>> | undefined
+        let currentManagementRemote: DesktopE2eeManagementRemote | undefined
         let roundAgain = false
         let closing = false
         const networkAbort = new AbortController()
@@ -946,94 +1015,181 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
         })
         const isClosing = () => closing
+        const publicationSource = Layer.succeed(EpochPublicationSource, {
+          current: (view) =>
+            sql(() => {
+              const epoch = view.inspectState().epoch.number
+              if (epoch === 0) return creation.record
+              for (const row of rows()
+                .filter((candidate) => candidate.position < view.length)
+                .reverse()) {
+                const parsed = Result.getOrThrow(decodeRecord(row.record)).body
+                if (
+                  parsed.type === 'ordinary' &&
+                  (parsed.operation.type === 'publishEpoch' ||
+                    parsed.operation.type === 'removeMemberAndPublishEpoch') &&
+                  parsed.operation.epoch === epoch
+                )
+                  return row.record
+              }
+              return null
+            }).pipe(
+              Effect.mapError(
+                () =>
+                  new LocalStoreError({
+                    store: 'EpochPublicationSource',
+                    reason: 'corrupt'
+                  })
+              )
+            )
+        })
+        const prepareKeyDelivery = (
+          recipient: string,
+          mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+        ) =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              if (closing) return yield* fail('closed')
+              const context = yield* Layer.build(
+                KeyDistributor.layer.pipe(
+                  Layer.provideMerge(KeyReceiver.layer),
+                  Layer.provide(
+                    Layer.mergeAll(
+                      sqliteDeliveryOutbox({
+                        path: join(directory, 'outbox.sqlite'),
+                        mode: 'create-or-open'
+                      }),
+                      sqliteDistributionJournal({
+                        path: join(directory, 'distribution.sqlite'),
+                        mode: 'create-or-open'
+                      }),
+                      sqliteReceiveJournal({
+                        path: join(directory, 'receive.sqlite'),
+                        mode: 'create-or-open'
+                      }),
+                      Layer.succeed(KeyMailbox, mailbox(networkAbort.signal)),
+                      Layer.succeed(VerifiedLedger, verified),
+                      Layer.succeed(InstalledEpochKeys, keys),
+                      publicationSource
+                    ).pipe(Layer.provideMerge(base))
+                  )
+                )
+              )
+              const distributor = Context.get(context, KeyDistributor)
+              if (!distributor.prepareDelivery) return null
+              const prepared = yield* distributor.prepareDelivery(recipient)
+              return { id: prepared.id, frameHex: hex(prepared.frame) }
+            })
+          )
         const keyRound = Effect.fnUntraced(function* (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
           staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
           refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history'],
-          mode: KeyRoundMode = 'full'
+          mode: KeyRoundMode = 'full',
+          recipients?: readonly string[]
         ) {
           if (closing) return yield* fail('closed')
-          if (mode === 'full') roundAgain = true
-          // One round at a time. A caller joins a running full round or one of its own
-          // mode; otherwise it waits that round out and then runs its own.
+          if (mode === 'full' && recipients === undefined) roundAgain = true
+          // A targeted request may follow a new admission after a running round
+          // captured its recipients. Wait it out and reconcile the target again.
+          // Only broad full rounds coalesce, scheduling their existing follow-up pass.
           while (round) {
             const joined = round
-            if (roundMode === 'full' || roundMode === mode) return yield* Deferred.await(joined)
+            if (
+              mode === 'full' &&
+              recipients === undefined &&
+              roundMode === 'full' &&
+              roundRecipients === undefined
+            )
+              return yield* Deferred.await(joined)
             yield* Effect.exit(Deferred.await(joined))
             if (closing) return yield* fail('closed')
           }
           const done = Deferred.makeUnsafe<void, unknown>()
           round = done
           roundMode = mode
+          roundRecipients = recipients ? new Set(recipients) : undefined
           const result = yield* Effect.exit(
             Effect.uninterruptible(
               Effect.gen(function* () {
-                if (!maintenance) {
-                  const journals = Layer.mergeAll(
-                    sqliteDeliveryOutbox({
-                      path: join(directory, 'outbox.sqlite'),
-                      mode: 'create-or-open'
-                    }),
-                    sqliteDistributionJournal({
-                      path: join(directory, 'distribution.sqlite'),
-                      mode: 'create-or-open'
-                    }),
-                    sqliteReceiveJournal({
-                      path: join(directory, 'receive.sqlite'),
-                      mode: 'create-or-open'
-                    }),
-                    sqliteRepairJournal({
-                      path: join(directory, 'repair.sqlite'),
-                      mode: 'create-or-open'
-                    })
-                  ).pipe(Layer.provideMerge(base))
-                  const ports = Layer.mergeAll(
-                    journals,
-                    Layer.succeed(KeyMailbox, mailbox(networkAbort.signal)),
-                    Layer.succeed(VerifiedLedger, verified),
-                    Layer.succeed(InstalledEpochKeys, keys),
-                    Layer.succeed(EpochPublicationSource, {
-                      current: (view) =>
-                        sql(() => {
-                          const epoch = view.inspectState().epoch.number
-                          if (epoch === 0) return creation.record
-                          for (const row of rows()
-                            .filter((candidate) => candidate.position < view.length)
-                            .reverse()) {
-                            const parsed = Result.getOrThrow(decodeRecord(row.record)).body
-                            if (
-                              parsed.type === 'ordinary' &&
-                              (parsed.operation.type === 'publishEpoch' ||
-                                parsed.operation.type === 'removeMemberAndPublishEpoch') &&
-                              parsed.operation.epoch === epoch
+                // Ports are bound once per entry, to the first round's mailbox, as before;
+                // each capability then opens only its own journals on first use.
+                const ports = Effect.fnUntraced(function* () {
+                  if (!maintenancePorts)
+                    maintenancePorts = yield* Layer.buildWithScope(
+                      Layer.mergeAll(
+                        Layer.succeed(KeyMailbox, mailbox(networkAbort.signal)),
+                        Layer.succeed(VerifiedLedger, verified),
+                        Layer.succeed(InstalledEpochKeys, keys),
+                        publicationSource,
+                        base
+                      ),
+                      scope
+                    )
+                  return Layer.succeedContext(maintenancePorts)
+                })
+                const ensureReceiver = Effect.fnUntraced(function* () {
+                  if (!receiverContext)
+                    receiverContext = yield* Layer.buildWithScope(
+                      KeyReceiver.layer.pipe(
+                        Layer.provide(
+                          sqliteReceiveJournal({
+                            path: join(directory, 'receive.sqlite'),
+                            mode: 'create-or-open'
+                          }).pipe(Layer.provideMerge(yield* ports()))
+                        )
+                      ),
+                      scope
+                    )
+                  return receiverContext
+                })
+                // KeyDistributor records this device's own publication through KeyReceiver.
+                const ensureDistributor = Effect.fnUntraced(function* () {
+                  if (!distributorContext) {
+                    const receiver = yield* ensureReceiver()
+                    distributorContext = yield* Layer.buildWithScope(
+                      KeyDistributor.layer.pipe(
+                        Layer.provide(
+                          Layer.mergeAll(
+                            sqliteDeliveryOutbox({
+                              path: join(directory, 'outbox.sqlite'),
+                              mode: 'create-or-open'
+                            }),
+                            sqliteDistributionJournal({
+                              path: join(directory, 'distribution.sqlite'),
+                              mode: 'create-or-open'
+                            })
+                          ).pipe(
+                            Layer.provideMerge(
+                              Layer.merge(yield* ports(), Layer.succeedContext(receiver))
                             )
-                              return row.record
-                          }
-                          return null
-                        }).pipe(
-                          Effect.mapError(
-                            () =>
-                              new LocalStoreError({
-                                store: 'EpochPublicationSource',
-                                reason: 'corrupt'
-                              })
                           )
                         )
-                    }),
-                    base
-                  )
-                  maintenance = yield* Layer.buildWithScope(
-                    Layer.mergeAll(KeyDistributor.layer, KeyRepair.layer).pipe(
-                      Layer.provideMerge(KeyReceiver.layer),
-                      Layer.provide(ports)
-                    ),
-                    scope
-                  )
-                }
+                      ),
+                      scope
+                    )
+                  }
+                  return distributorContext
+                })
+                const ensureRepair = Effect.fnUntraced(function* () {
+                  if (!repairContext)
+                    repairContext = yield* Layer.buildWithScope(
+                      KeyRepair.layer.pipe(
+                        Layer.provide(
+                          sqliteRepairJournal({
+                            path: join(directory, 'repair.sqlite'),
+                            mode: 'create-or-open'
+                          }).pipe(Layer.provideMerge(yield* ports()))
+                        )
+                      ),
+                      scope
+                    )
+                  return repairContext
+                })
                 const prepareReceive = Effect.fnUntraced(function* () {
                   const view = yield* verified.current()
                   const epoch = view.inspectState().epoch.number
-                  const currentReceiver = Context.get(maintenance!, KeyReceiver)
+                  const currentReceiver = Context.get(yield* ensureReceiver(), KeyReceiver)
                   const beforeReceive = Effect.gen(function* () {
                     const checked = yield* Effect.result(keys.check(epoch))
                     if (staging && epoch > 0 && Result.isFailure(checked)) {
@@ -1060,18 +1216,26 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 if (mode === 'distribute') {
                   // Only this device's deliveries: reconcile targets, resume pending sends,
                   // acknowledge ended tasks. Receiving and repair stay with a full round.
-                  const distributor = Context.get(maintenance!, KeyDistributor)
-                  yield* distributor.reconcileCurrentEpoch(100, null)
+                  const distributor = Context.get(yield* ensureDistributor(), KeyDistributor)
+                  yield* distributor.reconcileCurrentEpoch(100, null, recipients)
                   yield* distributor.resumePendingDeliveries(100, null)
                   const ended = yield* distributor.results(100, null)
                   for (const item of ended.items) yield* distributor.acknowledge(item.id)
                   return undefined
                 }
+                if (mode === 'receive-preview') {
+                  const { epoch, currentReceiver } = yield* prepareReceive()
+                  yield* Effect.result(currentReceiver.fetchAndInstall(null, 100))
+                  if (Result.isFailure(yield* Effect.result(keys.check(epoch))))
+                    yield* currentReceiver.fetchAndInstall(null, 100)
+                  return undefined
+                }
                 if (mode === 'receive') {
                   // Only this device's own key, from a staged group or the mailbox. Queued
                   // installation reports, distribution and repair stay with a full round.
-                  const { currentReceiver, beforeReceive } = yield* prepareReceive()
+                  const { epoch, currentReceiver, beforeReceive } = yield* prepareReceive()
                   yield* beforeReceive
+                  if (Result.isSuccess(yield* Effect.result(keys.check(epoch)))) return undefined
                   yield* currentReceiver.resume(100, null)
                   yield* currentReceiver.fetchAndInstall(null, 100)
                   return undefined
@@ -1081,10 +1245,20 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 do {
                   roundAgain = false
                   const { epoch, beforeReceive } = yield* prepareReceive()
-                  maintainKeys ??= yield* makeDesktopKeyMaintenance().pipe(
-                    Effect.provide(maintenance)
+                  if (!maintainKeys) {
+                    const maintenance = Context.merge(
+                      Context.merge(yield* ensureReceiver(), yield* ensureDistributor()),
+                      yield* ensureRepair()
+                    )
+                    maintainKeys = yield* makeDesktopKeyMaintenance().pipe(
+                      Effect.provide(maintenance)
+                    )
+                  }
+                  const needsRefresh = yield* maintainKeys(
+                    epoch,
+                    beforeReceive,
+                    passes === 0 ? recipients : undefined
                   )
-                  const needsRefresh = yield* maintainKeys(epoch, beforeReceive)
                   if (needsRefresh && refreshLedger && !refreshedUnknown) {
                     refreshedUnknown = true
                     // Delivery already ran. Refresh only this workspace through the
@@ -1099,12 +1273,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
           round = undefined
           roundMode = 'full'
+          roundRecipients = undefined
           yield* Deferred.done(done, result)
           return yield* result
         }, Effect.uninterruptible)
         const history = Context.get(historyContext, InstalledEpochHistory)
         const sharing = yield* makeLazyMachineSharingHost({
-          filename: join(directory, 'machine-sharing.sqlite'),
+          store: openSqliteMachineSharingStore(join(directory, 'machine-sharing.sqlite')),
           admissionHistory: (view) =>
             sql(() =>
               rows()
@@ -1121,11 +1296,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           refreshLedger: () => Effect.void
         })
         sharingOwner = sharing
+        const signIntent = (request: E2eeIntentSigningRequest) =>
+          signExecutionIntent({ ...request, genesis, signer: device }).pipe(
+            Effect.map((signature) => signature.toBytes())
+          )
         const rpc = makeE2eeRpcNative({
           workspaceId,
           requesterDevice: hex(device.publicKey.toBytes()),
           originals: new E2eeRpcOriginals(join(directory, 'rpc-originals.sqlite')),
           ledger: () => verified.current(),
+          signIntent,
           binding: (resource) =>
             makeRealtimeContentBinding({
               genesis,
@@ -1136,6 +1316,17 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             })
         })
         yield* Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie))
+        // Lives with this entry (its reader leases); the endpoint opens on first use.
+        const iroh = options.iroh
+          ? yield* makeDesktopIrohClient({
+              native: options.iroh.native,
+              relays: options.iroh.relays,
+              ...(options.iroh.proxyUrl ? { proxyUrl: options.iroh.proxyUrl } : {}),
+              withSeed: (open) =>
+                options.custody.withTransportSeed(genesis, device.publicKey, open),
+              ledger: () => verified.current()
+            })
+          : undefined
         const bindings = new Map<
           string,
           Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>
@@ -1191,16 +1382,21 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* provider.open(input).pipe(
             Effect.catchIf(
               (error): error is ContentError =>
-                error instanceof ContentError && error.code === 'missing-read-key',
+                error instanceof ContentError &&
+                (error.code === 'missing-read-key' || error.code === 'unauthorized'),
               (error) => keyPending(input, error)
             )
           )
         })
         /**
-         * Retryable only when this device's own verified ledger proves the frame's
-         * epoch exists, this device is a current member device, and the installed
-         * key store genuinely lacks that epoch: a rotation it has not received yet.
-         * Unreadable keys, unknown epochs and access loss keep the original failure.
+         * Retryable when this device is a current member device and either its own
+         * verified ledger proves the frame's epoch exists while the installed key store
+         * genuinely lacks it (a rotation not received yet), or the frame is within
+         * {@link LEDGER_LOOKAHEAD_EPOCHS} ahead of, or at, the verified epoch while its
+         * epoch or signer is not in the local ledger yet: Streams delivered it before the
+         * slower ledger feed. The renderer's single bounded refresh then catches up and
+         * retries once. Malformed frames, older unknown authors, epochs further ahead,
+         * unreadable keys and access loss keep the original failure.
          */
         const keyPending = Effect.fnUntraced(function* (
           input: E2eeContentOpen,
@@ -1221,13 +1417,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           if (Result.isFailure(metadata)) return yield* original
           const state = (yield* verified.current()).inspectState()
           const own = state.devices.get(hex(device.publicKey.toBytes()))
-          if (
-            metadata.success.epoch > state.epoch.number ||
-            !own ||
-            !state.members.has(hex(own.membershipId.toBytes()))
-          )
-            return yield* original
-          const checked = yield* Effect.result(keys.check(metadata.success.epoch))
+          if (!own || !state.members.has(hex(own.membershipId.toBytes()))) return yield* original
+          const epoch = metadata.success.epoch
+          if (ledgerLag(original.code, epoch, state.epoch.number)) return yield* fail('key-pending')
+          if (original.code === 'unauthorized' || epoch > state.epoch.number) return yield* original
+          const checked = yield* Effect.result(keys.check(epoch))
           return yield* Result.isFailure(checked) && checked.failure.reason === 'missing-key'
             ? fail('key-pending')
             : original
@@ -1273,6 +1467,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               candidate >= 0;
               candidate -= 1
             ) {
+              const packet = epochHistoryPacket(state.view, candidate)
+              if (Result.isFailure(packet) || packet.success.abandoned) continue
               const older = yield* Effect.result(keys.check(candidate))
               if (Result.isSuccess(older)) {
                 writeEpoch = candidate
@@ -1323,13 +1519,20 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const ingest = Effect.fnUntraced(function* (page: E2eeWorkspaceHistoryPage) {
           const state = yield* feed.current()
           const start = state.bootstrap ? 0 : state.view.length
+          const bootstrapGenesisSuffix =
+            state.bootstrap &&
+            invitation === undefined &&
+            state.view.length === 1 &&
+            page?.startIndex === 1 &&
+            Array.isArray(page?.recordsHex) &&
+            page.recordsHex.length > 0
           if (
             !page ||
             page.workspaceId !== workspaceId ||
             page.genesisHash !== creation.genesisHash ||
             !Number.isSafeInteger(page.startIndex) ||
             page.startIndex < 0 ||
-            page.startIndex > start ||
+            (!bootstrapGenesisSuffix && page.startIndex > start) ||
             (invitation !== undefined && page.startIndex < initialCount) ||
             !Array.isArray(page.recordsHex) ||
             page.recordsHex.length > 64 ||
@@ -1410,7 +1613,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               {
                 requestOffset: state.offset,
                 nextOffset: page.position,
-                records: records.slice(overlap),
+                records: bootstrapGenesisSuffix
+                  ? [creation.record, ...records]
+                  : records.slice(overlap),
                 upToDate: page.nextCursor === null
               },
               { head, length }
@@ -1431,14 +1636,25 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             minimumPin = { head: view.head, length: view.length }
           }
           if (!pending((yield* feed.current()).view) && length - compactedAt >= 64) {
-            const origin = yield* feed
-              .rebase()
-              .pipe(Effect.provideService(VerifiedLedger, verified))
-            yield* sql(() =>
-              db
-                .prepare('UPDATE cache SET origin=? WHERE id=1')
-                .run(JSON.stringify(savedOrigin(origin.state, origin.offset)))
+            const compacted = yield* Effect.result(
+              Effect.gen(function* () {
+                const origin = yield* feed
+                  .rebase()
+                  .pipe(Effect.provideService(VerifiedLedger, verified))
+                yield* sql(() =>
+                  db
+                    .prepare('UPDATE cache SET origin=? WHERE id=1')
+                    .run(JSON.stringify(savedOrigin(origin.state, origin.offset)))
+                )
+              })
             )
+            if (Result.isFailure(compacted)) {
+              yield* Effect.sync(() =>
+                console.warn('[E2EE] Ledger compaction pending', {
+                  code: 'e2ee_ledger_compaction_pending'
+                })
+              ).pipe(Effect.ignoreCause)
+            }
             compactedAt = length
           }
           return yield* status()
@@ -1459,6 +1675,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
           const mayRotate =
             self?.kind === 'personal' && (member?.role === 'owner' || member?.role === 'admin')
+          const personalCounts = new Map<string, number>()
+          const recoveryMembers = new Set<string>()
+          for (const device of state.devices.values()) {
+            const membership = hex(device.membershipId.toBytes())
+            if (device.kind === 'personal')
+              personalCounts.set(membership, (personalCounts.get(membership) ?? 0) + 1)
+            if (device.kind === 'recovery') recoveryMembers.add(membership)
+          }
           return {
             epoch: state.epoch.number,
             rotationRequired: state.epoch.rotationRequired,
@@ -1472,6 +1696,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             devices: [...state.devices].map(([key, entry]) => ({
               key,
               kind: entry.kind,
+              cryptoUserId: hex(
+                state.members.get(hex(entry.membershipId.toBytes()))!.userId.toBytes()
+              ),
+              recoveryDeviceAvailable: recoveryMembers.has(hex(entry.membershipId.toBytes())),
+              requiresRecoveryConfirmation:
+                entry.kind === 'personal' &&
+                personalCounts.get(hex(entry.membershipId.toBytes())) === 1,
               machineId: entry.machineId ?? null,
               self: key === ownKey,
               mayRevoke: Result.isSuccess(
@@ -1505,15 +1736,28 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           })
         const manage = Effect.fnUntraced(function* (
           command: DesktopE2eeManagementCommand,
-          remote: (signal: AbortSignal) => DesktopE2eeManagementRemote
+          remote: (
+            signal: AbortSignal,
+            feed: {
+              position: () => Effect.Effect<string | undefined, unknown>
+              ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<unknown, unknown>
+            }
+          ) => DesktopE2eeManagementRemote
         ) {
-          if (closing) return yield* fail('closed')
-          if (managing) return yield* Effect.fail(new Error('e2ee_management_pending'))
-          const done = Deferred.makeUnsafe<void, unknown>()
-          managing = done
-          const result = yield* Effect.exit(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
+          return yield* Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              if (closing) return yield* fail('closed')
+              if (managing) return yield* Effect.fail(new Error('e2ee_management_pending'))
+              const done = Deferred.makeUnsafe<void, unknown>()
+              managing = done
+              currentManagementRemote = remote(networkAbort.signal, {
+                position: () => status().pipe(Effect.map((value) => value.position ?? undefined)),
+                ingest: (page) =>
+                  serial.withPermit(
+                    Effect.suspend(() => (closing ? Effect.fail(fail('closed')) : ingest(page)))
+                  )
+              })
+              return yield* Effect.gen(function* () {
                 if (!manager)
                   manager = yield* makeDesktopE2eeManagement({
                     directory,
@@ -1525,40 +1769,70 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                     verified,
                     installed: keys,
                     current: () => feed.current(),
-                    ports: (() => {
-                      const upstream = remote(networkAbort.signal)
-                      return {
-                        ...upstream,
-                        // Admitted work never re-enters the account lock. Local ingest
-                        // failures retain this owner instead of awaiting its own close.
-                        refresh: () =>
-                          refreshManagementHistory((request) => upstream.history(request)),
-                        receive: () =>
-                          Effect.gen(function* () {
-                            const latest = (yield* verified.current()).inspectState().epoch.number
-                            const installedCurrent = yield* Effect.result(keys.check(latest))
-                            if (Result.isFailure(installedCurrent))
-                              yield* keyRound(
-                                () => upstream.mailbox(),
-                                () => upstream.staging(),
-                                () => upstream.history
-                              )
-                            // A later installed epoch can restore an older pending publication key.
-                            yield* Context.get(historyContext, InstalledEpochHistory).recover()
-                          }).pipe(Effect.asVoid)
-                      }
-                    })()
+                    ports: {
+                      log: {
+                        read: (anchor) => currentManagementRemote!.log.read(anchor),
+                        ...(currentManagementRemote!.log.readFrom
+                          ? {
+                              readFrom: (anchor, base) =>
+                                currentManagementRemote!.log.readFrom!(anchor, base)
+                            }
+                          : {}),
+                        ...(currentManagementRemote!.log.observe
+                          ? {
+                              observe: (point) => currentManagementRemote!.log.observe!(point)
+                            }
+                          : {}),
+                        appendCas: (anchor, point, source) =>
+                          currentManagementRemote!.log.appendCas(anchor, point, source)
+                      },
+                      staging: (roundId) => ({
+                        stageGroup: (group) =>
+                          currentManagementRemote!.staging(roundId).stageGroup(group),
+                        readGroup: (key) =>
+                          currentManagementRemote!.staging(roundId).readGroup(key),
+                        deleteGroup: (key, occupied) =>
+                          currentManagementRemote!.staging(roundId).deleteGroup(key, occupied)
+                      }),
+                      // Admitted work never re-enters the account lock. Local ingest
+                      // failures retain this owner instead of awaiting its own close.
+                      refresh: () =>
+                        refreshManagementHistory((request) =>
+                          currentManagementRemote!.history(request)
+                        ),
+                      receive: () =>
+                        Effect.gen(function* () {
+                          const latest = (yield* verified.current()).inspectState().epoch.number
+                          const installedCurrent = yield* Effect.result(keys.check(latest))
+                          if (Result.isFailure(installedCurrent))
+                            yield* keyRound(
+                              () => currentManagementRemote!.mailbox(),
+                              () => currentManagementRemote!.staging(),
+                              () => currentManagementRemote!.history
+                            )
+                          // A later installed epoch can restore an older pending publication key.
+                          yield* Context.get(historyContext, InstalledEpochHistory).recover()
+                        }).pipe(Effect.asVoid)
+                    }
                   }).pipe(Scope.provide(scope))
-                return yield* manager(command)
-              })
-            )
+                return yield* restore(manager(command))
+              }).pipe(
+                Effect.onExit((exit) =>
+                  Effect.sync(() => {
+                    currentManagementRemote = undefined
+                    managing = undefined
+                  }).pipe(
+                    Effect.andThen(
+                      Deferred.done(
+                        done,
+                        Exit.isSuccess(exit) ? Exit.succeed(undefined) : Exit.failCause(exit.cause)
+                      )
+                    )
+                  )
+                )
+              )
+            })
           )
-          managing = undefined
-          yield* Deferred.done(
-            done,
-            Exit.isSuccess(result) ? Exit.succeed(undefined) : Exit.failCause(result.cause)
-          )
-          return yield* result
         })
         /** Bind recovery to this workspace's verified ledger, signer and installed keys.
          * The trust checkpoint comes from the ledger this device has verified. */
@@ -1621,8 +1895,27 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           seal,
           openContent,
           rpc,
+          signIntent,
+          iroh,
           sharing,
           refreshSharingLedger: refreshManagementHistory,
+          /** Machines of other active members in this device's verified ledger: the
+           * targets whose sharing policy a dispatch from here must authorize. */
+          sharedMachineTargets: () =>
+            Effect.map(verified.current(), (view) => {
+              const state = view.inspectState()
+              const own = state.devices.get(hex(device.publicKey.toBytes()))
+              if (!own || !state.members.has(hex(own.membershipId.toBytes()))) return []
+              const self = hex(own.membershipId.toBytes())
+              return [...state.devices.values()].flatMap((entry) =>
+                entry.kind === 'machine' &&
+                entry.machineId &&
+                hex(entry.membershipId.toBytes()) !== self &&
+                state.members.has(hex(entry.membershipId.toBytes()))
+                  ? [entry.machineId]
+                  : []
+              )
+            }),
           // Same selection as KeyDistributor: an admitted device of an active member.
           keyDeliveryTarget: (device: string) =>
             Effect.map(verified.current(), (view) => {
@@ -1653,6 +1946,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               return { genesis: hex(genesis.toBytes()), epoch, signal: networkAbort.signal }
             }),
           keyRound,
+          prepareKeyDelivery,
           stop,
           isClosing: () => closing,
           close: closeEntry,
@@ -1750,6 +2044,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         })
       )
     }
+    // Entries whose shared-machine grants were already warmed once.
+    const prewarmedSharing = new WeakSet<object>()
     const withSharingHistory = (
       entry: {
         refreshSharingLedger: (
@@ -1811,7 +2107,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       manage: (
         workspaceId: string,
         command: DesktopE2eeManagementCommand,
-        ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
+        ports: (
+          signal: AbortSignal,
+          feed: {
+            position: () => Effect.Effect<string | undefined, unknown>
+            ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<unknown, unknown>
+          }
+        ) => DesktopE2eeManagementRemote
       ) =>
         Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
           entry.manage(command, ports)
@@ -1854,10 +2156,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             entry.memberApprovals.offer(mode, expiresAt)
           )
         ),
-      prepareMemberAdmission: (workspaceId: string, keyPackageHex: string) =>
+      prepareMemberAdmission: (
+        workspaceId: string,
+        keyPackageHex: string,
+        automatic?: { offer: unknown; now: number }
+      ) =>
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>
-            entry.memberApprovals.prepare(keyPackageHex)
+            entry.memberApprovals.prepare(keyPackageHex, automatic)
           )
         ),
       inspectMemberAdmission: (workspaceId: string, keyPackageHex: string) =>
@@ -1951,7 +2257,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         workspaceId: string,
         mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
         staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
-        refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
+        refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history'],
+        mode: KeyRoundMode = 'full',
+        recipients?: readonly string[]
       ) =>
         Effect.flatMap(
           run(
@@ -1961,7 +2269,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 : Effect.fail(fail('closed'))
             )
           ),
-          (entry) => entry.keyRound(mailbox, staging, refreshLedger)
+          (entry) => entry.keyRound(mailbox, staging, refreshLedger, mode, recipients)
         ),
       /** Fetch and install this device's current key only (no report flush, distribution or
        * repair), under the same single-flight as keyRound. A joining member uses it to reach
@@ -1984,7 +2292,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       /** Reconcile and send this device's deliveries only, under the keyRound single-flight. */
       distributeKeys: (
         workspaceId: string,
-        mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+        mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
+        recipients?: readonly string[]
       ) =>
         Effect.flatMap(
           run(
@@ -1994,7 +2303,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 : Effect.fail(fail('closed'))
             )
           ),
-          (entry) => entry.keyRound(mailbox, undefined, undefined, 'distribute')
+          (entry) => entry.keyRound(mailbox, undefined, undefined, 'distribute', recipients)
         ),
       seal: (workspaceId: string, input: E2eeContentSeal) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),
@@ -2044,6 +2353,32 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             withSharingHistory(entry, workspaceId, remote, readHistory)
           )
         ).pipe(boundary),
+      /** Sign one schedule declaration. The host computes the definition fingerprint
+       * from the document itself; the renderer never supplies a digest or signer. */
+      signScheduleDeclaration: (
+        workspaceId: string,
+        document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+        manualRunKey?: string
+      ) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          Effect.gen(function* () {
+            const subject = yield* Effect.try({
+              try: () => scheduleDeclarationSubject(document, manualRunKey),
+              catch: () => fail('invalid-input')
+            })
+            const signature = yield* entry.signIntent({
+              ...subject,
+              workspaceId,
+              contentDigest: Uint8Array.from(Buffer.from(subject.contentDigest, 'hex'))
+            })
+            const status = yield* entry.status()
+            return encodeE2eeIntentRecord({
+              kind: subject.kind,
+              signer: Uint8Array.from(Buffer.from(status.signingPublicKey ?? '', 'hex')),
+              signature
+            })
+          })
+        ).pipe(boundary),
       prepareDispatch: (
         workspaceId: string,
         targetMachineId: string,
@@ -2083,6 +2418,35 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               : undefined
           )
         ).pipe(boundary),
+      /**
+       * Best-effort, once per opened entry: authorize this device against the sharing
+       * policy of other members' machines so an interactive dispatch finds a fresh grant.
+       * Only an already open entry is used; failures are ignored and decide nothing.
+       */
+      prewarmMachineSharing: (
+        workspaceId: string,
+        remote: SharingRemote,
+        readHistory?: DesktopE2eeManagementRemote['history']
+      ) =>
+        Effect.flatMap(
+          run(Effect.sync(() => entries.get(workspaceId))),
+          (entry): Effect.Effect<void> => {
+            if (!entry || entry.isClosing() || prewarmedSharing.has(entry)) return Effect.void
+            prewarmedSharing.add(entry)
+            return Effect.gen(function* () {
+              const machines = (yield* entry.sharedMachineTargets()).slice(0, SHARING_PREWARM_LIMIT)
+              if (!machines.length) return
+              const requester = (yield* entry.status()).signingPublicKey ?? ''
+              const shared = withSharingHistory(entry, workspaceId, remote, readHistory)
+              yield* Effect.forEach(
+                machines,
+                (machineId) =>
+                  Effect.ignore(entry.sharing.authorize(machineId, requester, undefined, shared)),
+                { concurrency: 2, discard: true }
+              )
+            }).pipe(Effect.ignore)
+          }
+        ).pipe(Effect.ignore),
       prepareFeatureRpc: (
         workspaceId: string,
         input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
@@ -2109,8 +2473,38 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             entry.rpc.acceptResponse(targetMachineId, input, frameHex)
           )
         ),
+      /**
+       * Resolves the machine's iroh route under the host lock without any network
+       * wait. Callers run the route's `ready`/`call` after releasing every lock.
+       */
+      irohPeek: (workspaceId: string, targetMachineId: string) =>
+        run(
+          Effect.gen(function* () {
+            const entry = entries.get(workspaceId)
+            return entry?.iroh ? yield* entry.iroh.peek(targetMachineId) : undefined
+          })
+        ),
+      irohPrepare: (workspaceId: string, targetMachineId: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.iroh
+              ? entry.iroh.prepare(targetMachineId)
+              : Effect.fail(new Error('iroh_unavailable'))
+          )
+        ),
       ledgerView: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.ledgerView())),
+      /** Prepare the original authenticated current envelope without mailbox I/O. */
+      prepareKeyDelivery: (
+        workspaceId: string,
+        recipient: string,
+        mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.prepareKeyDelivery(recipient, mailbox)
+          )
+        ),
       /** Whether this device's verified ledger makes `device` a key distribution target. */
       keyDeliveryTarget: (workspaceId: string, device: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.keyDeliveryTarget(device))),

@@ -1,11 +1,10 @@
-import { Primitive } from "@diceui/shared";
-import * as React from "react";
-import { useMentionContext } from "./mention-root";
+import { Primitive } from '@diceui/shared';
+import * as React from 'react';
+import { useMentionContext } from './mention-root';
 
-const LABEL_NAME = "MentionLabel";
+const LABEL_NAME = 'MentionLabel';
 
-interface MentionLabelProps
-  extends React.ComponentPropsWithoutRef<typeof Primitive.label> {}
+interface MentionLabelProps extends React.ComponentPropsWithoutRef<typeof Primitive.label> {}
 
 const MentionLabel = React.forwardRef<HTMLLabelElement, MentionLabelProps>(
   (props, forwardedRef) => {
@@ -19,7 +18,7 @@ const MentionLabel = React.forwardRef<HTMLLabelElement, MentionLabelProps>(
         {...props}
       />
     );
-  },
+  }
 );
 
 MentionLabel.displayName = LABEL_NAME;

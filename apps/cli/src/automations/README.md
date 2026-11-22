@@ -18,8 +18,14 @@ replace the Session as the continuation target.
 | Composition         | [workspace](workspace-legacy.ts)                                                                                                                    | Fleet lifetime, local control and existing source owners                                      |
 | Execution authority | [Session authority](../session/session-automation-authority.ts)                                                                                     | Admission barriers, release proof, group settlement and exact-input cancellation              |
 
-Automations currently run in plaintext workspaces. Encrypted workspaces remain unsupported
-under the shared workspace content policy; Fleet creates no automation runtime there.
+Automations run in plaintext and encrypted workspaces. In an encrypted workspace, the
+[Session adapter](actions/session-actions-legacy.ts) signs each queued continuation as this
+machine, and encrypted admission refuses an automation input without that signature, as it
+does for scheduled runs. The ledger stays machine-local, and continuation text enters the
+Session through its encrypted history. The PR poller is not registered there, so `github.*`
+reads stay `unknown`. Remote control rides workspace Machine RPC, which encrypted
+workspaces withhold. Fleet therefore installs the remote verifier, and the renderer offers
+remote controls, only where the shared content policy supports `rpc`.
 
 ## Register a condition
 
@@ -54,7 +60,7 @@ pass `--session SESSION_ID --workspace WORKSPACE_ID`. MCP `lody_automation` acce
 current Session by default. Pass `sessionId` to target another owned Session on the
 same machine; continuations return to the target Session. CLI and MCP share the same local control endpoint. The Electron Session
 UI uses that endpoint for local-machine waits and settings, and the remote machine
-control bridge for eligible remote Sessions. Encrypted workspaces and Web remain unsupported.
+control bridge for eligible remote Sessions. Encrypted workspaces have local-machine controls only; Web remains unsupported.
 The [general availability decision](../../../../.agents/notes/implemented/feature/2026-10-30-session-continuation-general-availability.md) explains the UI gate removal; the [UI design](../../../../.agents/notes/proposed/feature/2026-10-27-session-continuation-note-ui.md) records its presentation trade-offs.
 
 Optional `reason`, `intervalMs` (default 30 seconds, minimum 1 second) and
@@ -103,6 +109,31 @@ program's result. Accepted continuations keep observation demand alive. A change
 HEAD or rerun supersedes old evidence; dispatch checks it again, and CI continuations also verify the referenced checkouts immediately before the native
 prompt, resolving Project members through their existing scoped worktree paths.
 
+## Run a long command
+
+`run` hands a long command to the Host instead of a check: `lody automation run --
+pnpm test`, or MCP `{command: {type: "run", command, args?, cwd?, env?, reason?}}`.
+It is a wait without a program, so it shares `list`, `show`, `cancel`, the
+Session group's unsettled state and the continuation path above. The
+[run owner](runtime/managed-runs.ts) starts the process on the first check, in the
+Session workdir or a `cwd` inside it, with no shell and an explicit environment:
+the login-shell and daemon `PATH`, home and temp variables, plus the caller's `env`.
+Output goes to `<data dir>/automations/runs/<workspace>/<wait>.log`, capped at
+16 MiB; logs older than seven days are removed when another run starts.
+
+The start is persisted before spawn. The exit, or a failure to start, is recorded
+with the bounded output tail and makes the wait due at once; the next check
+completes it with facts only: command, outcome, exit code or signal, duration,
+log path and tail. Cancel interrupts the owner, which terminates the process tree.
+Closing the owner terminates every run without recording an exit. A restarted owner
+reports each started, unfinished run as interrupted, with its pid, and never starts
+it again; a Host crash can leave that process running. Identical unfinished runs in
+one Session deduplicate. The [run decision](../../../../.agents/notes/implemented/feature/2026-11-16-managed-long-runs.md)
+records the ownership, no-restart and environment trade-offs.
+[Agent guidance](../../../../.agents/notes/implemented/simplification/2026-11-21-automation-guidance-scope.md)
+limits `run` to work that must continue beyond the current turn and resume the
+Session on exit; ordinary commands stay in the current turn.
+
 ## Completion and cancellation
 
 The Host commits the matched result, captured evidence and stable continuation identity atomically.
@@ -140,6 +171,7 @@ Lody code and is not a caller-authored rule graph.
 {
   "recoverCapacity": true,
   "archiveAfterMerge": true,
+  "autoDeliver": { "fixCi": true, "resolveConflicts": true, "merge": false },
   "compactWhenIdle": {
     "contextTokens": 300000,
     "cacheTtlMs": 600000,
@@ -168,6 +200,17 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   evidence. Archive waits for the entire Session group, including children, queues,
   Goals and native/automation work, then rechecks under existing admission barriers
   and commits the root last.
+- **Auto delivery:** the user's click or request turns it on for the Session's current
+  pull request ([Spec](../../../../specs/session-auto-delivery.md)). [`policies/delivery.ts`](policies/delivery.ts)
+  decides each step from PR poller checkpoints, which now record CI and merge state,
+  and keeps attempts per enablement in its own checkpoint. A step publishes one
+  `session.delivery.step` event with a deterministic id before progress is recorded,
+  so a crash repeats nothing. The policy turns the event into the existing Create PR,
+  Fix CI, Resolve Conflicts or a merge request, admitted only while the Session group
+  is settled and while the PR head still matches. Progress is written to
+  `SessionMeta.autoDelivery` at transitions only. The daemon never mutates GitHub;
+  the agent merges with `gh`. Encrypted workspaces refuse it because no PR poller runs
+  there.
 - **Idle compact:** context occupancy must reach the configured threshold. The same
   idle turn must still be current and the native adapter must advertise `/compact`.
   New input or the deadline invalidates maintenance. `cacheTtlMs` is an operator

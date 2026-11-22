@@ -1,4 +1,4 @@
-import { Effect, Exit, Fiber, Result } from 'effect';
+import { Deferred, Effect, Exit, Fiber, Result } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { accountUserId, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
@@ -47,12 +47,16 @@ function fixture() {
       Effect.sync(() => void calls.push({ kind: 'accept', value })),
     activate: () => Effect.sync(() => void calls.push({ kind: 'activate' })),
   };
-  const requester = (accountId = 'acc1') =>
+  const requester = (
+    accountId = 'acc1',
+    overrides: Partial<Parameters<typeof makePortableAccountPairingRequester>[0]> = {}
+  ) =>
     makePortableAccountPairingRequester({
       workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash }],
       host: () => Effect.succeed(host),
       history: () => Effect.succeed(page),
       accountId,
+      ...overrides,
     });
   return {
     f,
@@ -64,12 +68,62 @@ function fixture() {
 }
 
 describe('portable account pairing requester', () => {
+  it('uses only a hash-authenticated admission original with a verified cached prefix when history is unavailable', async () => {
+    const { f, calls, requester, membershipId } = fixture();
+    const genesis = f.genesisRecord;
+    const original = f.records().at(-1)!;
+    let unavailable = false;
+    const [workspace] = await Effect.runPromise(
+      requester('acc1', {
+        history: () =>
+          unavailable
+            ? Effect.fail(new Error('history unavailable'))
+            : Effect.succeed({
+                workspaceId: 'w1',
+                genesisHash: hex(f.context.genesis.toBytes()),
+                startIndex: 0,
+                recordsHex: [hex(genesis)],
+                checkpoint: { headHash: hex(hashRecordBytes(genesis).toBytes()), length: 1 },
+                position: 'prefix',
+                nextCursor: null,
+              }),
+      })()
+    );
+    await Effect.runPromise(workspace!.identity());
+    unavailable = true;
+    await Effect.runPromise(
+      workspace!.accept(new Uint8Array([9]), hashRecordBytes(original).toBytes(), {
+        admissionRecordHex: hex(original),
+      })
+    );
+    expect(calls.find((call) => call.kind === 'accept')?.value).toMatchObject({
+      endorser: hex(f.owner.raw),
+      membershipId,
+      genesisRecordHex: hex(genesis),
+    });
+    const rejected = await Effect.runPromiseExit(
+      workspace!.accept(new Uint8Array([9]), new Uint8Array(32).fill(7), {
+        admissionRecordHex: hex(original),
+      })
+    );
+    expect(Exit.isFailure(rejected)).toBe(true);
+    expect(calls.filter((call) => call.kind === 'accept')).toHaveLength(1);
+  });
+
   it('proves possession for the membership the verified history gives this account', async () => {
     const { f, calls, requester, membershipId } = fixture();
     const [workspace] = await Effect.runPromise(requester()());
     await Effect.runPromise(workspace!.identity());
     expect(calls).toEqual([
-      { kind: 'prepare', value: { genesisRecordHex: hex(f.genesisRecord), membershipId } },
+      {
+        kind: 'prepare',
+        value: {
+          genesisRecordHex: hex(f.genesisRecord),
+          membershipId,
+          // The same verified history, so the host can classify a revoked identity.
+          history: [expect.objectContaining({ startIndex: 0, nextCursor: null })],
+        },
+      },
     ]);
     // Another account finds no membership and prepares nothing.
     const [other] = await Effect.runPromise(requester('acc2')());
@@ -113,6 +167,134 @@ describe('portable account pairing requester', () => {
     expect(JSON.stringify(blocked)).toContain('pairing-journal-busy');
     expect(calls).toEqual([]);
   });
+
+  it('reuses verified history from identity() and queries only incremental records on accept()', async () => {
+    const f = envelopeFixture(0, 100, Result.getOrThrow(accountUserId('acc1')).toBytes());
+    const genesisHash = hex(f.context.genesis.toBytes());
+    const allRecords = f.records();
+    const initialRecords = allRecords.slice(0, -1);
+    const admission = allRecords.at(-1)!;
+    const queries: { workspaceId: string; after?: string }[] = [];
+    const req = makePortableAccountPairingRequester({
+      workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash }],
+      host: () =>
+        Effect.succeed({
+          workspaceId: 'w1',
+          genesisHash,
+          prepareAccountIdentity: () =>
+            Effect.succeed({
+              signingPublicKey: new Uint8Array(32).fill(1),
+              encryptionPublicKey: new Uint8Array(32).fill(2),
+              possessionProof: new Uint8Array(64).fill(3),
+              credentialHash: new Uint8Array(32).fill(4),
+            }),
+          pendingPersonalJoin: () => Effect.succeed(null),
+          acceptAccountInvitation: () => Effect.void,
+          activate: () => Effect.void,
+        }),
+      history: (input) =>
+        Effect.sync(() => {
+          queries.push(input);
+          if (input.after === 'pos-1') {
+            return {
+              workspaceId: 'w1',
+              genesisHash,
+              checkpoint: { length: allRecords.length, headHash: hex(f.view().head.toBytes()) },
+              startIndex: initialRecords.length,
+              recordsHex: [hex(admission)],
+              position: 'pos-2',
+              nextCursor: null,
+            };
+          }
+          return {
+            workspaceId: 'w1',
+            genesisHash,
+            checkpoint: {
+              length: initialRecords.length,
+              headHash: hex(hashRecordBytes(initialRecords.at(-1)!).toBytes()),
+            },
+            startIndex: 0,
+            recordsHex: initialRecords.map(hex),
+            position: 'pos-1',
+            nextCursor: null,
+          };
+        }),
+      accountId: 'acc1',
+    });
+    const [first] = await Effect.runPromise(req());
+    await Effect.runPromise(first!.identity());
+    const [second] = await Effect.runPromise(req());
+    await Effect.runPromise(
+      second!.accept(new Uint8Array([9, 9]), hashRecordBytes(admission).toBytes())
+    );
+    expect(queries).toEqual([{ workspaceId: 'w1' }, { workspaceId: 'w1', after: 'pos-1' }]);
+  });
+
+  it('merges explicit workspace hints when the requester list has not populated yet', async () => {
+    const { f } = fixture();
+    const genesisHash = hex(f.context.genesis.toBytes());
+    const req = makePortableAccountPairingRequester({
+      workspaces: () => [],
+      host: (workspaceId) =>
+        workspaceId === 'w1'
+          ? Effect.succeed({
+              workspaceId: 'w1',
+              genesisHash,
+              prepareAccountIdentity: () =>
+                Effect.succeed({
+                  signingPublicKey: new Uint8Array(32).fill(1),
+                  encryptionPublicKey: new Uint8Array(32).fill(2),
+                  possessionProof: new Uint8Array(64).fill(3),
+                  credentialHash: new Uint8Array(32).fill(4),
+                }),
+              pendingPersonalJoin: () => Effect.succeed(null),
+              acceptAccountInvitation: () => Effect.void,
+            })
+          : Effect.succeed(null),
+      history: () =>
+        Effect.succeed({
+          workspaceId: 'w1',
+          genesisHash,
+          checkpoint: { length: f.records().length, headHash: hex(f.view().head.toBytes()) },
+          startIndex: 0,
+          recordsHex: f.records().map(hex),
+          position: 'pos-1',
+          nextCursor: null,
+        }),
+      accountId: 'acc1',
+    });
+    const withoutHints = await Effect.runPromise(req());
+    expect(withoutHints).toEqual([]);
+    const withHints = await Effect.runPromise(
+      req([{ workspaceId: 'w1', name: 'Alpha', genesisHash }])
+    );
+    expect(withHints.map((item) => item.workspaceId)).toEqual(['w1']);
+  });
+
+  it('opens only the workspace hosts a single-workspace or retained request names', async () => {
+    // Each host open reads that workspace's local store; other workspaces stay closed.
+    const opened: string[] = [];
+    const req = makePortableAccountPairingRequester({
+      workspaces: () => [
+        { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+        { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+      ],
+      host: (workspaceId) => {
+        opened.push(workspaceId);
+        return Effect.succeed(null);
+      },
+      history: () => Effect.die('unused'),
+      accountId: 'acc1',
+    });
+    await Effect.runPromise(req(undefined, { workspaceId: 'w1' }));
+    expect(opened).toEqual(['w1']);
+    opened.length = 0;
+    await Effect.runPromise(req(undefined, { geneses: new Set(['22'.repeat(32)]) }));
+    expect(opened).toEqual(['w2']);
+    opened.length = 0;
+    await Effect.runPromise(req());
+    expect(opened).toEqual(['w1', 'w2']);
+  });
 });
 
 describe('account-level runtime', () => {
@@ -144,7 +326,7 @@ describe('account-level runtime', () => {
 describe('portable account pairing approver key delivery', () => {
   /** An approving session whose mailbox never confirms an envelope for the new device. */
   const approverSession = (
-    rounds: { count: number; released?: number },
+    rounds: { count: number; released?: number; modes?: (string | undefined)[] },
     device = 1
   ): AccountPairingApproverSession => ({
     release: () =>
@@ -159,9 +341,10 @@ describe('portable account pairing approver key delivery', () => {
       access: () => Effect.succeed({ workspaceId: 'w1', credential: 'synthetic' }),
     },
     refresh: () => Effect.void,
-    keyRound: () =>
+    keyRound: (mode) =>
       Effect.sync(() => {
         rounds.count += 1;
+        rounds.modes?.push(mode);
       }),
     keyDeliveryEvidence: () => Effect.succeed('e2ee_key_not_sent'),
   });
@@ -214,7 +397,7 @@ describe('portable account pairing approver key delivery', () => {
   });
 
   it('catches up with the ledger before retrying a delivery the mailbox refused as stale', async () => {
-    const rounds = { count: 0 };
+    const rounds = { count: 0, modes: [] as (string | undefined)[] };
     let ledgerCurrent = false;
     const session = {
       ...approverSession(rounds),
@@ -228,6 +411,9 @@ describe('portable account pairing approver key delivery', () => {
     const { events } = await deliver([session, session]);
     expect(events.at(-1)!.state).toBe('delivered');
     expect(rounds.count).toBe(2);
+    // The first attempt only sends from the approving device, which just signed the
+    // admission; a retry runs the full round so a device lacking the key receives it first.
+    expect(rounds.modes).toEqual(['distribute', 'full']);
   });
 
   it('still retries the round when the ledger catch-up fails', async () => {
@@ -278,6 +464,29 @@ describe('portable account pairing approver key delivery', () => {
       ['retrying', 'e2ee_key_not_sent'],
       ['ended', 'e2ee_key_delivery_closed'],
     ]);
+  });
+
+  it('lets the approval publish once the first delivery attempt ends, never after its retry backoff', async () => {
+    const rounds = { count: 0, released: 0 };
+    const states: string[] = [];
+    const [workspace] = await Effect.runPromise(
+      makePortableAccountPairingApprover({
+        workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
+        session: () => Effect.succeed(approverSession(rounds)),
+        appendRecord: () => Effect.void,
+        onKeyDelivery: (event) => states.push(event.state),
+        // The backoff never ends: waiting on it would stall the approval forever.
+        keyDeliveryRetry: { delays: [10], sleep: () => Effect.never },
+      })()
+    );
+    const firstPass = await Effect.runPromise(
+      workspace!.deliverKeys!(new Uint8Array(32).fill(2), 'r1')
+    );
+    expect(Effect.isEffect(firstPass)).toBe(true);
+    await Effect.runPromise(firstPass as Effect.Effect<void>);
+    expect(states).toEqual(['running', 'retrying']);
+    // The attempt's session was released before the backoff began.
+    expect([rounds.count, rounds.released]).toEqual([1, 1]);
   });
 
   it("never continues on another account's session for the same workspace", async () => {
@@ -379,6 +588,94 @@ describe('portable account pairing approver key delivery', () => {
     const fiber = Effect.runFork(listing);
     await firstOpened;
     await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(rounds.released).toBe(1);
+  });
+
+  it('looks up at most four approving workspaces at once and lists them in hint order', async () => {
+    // Approval latency over many workspaces must not grow with one lookup per workspace,
+    // while the approval preview keeps the account's workspace order.
+    const hints = Array.from({ length: 6 }, (_, index) => ({
+      workspaceId: `w${index}`,
+      name: `Workspace ${index}`,
+      genesisHash: '11'.repeat(32),
+    }));
+    const gates = new Map(hints.map((hint) => [hint.workspaceId, Deferred.makeUnsafe<void>()]));
+    const rounds = { count: 0, released: 0 };
+    let active = 0;
+    let peak = 0;
+    const started: string[] = [];
+    const listing = makePortableAccountPairingApprover({
+      workspaces: () => hints,
+      session: (workspaceId) =>
+        Effect.gen(function* () {
+          started.push(workspaceId);
+          active += 1;
+          peak = Math.max(peak, active);
+          yield* Deferred.await(gates.get(workspaceId)!);
+          active -= 1;
+          return approverSession(rounds);
+        }),
+      appendRecord: () => Effect.void,
+    })();
+    const fiber = Effect.runFork(listing);
+    await vi.waitFor(() => expect(started).toHaveLength(4));
+    // Settle in reverse order; later lookups start only as earlier ones finish.
+    for (const hint of [...hints].reverse())
+      Effect.runSync(Deferred.succeed(gates.get(hint.workspaceId)!, undefined));
+    const workspaces = await Effect.runPromise(Fiber.join(fiber));
+    expect(peak).toBe(4);
+    expect(workspaces.map((item) => item.workspaceId)).toEqual(hints.map((h) => h.workspaceId));
+  });
+
+  it('releases a session whose lookup settles after another workspace failed to list', async () => {
+    const rounds = { count: 0, released: 0 };
+    const gate = Deferred.makeUnsafe<void>();
+    let failed: () => void = () => {};
+    const failure = new Promise<void>((resolve) => (failed = resolve));
+    const fiber = Effect.runFork(
+      makePortableAccountPairingApprover({
+        workspaces: () => [
+          { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+          { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+        ],
+        // The first lookup is still opening its session when the second one fails.
+        session: (workspaceId) =>
+          workspaceId === 'w1'
+            ? Effect.as(Deferred.await(gate), approverSession(rounds))
+            : Effect.suspend(() => {
+                failed();
+                return Effect.fail(new Error('synthetic approval session failure'));
+              }),
+        appendRecord: () => Effect.void,
+      })()
+    );
+    await failure;
+    Effect.runSync(Deferred.succeed(gate, undefined));
+    const exit = await Effect.runPromise(Fiber.await(fiber));
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(rounds.released).toBe(1);
+  });
+
+  it('opens only workspaces matching the approver filter', async () => {
+    const opened: string[] = [];
+    const rounds = { count: 0, released: 0 };
+    const workspaces = await Effect.runPromise(
+      makePortableAccountPairingApprover({
+        workspaces: () => [
+          { workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) },
+          { workspaceId: 'w2', name: 'Beta', genesisHash: '22'.repeat(32) },
+        ],
+        session: (workspaceId) =>
+          Effect.sync(() => {
+            opened.push(workspaceId);
+            return approverSession(rounds);
+          }),
+        appendRecord: () => Effect.void,
+      })({ geneses: new Set(['22'.repeat(32)]), workspaceIds: new Set(['w2']) })
+    );
+    expect(opened).toEqual(['w2']);
+    expect(workspaces.map((item) => item.workspaceId)).toEqual(['w2']);
+    await Effect.runPromise(workspaces[0]!.release!());
     expect(rounds.released).toBe(1);
   });
 });

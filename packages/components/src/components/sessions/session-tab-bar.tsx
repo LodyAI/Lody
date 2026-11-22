@@ -43,6 +43,7 @@ import {
 import { isArchivedOutsideWorkspace, isSessionTabClosed } from '@/lib/session-tab-url';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
 import { SESSION_PAGE_CONTAINER_CLASS } from './session-conversation-page';
+import { dndPointerPoint } from '@/lib/dnd-pointer';
 import {
   armSessionMentionDrag,
   clearSessionMentionDrag,
@@ -374,20 +375,6 @@ const styles = stylex.create({
     maxHeight: '15rem',
   },
 });
-
-function clientPointFromDragEnd(event: DragEndEvent): { x: number; y: number } | null {
-  const source = event.activatorEvent;
-  if (
-    !source ||
-    !('clientX' in source) ||
-    !('clientY' in source) ||
-    typeof source.clientX !== 'number' ||
-    typeof source.clientY !== 'number'
-  ) {
-    return null;
-  }
-  return { x: source.clientX + event.delta.x, y: source.clientY + event.delta.y };
-}
 
 function getTabLabel(
   session: SessionMeta,
@@ -949,7 +936,7 @@ export const SessionTabBar = memo(function SessionTabBar({
       const { active, over } = event;
       const activeId = String(active.id);
       const overId = over ? String(over.id) : null;
-      const point = clientPointFromDragEnd(event);
+      const point = dndPointerPoint(event);
       // Tab droppables stay the closest collision even when the pointer is in
       // the conversation below, so mention wins whenever the pointer is there.
       const droppedOnConversation =
@@ -1043,10 +1030,11 @@ export const SessionTabBar = memo(function SessionTabBar({
         aria-label={t('sessions.tabs.label', 'Session tabs')}
         // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
         className={stylex.props(styles.adaptiveStrip).className}
-        // The first tab sits in the workspace card's 14px corner: its 3px left inset
-        // matches the ~3.5px top inset of a 32px tab centred in the 38px row, and
-        // its 10px radius is concentric with the card (14 - 3.5).
-        paddingLeft={3}
+        // A filled first pill needs more than the 6px inter-tab gap from the
+        // workspace card's left edge, or it hugs the card's 14px corner. A solo tab
+        // has no fill, and a leading slot already supplies its own 8px gap, so
+        // those keep the tight 3px inset that leaves the label where it was.
+        paddingLeft={soloTab || leftSlot ? 3 : 8}
         paddingRight={3}
       >
         {showParentTab && (

@@ -17,8 +17,20 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   restart an in-flight or already-started wasm runtime. A pending init retains
   the Loro document held by the snapshot upload.
   [Decision](../../.agents/notes/implemented/bug-fix/2026-11-03-cli-zstd-wasm-init-hang.md).
+- A WebAssembly trap leaves Loro's instance broken for later calls. `lib/loro/wasm-runtime-health.ts`
+  records the first fault and `start.ts` restarts through the ordinary shutdown; timer-driven Loro
+  reads without a caller catch locally and call `reportIfWasmFault`. The `loro-crdt` alias matches the
+  bare specifier only, so the bundle can import `loro-crdt/bundler/*` to read the shared memory
+  ([decision](../../.agents/notes/implemented/bug-fix/2026-11-09-loro-wasm-heap-exhaustion.md)).
 
-- The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
+- Every daemon process pays for each module it evaluates, so keep the bundle graph narrow.
+  Rollup applies each workspace package's own `sideEffects` declaration, so keep that field
+  accurate. Vendor wasm ships as `dist/assets/*.wasm` read from disk, never as inline base64.
+  The `daemon-runner` watchdog composes no Workspace presence and must never open a workspace
+  document. Daemon-owned Node children cap glibc arenas, and release the cap before launching
+  anything ([decision](../../.agents/notes/implemented/architecture/2026-11-21-daemon-memory-footprint.md)).
+- The CLI defaults to local; explicit `LODY_PLATFORM=cloud` consumes caller deployment values without dotenv discovery. It must
+
   never initialize telemetry in local mode even if PostHog env vars are set.
 - INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling
   `claude-acp.js` / `codex-acp.js` / `*-worker.js` — because worker owners resolve their child by
@@ -85,9 +97,9 @@ execution/consent rules. These rules also bind CLI callers outside that director
   never rewrite the exact opener to the root or treat either as `parentSessionId`.
 - INVARIANT: reasoning effort and fast mode are per MODEL. Apply mode, then model, then dependent
   options, for both top-level and config-option selections. A probe's `configOptions` describe only
-  its current model. Validate effort against the TARGET model using
-  `getModelEffortChoices` (the stored per-model declaration first, then
-  `modelReasoningEfforts`) and skip the resulting `validatedConfigIds` in
+  its current model; that model and every model a requested refresh read are also kept in
+  `acpModelConfigOptions` rows. Validate effort against the TARGET model using `getAcpModelEffortChoices` (the stored
+  per-model declaration first, then `modelReasoningEfforts`, then that model's recorded list) and skip the resulting `validatedConfigIds` in
   `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
   runtime rejections in debug diagnostics. Codex/Claude effort, Fast and Plan rejections stay hidden;
   model rejections always emit `agent_warning` in the GUI. Claude Fable

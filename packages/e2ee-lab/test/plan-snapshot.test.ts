@@ -97,19 +97,18 @@ it.each(['loro', 'flock'] as const)(
         actor: 'reader',
         operation: 'pull',
         document,
-        expect: good,
+        expect: { ok: false, refusal: { tag: 'LabContentError', code: 'protocol_error' } },
       });
       const afterReplay = add({
         kind: 'call',
         actor: 'reader',
         operation: 'observe',
         document,
-        expect: { ok: true, text: 'authenticated snapshot prefix;tail after snapshot;' },
+        expect: { ok: true, text: '', unchangedFrom: baseline },
       });
-      // The first pull already retries the authentic native snapshot after the
-      // damaged response and trimmed-history fallback. Explicit recovery is an
-      // idempotent fresh bootstrap; it does not rewrite
-      // a host retention boundary or delete the published snapshot.
+      // Explicit recovery performs a fresh bootstrap after the one-time damaged
+      // response and trimmed-history refusal; it does not rewrite a host retention
+      // boundary or delete the published snapshot.
       add({ kind: 'call', actor: 'reader', operation: 'recover', document, expect: good });
       const recovered = add({
         kind: 'call',
@@ -140,8 +139,13 @@ it.each(['loro', 'flock'] as const)(
           (row) => row.durability === 'violation' || row.durability === 'harness-error'
         )
       ).toEqual([]);
-      expect(observations.filter((row) => !row.reply.ok)).toEqual([]);
-      expect(observations[replayed].checks).toEqual({ ok: 'pass' });
+      expect(
+        observations.filter((_, index) => index !== replayed && !observations[index].reply.ok)
+      ).toEqual([]);
+      expect(observations[replayed].checks).toEqual({
+        ok: 'pass',
+        refusal: 'pass',
+      });
       const value = (index: number) => observations[index].reply.value as DocumentObservation;
       expect(value(baseline)).toMatchObject({
         text: '',
@@ -149,13 +153,10 @@ it.each(['loro', 'flock'] as const)(
         cursor: null,
         persisted: { documentDigest: expect.any(String), cursorDigest: null },
       });
-      expect(value(afterReplay)).toMatchObject({ status: 'active', text: value(positive).text });
-      expect(value(afterReplay).cursor?.nextOffset).toBe(value(positive).cursor?.nextOffset);
-      expect(value(afterReplay).persisted?.documentDigest).not.toBe(
-        value(baseline).persisted?.documentDigest
-      );
-      expect(value(afterReplay).persisted?.cursorDigest).toEqual(expect.any(String));
+      expect(value(afterReplay)).toEqual(value(baseline));
+      expect(observations[afterReplay].checks.unchangedFrom).toBe('pass');
       expect(value(recovered)).toMatchObject({ status: 'active', text: value(positive).text });
+      expect(value(recovered).cursor?.nextOffset).toBe(value(positive).cursor?.nextOffset);
       expect(value(recovered).persisted?.documentDigest).not.toBe(
         value(baseline).persisted?.documentDigest
       );

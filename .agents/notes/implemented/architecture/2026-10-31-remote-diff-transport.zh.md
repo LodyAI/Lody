@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2316](https://github.com/LodyAI/Lody/pull/2316)
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756), [#2765](https://github.com/LodyAI/Lody/pull/2765), [#2891](https://github.com/LodyAI/Lody/pull/2891)
 
 [English](2026-10-31-remote-diff-transport.md)
 
@@ -37,6 +37,27 @@ blob 分页使用原始字节偏移，允许切在 UTF-8 字符中间，正文�
 另外检查完整结果与密封 frame 上限。
 
 ### 来源与权限
+
+当前 Git 比较区分正文身份与文件是否变化。二进制或超限占位符不能证明正文相同，文本相同
+也不能排除执行权限变化。当前读取器将相同文本或旧接口的两个 binary 占位符判为
+`not_changed` 前，会在实际所属仓库内，针对同一个固定基线检查 Git 文件状态，按字面匹配
+路径，并禁用外部 diff 与文本转换。相同正文仍可复用 blob 键，但不能因此隐藏变更文件。
+这些信息只保留在 daemon 内，不增加协议字段。检查失败时旧批量接口返回 `deferred`
+（单文件返回 `transient_io`），清单返回逐文件 `unavailable`，后续读取仍可恢复，不能变成
+`not_changed`。历史 turn 比较仍只使用保留的证据。
+
+Web、Electron 和原生 iOS/Android 在历史证据不可用时仍保留请求轮次的范围。原生运行时
+把原因和提示传给已有的不可用界面。取消自动请求当前工作区 diff，是因为它即使可读，
+也可能包含后续修改，无法还原所请求的轮次。显式的当前/全部改动读取仍独立存在。
+这里规定的是失败后的行为，不认定历史证据缺失的原因，也不改变捕获与保留策略。
+
+新生成的本轮文件卡片及其修改前后内容来自同一份已保留的 ACP 编辑证据。证据缺失或
+保存失败时，轮末不再用 Git 统计合成 `history.fileDiff`。已移除的 Git 摘要补写会生成
+没有历史内容的可点击卡片，而且工作区比较无法证明每项修改都归属于本轮 Agent。
+因此，没有编辑证据的纯终端修改不再生成新的本轮卡片，当前“全部改动”仍通过 Git
+显示这些修改。已有的仅摘要历史不补写也不删除，历史内容不可用时维持上述提示。
+Git 未提交/未推送状态、PR 发现、证据重试、收尾预算和轮次释放责任仍相互独立。
+不引入新的捕获或存储格式，保留现有 Promise 证据与历史边界。
 
 只有通过权限校验的清单才能签发 handle。handle 按请求会话和内容键索引，绑定实际 owner、
 工作区和来源。每页重新校验会话权限与绑定。每个请求会话最多 8,192 个 handle，全局最多
@@ -89,7 +110,7 @@ generation 会减少文件索引容量：每个改动路径占两条物理行及
 128 条。即使索引陈旧，也以机器返回的文件集合驱动列表和视野加载。这会增加元数据传输，但不重传未变正文。
 
 provider 在自身生命周期内拥有实时 Branch 列表及监听者，完整成功的比较通知 summary hook；
-请求启动序号拒绝较旧的完成结果，取消或缓存释放后不再发布。它只更新本地展示元数据，
+请求启动序号阻止较旧结果覆盖已接受的完整清单；尚无完整清单时，首次完成的比较可以先替换有容量上限的索引，即使较新读取仍在进行。取消或缓存释放后不再发布。它只更新本地展示元数据，
 不由渲染器反写共享索引。provider 更换后先用新索引，下一次实时比较成功后再替换。
 实时 Changes 不等待可选的历史读取器，历史 turn 汇总仍跟随保留证据。接受完整清单后继续保留
 另一份陈旧侧栏列表会给同一比较提供两个矛盾答案，因此不采用。
@@ -110,7 +131,8 @@ owner 或根目录变化时更换 runtime。取消后，RPC 并发许可仍保�
 有权限的读取，不缓存持久失败；损坏缓存会丢弃并重读，部分或未校验 blob 不入缓存。
 解析后 diff 的缓存键包含两侧内容键及路径。
 
-两侧原始大小合计超过 256 KiB 时，远程清单携带三行上下文的 unified patch，最多 256 KiB。
+整份文件清单只传描述符和统计。打开大文件时再校验单文件清单，并按需获取有界补丁。
+两侧原始大小合计超过 256 KiB 时，远程单文件清单携带三行上下文的 unified patch，最多 256 KiB。
 计算也限制在 600 行编辑以内，超过计算、patch 或编码页预算时回退完整 blob；只有原始正文
 超限才不可用。本地清单仍返回完整描述，不应用远程 hunk 策略。Pierre 将 patch 解析为部分元数据，第一次展开上下文时再取得完整且校验通过
 的文件。展开操作有独立的读取 controller，文件块隐藏或卸载后不再启动后续分页；初始清单
@@ -163,9 +185,16 @@ loader 不进入跨工作区的不可变 turn 缓存；已经完整读取的 tur
 
 行为证据由以下测试维护：
 
+- `apps/cli/tests/session-execution-service.test.ts`：没有编辑证据的轮次不再获得
+  Git 单独补出的卡片；已捕获内容在后续轮次修改前完成保存；取消或更早的 Git 状态
+  观察不能覆盖较新的状态。
+- `apps/mobile/ios/apps/ios/tests/native/files-rpc.test.mjs` 和
+  `apps/mobile/android/runtime/test/contract-bridge.test.mjs`：当前工作区内容可读时，
+  不可用的历史轮次仍保持不可用；已保留的轮次正文和显式的当前读取维持各自的比较范围。
 - `apps/cli/src/lib/code-collab/code-collab-v2-service.test.ts`：真实 SHA-1/SHA-256 Git
   和磁盘字节、BOM/CRLF/Unicode、会话绑定、路径逃逸、过期、分页预算、基线移动、历史与非 Git
-  worker 读取、本地/远程 hunk 策略、等统计失效、不同文件根的基线、文件删除、捕获时编辑及补丁预算回退。
+  worker 读取、本地/远程 hunk 策略、等统计失效、不同文件根的基线、文件删除、捕获时编辑及补丁预算回退，
+  两种 scope 与 Project Member 的二进制替换、仅权限变化，以及 Git 比较失败后的单文件隔离与恢复。
 - `packages/turn-diff-store/tests/sqlite-store.test.ts`：只读描述与字节选择、owner 隔离、
   保留期、完整重组与 worker 消息。CLI 打包产物 `turn-diff-store-worker.js` 的独立探针也只读打开已有数据库，按描述精确还原 BOM、CRLF 和 Unicode 字节。早期未修改 store 的探针还精确还原了四个 chunk 中的
   400,020 UTF-8 字节，检查完整哈希、缺失/空文件与 GC；这是复用 store 而不新增快照表示的依据。

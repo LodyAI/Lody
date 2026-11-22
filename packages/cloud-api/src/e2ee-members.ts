@@ -1,6 +1,9 @@
 import type { E2eeDeviceAccess } from './e2ee-device';
 
-/** Public invitation pins transferred with the email/link, independently of the relay. */
+/** Public invitation pins transferred with the email/link, independently of the relay.
+ * `signature` is the endorser device's Ed25519 signature over the pins
+ * (`lody-e2ee/member-offer/v1`); only approving clients verify it, against their own
+ * verified ledger, before admitting an email applicant automatically. */
 export type E2eeMemberOffer = {
   version: 1;
   workspaceId: string;
@@ -10,6 +13,9 @@ export type E2eeMemberOffer = {
   token: string;
   mode: 'email' | 'link';
   expiresAt: number;
+  /** Absent on invitations created before offers were signed, and stripped from previews,
+   * invitation lists and links: only a request's own `offer` carries it to approvers. */
+  signature?: string;
 };
 
 /** A signed core JoinRequest plus its exact device-credential binding; never secret keys. */
@@ -31,6 +37,9 @@ export type E2eeMemberRequest = {
   source: 'email' | 'link';
   state: 'pending' | 'admitting' | 'committed' | 'rejected' | 'cancelled';
   expiresAt: number;
+  /** The relay's copy of the invitation this request answered. Approvers trust it only
+   * after verifying its endorsement signature; `source` is a display label. */
+  offer: E2eeMemberOffer;
 };
 
 export type E2eeMemberRequests = {
@@ -60,8 +69,19 @@ export type E2eeMemberReplies = {
   submit: E2eeMemberRequest;
   retire: { state: E2eeMemberRequest['state'] };
   pending: {
-    invitations: E2eeMemberOffer[];
-    items: (E2eeMemberRequest & { applicantName: string; applicantEmail: string })[];
+    /** Signature-free so clients that predate signed offers can still read the list.
+     * Clients set `needsReissue` and `email` from `unsignedInvitations`. */
+    invitations: (E2eeMemberOffer & { needsReissue?: true; email?: string })[];
+    /** Email invitations created before offers were signed, with their address. Re-sending
+     * one issues a signed replacement; they never qualify for automatic admission. */
+    unsignedInvitations?: { token: string; email: string }[];
+    items: (E2eeMemberRequest & {
+      applicantName: string;
+      applicantEmail: string;
+      /** The relay would refuse this admission for the free plan's member limit. A hint
+       * for the approver, never authority; absent when the relay does not say. */
+      memberLimitReached?: boolean;
+    })[];
     hasMore: boolean;
     seatPreview: import('./index').SeatInvitePreview;
   };

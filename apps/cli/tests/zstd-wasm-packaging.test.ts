@@ -3,17 +3,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  ZSTD_WASM_SPECIFIER,
-  placeBundledZstdWasm,
-} from '../scripts/copy-loro-wasm.js';
+import { ZSTD_WASM_SPECIFIER, placeBundledZstdWasm } from '../scripts/copy-loro-wasm.js';
 import { verifyRelocatedZstdRuntime } from '../scripts/verify-zstd-wasm-runtime.mjs';
 
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true }))
   );
 });
 
@@ -31,7 +30,10 @@ describe('CLI zstd wasm packaging', () => {
     const chunk = path.join(root, 'dist', 'chunks', 'vendor-streams.js');
     const entry = path.join(root, 'dist', 'index.js');
     await mkdir(path.dirname(chunk), { recursive: true });
-    await writeFile(chunk, `const url = new URL(${JSON.stringify(ZSTD_WASM_SPECIFIER)}, import.meta.url);\n`);
+    await writeFile(
+      chunk,
+      `const url = new URL(${JSON.stringify(ZSTD_WASM_SPECIFIER)}, import.meta.url);\n`
+    );
     await writeFile(entry, 'export const entry = true;\n');
 
     const placed = placeBundledZstdWasm(path.join(root, 'dist'), wasmSource);

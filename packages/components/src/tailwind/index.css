@@ -27,6 +27,10 @@
 }
 
 @custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
+/* `placeholder:` also styles the composer editor's placeholder (`ui/mention/mention-input.tsx`),
+   painted as its `::before`, so a composer's placeholder colour is the textarea's in every
+   engine. WebKit reports no computed style for `::placeholder`, so it cannot be copied. */
+@custom-variant placeholder (&::placeholder, &[data-composer-editor]::before);
 
 @theme inline {
   --font-ios: var(--font-sans);
@@ -127,6 +131,11 @@ pre,
   .dark .markdown-renderer a {
     color: hsl(200 69% 70%);
   }
+  /* Reference/link colours must yield to the same selected foreground as prose. */
+  [data-composer-editor] [data-mention-value][data-selected] {
+    color: HighlightText;
+  }
+
   /* A link rendered as a reference label (GitHub PR / issue): a link-blue
      tinted chip (no border) instead of the prose underline, so it reads as
      clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
@@ -1017,8 +1026,8 @@ pre,
        too, with wide hyphens in file and repo names. */
     --font-sans-default:
       'SF Pro Display', 'Inter Variable', 'PingFang SC', -apple-system, BlinkMacSystemFont,
-      'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, 'Apple Color Emoji',
-      'Segoe UI Emoji', sans-serif;
+      'Hiragino Sans GB', 'Segoe UI', 'Microsoft YaHei', 'Helvetica Neue', Arial,
+      'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
     --font-wordmark:
@@ -1234,29 +1243,46 @@ pre,
     -webkit-touch-callout: none;
   }
 
-  body.native-mobile-shell * {
+  body * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  body textarea,
+  body [contenteditable]:not([contenteditable='false']),
+  body [contenteditable]:not([contenteditable='false']) *,
+  body [data-text-selectable],
+  body [data-text-selectable] *,
+  body
+    input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
+      [type='radio']
+    ):not([type='range']):not([type='file']):not([type='color']) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  body [data-text-selectable] :is(button, [role='button']),
+  body [data-text-selectable] :is(button, [role='button']) * {
     -webkit-user-select: none;
     user-select: none;
   }
 
   body.native-mobile-shell textarea,
-  body.native-mobile-shell [contenteditable='true'],
-  body.native-mobile-shell [contenteditable='true'] *,
-  body.native-mobile-shell [data-native-selection-allow],
-  body.native-mobile-shell [data-native-selection-allow] *,
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']),
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']) *,
+  body.native-mobile-shell [data-text-selectable],
+  body.native-mobile-shell [data-text-selectable] *,
   body.native-mobile-shell
     input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
       [type='radio']
     ):not([type='range']):not([type='file']):not([type='color']) {
     -webkit-touch-callout: default;
-    -webkit-user-select: text;
-    user-select: text;
   }
 
   /* No WKWebView link preview inside selectable text: after its "Open Link",
      every later tap in the app reopened that link. Links open with a tap. */
-  body.native-mobile-shell [data-native-selection-allow] a[href],
-  body.native-mobile-shell [data-native-selection-allow] a[href] * {
+  body.native-mobile-shell [data-text-selectable] a[href],
+  body.native-mobile-shell [data-text-selectable] a[href] * {
     -webkit-touch-callout: none;
   }
 
@@ -1276,12 +1302,49 @@ pre,
     cursor: default;
   }
 
+  /* The composer editor (`ui/mention/mention-input.tsx`) is a contenteditable
+     that lays out, scrolls and paints its placeholder exactly like the textarea
+     it replaced: a textarea's UA box, `rows` lines tall plus its padding and
+     border, with utilities still free to size it. */
+  [data-composer-editor] {
+    display: inline-block;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    overflow: auto;
+    cursor: text;
+    height: calc(var(--composer-rows, 2) * 1lh + var(--composer-rows-chrome, 0px));
+  }
+
+  [data-composer-editor][data-empty]::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+    color: var(--composer-placeholder-color, rgb(117 117 117));
+    opacity: var(--composer-placeholder-opacity, 1);
+  }
+
+  /* Chip composers always painted their selection with the system colours. */
+  [data-composer-editor][data-system-selection] ::selection,
+  [data-composer-editor][data-system-selection]::selection {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+
+  /* Atomic mentions paint one selection surface from the editor's range.
+     Native text fragments must not add a second rectangle or recolour the icon. */
+  [data-composer-editor][data-system-selection] [data-mention-value]::selection,
+  [data-composer-editor][data-system-selection] [data-mention-value] *::selection {
+    background-color: transparent;
+    color: inherit;
+  }
+
   /* Pro focus style: only show on keyboard navigation */
-  :where(a, button, input, textarea, select, [tabindex]):focus {
+  :where(a, button, input, textarea, select, [tabindex], [data-composer-editor]):focus {
     outline: none;
   }
 
-  :where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  :where(a, button, input, textarea, select, [tabindex], [data-composer-editor]):focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.5);
   }
@@ -1290,7 +1353,11 @@ pre,
      Escape is `:focus-visible` too. Text entry keeps it (see the modality rule
      at the end of this file). */
   :where(html[data-focus-modality='pointer'])
-    :where(a, button, select, [tabindex]):not(input, textarea):focus-visible {
+    :where(a, button, select, [tabindex]):not(
+      input,
+      textarea,
+      [data-composer-editor]
+    ):focus-visible {
     box-shadow: none;
   }
 
@@ -1924,9 +1991,23 @@ pre,
   will-change: transform;
 }
 
+/* Back destination under the sliding-off page (`useMobileBackRevealClass`):
+   iOS-style parallax in from a dimmed, left-shifted position. */
+@keyframes mobile-drill-reveal {
+  from {
+    transform: translate3d(-28%, 0, 0);
+    opacity: 0.72;
+  }
+}
+
+.mobile-drill-reveal {
+  animation: mobile-drill-reveal 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mobile-drill-in,
-  .mobile-drill-out {
+  .mobile-drill-out,
+  .mobile-drill-reveal {
     animation: none;
   }
 }
@@ -2315,4 +2396,16 @@ html:active-view-transition-type(home-board-fold)::view-transition-old(home-boar
     transform: none;
     opacity: 1;
   }
+}
+
+/* Pinned sidebar drags (`lib/pinned-drop-settle.ts`): while a pin row or section is
+   held the cursor is grabbing everywhere; from the drop until the pointer next moves,
+   pin sections take no hover, so a landed row does not light up under a still pointer. */
+body[data-pin-dragging],
+body[data-pin-dragging] * {
+  cursor: grabbing !important;
+}
+
+body[data-pin-hover-suppressed] [data-pin-section] {
+  pointer-events: none;
 }

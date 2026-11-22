@@ -9,7 +9,7 @@ A person scanning configured Providers needs to identify the Provider and judge 
 
 ## Row structure
 
-A Provider row presents identity and model/usage metadata, read-only remaining quota, a flat “Reset forecast” action when eligible, and a persistent named Provider management menu. All reported windows retain their names and percentages. Quota wraps below the identity in narrow panels; additional windows wrap without hiding data behind a count or an intermediate details popover.
+A Provider row presents identity and model/usage metadata, read-only remaining quota, a flat “Reset forecast” action when eligible, and a persistent named Provider management menu. All reported windows retain their names and percentages. Quota takes its own line beneath the identity rather than squeezing the name; additional windows wrap without hiding data behind a count or an intermediate details popover.
 
 The quota group explicitly labels percentages as remaining quota. Refresh models/modes and delete belong to the Provider menu; deletion retains confirmation. Clicking the identity area still opens Provider configuration. Hover must not move or cover controls or reserve empty hidden-action slots.
 

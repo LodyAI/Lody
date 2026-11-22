@@ -71,6 +71,13 @@ export class LRUCache<K, V> {
   }
 
   /**
+   * Iterate over all cached values without affecting recency order.
+   */
+  values(): IterableIterator<V> {
+    return this.cache.values();
+  }
+
+  /**
    * Clear all entries from the cache.
    */
   clear(): void {

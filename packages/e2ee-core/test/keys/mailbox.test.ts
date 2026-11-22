@@ -64,6 +64,49 @@ const signedReport = (f: ReturnType<typeof envelopeFixture>, frame: Uint8Array, 
   );
 };
 describe('authenticated SQLite key mailbox', () => {
+  it('allows repeated key-loss repairs while enforcing the current revision quota', async () => {
+    const f = envelopeFixture(),
+      dbPath = file();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const host = yield* makeSqliteKeyMailbox({
+            path: dbPath,
+            mode: 'create',
+            genesis: f.context.genesis,
+            ledger: f.ledger,
+          });
+          const sender = ok(host.bind(f.owner.publicKey)),
+            recipient = ok(host.bind(f.phone.publicKey));
+          const original = yield* f.prepare();
+          yield* sender.put('01'.repeat(16), original);
+          for (let revision = 1; revision <= 20; revision++) {
+            yield* recipient.repair(target(f), `key-loss-${revision}`);
+            yield* recipient.repair(target(f), `key-loss-${revision}`);
+            expect((yield* recipient.status(target(f))).revision).toBe(revision);
+            const frame = yield* f.prepare();
+            yield* sender.put(revision.toString(16).padStart(32, '0'), frame);
+            yield* recipient.report(signedReport(f, frame, revision));
+            expect((yield* recipient.status(target(f))).status).toBe('InstallationReported');
+          }
+          // Historical retries stay idempotent and do not consume this revision's quota.
+          yield* sender.put('01'.repeat(16), original);
+          for (let n = 0; n < 15; n++)
+            yield* sender.put((100 + n).toString(16).padStart(32, '0'), yield* f.prepare());
+          const overflow = yield* Effect.result(sender.put('ff'.repeat(16), yield* f.prepare()));
+          expect(Result.isFailure(overflow) && overflow.failure).toMatchObject({ code: 'replay' });
+          expect(yield* sender.read('01'.repeat(16))).toEqual(original);
+          expect((yield* recipient.fetch(0, null, 100)).items).toHaveLength(36);
+          yield* recipient.repair(target(f), 'reject-original', Reports.mailboxDigest(original));
+          yield* sender.put('01'.repeat(16), original);
+          expect((yield* recipient.fetch(0, null, 100)).items).toHaveLength(35);
+          const conflict = yield* Effect.result(sender.put('01'.repeat(16), yield* f.prepare()));
+          expect(Result.isFailure(conflict) && conflict.failure).toMatchObject({ code: 'replay' });
+        })
+      )
+    );
+  });
+
   it('reads payload and continuation from one WAL snapshot during two public cross-worker repairs', async () => {
     const f = envelopeFixture(),
       dbPath = file();
@@ -403,7 +446,9 @@ describe('authenticated SQLite key mailbox', () => {
           const db = new Database(dbPath);
           try {
             db.pragma('ignore_check_constraints=ON');
-            db.prepare('INSERT INTO mailbox_envelopes VALUES(?,?,?,?,?,?)').run(
+            db.prepare(
+              'INSERT INTO mailbox_envelopes(epoch,recipient,sender,id,digest,frame) VALUES(?,?,?,?,?,?)'
+            ).run(
               0,
               hex(f.owner.raw),
               hex(f.owner.raw),

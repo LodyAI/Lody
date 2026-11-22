@@ -53,7 +53,8 @@ The [internal MCP loading decision](../notes/implemented/architecture/2026-10-30
 records the measured scope and why process isolation is retained.
 
 The CLI's own `version` comes from `@/pkg` because each build composition aliases it to the
-manifest that actually gets published (cloud builds point it at the private composing package). A
+manifest that actually gets published (`apps/cli/package.json` for both explicit cloud and
+default local builds). A
 relative `../package.json` import bakes the stale OSS version into the published bundle — that is
 what made `lody@0.82.1 --version` print `0.76.0`. The package `name` stays `lody` in every
 composition.
@@ -78,7 +79,7 @@ Write-back plans against freshly read owner meta: `pullRequests` upserts by URL 
 PR as the LAST item (legacy fields stripped once), while CI and merge state live in
 `SessionMeta.pullRequestState` (`{s,m,t}`, ≤50B per entry; legacy `r` readiness is no longer
 written and is deleted on touch). Scheduling state — never PR status — is in
-`~/.lody/pr-poller-state.json`. `LODY_PR_POLL_DISABLED=1` is the kill switch and `LODY_PR_POLL_*`
+`pr-poller-state.sqlite3` under the Lody data directory. `LODY_PR_POLL_DISABLED=1` is the kill switch and `LODY_PR_POLL_*`
 overrides live in `pr-poller-config.ts`. Module invariants: `src/lib/pr-poller/AGENTS.md`.
 
 ## Builtin agents and adapter provenance
@@ -197,3 +198,12 @@ Lifecycle records are independent per URL/source; shared resolution applies GitH
 revision ordering to UI, MCP, notifications and polling targets. The legacy array
 status is a compatibility projection. See the
 [observation contract](../../specs/local-github-pr-observation.md).
+
+## Compatibility window
+
+The daemon and desktop keep no compatibility code for clients or local state from
+before 2026-10-16: draft-preparation and Code Collab v1 requests are unsupported, and
+one-time readers for the send journal, PR poller JSON, pre-v1 managed-runtime metadata
+and unassociated quota reservations are gone. Shared Session document fields, shipped
+mobile writes and backend-dependent fallbacks remain. See the
+[compatibility cut decision](../notes/implemented/simplification/2026-11-16-drop-pre-october-compatibility.md).

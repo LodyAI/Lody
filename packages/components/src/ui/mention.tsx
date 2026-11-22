@@ -51,7 +51,9 @@ const MentionInput = React.forwardRef<
       ref={ref}
       data-slot="mention-input"
       className={cn(
-        'flex w-full resize-none text-input-foreground placeholder:text-input-placeholder focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-50',
+        // The editor is a block box, as the textarea it replaced laid out under
+        // `flex`; `data-disabled` mirrors the textarea's `:disabled`.
+        'block w-full resize-none text-input-foreground placeholder:text-input-placeholder focus-visible:outline-hidden data-disabled:cursor-not-allowed data-disabled:opacity-50',
         className
       )}
       {...props}

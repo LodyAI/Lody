@@ -1,4 +1,5 @@
 import { Cause, Effect, Exit, Scope } from 'effect';
+import type { LoroStreamsWebSocketOptions } from '@lody/shared';
 import {
   getServerNow,
   createLoroStreamsTokenProviderLegacy,
@@ -21,6 +22,20 @@ import {
   type PresenceRemoteOptions,
   type WorkspacePresence,
 } from './workspace-presence';
+
+/** Third-party WS callback bridge. Token producers remain owned by the provider Scope. */
+export const createPresenceWebSocketAuthLegacy =
+  (auth: PresenceRemoteOptions['auth']): NonNullable<LoroStreamsWebSocketOptions['auth']> =>
+  async ({ reason, previousToken }) => {
+    const token = await Effect.runPromise(
+      auth({
+        reason: reason === 'reauth' ? 'unauthorized' : 'request',
+        ...(previousToken === undefined ? {} : { previousToken }),
+      })
+    );
+    if (!token?.trim()) throw new Error('presence_websocket_token_unavailable');
+    return token;
+  };
 
 /** Complete owning Cause, including every retained cleanup owner, crosses this door. */
 export class WorkspacePresenceLegacyFailure extends Error {

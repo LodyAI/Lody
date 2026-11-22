@@ -480,7 +480,7 @@ function ShareManagementList({
             <AlertDialog.Title>
               {confirmation?.kind === 'reset'
                 ? t('sharing.static.reset', 'Reset link')
-                : t('sharing.static.revoke', 'Revoke')}
+                : t('sharing.static.revoke', 'Revoke share')}
             </AlertDialog.Title>
             <AlertDialog.Description>
               {t(
@@ -646,7 +646,7 @@ function ShareDetailDialog({
                 disabled={actions.busy}
                 onClick={() => onUpdate(entry)}
               >
-                {t('sharing.static.update', 'Update deployment')}
+                {t('sharing.static.update', 'Update share')}
               </Button>
             )}
             {entry.canManage && (
@@ -667,7 +667,7 @@ function ShareDetailDialog({
                 disabled={actions.busy}
                 onClick={() => onConfirm('revoke', entry)}
               >
-                {t('sharing.static.revoke', 'Revoke')}
+                {t('sharing.static.revoke', 'Revoke share')}
               </Button>
             )}
           </div>

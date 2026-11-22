@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue } from 'jotai';
-import { getSessionGroupTitle, type SessionId } from '@lody/shared';
+import type { SessionId } from '@lody/shared';
 import {
   commands,
   useCommandPaletteState,
@@ -109,7 +109,7 @@ export function CommandPalette() {
       return {
         kind: 'session',
         key: `session:${session.id}`,
-        title: getSessionGroupTitle(session) || t('sessions.untitled', 'Untitled session'),
+        title: session.title?.trim() || t('sessions.untitled', 'Untitled session'),
         subtitle: getSessionPaletteSubtitle(session, localProjects),
         shortcut: null,
         trailing:
@@ -161,12 +161,7 @@ export function CommandPalette() {
       // Match the displayed project/repo label too (covers local project names, not
       // just `repoFullName`), so a session is findable by what the row shows.
       const projectLabel = resolveSessionProjectLabel(session, localProjects) ?? '';
-      for (const text of [
-        session.groupTitle ?? '',
-        session.title ?? '',
-        projectLabel,
-        session.branchName ?? '',
-      ]) {
+      for (const text of [session.title ?? '', projectLabel, session.branchName ?? '']) {
         if (!text) continue;
         const score = fuzzyMatch(trimmedQuery, text);
         if (score !== null && (best === null || score > best)) best = score;

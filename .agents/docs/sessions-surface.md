@@ -7,17 +7,48 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
+Owner assignment uses `SessionMeta.userId`; it does not share machines, projects or
+individual sessions. Both owner menus and `transferSessionOwner` require the target
+member's existing machine access and, for local sessions, project access. The machine
+owner can reclaim any session on that machine. My scope includes only sessions
+assigned to the current user, across desktop/mobile lists, archive, home summaries
+and badges. Owning a machine does not include other
+members' sessions in My scope. Machine ownership also preserves history and
+management when a local project is removed, without granting execution availability.
+
+Machine ownership for access and management checks comes from the visible
+machine index's `accessByMachineId`, using the workspace-local account identity. An existing
+authoritative access row overrides the Loro owner claim; only the index's existing
+missing-row compatibility fallback uses Loro ownership. No consumer reconstructs
+ownership directly from raw machine metadata. Home and badge atoms receive only
+the workspace-local account identity from their React host; machine ownership does not expand personal summaries.
+
+Legacy metadata has no immutable creator field. The existing `userId` history fallback
+is retained so a creator can still read their work after machine sharing is revoked;
+old transferred owners cannot be distinguished. E2EE workspace-history admission is
+unchanged. These client checks do not replace hosted metadata/body authorization.
+
 - `session-chat-interface.tsx` — conversation surface (draft variant:
   `draft-session-chat-interface.tsx`).
-  **Read receipts are gated on VISIBILITY, not on being mounted.** A child tab
+  **Read receipts are gated on VISIBILITY, an active foreground window, and page
+  interaction, not on being mounted or merely open.** A child tab
   or side chat stays mounted after its first selection, so the mark-as-read
   effect takes an explicit `isVisible` prop (`../../lib/session-read-receipt.ts`)
   that `session-detail.tsx` derives per surface — top tabs `isActive`, side chats
   `isActive && isSidebarOpen` (a collapsed panel is only `invisible`). Dropping
   that prop silently marks every sub-session read the moment the parent opens.
-  A manual Mark as unread moves `lastReadAt` behind the latest message while a
-  surface may already be visible; that receipt gets no new opportunity until a
-  new message arrives or the user leaves and reopens the surface.
+  In addition, `useWindowReadEngagement` (`../../lib/window-read-engagement.ts`)
+  requires the host window to be visible, focused, and neither suspended nor
+  locked, and requires a page interaction (`pointerdown`, `keydown`, `wheel`,
+  `touchstart`, or `click`) within the active visit's idle window (mounted at
+  the workspace layout root via `useObserveWindowReadEngagement` so sidebar or
+  tab navigation clicks carry into the opened session). Window blur, hide, OS
+  sleep/lock, or idle expiry clears engagement so background, untouched, or
+  `Cmd+Tab`-only windows never mark sessions read until the user interacts with
+  the page. A manual Mark as unread moves `lastReadAt` behind the latest message
+  while a surface may already be visible; `resolveManualUnreadLatch` suppresses
+  subsequent interactions and focus changes on that visit until a new message
+  arrives or the user switches away and reopens the surface.
   "Copy as Markdown" renders through `@lody/shared`
   `buildConversationMarkdown` (`packages/shared/src/conversation-markdown.ts`),
   NOT `buildReplayPromptFromHistory` — that one is the agent-facing replay

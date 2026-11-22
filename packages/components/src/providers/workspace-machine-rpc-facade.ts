@@ -16,6 +16,8 @@ import {
   MAIN_SESSION_FILE_ROOT_ID,
   MemoryProviderResponseSchema,
   ProjectProbeLocalMemberResultSchema,
+  isLocalOnlyMemoryProvider,
+  machineSupportsAccountMemoryProviders,
   machineSupportsBugReportClientLog,
   machineSupportsMemoryProviders,
   type BugReportClientLog,
@@ -29,7 +31,7 @@ import {
 } from '@lody/shared/local-machine-rpc';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
-import { mintPreviewControlProof } from '@/lib/preview-control-api';
+import { mintPreviewControlProof, mintSessionHistoryReadProof } from '@/lib/preview-control-api';
 import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import type { RemoteAutomationOperation, RemoteAutomationResult } from '@lody/shared/automations';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -44,6 +46,8 @@ import {
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_PROVIDERS_PROTOCOL_VERSION,
   MACHINE_PROTOCOL_CAPABILITIES,
+  E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+  E2EE_SESSION_FORK_PROTOCOL_VERSION,
   MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
   machineSupportsProtocolCapability,
   type WorkspaceMcpServerMeta,
@@ -57,6 +61,8 @@ import {
   type IosSimulatorCommand,
   type IosSimulatorResponse,
   machineSupportsSessionHistoryProtocol,
+  SessionHistoryReadQuerySchema,
+  sessionHistoryWriteIntentDigest,
   type MachineProtocolCapabilities,
   type AgentConfigId,
   type CodeCollabRole,
@@ -316,11 +322,28 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     if (plane === 'local') {
       throw new Error('Local Roost history must use the local session control bridge.');
     }
+    if (deps.protectedContent) {
+      if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
+      const response = await deps.requestEncryptedFeature({
+        method: 'session/history-read',
+        machineId,
+        workspaceId,
+        params: { sessionId, query: SessionHistoryReadQuerySchema.parse(query) },
+        timeoutMs: options?.timeoutMs ?? 30_000,
+      });
+      if (!response.ok) throw new Error(response.code ?? 'session_history_read_denied');
+      return response.result as SessionHistoryReadResponse;
+    }
+    const readProof = await mintSessionHistoryReadProof(
+      { workspaceId, machineId, sessionId },
+      deps.getSessionToken?.() ?? null
+    );
     const response = await (
       await getMachineRpcClient(machineId)
     ).requestSessionHistoryRead({
       sessionId,
       query,
+      readProof,
       timeoutMs: options?.timeoutMs ?? 30_000,
     });
     if (!response) throw new Error('Roost session history read request timed out.');
@@ -341,10 +364,24 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     if (plane === 'local') {
       throw new Error('Local Roost history must use the local session control bridge.');
     }
+    if (deps.protectedContent) throw new Error('e2ee_history_write_unavailable');
+    const requestId = crypto.randomUUID();
+    const intentDigest = await sessionHistoryWriteIntentDigest(
+      requestId,
+      args.operation,
+      args.payload
+    );
+    const writeProof = await mintSessionHistoryReadProof(
+      { workspaceId, machineId, sessionId: args.sessionId, requestId, intentDigest },
+      deps.getSessionToken?.() ?? null,
+      true
+    );
     const response = await (
       await getMachineRpcClient(machineId)
     ).requestSessionHistoryWrite({
       ...args,
+      writeProof,
+      requestId,
       timeoutMs: options?.timeoutMs ?? 30_000,
     });
     if (!response) throw new Error('Roost session history write request timed out.');
@@ -1101,13 +1138,43 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (response?.ok) return response.result as SessionForkResponse;
       }
+      const timeoutMs =
+        options?.timeoutMs ?? (args.targetContext?.kind === 'new-worktree' ? 15_000 : 120_000);
+      // Encrypted content never opens ordinary Machine RPC: the fork is a signed write that
+      // the machine authorizes like a send (owner, or a member it is shared with).
+      if (deps.protectedContent) {
+        if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
+        // An older machine drops an unknown method without replying; refuse before signing.
+        if (
+          ((await deps.getMachineProtocolCapabilities(machineId))?.[
+            MACHINE_PROTOCOL_CAPABILITIES.e2eeSessionFork
+          ] ?? 0) < E2EE_SESSION_FORK_PROTOCOL_VERSION
+        )
+          return sessionForkFailure(
+            args,
+            'FORK_UNAVAILABLE',
+            'Update Lody on this machine to fork conversations in an encrypted workspace.'
+          );
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/fork',
+          params: args,
+          timeoutMs,
+        });
+        if (!response.ok)
+          return sessionForkFailure(
+            args,
+            response.code === 'e2ee_machine_not_shared'
+              ? 'MACHINE_ACCESS_DENIED'
+              : 'INTERNAL_ERROR',
+            response.error
+          );
+        return response.result as SessionForkResponse;
+      }
       return await (
         await getMachineRpcClient(machineId)
-      ).requestSessionFork({
-        ...args,
-        timeoutMs:
-          options?.timeoutMs ?? (args.targetContext?.kind === 'new-worktree' ? 15_000 : 120_000),
-      });
+      ).requestSessionFork({ ...args, timeoutMs });
     } catch (error) {
       return sessionForkFailure(
         args,
@@ -1136,9 +1203,34 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (response?.ok) return response.result as SessionEditAndResendResponse;
       }
+      const timeoutMs = options?.timeoutMs ?? 120_000;
+      // Encrypted content never opens ordinary Machine RPC: the edit is a signed owned write.
+      if (deps.protectedContent) {
+        if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
+        if (
+          ((await deps.getMachineProtocolCapabilities(machineId))?.[
+            MACHINE_PROTOCOL_CAPABILITIES.e2eeSessionEditAndResend
+          ] ?? 0) < E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION
+        )
+          return sessionEditAndResendFailure(
+            args,
+            'INTERNAL_ERROR',
+            'Update Lody on this machine to edit and resend in an encrypted workspace.'
+          );
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/edit-and-resend',
+          params: args,
+          timeoutMs,
+        });
+        if (!response.ok)
+          return sessionEditAndResendFailure(args, 'INTERNAL_ERROR', response.error);
+        return response.result as SessionEditAndResendResponse;
+      }
       return await (
         await getMachineRpcClient(machineId)
-      ).requestSessionEditAndResend({ ...args, timeoutMs: options?.timeoutMs ?? 120_000 });
+      ).requestSessionEditAndResend({ ...args, timeoutMs });
     } catch (error) {
       return sessionEditAndResendFailure(
         args,
@@ -1640,8 +1732,9 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     sessionId: SessionId,
     requestedByUserId: string,
-    options?: { reason?: string; timeoutMs?: number }
+    options?: { reason?: string; stopProcess?: boolean; timeoutMs?: number }
   ): Promise<SessionPreviewRevokeResponse | null> => {
+    const stopProcess = options?.stopProcess === true ? true : undefined;
     try {
       await waitForMachineRoute(machineId);
       if (
@@ -1652,7 +1745,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           method: 'session/preview-revoke',
           machineId,
           workspaceId,
-          params: { sessionId, requestedByUserId, reason: options?.reason },
+          params: {
+            sessionId,
+            requestedByUserId,
+            reason: options?.reason,
+            ...(stopProcess ? { stopProcess: true } : {}),
+          },
           timeoutMs: options?.timeoutMs ?? 15_000,
         });
         if (!response) throw new Error('Local preview control is unavailable.');
@@ -1665,7 +1763,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           machineId,
           workspaceId,
           method: 'session/preview-revoke',
-          params: { sessionId, requestedByUserId, reason: options?.reason },
+          params: {
+            sessionId,
+            requestedByUserId,
+            reason: options?.reason,
+            ...(stopProcess ? { stopProcess: true } : {}),
+          },
           timeoutMs: options?.timeoutMs ?? 30_000,
         });
         if (!response.ok) throw new Error(response.error);
@@ -1676,8 +1779,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       ).requestSessionPreviewRevoke({
         sessionId,
         requestedByUserId,
-        proof: await previewProof(machineId, sessionId, requestedByUserId, { action: 'revoke' }),
+        proof: await previewProof(machineId, sessionId, requestedByUserId, {
+          action: 'revoke',
+          ...(stopProcess ? { stopProcess: true } : {}),
+        }),
         reason: options?.reason,
+        ...(stopProcess ? { stopProcess: true } : {}),
         timeoutMs: options?.timeoutMs ?? 30_000,
       });
     } catch (error) {
@@ -1839,6 +1946,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       const capabilities = await deps.getMachineProtocolCapabilities(machineId);
       if (!machineSupportsMemoryProviders({ protocolCapabilities: capabilities ?? undefined }))
         return fail('Update this machine to use memory providers.');
+      if (
+        isLocalOnlyMemoryProvider(params.providerId) &&
+        !machineSupportsAccountMemoryProviders({ protocolCapabilities: capabilities ?? undefined })
+      )
+        return fail('Update Lody on this machine to use this memory provider.');
       const plane = targetRouter.getPlaneForMachine(machineId);
       if (plane === null) return fail('Machine RPC routing is not available.');
       if (plane === 'local') {
@@ -2054,10 +2166,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     return result;
   };
 
-  /**
-   * Custom Providers live in the agent's store, so every call runs a bounded Sorbet
-   * process on the target machine. Writes are owner-scoped like the credentials panel.
-   */
+  /** Sorbet control-plane reads and writes are owner-scoped like the credentials panel. */
   const requestLocalSorbetProviders = async (
     machineId: MachineId,
     request:
@@ -2073,6 +2182,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-delete' }>,
           'method' | 'params'
         >
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-refresh' }>,
+          'method' | 'params'
+        >
+      | Pick<Extract<LocalMachineRpcRequest, { method: 'sorbet/models-list' }>, 'method' | 'params'>
   ) => {
     const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
     const local = await canUseLocalMachineRpc(machineId);

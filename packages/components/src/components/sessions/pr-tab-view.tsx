@@ -33,6 +33,7 @@ import type {
 } from '@lody/shared';
 
 import { withClassName } from '@/lib/stylex';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   derivePrStatusFromDetails,
@@ -57,6 +58,7 @@ import { Menu } from '@/ui/menu';
 import { PrChangesView } from './pr-changes-view';
 import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
 import type { PrCommitSelection } from '@/lib/github-pr-diff';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 /** The tab's own width, not the window's: the PR tab lives in a resizable side panel. */
 const NARROW = '@container pr-tab (width < 420px)';
@@ -674,7 +676,7 @@ function UserAvatar({
   const login = user?.login ?? 'ghost';
   return (
     <Avatar.Root size={size}>
-      {user?.avatarUrl && <Avatar.Image src={user.avatarUrl} alt={login} />}
+      <CachedAvatarImage src={user?.avatarUrl} alt={login} />
       <Avatar.Fallback>{login.slice(0, 2).toUpperCase()}</Avatar.Fallback>
     </Avatar.Root>
   );
@@ -716,7 +718,7 @@ function BranchChip({ role, value }: { role: 'base' | 'head'; value: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     if (!value) return;
-    void navigator.clipboard.writeText(value);
+    void copyTextToClipboard(value);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }, [value]);

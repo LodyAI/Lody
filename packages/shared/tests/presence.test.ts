@@ -3,13 +3,17 @@ import { z } from 'zod';
 import {
   LODY_PRESENCE_TTL_MS,
   collectOnlineMachineIdsFromPresence,
+  collectViewedSessionIdsFromPresence,
   findFreshMachinePresenceState,
   findFreshSessionPresenceState,
+  hasFreshDesktopForegroundPresence,
   getLodyMachinePresenceKey,
   getLodySessionPresenceKey,
+  getLodySessionViewingPresenceKey,
   parseLodyPresenceStates,
   type LodyPresenceInstanceId,
   type LodyPresenceStateMap,
+  type LodySessionViewingPresenceState,
   type MachineId,
   type SessionId,
 } from '../src';
@@ -365,5 +369,70 @@ describe('presence helpers', () => {
     // Session presence alone must not mark a machine online; machine liveness
     // is only asserted by machine heartbeats.
     expect(online.size).toBe(1);
+  });
+
+  it('collectViewedSessionIdsFromPresence returns only fresh viewing entries', () => {
+    const viewerUserId = 'user-1';
+    const viewingState = (overrides: Partial<LodySessionViewingPresenceState> = {}) =>
+      ({
+        kind: 'session-viewing',
+        userId: viewerUserId,
+        instanceId,
+        sessionId,
+        since: 1_000,
+        updatedAt: 2_000,
+        ...overrides,
+      }) satisfies LodySessionViewingPresenceState;
+
+    const nowMs = 100_000;
+    const states = parseLodyPresenceStates({
+      [getLodySessionViewingPresenceKey(viewerUserId, instanceId)]: viewingState({
+        updatedAt: nowMs - 1_000,
+      }),
+      'viewing:user-2:instance-9': viewingState({
+        userId: 'user-2',
+        sessionId: 'session-2' as SessionId,
+        updatedAt: nowMs - LODY_PRESENCE_TTL_MS - 1,
+      }),
+      'session:session-3:instance-1': {
+        kind: 'session',
+        sessionId: 'session-3',
+        machineId: 'machine-1',
+        instanceId,
+        status: { type: 'running' },
+        updatedAt: nowMs - 1_000,
+      },
+    });
+
+    const viewed = collectViewedSessionIdsFromPresence(states, nowMs);
+    expect([...viewed]).toEqual([sessionId]);
+  });
+
+  it('suppresses a mobile push only for a fresh focused desktop of the same user, in any hosted workspace', () => {
+    const userId = 'Abcdef0123456789Abcdef0123456789';
+    const nowMs = 1_790_000_000_000;
+    const desktop = (forUser: string, updatedAt: number) => ({
+      kind: 'desktop-foreground',
+      userId: forUser,
+      instanceId,
+      updatedAt,
+    });
+    const workspaceA = parseLodyPresenceStates({
+      a: desktop('OtherUser0123456789Abcdef01234567', nowMs),
+    });
+    const workspaceB = parseLodyPresenceStates(
+      { b: desktop(userId, nowMs - 1_000) },
+      { minimal: true }
+    );
+    expect(hasFreshDesktopForegroundPresence([workspaceA], userId, nowMs)).toBe(false);
+    expect(hasFreshDesktopForegroundPresence([workspaceA, workspaceB], userId, nowMs)).toBe(true);
+    // A crashed desktop stops suppressing once its entry leaves the freshness window.
+    expect(
+      hasFreshDesktopForegroundPresence([workspaceB], userId, nowMs + LODY_PRESENCE_TTL_MS)
+    ).toBe(false);
+    // Encrypted workspaces never carry a non-identifier user string.
+    expect(
+      parseLodyPresenceStates({ c: desktop('User name /private/path', nowMs) }, { minimal: true })
+    ).toEqual({});
   });
 });

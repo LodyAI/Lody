@@ -100,7 +100,14 @@ traversed iteratively with identity deduplication; original Causes remain intact
 recovery. A failed close/timeout leaves health observable, and successful cleanup
 clears its blocked state. New providers in the same parent Scope have independent
 close receipts. A retained release failure fences admission before any new credential
-I/O, not only before producer replacement. This changes no P1-owned logger/presence files.
+I/O, not only before producer replacement.
+
+Producer diagnostics observe Exit, including interruption and I/O finalizer failures.
+Only a pure interruption whose first stop intent is explicit owner close becomes
+the fixed, content-free `fetch-cancelled` / `owner_released` lifecycle event.
+Unknown stops, deadlines and mixed failures remain reportable; error names are
+not cancellation evidence. Waiter results and cleanup custody stay unchanged.
+This proof is local to the provider and does not classify platform-side disconnects.
 
 The raw HTTP receipt includes success-body EOF and error-body cancellation. A body
 release rejection retains its owner and I/O failure; 401/403 also retain their typed

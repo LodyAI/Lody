@@ -4,6 +4,27 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Workspace sync diagnostics
+
+`useWorkspaceSyncStuckReport` observes readiness without changing sync or retry
+ownership. One continuous wait for a route target reports once, even as its blocker
+or connection changes; recovery ends that episode so a new wait can report again.
+Its exception carries only fixed operation/stage/failure/handling/retry diagnostics.
+A rejected initial metadata scan has no scheduled retry; other retry states and
+unproven causes remain `unknown`. Restricted capture and transport reprojection
+preserve those fields through `@lody/platform/telemetry`, rejecting unknown values
+and excluding workspace content and raw error metadata. Existing analytics also
+omit workspace IDs and raw error names; detailed local diagnostics remain local.
+
+## Electron state snapshots
+
+`use-electron-updater-state.ts` and `use-electron-cli-daemon.ts` subscribe before
+requesting their initial IPC snapshot. The snapshot seeds a subscription only
+until its first push: a late initial response cannot replace live update progress
+or daemon readiness. Cleanup retires that subscription's response and listener;
+a later mount starts its own initial read. The main process remains the state
+owner; renderer observation neither restarts a process nor retries an update.
+
 ## Explicit plaintext copies
 
 `use-plaintext-copy.tsx` borrows the existing runtime admission and mode atom for
@@ -88,16 +109,20 @@ reports its own list. See the [command ownership decision](../../../../.agents/n
 
 ## Avatar sources
 
-`use-stable-avatar-src.ts` keeps the initial remote URL on a cold mount while
-filling the byte cache, then asks `lib/avatar-cache.ts` to preload and asynchronously
-decode that local blob for a return visit. Only avatars used by this hook are
+`use-stable-avatar-src.ts` resolves cached avatars from `lib/avatar-cache.ts`
+(URL-keyed memory map backed by IndexedDB `lody:avatar-image-cache` with
+CacheStorage migration/fallback and a synchronous `lody:avatar-cache-index`
+key set). On a new page or Electron `file://` window, persisted URLs hold off
+emitting a remote image request while the local blob resolves in milliseconds;
+truly cold URLs paint immediately while filling the cache, and active workspace
+members warm their cached blobs when the directory loads. Only used avatars are
 decoded; startup restoration does not decode the entire persistent cache. The
 cache entry retains the off-DOM image for the same lifetime as its blob URL.
 Source changes select the current URL synchronously, including delayed profile
 arrival and image removal, while background callbacks remain tied to their source.
-First paint and cache reads never await decoding. Fully cold images and missing
+First paint and cache reads never await decoding. Fully cold images and genuinely absent
 profile data can still show a fallback. Evidence and limits:
-[avatar continuity](../../../../.agents/notes/proposed/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
+[avatar continuity](../../../../.agents/notes/implemented/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
 
 ## Cloud query recovery
 
@@ -110,8 +135,23 @@ boundary. Auth expiry continues through the central supervisor and retains only 
 matching committed snapshot. Brief success and temporary auth skips do not replenish
 attempts; 30 seconds of continuously observed success resets the budget. Skipped or
 unmounted queries stop retries, and session/query identity fences callbacks and results.
-Public queries, mutations/actions and local-only clients keep their existing behavior.
+Public queries and local-only clients keep their existing behavior.
 See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
+
+`providers/cloud-platform-api.ts` also admits imperative queries, subscriptions,
+and React action/mutation commands through the same authenticated Convex state.
+Structured `unauthenticated` failures report to the existing supervisor and stop
+new protected requests. Imperative subscriptions release their watches while auth
+is unavailable and resume for the same session after recovery. Confirmed logout or
+account replacement retires those subscriptions; provider cleanup stops their
+watches. Reattachment does not treat an old SDK-cached auth rejection as a fresh
+server rejection. Commands preserve their rejected result and never replay.
+Intentionally public operations stay available without authentication.
+
+`CloudPlatformProvider` also wraps standalone login without authenticated Convex
+context. Its optional authenticated child owns organization queries and E2EE email
+inbox hosts. The shared router supplies that context; standalone login must still
+render without it.
 
 Authentication recovery status is presented separately from query retries:
 `AuthenticatedConvexProvider` owns its budget and actions; `AuthRecoveryEntryProvider`
@@ -193,7 +233,8 @@ own rendered row is a placeholder. See the
 
 ## `useWorkspaceBadge`
 
-`workspaceBadgeAtom` derives an absolute count from complete active-session metadata
+`createWorkspaceBadgeAtom` binds the workspace-local account and owned machine IDs
+from the visible access index, then derives an absolute count from active-session metadata
 and fresh presence, sharing the sidebar's parent/child activity summary. The elected
 workspace window publishes changes immediately, reasserts the snapshot every 30 seconds,
 and reconciles on focus or visibility restoration. The interval reads the current atom
@@ -343,3 +384,42 @@ are exhausted. Local changes preserve the warning and do not mark a retry active
 Only successful first sync clears the sync warning. An initial local scan failure
 releases the unusable observer so the next attempt can reopen it. Workspace changes
 or unmount release both subscriptions and retire pending results.
+
+## Read-only session actions and containment
+
+Sidebar pin/unread actions use `useSessionActions`' checked preference path, while
+read-only rows omit management controls. The action layer still refuses management
+writes and rechecks preference access after asynchronous reads.
+
+`isContainedSession` owns read-grant inheritance, history tab projection, deep-link
+selection and sharing-target resolution. It accepts direct same-machine containment:
+the existing sparse default is a Tab, and `side-panel` is the supported override.
+Unknown placements and nested/cross-machine links do not inherit. Opener provenance
+alone grants nothing; malformed parent links do not redirect a sharing mutation away
+from the current session. This client check cannot authenticate a forged otherwise
+valid containment relation or provide an authoritative session-to-machine binding.
+
+## Live member directory
+
+`useWorkspaceMembers` reads the capability-gated `workspaceMembers:list` descriptor
+through the existing shared authenticated query source. Convex dependency updates
+replace the whole directory on member joins, departures, replacements and profile
+changes. The response contains only account ID, display name (email fallback) and
+avatar; it is never a membership or sharing authority. Unsupported/local assemblies
+retain their existing organization projection.
+
+The directory query key includes the expected account, which the server compares
+with its authenticated user before any directory read. This prevents an old-account
+SDK cache from being accepted under a new account.
+
+Same-account/workspace labels survive optional-query failures, component remounts,
+and cold page reloads through `lib/workspace-sender-identity.ts` (`clear-local-cache.ts`
+clears both display caches). `useWorkspaceSenderProfile` resolves human message
+senders from live `auth:getUserById`, then the same-scope retained sender profile,
+member directory, and matching current user, so virtualized scroll and send-to-history
+handoff do not drop sender names or avatars while queries reconnect; explicit `null`
+responses clear deleted accounts. The sharing panel
+shows a local retry using the query owner's bounded retry budget, shared across all
+mounted consumers; no polling or second watch owner is added. Account, workspace or
+API changes discard retained labels. Team/public sharing and grant writes keep their
+independent permission checks even while labels are unavailable.

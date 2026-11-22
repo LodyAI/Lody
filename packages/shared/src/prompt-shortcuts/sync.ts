@@ -1,4 +1,8 @@
-import { requirePlaintextWorkspaceStreamsContent, type WorkspaceStreamsMode } from '../workspace-streams-content';
+import { HANDLED_SHORTCUT_TOKEN_ERROR, isConvexUnauthenticatedError } from '../auth';
+import {
+  requirePlaintextWorkspaceStreamsContent,
+  type WorkspaceStreamsMode,
+} from '../workspace-streams-content';
 import {
   StreamsCrdt,
   type CrdtAdapter,
@@ -8,10 +12,9 @@ import {
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import { createFlockAdapter } from '@loro-dev/streams-crdt/flock';
 import type { LoroRepo } from 'loro-repo';
-import { createLoroStreamUrl, LORO_STREAMS_BUCKET_ID } from '../index';
-import { getShortcutBodyStreamId, getShortcutIndexStreamId } from './access';
+import { createLoroStreamUrl, LORO_STREAMS_BUCKET_ID } from '../loro-streams-routing';
+import { getShortcutResourceStreamId, type ShortcutResource } from './access';
 import { PromptShortcutError } from './model';
-import type { ShortcutResource } from './access';
 import { ShortcutLifetime } from './lifetime';
 
 export type ShortcutStreamGrant = {
@@ -49,9 +52,18 @@ export type ShortcutSyncLease = Pick<ShortcutSyncRoom, 'sync' | 'join'> & {
   release(): Promise<void>;
 };
 
+export class ShortcutSyncTransportError extends Error {
+  constructor(
+    readonly code: string,
+    message: string
+  ) {
+    super(message);
+    this.name = 'ShortcutSyncTransportError';
+  }
+}
+
 /**
- * Scoped resources do not use the workspace token or sync its Meta room.
- * Each live room has one CRDT/transport/lease, independent of React consumers.
+ * Each live room has one CRDT/transport/lease per access mode, independent of React consumers.
  */
 export class PromptShortcutSync {
   private readonly lifetime = new ShortcutLifetime();
@@ -65,7 +77,11 @@ export class PromptShortcutSync {
     private readonly options: {
       content: WorkspaceStreamsMode;
       repo: LoroRepo;
-      grant: (resource: ShortcutResource, write: boolean) => Promise<ShortcutStreamGrant>;
+      grant: (
+        resource: ShortcutResource,
+        write: boolean,
+        force?: boolean
+      ) => Promise<ShortcutStreamGrant>;
       now: () => number;
     }
   ) {}
@@ -73,16 +89,9 @@ export class PromptShortcutSync {
   async acquire(resource: ShortcutResource, write: boolean): Promise<ShortcutSyncLease> {
     requirePlaintextWorkspaceStreamsContent(this.options.content);
     if (this.disposed) throw new Error('Shortcut sync is disposed');
-    const key =
-      resource.kind === 'index'
-        ? getShortcutIndexStreamId(resource.domain)
-        : getShortcutBodyStreamId(resource.bodyDocId);
+    const streamId = getShortcutResourceStreamId(resource);
+    const key = `${write ? 'w' : 'r'}:${streamId}`;
     let entry = this.rooms.get(key);
-    if (entry && entry.write !== write)
-      throw new PromptShortcutError(
-        'forbidden',
-        'Release the existing room before changing its access mode'
-      );
     if (!entry) {
       entry = { refs: 0, write, opening: this.open(resource, write) };
       this.rooms.set(key, entry);
@@ -125,18 +134,15 @@ export class PromptShortcutSync {
   }
 
   private async open(resource: ShortcutResource, write: boolean): Promise<ShortcutSyncRoom> {
-    const streamId =
-      resource.kind === 'index'
-        ? getShortcutIndexStreamId(resource.domain)
-        : getShortcutBodyStreamId(resource.bodyDocId);
-    let grant = await this.lifetime.wait(this.options.grant(resource, write));
+    const streamId = getShortcutResourceStreamId(resource);
+    let grant = await this.lifetime.wait(this.options.grant(resource, write, false));
     if (grant.streamId !== streamId)
       throw new PromptShortcutError('forbidden', 'Grant does not match the requested stream');
     const gatewayBaseUrl = grant.gatewayBaseUrl;
     let expiresAt = this.options.now() + grant.expiresIn * 1000;
     const auth = async (force: boolean) => {
       if (force || this.options.now() >= expiresAt - 5000) {
-        grant = await this.lifetime.wait(this.options.grant(resource, write));
+        grant = await this.lifetime.wait(this.options.grant(resource, write, force));
         if (grant.streamId !== streamId || grant.gatewayBaseUrl !== gatewayBaseUrl) {
           throw new PromptShortcutError('forbidden', 'Stream grant changed its resource');
         }
@@ -144,10 +150,10 @@ export class PromptShortcutSync {
       }
       return grant.token;
     };
-    const lease =
-      resource.kind === 'body'
-        ? await this.options.repo.acquireDoc(streamId)
-        : await this.options.repo.acquireFlockDoc(streamId);
+    const isBody = resource.kind === 'body' || resource.kind === 'workspace-body';
+    const lease = isBody
+      ? await this.options.repo.acquireDoc(streamId)
+      : await this.options.repo.acquireFlockDoc(streamId);
     try {
       const adapter: CrdtAdapter<JsonObject> =
         'doc' in lease ? createLoroDocAdapter(lease.doc) : createFlockAdapter(lease.flock);
@@ -171,11 +177,25 @@ export class PromptShortcutSync {
       let subscription: TransportSubscription | undefined;
       let joining: Promise<void> | undefined;
       let closed = false;
+      const toTransportError = (error: {
+        code: string;
+        message: string;
+        cause?: unknown;
+      }): Error => {
+        if (
+          error.code === 'auth_provider_error' &&
+          error.cause instanceof Error &&
+          (error.cause.name === HANDLED_SHORTCUT_TOKEN_ERROR ||
+            isConvexUnauthenticatedError(error.cause))
+        )
+          return error.cause;
+        return new ShortcutSyncTransportError(error.code, error.message);
+      };
       return {
         sync: async () => {
           if (closed) throw new Error('Shortcut room closed');
           const result = await transport.sync();
-          if (!result.ok) throw new Error(result.error.message);
+          if (!result.ok) throw toTransportError(result.error);
           await persist();
         },
         join: () => {
@@ -183,7 +203,7 @@ export class PromptShortcutSync {
           if (joining) return joining;
           joining = (async () => {
             const result = await transport.join();
-            if (!result.ok) throw new Error(result.error.message);
+            if (!result.ok) throw toTransportError(result.error);
             subscription = result.value;
             if (closed) subscription.unsubscribe();
           })().catch((error: unknown) => {

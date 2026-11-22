@@ -1,3 +1,7 @@
+import {
+  ManagedDaemonUpdateStatusSchema,
+  ManagedDaemonUpgradeOptionsSchema,
+} from './daemon-update';
 import { EncryptedAttachmentSchema } from './encrypted-attachment';
 import { ProjectLocalMemberProbeSchema, SessionProjectRunSchema } from './workspace-project';
 import { automationOriginSchema } from './automations/contracts';
@@ -33,7 +37,6 @@ import type { ProjectRef } from './project';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { LodyOperationIdSchema, LodyOperationCompletionSchema } from './session-orchestration';
-import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
 import { normalizeMcpServerIdSelection } from './workspace-mcp';
 import {
   ACP_AUTH_FORM_FIELD_MAX_COUNT,
@@ -45,18 +48,9 @@ import {
   isAcpAuthenticationFormWithinByteLimit,
 } from './acp-authentication-limits';
 
-// Reuse immutable primitive rules across the message contracts. Keep constraints and
-// metadata on derived schemas so one field cannot change another field's rule.
 const SharedStringSchema = z.string();
 const SharedOptionalStringSchema = SharedStringSchema.optional();
 const SharedTrimmedNonEmptyStringSchema = SharedStringSchema.trim().min(1);
-
-// ============================================
-// BASE ID TYPE SCHEMAS
-// Zod's .brand() is incompatible with the repository's existing TypeScript
-// brands. Convert at this validation boundary so parsed session ids carry the
-// domain type without forcing casts throughout application code.
-// ============================================
 
 export const SessionIdSchema = z.string().transform((value) => value as SessionId);
 export const MachineIdSchema = z.string();
@@ -79,10 +73,6 @@ export const WorktreeSetupScriptConfigSchema = z
 
 export const WorktreeCleanupScriptConfigSchema = WorktreeSetupScriptConfigSchema;
 
-// ============================================
-// ACP SESSION CONFIG SCHEMAS
-// ============================================
-
 export const CliTypeSchema = z.enum(['kimi', 'grok', 'claude', 'codex']);
 export const AgentConfigCliTypeSchema = z.enum(['builtin', 'registry', 'custom']);
 
@@ -96,6 +86,7 @@ export const CustomAcpLaunchSpecSchema = z
 
 export const BuiltinRuntimeOverridesSchema = z
   .object({
+    antigravityPath: SharedOptionalStringSchema,
     codexPath: SharedOptionalStringSchema,
     claudeCodeExecutable: SharedOptionalStringSchema,
     kimiPath: SharedOptionalStringSchema,
@@ -106,6 +97,7 @@ export const BuiltinRuntimeOverridesSchema = z
       .array(z.string().trim().min(1).max(PI_EXTENSION_PATH_MAX_LENGTH))
       .max(PI_EXTENSIONS_MAX_SELECTIONS)
       .optional(),
+    antigravitySkipPermissions: z.boolean().optional(),
   })
   .strict();
 
@@ -185,10 +177,6 @@ export const SessionImageGroupContentSchema = z
   })
   .strict();
 
-// Base object (no cross-field refinement) so it can participate in
-// `z.discriminatedUnion('type', ...)`. The transport/machineId invariant is
-// enforced by `refineSessionFileBlock` at the array level (a ZodEffects schema
-// cannot be a discriminated-union member).
 const SessionFileBlockObjectSchema = z
   .object({
     type: z.literal('file'),
@@ -227,9 +215,6 @@ const refineSessionFileBlock = (
       message: 'Encrypted attachment reference mismatch',
     });
   }
-  // transport='local' means the bytes only exist on a specific machine pending
-  // backfill; without machineId other devices can't render the honest
-  // "uploading from <machine>" pending state.
   if (block.transport === 'local' && (block.machineId === undefined || block.machineId === '')) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -251,10 +236,6 @@ const MessageTextSpanSchema = z
     label: z.string().min(1),
     target: SharedOptionalStringSchema,
     quoteVersion: z.literal(1).optional(),
-    // The same bar `sanitizeMessageTextSpans` applies. This object is `.strict()`,
-    // and a rejected span fails the whole block list — which surfaces as an empty
-    // prompt, not as a missing chip — so a field one side knows must be declared
-    // on both.
     mark: z.string().min(1).max(MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH).optional(),
   })
   .strict();
@@ -263,11 +244,6 @@ const SessionTextInputBlockSchema = z
   .object({
     type: z.literal('text'),
     text: SharedStringSchema,
-    // Optional so every text block written before spans existed still parses.
-    // Offsets are NOT checked against `text` here — only the shape is. The
-    // range check belongs to `sanitizeMessageTextSpans`, which also runs on the
-    // read path, where spans arrive through the session document's untyped
-    // catchall and never see this schema at all.
     spans: z.array(MessageTextSpanSchema).optional(),
   })
   .strict();
@@ -654,10 +630,6 @@ export const SessionStartMetaSchema = z
   })
   .strict();
 
-// ============================================
-// CONTROL MESSAGE SCHEMAS
-// ============================================
-
 export const SessionCreateRequestSchema = z
   .object({
     type: z.literal('session/create'),
@@ -856,8 +828,6 @@ export const SessionEditAndResendSpecSchema = z
     replacementUserTurnId: SharedTrimmedNonEmptyStringSchema,
     requestedByUserId: SharedTrimmedNonEmptyStringSchema,
     timestamp: SharedTrimmedNonEmptyStringSchema,
-    // Opaque on the wire. The owning CLI applies the same normalization used
-    // for ordinary dispatch before it creates the replacement history entry.
     inputConfig: z.record(SharedStringSchema, z.unknown()),
   })
   .strict()
@@ -1025,82 +995,6 @@ export const SessionDispatchTurnResponseSchema = z
 
 export type SessionDispatchTurnResponse = z.infer<typeof SessionDispatchTurnResponseSchema>;
 
-const SessionPreparationIdSchema = z.string().trim().min(1).max(128);
-export const SessionPreparationRunConfigSchema = z
-  .object({
-    modeId: z.string().trim().min(1).optional(),
-    modelId: z.string().trim().min(1).optional(),
-    configOptionValues: AcpConfigOptionValuesSchema.transform((values) =>
-      Object.fromEntries(
-        Object.entries(values).filter(([configId]) => !isSensitiveAcpConfigOptionId(configId))
-      )
-    ).optional(),
-    memory: MemoryBindingSchema.optional(),
-    mcpServerIds: z
-      .array(SharedStringSchema)
-      .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])
-      .optional(),
-  })
-  .strict();
-
-/**
- * Draft session preparation request from desktops that predate its removal.
- * Daemons decline it without doing any work; the schemas remain only so those
- * requests still parse. Draft text, launch secrets, and secret-shaped ACP
- * option values were never part of the request.
- */
-export const SessionPreparationSpecSchema = z
-  .object({
-    preparationId: SessionPreparationIdSchema,
-    sessionId: SessionIdSchema,
-    requestedByUserId: SharedTrimmedNonEmptyStringSchema,
-    agentConfigId: AgentConfigIdSchema,
-    cliType: AgentConfigCliTypeSchema,
-    agentType: SharedTrimmedNonEmptyStringSchema,
-    project: ProjectRefSchema.optional(),
-    runConfig: SessionPreparationRunConfigSchema.optional(),
-  })
-  .strict();
-
-export type SessionPreparationSpec = z.infer<typeof SessionPreparationSpecSchema>;
-
-export const SessionPreparationCancelSpecSchema = z
-  .object({
-    preparationId: SessionPreparationIdSchema,
-    sessionId: SessionIdSchema,
-    requestedByUserId: SharedTrimmedNonEmptyStringSchema,
-  })
-  .strict();
-
-export type SessionPreparationCancelSpec = z.infer<typeof SessionPreparationCancelSpecSchema>;
-
-export const SessionPrepareResponseSchema = z
-  .object({
-    type: z.literal('session/prepare_response'),
-    preparationId: SessionPreparationIdSchema,
-    sessionId: SessionIdSchema,
-    accepted: z.boolean(),
-    disposition: z.enum(['accepted', 'duplicate', 'replaced', 'busy', 'not-owned', 'error']),
-    error: SharedOptionalStringSchema,
-  })
-  .strict();
-
-export type SessionPrepareResponse = z.infer<typeof SessionPrepareResponseSchema>;
-
-export const SessionPrepareCancelResponseSchema = z
-  .object({
-    type: z.literal('session/prepare-cancel_response'),
-    preparationId: SessionPreparationIdSchema,
-    sessionId: SessionIdSchema,
-    cancelled: z.boolean(),
-    disposition: z.enum(['cancelled', 'not-found', 'not-owned', 'error']),
-    error: SharedOptionalStringSchema,
-  })
-  .strict();
-
-export type SessionPrepareCancelResponse = z.infer<typeof SessionPrepareCancelResponseSchema>;
-
-// Permission schemas (simplified - actual types come from @agentclientprotocol/sdk)
 const PermissionMetaSchema = z.record(SharedStringSchema, z.unknown()).nullable();
 
 export const PermissionOptionSchema = z.object({
@@ -1152,10 +1046,6 @@ export const PermissionResponseMessageSchema = z.object({
   outcome: PermissionOutcomeSchema,
 });
 
-// ============================================
-// MACHINE STATUS AND CONTROL SCHEMAS
-// ============================================
-
 export const MachineResourceInfoSchema = z
   .object({
     totalMemoryGB: z.number(),
@@ -1173,6 +1063,7 @@ export const MachineStatusRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     /** Only for daemons advertising `machineDiskStatus`. */
     includeDisk: z.literal(true).optional(),
+    includeDaemonUpdate: z.literal(true).optional(),
   })
   .strict();
 
@@ -1215,6 +1106,7 @@ export const MachineStatusResponseSchema = z
     resources: MachineResourceInfoSchema.optional(),
     disk: MachineDiskInfoSchema.optional(),
     lifecycle: MachineLifecycleCapabilitySchema.optional(),
+    daemonUpdate: ManagedDaemonUpdateStatusSchema.nullable().optional(),
     error: SharedOptionalStringSchema,
   })
   .strict();
@@ -1262,6 +1154,7 @@ export const MachineLifecycleDispositionSchema = z.enum([
 export const MachineRestartRequestSchema = z
   .object({
     type: z.literal('machine/restart'),
+    restoreMachineId: MachineIdSchema.optional(),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     requesterUserId: SharedTrimmedNonEmptyStringSchema,
@@ -1291,6 +1184,7 @@ export const MachineUpgradeRequestSchema = z
     requestToken: SharedTrimmedNonEmptyStringSchema,
     requestId: SharedTrimmedNonEmptyStringSchema,
     targetVersion: z.string().trim().min(1).optional(),
+    upgrade: ManagedDaemonUpgradeOptionsSchema.optional(),
   })
   .strict();
 
@@ -1503,6 +1397,7 @@ export const MachineAcpCapabilitiesRefreshRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     configId: AgentConfigIdSchema,
     force: z.boolean().optional(),
+    readModelOptions: z.literal(true).optional(),
   })
   .strict();
 
@@ -1759,6 +1654,7 @@ export const MachineAcpBinaryProgressMessageSchema = z
       'unsupported-platform',
       'incompatible-host',
       'error',
+      'reading-model-options',
     ]),
     downloadedBytes: z.number().int().nonnegative().optional(),
     totalBytes: z.number().int().nonnegative().optional(),
@@ -1769,6 +1665,11 @@ export const MachineAcpBinaryProgressMessageSchema = z
     required: SharedOptionalStringSchema,
     command: SharedOptionalStringSchema,
     error: SharedOptionalStringSchema,
+    configId: AgentConfigIdSchema.optional(),
+    modelId: SharedOptionalStringSchema,
+    modelName: SharedOptionalStringSchema,
+    modelIndex: z.number().int().positive().optional(),
+    modelCount: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -1791,42 +1692,6 @@ export const MachineBugReportResponseSchema = z
     success: z.boolean(),
     bugReportId: SharedOptionalStringSchema,
     error: SharedOptionalStringSchema,
-  })
-  .strict();
-
-const SessionCodeCollabHostStartStatusSchema = z.enum([
-  'started',
-  'already-running',
-  'disabled',
-  'failed',
-  'stopped',
-]);
-
-/**
- * @deprecated Legacy compatibility only. Code Collab v2 uses machine RPC methods
- * under `code-collab/*`; current CLIs reject this request as unsupported.
- */
-export const SessionCodeCollabHostStartRequestSchema = z
-  .object({
-    type: z.literal('session/code-collab-host-start'),
-    machineId: MachineIdSchema,
-    workspaceId: WorkspaceIdSchema,
-    sessionId: SessionIdSchema,
-    requestedByUserId: SharedTrimmedNonEmptyStringSchema,
-  })
-  .strict();
-
-/**
- * @deprecated Legacy compatibility response for `session/code-collab-host-start`.
- */
-export const SessionCodeCollabHostStartResponseSchema = z
-  .object({
-    type: z.literal('session/code-collab-host-start_response'),
-    sessionId: SessionIdSchema,
-    success: z.boolean(),
-    status: SessionCodeCollabHostStartStatusSchema.optional(),
-    error: SharedOptionalStringSchema,
-    message: SharedOptionalStringSchema,
   })
   .strict();
 
@@ -1885,8 +1750,6 @@ export const SessionFileUploadResponseSchema = z
     attachedTo: z.enum(['active_turn', 'new_entry']).optional(),
     files: z
       .array(
-        // Cloud uploads are always relay-stored; only the send-local response
-        // may carry transport 'local'.
         SessionFileBlockObjectSchema.extend({
           downloadUrl: z.string().url(),
           transport: z.literal('r2'),
@@ -1981,9 +1844,6 @@ export const SessionFileSendLocalResponseSchema = z
     success: z.boolean(),
     error: SharedOptionalStringSchema,
     message: SharedOptionalStringSchema,
-    // Local-transport blocks carry no downloadUrl (bytes not yet in the relay
-    // store). `SessionFileBlockSchema` enforces the transport='local' ⇒
-    // machineId invariant via its superRefine.
     files: z.array(SessionFileBlockSchema).min(1).max(SESSION_FILE_MAX_COUNT).optional(),
   })
   .strict();
@@ -2182,6 +2042,7 @@ export const SessionPreviewRevokeRequestSchema = z
     sessionId: SessionIdSchema,
     requestedByUserId: SharedTrimmedNonEmptyStringSchema,
     reason: z.string().trim().min(1).optional(),
+    stopProcess: z.boolean().optional(),
   })
   .strict();
 
@@ -2527,7 +2388,6 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   MachineAcpAuthenticateRequestSchema,
   MachineAcpBinaryStatusRequestSchema,
   MachineAcpBinaryInstallRequestSchema,
-  SessionCodeCollabHostStartRequestSchema,
   SessionImageUploadRequestSchema,
   SessionFileUploadRequestSchema,
   SessionFileSendLocalRequestSchema,
@@ -2567,7 +2427,6 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   MachineAcpBinaryStatusResponseSchema,
   MachineAcpBinaryInstallResponseSchema,
   MachineAcpBinaryProgressMessageSchema,
-  SessionCodeCollabHostStartResponseSchema,
   SessionImageUploadResponseSchema,
   SessionFileUploadResponseSchema,
   SessionFileSendLocalResponseSchema,
@@ -3476,13 +3335,8 @@ export const ServerSendMessageSchema = z.discriminatedUnion('type', [
   MachineAcpBinaryProgressMessageSchema,
 ]);
 
-// ============================================
-// MESSAGE CONTENT SCHEMAS
-// ============================================
-
 export const RoleSchema = z.enum(['user', 'assistant', 'system']);
 
-// Match @agentclientprotocol/sdk ToolCallStatus type
 export const ToolCallStatusSchema = z.enum(['pending', 'in_progress', 'completed', 'failed']);
 
 export const ToolKindSchema = z.enum([
@@ -3561,8 +3415,6 @@ const KnownStandardToolContentSchema = z.discriminatedUnion('type', [
     .loose(),
 ]);
 
-// ACP extension blocks remain opaque JSON. Known discriminators must still pass
-// their own schema; malformed known blocks cannot fall through as extensions.
 const unknownProtocolBlock = (known: z.ZodUnion) => {
   const types = new Set(
     known.options.flatMap((option) =>
@@ -3579,7 +3431,6 @@ const StandardToolContentSchema = z.union([
 ]);
 
 const KnownToolCallContentSchema = z.union([
-  // Legacy blocks used by older history entries
   z
     .object({
       type: z.literal('input'),
@@ -3598,7 +3449,6 @@ const KnownToolCallContentSchema = z.union([
       text: SharedStringSchema,
     })
     .loose(),
-  // ACP blocks
   z
     .object({
       type: z.literal('content'),
@@ -3611,7 +3461,6 @@ const KnownToolCallContentSchema = z.union([
       terminalId: SharedStringSchema,
     })
     .loose(),
-  // Stable terminal snapshots stored in history (do not depend on ACP rawOutput structure)
   z
     .object({
       type: z.literal('terminal_command'),
@@ -3674,36 +3523,29 @@ export const PermissionRequestInfoSchema = z.object({
   outcome: PermissionOutcomeSchema.optional(),
 });
 
-// System notice name schema
 export const SystemNoticeNameSchema = z.enum([
   'resume_from_external_chat_history',
   'chat_failed',
   'agent_warning',
 ]);
 
-// Metadata for resume_from_external_chat_history system notice
 export const ResumeFromExternalChatHistoryMetaSchema = z.object({
   truncated: z.boolean().optional(),
   terminalOmitted: z.boolean().optional(),
   thinkingOmitted: z.boolean().optional(),
 });
 
-// Metadata for agent_warning system notice: a warning issued by the agent
-// runtime (e.g. Codex app-server `warning`/`configWarning` notifications),
-// carried structured via ACP session_info_update `_meta` instead of agent text.
 export const AgentWarningMetaSchema = z.object({
   message: SharedStringSchema,
   source: SharedOptionalStringSchema,
 });
 
-// Who authored a history item; agent-authored content cannot use turn-level userId.
 export const MessageItemActorSchema = z.object({
   kind: z.enum(['human', 'agent']),
   agentConfigId: SharedOptionalStringSchema,
   name: SharedOptionalStringSchema,
 });
 
-// Metadata for the task_proposal system notice
 export const TaskProposalMetaSchema = z.object({
   proposalId: SharedTrimmedNonEmptyStringSchema,
   title: SharedStringSchema,
@@ -3718,10 +3560,28 @@ const proposalTimeOfDay = {
   minute: z.number().int().min(0).max(59),
   timeZone: z.string().min(1).max(100).optional(),
 };
+/**
+ * Largest "every N minutes / hours" step, shared by the editor's Custom field,
+ * agent proposals, the CLI and the mobile runtimes. It is the 32-bit signed
+ * maximum because Android carries `every` as a Kotlin `Int`; it also keeps
+ * `every × unit` an exact JS integer whose first run, from any anchor before
+ * year 29,000, stays inside the JS Date range the planner and ledger store.
+ * A step that does not divide the clock is stored as an anchored interval.
+ */
+export const SCHEDULE_CUSTOM_STEP_MAX = 2_147_483_647;
+export const SCHEDULE_CUSTOM_MINUTES_MAX = SCHEDULE_CUSTOM_STEP_MAX;
+export const SCHEDULE_CUSTOM_HOURS_MAX = SCHEDULE_CUSTOM_STEP_MAX;
 export const ScheduleProposalRuleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('manual') }).strict(),
-  z.object({ kind: z.literal('minutes'), every: z.number().int().min(1).max(59) }).strict(),
-  z.object({ kind: z.literal('hours'), every: z.number().int().min(1).max(23) }).strict(),
+  z
+    .object({
+      kind: z.literal('minutes'),
+      every: z.number().int().min(1).max(SCHEDULE_CUSTOM_MINUTES_MAX),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('hours'), every: z.number().int().min(1).max(SCHEDULE_CUSTOM_HOURS_MAX) })
+    .strict(),
   z.object({ kind: z.literal('daily'), ...proposalTimeOfDay }).strict(),
   z.object({ kind: z.literal('weekdays'), ...proposalTimeOfDay }).strict(),
   z
@@ -3768,7 +3628,6 @@ export const ScheduleProposalMetaSchema = z.object({
   proposedBy: MessageItemActorSchema.optional(),
 });
 
-// Reason codes for chat_failed system notice
 export const ChatFailedReasonSchema = z.enum([
   'session_archived',
   'agent_type_mismatch',
@@ -3798,7 +3657,6 @@ export const ChatFailedReasonSchema = z.enum([
 
 export const ChatFailedCodeSchema = z.enum(['git_executable_not_found']);
 
-// Metadata for chat_failed system notice
 export const ChatFailedMetaSchema = z.object({
   reason: ChatFailedReasonSchema,
   code: ChatFailedCodeSchema.optional(),
@@ -3861,17 +3719,12 @@ export const ToolCallMessageSchema = z.object({
   rawInput: z.record(SharedStringSchema, z.unknown()).optional(),
   rawOutput: z.record(SharedStringSchema, z.unknown()).optional(),
   activityKind: z.enum(['context_compaction', 'codex_retry']).optional(),
-  // Canonical tool name, when the agent published one (ACP `title` is human-facing).
   toolName: SharedOptionalStringSchema,
-  // IANA timezone of the machine that ran a scheduling tool (cron is local-time to it).
   schedulingTimeZone: SharedOptionalStringSchema,
-  // Epoch ms when a scheduling tool call was first persisted (true creation moment;
-  // turn-level timestamps are not a safe proxy — see `recordedAtMs` in ai.ts).
   recordedAtMs: z.number().optional(),
   permissionRequest: PermissionRequestInfoSchema.optional(),
 });
 
-// Non-system notice MessageContent discriminated union
 const SubagentItemIdentityShape = {
   nativeTurnId: SharedOptionalStringSchema,
   messageId: SharedOptionalStringSchema,
@@ -4006,7 +3859,6 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
   }),
 ]);
 
-// System notice message content schema
 export const SessionForkOriginMetaSchema = z.object({
   sourceSessionId: SessionIdSchema,
   sourceTurnId: SharedStringSchema,
@@ -4070,7 +3922,6 @@ export const WorktreeScriptContentSchema = z.object({
   endedAt: z.number().optional(),
 });
 
-// MessageContent union
 export const MessageContentSchema = z
   .union([NonSystemNoticeMessageContentSchema, SystemNoticeSchema, WorktreeScriptContentSchema])
   .superRefine((item, ctx) => {
@@ -4079,17 +3930,9 @@ export const MessageContentSchema = z
 
 export const MessageContentArraySchema = z.array(MessageContentSchema);
 
-// ============================================
-// TYPE EXPORTS (inferred from schemas)
-// ============================================
-
-// Use original ServerToMachine type for compatibility with branded types
-// Zod validates structure at runtime, original types provide compile-time safety
 export type MessageContentValidated = z.infer<typeof MessageContentSchema>;
 export type MessageContentArrayValidated = z.infer<typeof MessageContentArraySchema>;
 
-// Individual message types - re-export original types from message.ts
-// Zod validates at runtime, then we use original types for type safety
 import type {
   ClientToServer,
   MachineToServer,
@@ -4139,15 +3982,12 @@ import type {
   MachineAcpBinaryInstallRequest,
   MachineAcpBinaryInstallResponse,
   MachineAcpBinaryProgressMessage,
-  SessionCodeCollabHostStartRequest,
-  SessionCodeCollabHostStartResponse,
   LocalProjectControlRequest,
   LocalProjectControlResponse,
   LocalSessionControlRequest,
   LocalSessionControlResponse,
 } from './message';
 
-// Re-export original types for handlers to use after validation
 export type {
   SessionCreateRequest as SessionCreateRequestValidated,
   SessionCreateResponse as SessionCreateResponseValidated,
@@ -4191,8 +4031,6 @@ export type {
   MachineAcpBinaryInstallRequest as MachineAcpBinaryInstallRequestValidated,
   MachineAcpBinaryInstallResponse as MachineAcpBinaryInstallResponseValidated,
   MachineAcpBinaryProgressMessage as MachineAcpBinaryProgressMessageValidated,
-  SessionCodeCollabHostStartRequest as SessionCodeCollabHostStartRequestValidated,
-  SessionCodeCollabHostStartResponse as SessionCodeCollabHostStartResponseValidated,
 };
 
 export type ClientToServerValidated = ClientToServer;
@@ -4205,10 +4043,6 @@ export type LocalSessionControlRequestValidated = LocalSessionControlRequest;
 export type LocalSessionControlResponseValidated = LocalSessionControlResponse;
 export type LocalProjectControlRequestValidated = LocalProjectControlRequest;
 export type LocalProjectControlResponseValidated = LocalProjectControlResponse;
-
-// ============================================
-// VALIDATION HELPERS
-// ============================================
 
 type UnknownRecord = Record<string, unknown>;
 const LEGACY_DEFAULT_BRANCH = 'main';
@@ -4243,9 +4077,7 @@ function isAgentConfigCliTypeString(
  * - Current schemas are strict and reject unknown keys.
  * - Older senders may still send `project.project` as a branch alias.
  *
- * Release policy:
- * - This is temporary and must be removed for the formal release cleanup.
- * - Keep the lifecycle documented in docs/backward-compatibility.md.
+ * Remove it once no supported sender can still produce `project.project`.
  */
 function normalizeLegacyProjectRef(value: unknown): unknown {
   if (!isRecord(value)) {
@@ -4345,10 +4177,7 @@ function normalizeLegacySessionProject(message: UnknownRecord): UnknownRecord {
     ? getTrimmedString(projectRecord.githubRepoFullName)
     : undefined;
   const localUseWorktree = projectRecord?.useWorktree;
-  const branch =
-    explicitBranch ??
-    // Legacy payloads could carry repo identity but no branch before branch-aware startup.
-    (repoFullName ? LEGACY_DEFAULT_BRANCH : undefined);
+  const branch = explicitBranch ?? (repoFullName ? LEGACY_DEFAULT_BRANCH : undefined);
 
   if (branch && repoFullName) {
     normalized.project = { kind: 'github', repoFullName, branch };
@@ -4407,26 +4236,22 @@ export function normalizeLegacyAcpSessionConfig(value: unknown): unknown {
     return normalized;
   }
 
-  // Keep invalid non-legacy cliType untouched so schema validation can reject it.
   if (cliType && !isLegacyBuiltinCliType(cliType)) {
     return normalized;
   }
 
-  // Legacy payload before #1221: only `agentType=claude|codex`.
   if (!cliType && isLegacyBuiltinCliType(agentType)) {
     normalized.cliType = 'builtin';
     normalized.agentType = agentType;
     return normalized;
   }
 
-  // Transitional payload from old session meta: `cliType=claude|codex` and missing `agentType`.
   if (isLegacyBuiltinCliType(cliType) && !agentType) {
     normalized.cliType = 'builtin';
     normalized.agentType = cliType;
     return normalized;
   }
 
-  // If both legacy fields exist, prefer `agentType` to align with local-session-control parser.
   if (isLegacyBuiltinCliType(cliType) && isLegacyBuiltinCliType(agentType)) {
     normalized.cliType = 'builtin';
     normalized.agentType = agentType;

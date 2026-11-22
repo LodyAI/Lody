@@ -12,7 +12,6 @@ import { HomeDashboard } from '@/components/chat/home/home-dashboard';
 import { useChatLandingKeyboardNav } from '@/hooks/use-chat-landing-keyboard-nav';
 import { ContextSwitch } from '@/components/chat/context-switch';
 import type { SessionContextType } from '@/components/chat/context-switch';
-import { getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
 import { AcpBottomBarModeSelector, AcpFooterSelectorGroup } from '@/components/shared';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
@@ -31,6 +30,7 @@ import {
   homeWeekAgentLabel,
   homeWeekUsageFixture,
 } from './fixtures/home-week';
+import { ConvertDialogPreview } from './fixtures/convert-dialog';
 
 const samplePromptPlaceholder = "Press '/' for commands, '@' for mentions.";
 const sampleZhCnPromptPlaceholder = "按 '/' 使用命令，'@' 添加提及。";
@@ -306,8 +306,6 @@ function DemoLandingContent({
     verbosity: 'balanced',
   });
 
-  const selectorTagClassName = getSelectorTagClassName(tone);
-
   // Top selector: repo (shown above textarea)
   const topSelectorNode = (
     <div className="flex items-center gap-1">
@@ -317,7 +315,6 @@ function DemoLandingContent({
         onSelect={(option) => setSelectedRepo(option.value)}
         placeholder="Select repo"
         placeholderIcon={Github}
-        tone={tone}
         searchable
         searchPlaceholder="Search repos"
         className="h-6 gap-1 rounded-md border-none bg-transparent px-1 [&_span]:text-[11px] [&_span]:leading-tight"
@@ -349,8 +346,6 @@ function DemoLandingContent({
           onSelect={(option) => setSelectedMachine(option.value)}
           placeholder="Machine"
           placeholderIcon={Monitor}
-          tone={tone}
-          className={selectorTagClassName}
           contentClassName="w-56"
           renderTriggerValue={(option) => (
             <div className="flex min-w-0 items-center gap-1.5">
@@ -371,8 +366,6 @@ function DemoLandingContent({
           onSelect={(option) => setSelectedAgent(option.value)}
           placeholder="Select agent"
           placeholderIcon={Bot}
-          tone={tone}
-          className={selectorTagClassName}
           contentClassName="w-64"
         />
       </div>
@@ -495,6 +488,35 @@ export const SubmissionPendingDark: Story = {
 
 export const DesktopKeyboardNav: Story = {
   render: () => <DemoLanding tone="dark" initialPrompt="" enableKeyboardNav />,
+};
+
+/**
+ * Today's "Convert to task": the dialog layout — breadcrumb header, the prompt
+ * as the page, the desktop selectors as one pill row, and a footer with "+",
+ * Cancel and Start task. Shared with the Today stories.
+ */
+export const DialogLayout: Story = {
+  render: () => (
+    <ConvertDialogPreview
+      open
+      prompt={'Plan the launch\n  Draft the release notes\n  Ping design'}
+      onOpenChange={() => {}}
+      onStart={() => {}}
+    />
+  ),
+};
+
+export const DialogLayoutNoMachine: Story = {
+  render: () => (
+    <ConvertDialogPreview
+      open
+      prompt="Plan the launch"
+      hintType="no-machine"
+      onOpenChange={() => {}}
+      onStart={() => {}}
+    />
+  ),
+  globals: { theme: 'light' },
 };
 
 export const DesktopLight: Story = {

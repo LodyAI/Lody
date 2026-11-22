@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { createElement } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -12,12 +10,9 @@ import {
   AcpInputOutcomeUnknownError,
   useMachineAcpAuthentication,
 } from '../src/hooks/use-machine-acp-authentication';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
-  }),
-}));
+const testI18n = createTestI18n();
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -76,13 +71,16 @@ describe('useMachineAcpAuthentication', () => {
       let controller!: AuthenticationController;
       await act(async () => {
         root?.render(
-          createElement(Probe, {
-            runtime,
-            workspaceId: 'workspace-1' as WorkspaceId,
-            onResult: (value) => {
-              controller = value;
-            },
-          })
+          withTestI18n(
+            createElement(Probe, {
+              runtime,
+              workspaceId: 'workspace-1' as WorkspaceId,
+              onResult: (value) => {
+                controller = value;
+              },
+            }),
+            testI18n
+          )
         );
       });
       const args = { machineId: 'machine-1' as MachineId, configId: 'config-1' as AgentConfigId };
@@ -125,13 +123,16 @@ describe('useMachineAcpAuthentication', () => {
       } as unknown as WorkspaceRuntime;
       await act(async () => {
         root?.render(
-          createElement(Probe, {
-            runtime,
-            workspaceId: 'workspace-1' as WorkspaceId,
-            onResult: (value) => {
-              controller = value;
-            },
-          })
+          withTestI18n(
+            createElement(Probe, {
+              runtime,
+              workspaceId: 'workspace-1' as WorkspaceId,
+              onResult: (value) => {
+                controller = value;
+              },
+            }),
+            testI18n
+          )
         );
       });
       const machineId = 'machine-1' as MachineId;
@@ -161,13 +162,16 @@ describe('useMachineAcpAuthentication', () => {
     let controller: AuthenticationController | undefined;
     await act(async () => {
       root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId: 'workspace-1' as WorkspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
       );
     });
     await expect(
@@ -198,13 +202,16 @@ describe('useMachineAcpAuthentication', () => {
     let controller: AuthenticationController | undefined;
     await act(async () => {
       root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId: 'workspace-1' as WorkspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
       );
     });
     await expect(
@@ -229,13 +236,16 @@ describe('useMachineAcpAuthentication', () => {
     let controller: AuthenticationController | undefined;
     await act(async () => {
       root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId: 'workspace-1' as WorkspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
       );
     });
     await expect(
@@ -261,13 +271,16 @@ describe('useMachineAcpAuthentication', () => {
 
     await act(async () => {
       root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
       );
     });
 
@@ -308,13 +321,16 @@ describe('useMachineAcpAuthentication', () => {
 
     await act(async () => {
       root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
       );
     });
 
@@ -351,13 +367,16 @@ describe('useMachineAcpAuthentication', () => {
 
     await act(async () => {
       root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
       );
     });
 

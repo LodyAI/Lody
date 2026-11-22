@@ -15,6 +15,27 @@ it hides after scrolling and interaction stop. An opaque capsule keeps the icons
 legible over conversation rows. Time/status grouping, search, and conversation
 pages keep their existing scrolling.
 
+iOS keeps application icon selection under Settings → Preferences. Android's
+settings home follows iOS's account, personal, workspace, conversation and
+additional sections; unfinished detail pages remain explicitly unavailable.
+Neither native client exposes a standalone Machines entry, MCP server management,
+Memory, or a separate Appearance page in settings. Agents keeps machine selection
+inside its own page, above the selected machine's provider list.
+Developer Mode is the last switch on the Settings home. With it on, a Roost
+switch appears directly below it; both clients then use Roost for new
+conversations when the selected machine supports it. Existing conversations retain
+their history backend.
+
+Workspace lists retain encrypted workspaces with a lock. Native clients currently
+require Lody Desktop to open them. Each backend's local encryption pins survive
+logout and restart and reject plaintext downgrades. New workspaces remain blocked
+until `e2eeWorkspaces:describe` confirms plaintext or explicitly admits an ordinary
+legacy workspace. A failed mode query shows a retry button; retry preserves login
+and the selected workspace. Mode queries share a six-second budget with at most
+four requests in flight and skip pinned encrypted workspaces. Plaintext cache
+writes are optional and cannot revoke successful online admission. Native creation,
+Outbox writes, Share export and attachment uploads all check plaintext admission.
+
 The clients are under active development. This source import does not establish
 an App Store, Play Store, or TestFlight release for this repository. The mobile
 clients currently use Lody Cloud; they are not a mobile frontend for the OSS
@@ -22,18 +43,21 @@ desktop’s local-only composition.
 
 ## Credits and origins
 
-The iOS client is based on **[Innei’s lody-ios](https://github.com/Innei/lody-ios)**,
-and Android reuses its cloud protocol runtime. Thank you to
-[Innei](https://github.com/Innei) and the upstream contributors for the native app,
-chat experience, and shared runtime. Original licenses and copyright notices are
-preserved; [ChatKit](https://github.com/Innei/ChatKit) remains a pinned submodule.
+The iOS client is **[lody-ios](https://github.com/LodyAI/lody-ios)**, created by
+[Innei](https://github.com/Innei) and contributors, and Android reuses its cloud
+protocol runtime. Thank you to Innei and the upstream contributors for the native
+app, chat experience, and shared runtime. It was first imported here as a copy;
+that copy and its history have since moved back into lody-ios, which this
+repository now pins as the `ios/` submodule. Original licenses and copyright
+notices are preserved; [ChatKit](https://github.com/Innei/ChatKit) is a pinned
+submodule inside lody-ios.
 
 ## Repository layout
 
 | Directory                     | Purpose                                                                          |
 | ----------------------------- | -------------------------------------------------------------------------------- |
-| [ios/](ios/README.md)         | Swift/UIKit and SwiftUI client; XcodeGen, SwiftPM, and a separate pnpm workspace |
-| [android/](android/README.md) | Kotlin/Jetpack Compose client; Gradle and an npm-built protocol runtime          |
+| [ios/](ios/README.md)         | Submodule: Swift/UIKit and SwiftUI client; XcodeGen, SwiftPM, own pnpm workspace |
+| [android/](android/README.md) | Submodule: Kotlin/Jetpack Compose client, Gradle and npm-built protocol runtime  |
 | `shared/markdown-repair/`     | Markdown repair entry used by both clients                                       |
 
 Appearance code and icons are owned by each platform. iOS uses system fonts,
@@ -44,10 +68,26 @@ appearance sources and resources under `android/app/src/main`.
 
 ## Development
 
-Run these commands from the Lody repository root to initialize the native chat dependency:
+Run this from the Lody repository root to check out both native clients and the iOS chat dependency:
 
 ```sh
-git submodule update --init --recursive apps/mobile/ios/packages/chat-kit
+git submodule update --init --recursive apps/mobile/ios apps/mobile/android
+```
+
+Commit native changes in [lody-ios](https://github.com/LodyAI/lody-ios) or
+[lody-android](https://github.com/LodyAI/lody-android) first, then update the corresponding
+pointer here to a commit reachable from the native repository’s default branch.
+Build Android inside this checkout so Gradle and npm can read the shared mobile inputs.
+If ignored Gradle or npm files remain in `apps/mobile/android` after upgrading an
+existing checkout, move the directory aside before initializing the submodule.
+
+A checkout from before the switch still holds ignored files (`node_modules`, the
+generated Xcode project, ChatKit's old checkout) in `apps/mobile/ios`, which blocks
+the submodule. After pulling, move that directory aside, then initialize:
+
+```sh
+mv apps/mobile/ios /tmp/lody-ios-before-submodule
+git submodule update --init --recursive apps/mobile/ios
 ```
 
 Mobile has independent dependency locks and toolchains. The root `pnpm install`,
@@ -81,6 +121,8 @@ After changes, regenerate/build iOS (`pnpm prebuild` from `ios/`) or rebuild
 Android with Gradle. Endpoint tuples select separate credential/cache namespaces;
 the production tuple retains existing production data. These values are built
 into the app, not read from the developer machine when the app launches.
+Roost history caches and pending inputs use the same endpoint namespace in
+addition to the account and workspace.
 Provider callback registrations must permit the selected auth origin; changing
 client endpoints does not configure OAuth providers or the backend itself.
 
@@ -112,14 +154,46 @@ cd ..
 
 See the [Android README](android/README.md) for device setup and runtime ownership.
 
+## Conversation images
+
+Agents can send images into a conversation (`image` / `image_group` items, for
+example through an image upload tool). Both clients render them the same way:
+
+- One image is a rounded card at its own aspect ratio. Images that only tool work
+  separates (an image group, adjacent images or repeated upload calls) fan into
+  one stack of uniform cards, placed where the first image was; the tool rows
+  between them follow it. Prose ends a stack.
+- Swiping the top card left sends it to the back and brings up the next image;
+  swiping right brings the previous one back. A counter shows the position, and
+  VoiceOver / TalkBack actions move through the stack. A tap opens the viewer at
+  the top image, and the stack keeps the image the reader ended on.
+- The full-screen viewer pages through the images, zooms with pinch and double
+  tap, and toggles its controls with a tap. Swiping down (or up) closes it. A long
+  press, or the share button, offers Copy, Save and Share. These always read the
+  original image, never the 768 px thumbnail the cards use.
+
+iOS (`ChatTranscript.stackImages`, `ChatImageStackCell`, `ChatImagePreview`)
+pages through every image in the conversation, flies the photo back into its
+card on a swipe-down close, and saves with the Photos add-only permission
+(`NSPhotoLibraryAddUsageDescription`). The Photos change block runs on the
+framework's queue without main-actor isolation; completion and error feedback
+remain on the main actor.
+
+Android (`TurnLayout`, `chat/ImageViews`, `chat/SessionImages`) pages through the
+images of the turn. `SessionImageHttp` reads the Worker session-images endpoints
+with the verified account bearer, no redirects and a bounded body;
+`SessionImageSource` keeps decoded bitmaps in a process memory cache. Copy and
+Share hand a cache copy out through the `${applicationId}.images` FileProvider;
+Save writes to MediaStore `Pictures/Lody` without a storage permission and is
+offered on Android 10 and later.
+
 ## Push notifications
 
 Both native clients select their push provider from the authenticated backend's
 `pushSubscriptions:configuration` response. `selfHostedEnabled: true` selects
 APNs on iOS or FCM on Android; `false` selects OneSignal. A failed configuration
-read is not permission to switch providers. OneSignal uses the external identity
-`lody-push-v2:<userId>`; notification recipients and local account checks still
-use the raw user ID.
+read is not permission to switch providers. OneSignal uses the original verified user ID as its external identity, unchanged;
+notification recipients and local account checks use that same user ID.
 
 Provider configuration does not enroll offline devices. Open the updated app and
 sign in to register with the selected provider. Direct push registration is bound

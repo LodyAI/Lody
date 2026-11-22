@@ -46,6 +46,10 @@ export class NodeE2eeCustodyError extends Data.TaggedError('NodeE2eeCustodyError
     return `e2ee_${this.code}`;
   }
 }
+/** DER header of a PKCS#8 v1 Ed25519 private key; the 32-byte seed follows it. */
+const ed25519Pkcs8Prefix = new Uint8Array([
+  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+]);
 const fail = (code: NodeE2eeCustodyError['code']) => new NodeE2eeCustodyError({ code });
 const domain = Buffer.from('lody-e2ee/desktop-custody/v1\0');
 const installedPurpose = Buffer.from('lody-e2ee/local-epoch-key/v1\0');
@@ -126,8 +130,17 @@ const remove = (file: string) =>
   unlink(file).catch((cause: NodeJS.ErrnoException) => {
     if (cause.code !== 'ENOENT') throw cause;
   });
-const kekDigest = (plaintext: string) => {
-  const key = Buffer.from(plaintext, 'hex');
+// Decode directly into owned memory; Buffer.from(hex, 'hex') uses the shared slab.
+const decodeHex = (value: string): Uint8Array => {
+  if (!/^(?:[0-9a-f]{2})*$/.test(value)) throw fail('corrupt');
+  const bytes = new Uint8Array(value.length / 2);
+  const nibble = (code: number) => (code <= 57 ? code - 48 : code - 87);
+  for (let i = 0; i < bytes.length; i++)
+    bytes[i] = (nibble(value.charCodeAt(i * 2)) << 4) | nibble(value.charCodeAt(i * 2 + 1));
+  return bytes;
+};
+const secretDigest = (plaintext: string) => {
+  const key = decodeHex(plaintext);
   try {
     return createHash('sha256').update(key).digest('hex');
   } finally {
@@ -137,7 +150,7 @@ const kekDigest = (plaintext: string) => {
 const wrapper = (value: unknown): Uint8Array => {
   if (typeof value !== 'string' || !/^(?:[0-9a-f]{2}){1,8192}$/.test(value))
     throw fail('rewrap-failed');
-  return new Uint8Array(Buffer.from(value, 'hex'));
+  return decodeHex(value);
 };
 /** SQLite's OS lock dies with its process; the persistent file is not a lease. */
 async function lockInitialization(path: string) {
@@ -204,7 +217,7 @@ async function recoverRewrap(path: string, unwrap: KekWrapper['unwrap']) {
     replacement = wrapper(value.replacement);
   const validate = async (encoded: Uint8Array) => {
     const opened = await unwrap(Buffer.from(encoded));
-    if (!/^[0-9a-f]{64}$/.test(opened.result) || kekDigest(opened.result) !== value.digest)
+    if (!/^[0-9a-f]{64}$/.test(opened.result) || secretDigest(opened.result) !== value.digest)
       throw fail('rewrap-failed');
   };
   let current: Uint8Array | undefined;
@@ -256,7 +269,7 @@ async function rewrapKek(
       JSON.stringify({
         original: Buffer.from(original).toString('hex'),
         replacement: Buffer.from(replacement).toString('hex'),
-        digest: kekDigest(plaintext),
+        digest: secretDigest(plaintext),
       })
     );
     // The journal reaches disk before the retained wrapper can change.
@@ -382,7 +395,11 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
             throw fail('identity-lost');
           const candidate = random(new Uint8Array(32));
           try {
-            const encoded = await wrap(Buffer.from(candidate).toString('hex'));
+            const encoded = await wrap(
+              Buffer.from(candidate.buffer, candidate.byteOffset, candidate.byteLength).toString(
+                'hex'
+              )
+            );
             if (!(encoded instanceof Uint8Array) || encoded.length < 1 || encoded.length > 8192)
               throw fail('corrupt');
             await publish(file, encoded);
@@ -391,11 +408,13 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           }
           wrapped = await readOwned(file, 8192);
         }
-        const recovered = await unwrap(Buffer.from(wrapped));
+        const recovered = await unwrap(
+          Buffer.from(wrapped.buffer, wrapped.byteOffset, wrapped.byteLength)
+        );
         if (!/^[0-9a-f]{64}$/.test(recovered.result)) throw fail('corrupt');
         if (recovered.shouldReEncrypt)
           await rewrapKek(file, wrapped, recovered.result, wrap, unwrap);
-        kek = new Uint8Array(Buffer.from(recovered.result, 'hex'));
+        kek = decodeHex(recovered.result);
         // Native strings/handles cannot be deterministically erased. Never log or
         // persist this decrypted string; owned byte copies are cleared on close.
       } finally {
@@ -624,7 +643,9 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
     const file = pathFor(genesis, value.kind);
     if (!value.bound) {
       if (!value.signingBytes || !value.encryptionBytes) throw fail('closed');
-      const body = new Uint8Array(Buffer.concat([value.signingBytes, value.encryptionBytes]));
+      const body = new Uint8Array(value.signingBytes.length + value.encryptionBytes.length);
+      body.set(value.signingBytes);
+      body.set(value.encryptionBytes, value.signingBytes.length);
       try {
         await publish(
           file,
@@ -658,42 +679,22 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
     preparing = false
   ) => {
     let blob: Uint8Array;
-    let legacy = false;
     try {
       blob = await readOwned(credentialPath(genesis, key), 1024);
     } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
-      legacy = true;
-      try {
-        blob = await readOwned(
-          join(
-            directory,
-            `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}.sealed`
-          ),
-          1024
-        );
-      } catch (legacyCause) {
-        if (preparing && (legacyCause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-        throw legacyCause;
-      }
+      if (preparing && (cause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw cause;
     }
     const opened = unseal(blob);
     try {
       const expected = credentialContext(genesis, key);
       if (opened.body.length !== 32) throw fail('corrupt');
-      if (!equal(opened.aad, expected)) {
-        // The old location is read-only. A genuine other identity's credential
-        // is retained evidence, never the replacement identity's credential.
-        if (
-          legacy &&
-          preparing &&
-          opened.aad.length === expected.length &&
-          equal(opened.aad.subarray(0, -32), expected.subarray(0, -32))
-        )
-          return undefined;
-        throw fail('corrupt');
-      }
-      return Buffer.from(opened.body).toString('hex');
+      if (!equal(opened.aad, expected)) throw fail('corrupt');
+      return Buffer.from(
+        opened.body.buffer,
+        opened.body.byteOffset,
+        opened.body.byteLength
+      ).toString('hex');
     } finally {
       opened.body.fill(0);
     }
@@ -710,9 +711,7 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           if (retained !== undefined)
             return {
               credential: retained,
-              credentialHash: createHash('sha256')
-                .update(Buffer.from(retained, 'hex'))
-                .digest('hex'),
+              credentialHash: secretDigest(retained),
             };
           const raw = random(new Uint8Array(32));
           try {
@@ -724,9 +723,7 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           if (credential === undefined) throw fail('corrupt');
           return {
             credential,
-            credentialHash: createHash('sha256')
-              .update(Buffer.from(credential, 'hex'))
-              .digest('hex'),
+            credentialHash: secretDigest(credential),
           };
         })
       ),
@@ -774,6 +771,44 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           if (!validKind(kind)) throw fail('invalid-input');
           const genesis = ownGenesis(inputGenesis);
           return decodeDevice(genesis, kind, await readOwned(pathFor(genesis, kind), 32768));
+        })
+      ),
+    /**
+     * Hands this retained device's 32-byte Ed25519 seed to one native transport
+     * opener (the iroh endpoint, whose EndpointId is the ledger signing key) and
+     * wipes it after `open` settles. Purpose-limited: never expose it through IPC,
+     * return it, or pass any other consumer. `key` must equal the retained identity;
+     * a different or missing identity fails without opening anything.
+     */
+    withTransportSeed: <A>(
+      inputGenesis: Bytes.GenesisHash,
+      key: Bytes.SigningPublicKey,
+      open: (seed: Uint8Array) => Promise<A>,
+      kind: 'personal' | 'machine' = 'personal'
+    ) =>
+      native(() =>
+        track(async () => {
+          if (!validKind(kind)) throw fail('invalid-input');
+          const genesis = ownGenesis(inputGenesis);
+          const opened = unseal(await readOwned(pathFor(genesis, kind), 32768));
+          const seed = new Uint8Array(32);
+          try {
+            const at = devicePurpose.length + 32;
+            const retainedKey = opened.aad.slice(at, at + 32);
+            const enc = opened.aad.slice(at + 32, at + 64);
+            if (
+              !equal(opened.aad, deviceContext(genesis, retainedKey, enc, kind)) ||
+              opened.body.length !== 96 ||
+              !equal(opened.body.subarray(0, 16), ed25519Pkcs8Prefix)
+            )
+              throw fail('corrupt');
+            if (!equal(retainedKey, key.toBytes())) throw fail('invalid-input');
+            seed.set(opened.body.subarray(16, 48));
+            return await open(seed);
+          } finally {
+            seed.fill(0);
+            opened.body.fill(0);
+          }
         })
       ),
     /** Terminal host-confirmed removal only, after all workspace users drain. Deletes

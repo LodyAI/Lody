@@ -19,7 +19,7 @@ retained RSS-limit failures. These local results do not imply release acceptance
 The [position paging experiment](../notes/proposed/architecture/2026-10-24-roost-position-paging.md)
 tracks cold positional reads, derived-index maintenance and the index-only
 generation-race regression.
-The [control storage study](../notes/proposed/architecture/2026-10-23-roost-control-storage.md)
+The [control storage study](../notes/rejected/architecture/2026-10-23-roost-control-storage.md)
 records the minimal notification change and rejected storage experiments. Ordinary
 Roost KV values already have independent compression; check the current source
 and retained-byte/page breakdown before proposing the same optimization again.

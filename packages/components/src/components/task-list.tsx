@@ -63,6 +63,7 @@ import {
   GitHubOwnerIcon,
   SessionPrIcon,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SidebarListSkeleton,
@@ -75,6 +76,7 @@ import {
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import { SessionSharingIndicator } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type { PrStatus };
 
@@ -740,7 +742,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 : undefined;
               // Mobile keeps swipe-to-archive as the only row gesture; the context
               // menu (and its ⋯ button) is desktop-only. Computed before the row so
-              // the leading slot can show the ⋯ affordance.
+              // the end slot can reveal the ⋯ affordance.
               const hasMenuActions =
                 !isMobile &&
                 Boolean(
@@ -815,10 +817,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     />
                   ) : null}
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <SessionRowLeadingSlot
-                      showMenuButton={hasMenuActions}
-                      menuLabel={moreActionsLabel}
-                    />
+                    <SessionRowLeadingSlot />
                     <div
                       className={cn(
                         'flex items-center gap-1',
@@ -887,6 +886,11 @@ const TaskGroupSection = memo(function TaskGroupSection({
                             ) : null}
                             {task.sharing ? <SessionSharingIndicator state={task.sharing} /> : null}
                           </span>
+                        ) : undefined
+                      }
+                      menu={
+                        hasMenuActions ? (
+                          <SessionRowMenuButton label={moreActionsLabel} />
                         ) : undefined
                       }
                       archive={
@@ -1005,7 +1009,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                       <ContextMenu.Item
                         icon={GitBranch}
                         onClick={() => {
-                          void navigator.clipboard.writeText(task.branchName).catch(() => {});
+                          void copyTextToClipboard(task.branchName).catch(() => {});
                         }}
                       >
                         {contextMenuLabels.copyBranch}

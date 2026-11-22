@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +11,7 @@ import { ScheduleMentionForm } from '../src/components/schedules/schedule-mentio
 import { evaluateSchedule, ScheduleDefinitionSchema, ScheduleAgentSchema } from '@lody/shared';
 
 import { ScheduleAgentControls } from '../src/components/schedules/schedule-agent-controls';
+import { composerHandle } from './composer-test-utils';
 
 vi.mock('../src/components/mentions/mention-project-file-source', async (original) => ({
   ...(await original<object>()),
@@ -117,7 +117,9 @@ describe('Schedule editor', () => {
   const footer = () => container.querySelector(`#${button().getAttribute('aria-describedby')}`)!;
   const field = (label: string) =>
     container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
-  const type = (label: string, text: string) =>
+  const type = (label: string, text: string) => {
+    const target = field(label) as HTMLElement;
+    if (target.hasAttribute('data-composer-editor')) return composerHandle(target).edit(text);
     act(() => {
       const element = field(label);
       const setter = Object.getOwnPropertyDescriptor(
@@ -129,20 +131,15 @@ describe('Schedule editor', () => {
       setter.call(element, text);
       element.dispatchEvent(new Event('input', { bubbles: true }));
     });
+  };
 
   it('selects a session from the mention menu without submitting and saves its identity', async () => {
     props.initial = { ...props.initial, prompt: '' };
     await act(async () => root.render(<ScheduleMentionForm {...props} />));
-    const input = field(en['schedules.prompt']) as HTMLTextAreaElement;
-    await act(async () => {
-      input.focus();
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
-        input,
-        '@session:review'
-      );
-      input.setSelectionRange(15, 15);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    const input = composerHandle(field(en['schedules.prompt']) as HTMLElement);
+    input.focus();
+    input.edit('@session:review', 15);
+    await act(async () => {});
     expect(document.body.textContent).toContain('Review changes');
     await act(async () => {
       input.dispatchEvent(
@@ -519,16 +516,9 @@ describe('Time rules a person opens', () => {
       timeZone: 'Asia/Shanghai',
     } as const;
     open(trigger);
-    act(() => {
-      const prompt = container.querySelector<HTMLTextAreaElement>(
-        `[aria-label="${en['schedules.prompt']}"]`
-      )!;
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
-        prompt,
-        'Different prompt.'
-      );
-      prompt.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    composerHandle(
+      container.querySelector<HTMLElement>(`[aria-label="${en['schedules.prompt']}"]`)!
+    ).edit('Different prompt.');
     submit();
     expect(onSave.mock.calls[0]![0].trigger).toBe(trigger);
     expect(onSave.mock.calls[0]![0].prompt).toBe('Different prompt.');
@@ -566,6 +556,31 @@ describe('Time rules a person opens', () => {
     expect(onSave.mock.calls[0]![0].trigger).toEqual({
       kind: 'interval',
       everyMs: 45 * 60_000,
+      anchorAt: new Date(NOW).toISOString(),
+    });
+  });
+
+  it('accepts a custom step far beyond a day, as a proposal or the CLI may store', async () => {
+    open({ kind: 'interval', everyMs: 90 * 60_000, anchorAt: '2026-09-06T00:00:00.000Z' });
+    const minutesField = () =>
+      container.querySelector<HTMLInputElement>(
+        `[aria-label="${en['schedules.repeat.customMinutes']}"]`
+      )!;
+    expect(minutesField().value).toBe('90');
+    await act(async () => {
+      const input = minutesField();
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        '200000'
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.blur();
+    });
+    submit();
+    expect(onSave.mock.calls[0]![0].trigger).toEqual({
+      kind: 'interval',
+      everyMs: 200_000 * 60_000,
       anchorAt: new Date(NOW).toISOString(),
     });
   });

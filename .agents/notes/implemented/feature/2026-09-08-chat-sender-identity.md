@@ -17,10 +17,13 @@ small popover interaction to the phone layout.
 
 ## Decision
 
-The production session interface enables both identity affordances only when the
-active workspace has multiple members. The user-message row also requires that
-explicit gate, in addition to the sender resolved from each history entry's
-`userId`. A name is rendered only when resolution supplies one; solo workspaces and
+The production session interface and read-only `SessionHistoryReader` enable both
+identity affordances only when the active workspace has multiple members. Both
+`PendingMessageRow` (during attachment preparation and local send acceptance) and
+`UserMessageRowView` share that explicit gate, the `conversationSurface` row layout,
+and `useWorkspaceSenderProfile` (live `auth:getUserById` backed by same-account/workspace
+directory and current-user fallbacks). A name (falling back to email when an account
+has no display name) is rendered only when resolution supplies one; solo workspaces and
 unresolved entries retain the previous avatar and timestamp behavior rather than
 inventing an identity. The metadata row keeps its existing reversed layout, so
 placing the name first makes it the rightmost item beside the avatar and puts the
@@ -35,11 +38,11 @@ popover target.
 
 ## Evidence and limits
 
-`user-message-sender-identity.test.tsx` verifies the multi-member metadata order,
-the click-opened name/email card, and the absence of both affordances when the gate
-is disabled. `SessionConversationPage.stories.tsx` adds a synthetic conversation
-with two named senders and a second story whose play function opens Maya Chen's card.
-The component package typecheck passes, and both stories were rendered in Chromium
-at a 1400 by 900 viewport. The fixtures use avatar initials, so image loading is not
-part of this verification; the card delegates real images to the existing
-`UserAvatar` path.
+`user-message-sender-identity.test.tsx` and `session-pending-message-row.test.tsx`
+verify the multi-member metadata order, email fallback, directory/profile retention
+across remounts and reloads, pending-to-history handoff continuity, the click-opened
+name/email card, and the absence of both affordances when the gate is disabled.
+`SessionConversationPage.stories.tsx` renders a synthetic conversation with two named
+senders and a second story whose play function opens Maya Chen's card. The fixtures
+use avatar initials, so image loading is covered separately by the
+[avatar continuity decision](../bug-fix/2026-10-20-message-avatar-switch-continuity.md).

@@ -328,6 +328,54 @@ describe('ProviderSetupManager', () => {
     harness.manager.stop();
   });
 
+  it('fails verification when the probe succeeds with an empty model catalog', async () => {
+    const harness = createHarness({
+      refreshMachineAcpCapabilities: vi.fn(async () => ({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId,
+        configId: setupId,
+        cliType: 'builtin' as const,
+        agentType: 'devin',
+        success: true,
+        modes: [],
+        models: [],
+        capability: {
+          cliType: 'builtin' as const,
+          agentType: 'devin',
+          modes: [],
+          models: [],
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select' as const,
+              currentValue: 'model-a',
+              options: [],
+            },
+          ],
+          sessionFork: false,
+          acknowledgedSteer: true,
+          sessionTitle: false,
+          sessionForkWorktree: false,
+          fetchedAt: 1,
+        },
+      })),
+    });
+    seedSetup(harness.flock, createSetup('queued', { name: 'devin', agentType: 'devin' }));
+
+    await harness.manager.kick();
+
+    // A degraded catalog is not a working provider: nothing is published and
+    // the setup is marked failed instead of verified.
+    expect(readState(harness.flock).config).toBeUndefined();
+    expect(readState(harness.flock).setup).toMatchObject({
+      status: 'failed',
+      failureCode: 'verification-failed',
+    });
+    harness.manager.stop();
+  });
+
   it('waits for UI authentication and resumes from the durable row', async () => {
     const refresh = vi
       .fn()

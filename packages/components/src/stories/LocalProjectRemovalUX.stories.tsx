@@ -113,7 +113,6 @@ function DesktopSidebar({
           <SidebarSectionHeader
             label="本地项目"
             collapsed={false}
-            count={2}
             isMobile={false}
             toggleLabel="展开或收起本地项目"
             onToggleCollapsed={() => {}}

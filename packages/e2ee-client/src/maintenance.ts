@@ -8,6 +8,14 @@ import {
   type WorkspaceKeyRoundCursors,
 } from '@lody/e2ee-core';
 
+/**
+ * Scope of one key round. `full` receives, reports, distributes and repairs;
+ * `receive` only installs this device's own current key; `distribute` only
+ * reconciles and sends this device's deliveries. Narrow modes never replace a later
+ * full round: their remaining work stays in the core journals.
+ */
+export type PersonalKeyRoundMode = 'full' | 'receive' | 'distribute';
+
 /** Workspace-owned paging hints. Originals and retry evidence remain in core journals. */
 export const makePersonalKeyMaintenance = Effect.fnUntraced(function* () {
   const repair = yield* KeyRepair;
@@ -17,22 +25,35 @@ export const makePersonalKeyMaintenance = Effect.fnUntraced(function* () {
   let epoch: number | undefined;
   return Effect.fnUntraced(function* (
     currentEpoch: number,
-    beforeReceive?: Effect.Effect<unknown, unknown>
+    beforeReceive?: Effect.Effect<unknown, unknown>,
+    recipients?: readonly string[]
   ) {
     if (epoch !== currentEpoch) {
       cursors = {};
       epoch = currentEpoch;
     }
+    const narrowed = recipients !== undefined;
+    let roundCursors: WorkspaceKeyRoundCursors = narrowed
+      ? { ...cursors, reconciliation: null }
+      : cursors;
     let refreshRequired = false;
     // A refresh performs finite work even if a server keeps returning hostile pages.
     for (let step = 0; step < 4; step++) {
-      const result = yield* runWorkspaceKeyRound(100, cursors, beforeReceive).pipe(
+      const result = yield* runWorkspaceKeyRound(
+        100,
+        roundCursors,
+        beforeReceive,
+        narrowed ? { recipients } : undefined
+      ).pipe(
         Effect.provideService(KeyRepair, repair),
         Effect.provideService(KeyReceiver, receiver),
         Effect.provideService(KeyDistributor, distributor),
         Effect.catchTag('WorkspaceKeyRoundFailure', (failure) =>
           Effect.gen(function* () {
-            cursors = failure.cursors;
+            roundCursors = failure.cursors;
+            cursors = narrowed
+              ? { ...failure.cursors, reconciliation: cursors.reconciliation }
+              : failure.cursors;
             // Observe the successful sibling even while the failed phase remains retryable.
             if (Result.isSuccess(failure.receive)) {
               refreshRequired ||= failure.receive.success.refreshRequired;
@@ -72,7 +93,7 @@ export const makePersonalKeyMaintenance = Effect.fnUntraced(function* () {
       for (const item of result.results) yield* receiver.acknowledge(item.id);
       for (const item of result.repairResults.items) yield* repair.acknowledge(item.id);
       for (const item of result.deliveryResults.items) yield* distributor.acknowledge(item.id);
-      cursors = {
+      roundCursors = {
         repairs: result.repairs.next,
         resumed: result.resumed.next,
         received: result.next,
@@ -83,7 +104,10 @@ export const makePersonalKeyMaintenance = Effect.fnUntraced(function* () {
         repairResults: result.repairResults.next,
         deliveryResults: result.deliveryResults.next,
       };
-      if (Object.values(cursors).every((cursor) => cursor === null)) break;
+      cursors = narrowed
+        ? { ...roundCursors, reconciliation: cursors.reconciliation }
+        : roundCursors;
+      if (Object.values(roundCursors).every((cursor) => cursor === null)) break;
     }
     return refreshRequired;
   });

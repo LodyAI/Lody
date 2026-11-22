@@ -5,6 +5,7 @@ import {
   type AcpModelControls,
 } from '@lody/shared';
 import {
+  coerceFastModeConfigOptionValue,
   isConfigOptionValueValid,
   isThoughtLevelSelector,
   normalizePerModelSelectors,
@@ -247,19 +248,25 @@ const resolveConfigOptionValues = (
     // fall through the chain.
     for (const selector of selectors) {
       const configId = selector.configId;
-      const editValue = configId in edits.configOptions ? edits.configOptions[configId] : undefined;
+      const editValue =
+        configId in edits.configOptions
+          ? coerceFastModeConfigOptionValue(selector, edits.configOptions[configId])
+          : undefined;
       if (isConfigOptionValueValid(selector, editValue)) {
         configOptionValues[configId] = editValue;
         continue;
       }
       if (runtimeTable) {
-        const runtimeValue = runtimeTable[configId];
+        const runtimeValue = coerceFastModeConfigOptionValue(selector, runtimeTable[configId]);
         if (isConfigOptionValueValid(selector, runtimeValue)) {
           configOptionValues[configId] = runtimeValue;
         }
         continue;
       }
-      const preferredValue = preferences.configOptionValues?.[configId];
+      const preferredValue = coerceFastModeConfigOptionValue(
+        selector,
+        preferences.configOptionValues?.[configId]
+      );
       configOptionValues[configId] = isConfigOptionValueValid(selector, preferredValue)
         ? preferredValue
         : selector.currentValue;
@@ -392,8 +399,9 @@ export const filterAcpSessionConfigOptionValues = (
       filtered[selector.configId] = value;
       continue;
     }
-    if (isConfigOptionValueValid(selector, value)) {
-      filtered[selector.configId] = value;
+    const coerced = coerceFastModeConfigOptionValue(selector, value);
+    if (isConfigOptionValueValid(selector, coerced)) {
+      filtered[selector.configId] = coerced;
     }
   }
   if (options.switchesModel === true) {

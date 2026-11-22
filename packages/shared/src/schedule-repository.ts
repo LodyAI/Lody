@@ -1,4 +1,4 @@
-import { recordScheduleAuthorization } from './schedule-authorization';
+import { readScheduleAuthorization, recordScheduleAuthorization } from './schedule-authorization';
 import type { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 
@@ -12,6 +12,7 @@ import {
   readScheduleRegistryRows,
   scheduleRegistryKeys,
   manualScheduleRunKey,
+  scheduleDefinitionFingerprint,
 } from './schedule-registry';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
@@ -121,7 +122,14 @@ export class ScheduleRepository {
   constructor(
     readonly repo: ScheduleRepositoryPort,
     readonly workspaceId: WorkspaceId,
-    private readonly options: { protectedContent?: boolean } = {}
+    private readonly options: {
+      protectedContent?: boolean;
+      /** Encrypted only: this device's signed declaration for a definition or manual run. */
+      signDeclaration?: (
+        document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+        manualRunKey?: string
+      ) => Promise<string>;
+    } = {}
   ) {}
 
   async list() {
@@ -145,8 +153,18 @@ export class ScheduleRepository {
     }
   }
 
-  private async write(document: ScheduleDocument): Promise<void> {
+  /** Encrypted declarations are signed before anything is written. */
+  private async declaration(document: ScheduleDocument, manualRunKey?: string) {
+    if (!this.options.protectedContent) return undefined;
+    if (!this.options.signDeclaration) throw new Error('e2ee_signature_unavailable');
+    return await this.options.signDeclaration(document, manualRunKey);
+  }
+
+  private async write(document: ScheduleDocument, pause = false): Promise<void> {
+    if (pause && document.definition.enabled)
+      throw new Error('Schedule pause must disable execution');
     const row = buildScheduleRegistryRow(document);
+    const e2eeIntent = pause ? undefined : await this.declaration(document);
     const handle = await this.repo.openPersistedDoc(getScheduleRoomId(row.scheduleId));
     const mirror = new Mirror({
       doc: handle.doc as LoroDoc,
@@ -169,8 +187,8 @@ export class ScheduleRepository {
           requesterSessionId: entry.requesterSessionId,
         })),
       });
-      if (this.options.protectedContent)
-        recordScheduleAuthorization(handle.doc as LoroDoc, document);
+      if (this.options.protectedContent && !pause)
+        recordScheduleAuthorization(handle.doc as LoroDoc, document, undefined, e2eeIntent);
       await this.repo.flush();
       // This publication is the execution gate. An interrupted first flush
       // leaves an orphan definition; no discovery/repair may enable it.
@@ -312,14 +330,17 @@ export class ScheduleRepository {
         prior.requesterSessionId !== args.requesterSessionId
       )
         throw new Error('Idempotency key conflict');
-      await this.write(document);
+      // An old pause retry must never undo a later human resume.
+      if (!args.enabled && document.definition.enabled) return;
+      await this.write(document, !args.enabled);
       return;
     }
     document.definition = {
       ...document.definition,
       enabled: args.enabled,
       updatedAt: args.now,
-      ...(args.enabled ? { activationId: args.activationId, activeFrom: args.now } : {}),
+      activationId: args.activationId,
+      ...(args.enabled ? { activeFrom: args.now } : {}),
     };
     document.timeline.push(
       ScheduleActivitySchema.parse({
@@ -330,7 +351,7 @@ export class ScheduleRepository {
         createdAt: args.now,
       })
     );
-    await this.write(document);
+    await this.write(document, !args.enabled);
   }
 
   /**
@@ -443,12 +464,22 @@ export class ScheduleRepository {
       return;
     }
     if (this.options.protectedContent) {
+      const manualRunKey = manualScheduleRunKey(args.scheduleId, args.manualRunId);
       const handle = await this.repo.openPersistedDoc(getScheduleRoomId(args.scheduleId));
-      recordScheduleAuthorization(
-        handle.doc as LoroDoc,
-        document,
-        manualScheduleRunKey(args.scheduleId, args.manualRunId)
-      );
+      const latest = readScheduleAuthorization(handle.doc as LoroDoc)?.value as
+        | { definitionFingerprint?: unknown }
+        | undefined;
+      // Pause retains its old declaration. A deliberate manual run endorses the
+      // current paused definition without enabling automatic scheduling.
+      const definitionIntent =
+        latest?.definitionFingerprint !== scheduleDefinitionFingerprint(document)
+          ? await this.declaration(document)
+          : undefined;
+      const e2eeIntent = await this.declaration(document, manualRunKey);
+      // Obtain both signatures before appending either declaration.
+      if (definitionIntent !== undefined)
+        recordScheduleAuthorization(handle.doc as LoroDoc, document, undefined, definitionIntent);
+      recordScheduleAuthorization(handle.doc as LoroDoc, document, manualRunKey, e2eeIntent);
       await this.repo.flush();
     }
     registry.flock.set(key, request as never);

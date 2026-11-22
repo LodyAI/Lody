@@ -1,9 +1,9 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { LoroDoc, type Change } from 'loro-crdt';
 import {
-  createSessionMirror,
   SESSION_FILE_MAX_SIZE_BYTES,
   type SessionHistoryInput,
   type SessionId,

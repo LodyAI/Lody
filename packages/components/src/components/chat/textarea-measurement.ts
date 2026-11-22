@@ -60,3 +60,27 @@ export function measureTextareaScrollHeight(
     mirror.remove();
   }
 }
+
+/**
+ * Content height of the composer's editing element, as a textarea's
+ * `scrollHeight` reports it (content plus vertical padding). The mention editor
+ * lays its paragraph out at full height even while its own box is shorter, so
+ * that paragraph is measured directly: no clone and no temporary `height: auto`.
+ */
+export function measureComposerContentHeight(
+  element: HTMLElement,
+  computed: CSSStyleDeclaration
+): number {
+  if (element instanceof HTMLTextAreaElement) {
+    return measureTextareaScrollHeight(element, computed);
+  }
+  let content = 0;
+  for (const child of Array.from(element.children)) {
+    if (child instanceof HTMLElement) content += child.offsetHeight;
+  }
+  return (
+    content +
+    (Number.parseFloat(computed.paddingTop) || 0) +
+    (Number.parseFloat(computed.paddingBottom) || 0)
+  );
+}

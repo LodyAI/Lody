@@ -1185,6 +1185,7 @@ function DiffViewerImpl({
       onFocusCapture={() => setKeepContentMounted(true)}
       className="lody-pierre-diff w-full bg-background"
       style={pierreDiffHostStyle}
+      data-text-selectable
     >
       {diffContent}
     </div>

@@ -3,7 +3,6 @@ import './session-monaco-text-viewer.css';
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { extendedCodeLanguagesEnabledAtom, fileViewerWordWrapAtom } from '@/atoms/settings';
 import { cn } from '@/lib/utils';
 import { configureSessionMonacoWorkers } from '@/lib/session-monaco-workers';
@@ -101,13 +100,15 @@ export function SessionMonacoTextViewer({
     readonly character: number;
   }) => void;
   readonly onScrollChange?: (state: { readonly scrollTop: number }) => void;
-  // Optional Monaco model URI. When provided the viewer creates the
+  // Optional serialized Monaco model URI (e.g. from
+  // `buildCodeCollabMonacoUri`). When provided the viewer creates the
   // model under this URI, which lets Monaco's globally-registered
   // Code Collab definition/reference providers (see
   // `lib/session-monaco-language-providers`) attach via the
   // `code-collab://<fileId>` scheme. Defaults to Monaco's auto-generated
   // URI so non-collab callers (story/diff viewer) keep working unchanged.
-  readonly modelUri?: monaco.Uri;
+  // Serialized so callers can build it without importing `monaco-editor`.
+  readonly modelUri?: string;
   readonly className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);

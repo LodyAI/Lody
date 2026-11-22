@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import { indexedDB, IDBObjectStore } from 'fake-indexeddb';
 import { createRoot, type Root } from 'react-dom/client';

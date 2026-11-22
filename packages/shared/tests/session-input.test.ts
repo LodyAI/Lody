@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { Loro } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import {
+  buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
   historyItemsToInputBlocks,
   inputBlocksToHistoryItems,
@@ -13,15 +14,19 @@ import {
   resolveSessionConversationConfig,
 } from '../src/session-input';
 import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
-import { sessionDocSchema } from '../src/schema';
+import { turnExecutionDigest } from '../src/e2ee-execution-intent';
+import { buildInitialHistoryEntry, buildInitialSessionMetaPatch } from '../src/session-bootstrap';
+import { sessionDocSchema } from '../src/session-doc-schemas';
+import type { SessionDoc, SessionHistoryInput } from '../src/schema';
 import type {
   CommentReferencePayload,
+  MachineId,
   SessionFilePayload,
   SessionId,
   SessionInputBlock,
   VisualAnnotationReferencePayload,
 } from '../src/ai';
-import type { SessionDoc } from '../src/schema';
+import type { AgentRoleId, McpServerId } from '../src/ids';
 
 const commentReference: CommentReferencePayload = {
   source: 'lody',
@@ -365,6 +370,82 @@ describe('session-input helpers', () => {
       ],
     });
   });
+  it('omits redundant plain single-text inputBlocks in pending user turns while preserving E2EE digests', () => {
+    const plainBlocks: SessionInputBlock[] = [{ type: 'text', text: 'Synthetic oversized prompt' }];
+    const plainConfig = buildSessionTurnInputConfig({
+      inputBlocks: plainBlocks,
+      cliType: 'builtin',
+      agentType: 'codex',
+    });
+    const compacted = buildPendingUserHistoryEntry({
+      userId: 'user-1',
+      inputBlocks: plainBlocks,
+      timestamp: '2026-08-12T00:00:00.000Z',
+      inputConfig: plainConfig,
+    });
+    expect(compacted?.inputConfig?.inputBlocks).toBeUndefined();
+    expect(compacted?.inputConfig?.prompt).toBe('Synthetic oversized prompt');
+    expect(turnExecutionDigest({ inputConfig: compacted?.inputConfig })).toBe(
+      turnExecutionDigest({ inputConfig: plainConfig })
+    );
+    expect(resolveSessionAuthoredText(compacted?.inputConfig ?? {})).toBe(
+      'Synthetic oversized prompt'
+    );
+    expect(resolveSessionExecutionInputBlocks(compacted?.inputConfig ?? {})).toEqual(
+      resolveSessionExecutionInputBlocks(plainConfig)
+    );
+
+    // Keep inputBlocks when Role/Config instructions make prompt differ from authored text.
+    const composedConfig = buildSessionTurnInputConfig({
+      inputBlocks: plainBlocks,
+      prompt: 'ROLE_INSTRUCTIONS\n\nSynthetic oversized prompt',
+      cliType: 'builtin',
+      agentType: 'codex',
+    });
+    expect(
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        inputBlocks: plainBlocks,
+        timestamp: '2026-08-12T00:00:00.000Z',
+        inputConfig: composedConfig,
+      })?.inputConfig?.inputBlocks
+    ).toEqual(plainBlocks);
+
+    // Keep inputBlocks when spans or attachments exist.
+    const spannedBlocks: SessionInputBlock[] = [
+      {
+        type: 'text',
+        text: 'Check @src/a.ts',
+        spans: [{ start: 6, end: 15, kind: 'file', label: '@src/a.ts', target: 'src/a.ts' }],
+      },
+    ];
+    expect(
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        inputBlocks: spannedBlocks,
+        timestamp: '2026-08-12T00:00:00.000Z',
+        inputConfig: buildSessionTurnInputConfig({
+          inputBlocks: spannedBlocks,
+          cliType: 'builtin',
+          agentType: 'codex',
+        }),
+      })?.inputConfig?.inputBlocks
+    ).toEqual(spannedBlocks);
+
+    const attachmentBlocks: SessionInputBlock[] = [r2FilePayload, { type: 'text', text: 'check' }];
+    expect(
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        inputBlocks: attachmentBlocks,
+        timestamp: '2026-08-12T00:00:00.000Z',
+        inputConfig: buildSessionTurnInputConfig({
+          inputBlocks: attachmentBlocks,
+          cliType: 'builtin',
+          agentType: 'codex',
+        }),
+      })?.inputConfig?.inputBlocks
+    ).toEqual(attachmentBlocks);
+  });
 });
 
 it('freezes a memory identity in turn input and restores the same identity from history', () => {
@@ -433,4 +514,155 @@ it('retains local-only attachments across history and frozen execution input', (
       inputBlocks: [{ ...input, path: '' }],
     })
   ).toThrow();
+});
+
+describe('session bootstrap helpers', () => {
+  it('returns null when there is no effective initial user input', () => {
+    const entry = buildInitialHistoryEntry({
+      userId: 'user-1',
+      timestamp: '2026-04-19T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      prompt: '   ',
+      inputBlocks: [{ type: 'text', text: '   ' }],
+    });
+
+    expect(entry).toBeNull();
+  });
+
+  it('does not persist an unresolved local branch selector as baseBranch', () => {
+    const patch = buildInitialSessionMetaPatch({
+      sessionId: 'session-local' as SessionId,
+      machineId: 'machine-1' as MachineId,
+      userId: 'user-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      createdAt: '2026-08-02T00:00:00.000Z',
+      project: {
+        kind: 'local',
+        localProjectId: 'project-1' as never,
+        branch: 'lody:branch:remote:origin:foo',
+        useWorktree: true,
+      },
+    });
+
+    expect(patch.project).toMatchObject({ branch: 'lody:branch:remote:origin:foo' });
+    expect(patch).not.toHaveProperty('baseBranch');
+  });
+});
+
+describe('session MCP selection CRDT round-trip', () => {
+  const userTurn = (
+    turnId: string,
+    mcpServerIds: McpServerId[] | undefined
+  ): SessionHistoryInput => ({
+    id: turnId,
+    role: 'user',
+    items: [{ type: 'text', text: turnId }],
+    timestamp: '2026-08-12T00:00:00.000Z',
+    status: 'pending',
+    read: false,
+    userId: 'user-1',
+    fileDiff: [],
+    finished: true,
+    inputConfig: {
+      prompt: turnId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      ...(mcpServerIds === undefined ? {} : { mcpServerIds }),
+    },
+  });
+
+  const roundTrip = (history: SessionHistoryInput[], mq: SessionDoc['mq'] = []) => {
+    const sourceDoc = new Loro();
+    const source = new Mirror({
+      doc: sourceDoc,
+      schema: sessionDocSchema,
+      initialState: {
+        session: { id: 'session-1' as SessionId },
+        history: [],
+        mq: [],
+      } satisfies Partial<SessionDoc>,
+      throwOnValidationError: true,
+    });
+    source.setState((previous) => ({ ...previous, history, mq }));
+
+    const targetDoc = new Loro();
+    targetDoc.import(sourceDoc.export({ mode: 'snapshot' }));
+    const target = new Mirror({
+      doc: targetDoc,
+      schema: sessionDocSchema,
+      throwOnValidationError: true,
+    });
+    const state = target.getState();
+    source.dispose();
+    target.dispose();
+    return state;
+  };
+
+  it('keeps an explicit empty selection distinct from an absent selection', () => {
+    const explicitEmpty = roundTrip([userTurn('turn-empty', [])]);
+    const absent = roundTrip([userTurn('turn-absent', undefined)]);
+    expect(resolveSessionConversationConfig(explicitEmpty.history, explicitEmpty.mq)).toMatchObject(
+      {
+        mcpServerIds: [],
+      }
+    );
+    expect(
+      resolveSessionConversationConfig(absent.history, absent.mq).mcpServerIds
+    ).toBeUndefined();
+  });
+
+  it('prefers the latest queued selection over history', () => {
+    const state = roundTrip(
+      [userTurn('turn-history', ['history-server'] as McpServerId[])],
+      [
+        {
+          $cid: 'queue-1',
+          text: 'queued',
+          timestamp: '2026-08-12T00:00:01.000Z',
+          acpSessionConfig: {
+            prompt: 'queued',
+            cliType: 'builtin',
+            agentType: 'codex',
+            mcpServerIds: ['queued-server'] as McpServerId[],
+          },
+        },
+      ]
+    );
+    const resolved = resolveSessionConversationConfig(state.history, state.mq);
+    expect(resolved.mcpServerIds).toEqual(['queued-server']);
+  });
+
+  it('round-trips Agent Role identity and explicit None through Loro', () => {
+    const historyTurn = userTurn('turn-role', undefined);
+    historyTurn.inputConfig = {
+      ...historyTurn.inputConfig,
+      agentRoleId: 'role-reviewer' as AgentRoleId,
+      agentRoleRevision: 6,
+    };
+    const withRole = roundTrip([historyTurn]);
+    expect(resolveSessionConversationConfig(withRole.history, withRole.mq)).toMatchObject({
+      agentRoleId: 'role-reviewer',
+      agentRoleRevision: 6,
+    });
+
+    const withNone = roundTrip(
+      [historyTurn],
+      [
+        {
+          $cid: 'queue-none',
+          text: 'queued',
+          timestamp: '2026-08-12T00:00:01.000Z',
+          acpSessionConfig: {
+            prompt: 'queued',
+            cliType: 'builtin',
+            agentType: 'codex',
+            agentRoleId: null,
+          },
+        },
+      ]
+    );
+    expect(resolveSessionConversationConfig(withNone.history, withNone.mq).agentRoleId).toBeNull();
+  });
 });

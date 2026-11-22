@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -14,9 +14,7 @@ import type { NodeProcessApi } from '@lody/shared/node/process';
 
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
-import { getLodyNpmCacheDir } from './npx-cache';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
-import { acquireSorbetCredentialMutation } from './sorbet-credential-mutation';
 import * as profileUsage from './codex-profile-process-usage';
 import { CodexProfileStore, getCodexProfileStore } from './codex-profile-store';
 import type { resolveBuiltinAuthenticationProcessLaunch } from './setting';
@@ -235,6 +233,12 @@ describe('AcpAuthenticationManager', () => {
 
   it.each([
     {
+      agentType: 'antigravity',
+      runtimeOverrides: { antigravityPath: '/test/agy' },
+      command: '/test/agy',
+      args: ['acp', '--login', '--disable-telemetry'],
+    },
+    {
       agentType: 'claude',
       runtimeOverrides: { claudeCodeExecutable: '/test/claude' },
       command: '/test/claude',
@@ -284,67 +288,86 @@ describe('AcpAuthenticationManager', () => {
     }
   );
 
-  it('emits a Claude browser authorization event and accepts the fallback code through stdin', async () => {
-    const child = createFakeChild();
-    const stdin = new PassThrough();
-    const stdout = new PassThrough();
-    const stdoutListening = createDeferred<void>();
-    stdout.once('newListener', (event) => {
-      if (event === 'data') stdoutListening.resolve();
-    });
-    child.stdin = stdin;
-    child.stdout = stdout;
-    child.stderr = new PassThrough();
-    const receivedInput: string[] = [];
-    stdin.on('data', (chunk) => receivedInput.push(String(chunk)));
-    stdin.on('finish', () => {
-      queueMicrotask(() => {
-        child.exitCode = 0;
-        child.emit('exit', 0, null);
+  it.each([
+    { agentType: 'claude', input: 'browser-code', exitCode: 0 },
+    { agentType: 'antigravity', input: 'browser-code', exitCode: 0 },
+    {
+      agentType: 'antigravity',
+      input: 'https://example.test/callback?code=synthetic',
+      exitCode: 0,
+    },
+    { agentType: 'antigravity', input: 'invalid-code', exitCode: 1 },
+  ] as const)(
+    'handles $agentType browser sign-in with exit $exitCode and input $input',
+    async ({ agentType, input, exitCode }) => {
+      const child = createFakeChild();
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      const stdoutListening = createDeferred<void>();
+      stdout.once('newListener', (event) => {
+        if (event === 'data') stdoutListening.resolve();
       });
-    });
-    const authorizationReceived = createDeferred<void>();
-    const progress = vi.fn((event: { status: string }) => {
-      if (event.status === 'authorization') authorizationReceived.resolve();
-    });
-    const manager = new AcpAuthenticationManager(createSilentLogger(), {
-      nodeProcess: fakeNodeProcess(vi.fn(() => child)),
-      resolveLoginShellEnv: async () => ({}),
-    });
-    const authentication = manager.authenticate({
-      requestId: 'auth-claude',
-      cliType: 'builtin',
-      agentType: 'claude',
-      runtimeOverrides: { claudeCodeExecutable: '/test/claude' },
-      onProgress: progress,
-    });
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = new PassThrough();
+      const receivedInput: string[] = [];
+      stdin.on('data', (chunk) => receivedInput.push(String(chunk)));
+      stdin.on('finish', () => {
+        queueMicrotask(() => {
+          child.exitCode = exitCode;
+          child.emit('exit', exitCode, null);
+        });
+      });
+      const authorizationReceived = createDeferred<void>();
+      const progress = vi.fn((event: { status: string }) => {
+        if (event.status === 'authorization') authorizationReceived.resolve();
+      });
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        nodeProcess: fakeNodeProcess(vi.fn(() => child)),
+        resolveLoginShellEnv: async () => ({}),
+      });
+      const authentication = manager.authenticate({
+        requestId: 'auth-browser',
+        cliType: 'builtin',
+        agentType,
+        runtimeOverrides: { claudeCodeExecutable: '/test/claude', antigravityPath: '/test/agy' },
+        onProgress: progress,
+      });
 
-    await stdoutListening.promise;
-    stdout.write(
-      'If the browser did not open, visit: ' +
-        'https://claude.com/cai/oauth/authorize?code=true&client_id=test&state=test\n' +
-        'Paste code here if prompted > '
-    );
-    await authorizationReceived.promise;
-    expect(progress).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'authorization',
-        authorizationUrl:
-          'https://claude.com/cai/oauth/authorize?code=true&client_id=test&state=test',
-        acceptsAuthorizationCode: true,
-      })
-    );
+      const authorizationUrl =
+        agentType === 'claude'
+          ? 'https://claude.com/cai/oauth/authorize?code=true&client_id=test&state=test'
+          : 'https://accounts.google.com/o/oauth2/auth?client_id=test&state=test';
+      await stdoutListening.promise;
+      stdout.write(
+        'If the browser did not open, visit: ' +
+          `${authorizationUrl}\n` +
+          'Paste code here if prompted > '
+      );
+      await authorizationReceived.promise;
+      expect(progress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'authorization',
+          authorizationUrl,
+          acceptsAuthorizationCode: true,
+        })
+      );
 
-    expect(manager.submitAuthorizationCode('auth-claude', 'browser-code')).toEqual({
-      success: true,
-      disposition: 'input-accepted',
-    });
-    await expect(authentication).resolves.toEqual({
-      success: true,
-      disposition: 'authenticated',
-    });
-    expect(receivedInput).toEqual(['browser-code\n']);
-  });
+      expect(manager.submitAuthorizationCode('auth-browser', input)).toEqual({
+        success: true,
+        disposition: 'input-accepted',
+      });
+      await expect(authentication).resolves.toMatchObject(
+        exitCode === 0
+          ? { success: true, disposition: 'authenticated' }
+          : { success: false, disposition: 'error' }
+      );
+      expect(receivedInput).toEqual([`${input}\n`]);
+      if (agentType === 'antigravity') {
+        expect(progress.mock.calls.map(([event]) => event.status)).not.toContain('output');
+      }
+    }
+  );
 
   it('cancels launch preparation without spawning and allows an immediate retry', async () => {
     const firstLoginShellEnv = createDeferred<Record<string, string>>();
@@ -484,113 +507,6 @@ describe('AcpAuthenticationManager', () => {
     });
   });
 
-  it('retries Sorbet login offline only after npm fails before ACP output', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'lody-sorbet-offline-auth-'));
-    vi.stubEnv('LODY_DATA_DIR', root);
-    const install = path.join(getLodyNpmCacheDir(), '_npx', 'aa11');
-    const pkg = path.join(install, 'node_modules', '@sorbetai', 'acp');
-    await mkdir(pkg, { recursive: true });
-    await writeFile(
-      path.join(install, 'package.json'),
-      JSON.stringify({ _npx: { packages: ['@sorbetai/acp@alpha'] } })
-    );
-    await writeFile(
-      path.join(pkg, 'package.json'),
-      JSON.stringify({ version: '0.1.0', bin: 'index.js' })
-    );
-    await writeFile(path.join(pkg, 'index.js'), '');
-    const attempts: string[][] = [];
-    let authenticated = 0;
-    const manager = new AcpAuthenticationManager(createSilentLogger(), {
-      resolveLoginShellEnv: async () => ({}),
-      nodeProcess: fakeNodeProcess(((_command: string, args: string[]) => {
-        attempts.push(args);
-        const child = createFakeChild();
-        const stdin = new PassThrough();
-        const stdout = new PassThrough();
-        const stderr = new PassThrough();
-        child.stdin = stdin;
-        child.stdout = stdout;
-        child.stderr = stderr;
-        if (attempts.length === 1) {
-          queueMicrotask(() => {
-            stderr.write('npm error code ENOTFOUND\n');
-            child.exitCode = 1;
-            child.emit('exit', 1, null);
-          });
-        } else {
-          const agent = acp
-            .agent({ name: 'fixture' })
-            .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
-              protocolVersion: params.protocolVersion,
-              authMethods: [{ id: 'oauth', name: 'OAuth' }],
-            }))
-            .onRequest(acp.methods.agent.authenticate, async () => {
-              authenticated++;
-              return {};
-            });
-          agent.connect(
-            acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
-          );
-        }
-        return child;
-      }) as never),
-    });
-    try {
-      expect(
-        await manager.authenticate({
-          requestId: 'offline-auth',
-          cliType: 'builtin',
-          agentType: 'sorbet',
-        })
-      ).toEqual({ success: true, disposition: 'authenticated' });
-      expect(attempts).toHaveLength(2);
-      expect(attempts[1]).toContain('--offline');
-      expect(authenticated).toBe(1);
-    } finally {
-      vi.unstubAllEnvs();
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it('preserves the authentication failure and the cleanup failure while retaining the Sorbet lease', async () => {
-    vi.useFakeTimers();
-    const child = createFakeChild();
-    // Neither termination signal succeeds until the test explicitly confirms exit.
-    child.kill = vi.fn(() => true);
-    const spawned = createDeferred<void>();
-    const spawnProcess = vi.fn(() => {
-      spawned.resolve();
-      return child;
-    });
-    const manager = new AcpAuthenticationManager(createSilentLogger(), {
-      nodeProcess: fakeNodeProcess(spawnProcess),
-      resolveLoginShellEnv: async () => ({}),
-      terminationGraceMs: 2,
-    });
-    const result = manager.authenticate({
-      requestId: 'sorbet-cleanup-failure',
-      cliType: 'builtin',
-      agentType: 'sorbet',
-    });
-    await spawned.promise;
-    await vi.advanceTimersByTimeAsync(20);
-    await expect(result).resolves.toEqual({
-      success: false,
-      disposition: 'error',
-      error:
-        'sorbet ACP authentication streams are unavailable; Sorbet authentication process cleanup is unconfirmed',
-    });
-    expect(spawnProcess).toHaveBeenCalledTimes(1);
-    const retry = expect(acquireSorbetCredentialMutation()).rejects.toThrow(
-      'cleanup is unconfirmed'
-    );
-    await vi.advanceTimersByTimeAsync(20);
-    await retry;
-    child.exitCode = 0;
-    (await acquireSorbetCredentialMutation()).release();
-  });
-
   it('keeps a replacement manager fenced after cleanup fails until the child exits', async () => {
     vi.useFakeTimers();
     const child = createFakeChild();
@@ -644,7 +560,7 @@ describe('AcpAuthenticationManager', () => {
     }
   });
 
-  it.each(['custom', 'devin', 'sorbet'] as const)(
+  it.each(['custom', 'devin'] as const)(
     'bridges request-scoped ACP form elicitation for %s',
     async (provider) => {
       const child = createFakeChild();

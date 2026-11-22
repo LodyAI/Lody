@@ -6,7 +6,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
 import { formatUpcoming } from '../../schedules/schedule-format';
-import { queueSurface } from './surface';
+import { queuePreviewStyle, queueSurface } from './surface';
 import { IconAction, MoreTrigger } from './message-queue-row';
 
 export type ScheduledQueueItem = {
@@ -72,11 +72,7 @@ export function ScheduledQueueRow({
           'min-w-0 flex-1 overflow-hidden',
           stylex.props(queueSurface.text, roomy && queueSurface.roomyBody).className
         )}
-        style={{
-          display: '-webkit-box',
-          WebkitLineClamp: roomy || compact ? 1 : 2,
-          WebkitBoxOrient: 'vertical',
-        }}
+        style={queuePreviewStyle(!!(roomy || compact))}
       >
         <button
           type="button"

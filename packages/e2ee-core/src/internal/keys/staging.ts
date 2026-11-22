@@ -1,4 +1,4 @@
-import { Data, Result, Schema } from 'effect';
+import { Data, HashMap, Result, Schema } from 'effect';
 import { bytesEqual } from '../foundation/cbor';
 import { keyId } from '../foundation/identifiers';
 import {
@@ -9,6 +9,7 @@ import {
   hashRecordBytes,
   type LedgerView,
 } from '../ledger';
+import { internalViewState } from '../ledger/replay';
 import { authenticateEpochEnvelope, authenticateEpochEnvelopeSignature } from './envelope';
 import * as Bytes from '../foundation/bytes';
 
@@ -70,7 +71,8 @@ export function ownEpochStagedGroup(input: EpochStagedGroup) {
     if (
       keyId(hashRecordBytes(record).toBytes()) !== key.recordHash ||
       parsed.body.type !== 'ordinary' ||
-      (parsed.body.operation.type !== 'publishEpoch' &&
+      (parsed.body.operation.type !== 'abandonEpoch' &&
+        parsed.body.operation.type !== 'publishEpoch' &&
         parsed.body.operation.type !== 'removeMemberAndPublishEpoch') ||
       parsed.body.operation.epoch !== key.epoch ||
       keyId(parsed.body.operation.commitment.toBytes()) !== key.commitment
@@ -138,7 +140,9 @@ export function authenticateEpochStagedGroup(
         : authenticateEpochEnvelopeSignature(context, row.frame);
     }
     if (complete) {
-      const targets = [...view.inspectState().devices.keys()].sort();
+      const state = internalViewState(view);
+      if (!state) return yield* Result.fail(fail('incomplete'));
+      const targets = [...HashMap.keys(state.devices)].sort();
       if (
         targets.length !== group.envelopes.length ||
         targets.some((key, i) => key !== group.envelopes[i]!.recipient)

@@ -15,7 +15,6 @@ import {
   withScheduleRecurrenceTimeZone,
   type ScheduleRecurrence,
   type ScheduleTrigger,
-  ScheduleRepository,
   getDeviceTimeZone,
   scheduleProposalRuleToRecurrence,
   scheduleProposalRuleToTrigger,
@@ -406,11 +405,13 @@ export function ScheduleProposalNotice({
         // The proposal id is the schedule id, so a double click or a retried
         // write cannot create two schedules.
         const scheduleId = meta.proposalId;
+        const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
         await runtime.withScheduleStore(
           scheduleId,
           () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
               protectedContent: runtime.contentMode === 'e2ee',
+              signDeclaration: runtime.signScheduleDeclaration,
             }).save({
               scheduleId,
               activationId: uuid(),

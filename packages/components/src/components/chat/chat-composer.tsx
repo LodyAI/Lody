@@ -19,7 +19,7 @@ import { useTranslation } from 'react-i18next';
 import type { AcpCommandSummary } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
 import { ComposerImagePeek } from './composer-image-peek';
-import { measureTextareaScrollHeight } from './textarea-measurement';
+import { measureComposerContentHeight } from './textarea-measurement';
 import { CommentReferenceChip, type CommentReferenceChipItem } from './comment-reference-chip';
 import {
   VisualAnnotationReferenceChip,
@@ -69,6 +69,13 @@ import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { text as textScale, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  type ComposerInputElement,
+  getComposerCaretRect,
+  getComposerSelection,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 const typography = stylex.create({
   imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
@@ -76,6 +83,76 @@ const typography = stylex.create({
   helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   code: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
+});
+
+/* The `modal` variant: the composer as the body of a create dialog (Today's
+   "Convert to task"). The prompt is the page, with no box of its own; the
+   selectors sit under it as one wrapping row of pills, and a footer ruled off
+   across the panel holds the "+" entry and the dialog's own actions. */
+const modalStyles = stylex.create({
+  box: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[3],
+  },
+  // One row, like a create dialog's property bar (Linear): it never wraps.
+  // Running short, the project label truncates to its minimum first; past
+  // that (desktop windows go down to 400px) the row scrolls sideways, its
+  // scrollbar hidden. The block padding keeps the pills' lift and focus rings
+  // inside the scroll box.
+  pills: {
+    display: 'flex',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    columnGap: space[1.5],
+    minWidth: 0,
+    userSelect: 'none',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
+    paddingBlock: '3px',
+    marginBlock: '-3px',
+    paddingInline: '3px',
+    marginInline: '-3px',
+  },
+  // The run-config group follows the scope pills on their line at its own
+  // size; only a model name long enough to take over half the row truncates.
+  // It is not the footer's `composer-face` container, whose narrow form hides
+  // labels.
+  face: {
+    display: 'flex',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    columnGap: space[1.5],
+    flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 0,
+    maxWidth: '50%',
+    overflow: 'hidden',
+  },
+  // Ruled off across the whole panel: the negative inline margin is the
+  // dialog's own padding (`dialog.padding`, space[4]).
+  footer: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: space[2],
+    marginInline: `calc(-1 * ${space[4]})`,
+    paddingInline: space[4],
+    paddingTop: space[3],
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    userSelect: 'none',
+  },
+  actions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: space[2],
+    marginInlineStart: 'auto',
+  },
 });
 
 const promptSuggestionStyles = stylex.create({
@@ -140,7 +217,8 @@ const promptSuggestionStyles = stylex.create({
 });
 
 type ChatComposerTone = 'light' | 'dark';
-type ChatComposerVariant = 'landing' | 'session' | 'dialog' | 'sheet';
+/** `modal` is the body of a create dialog; see `modalStyles`. */
+type ChatComposerVariant = 'landing' | 'session' | 'dialog' | 'sheet' | 'modal';
 type ChatComposerStatusTone = 'error' | 'warning' | 'info';
 
 export interface ChatComposerAction {
@@ -188,8 +266,8 @@ export interface ChatComposerProps {
   promptId?: string;
   promptValue: string;
   onPromptChange: (value: string) => void;
-  onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onPromptKeyDown?: (event: KeyboardEvent<ComposerInputElement>) => void;
+  onPromptPaste?: (event: ClipboardEvent<ComposerInputElement>) => void;
   /**
    * Advisory next-prompt text for an empty composer. Desktop accepts it with
    * Tab; mobile only through the inline Apply control. Accepting writes the
@@ -207,7 +285,7 @@ export interface ChatComposerProps {
   /** Focus the prompt as soon as this composer mounts (new-chat sheet). */
   promptAutoFocus?: boolean;
   promptEnterKeyHint?: TextareaProps['enterKeyHint'];
-  promptRef?: Ref<HTMLTextAreaElement>;
+  promptRef?: Ref<ComposerInputElement>;
   pastedTextDrafts?: PastedTextDraft[];
   onPastedTextDraftsChange?: (drafts: PastedTextDraft[]) => void;
   /**
@@ -257,8 +335,6 @@ export interface ChatComposerProps {
   visualAnnotationReferenceItems?: VisualAnnotationReferenceChipItem[];
   /** Remove a visual annotation reference by localId */
   onVisualAnnotationReferenceRemove?: (localId: string) => void;
-  /** @deprecated Use footerSelector instead */
-  selector?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, agent) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -295,14 +371,16 @@ export function getChatComposerTextareaClassName({
     stylex.props(typography.prompt).className,
     isSheet
       ? 'min-h-0 flex-1 border-transparent bg-transparent px-5 py-4 text-base leading-7'
-      : isLanding
-        ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
-        : cn(
-            'text-sm leading-6',
-            'border-transparent bg-transparent px-1 py-0',
-            // Mobile session composer floors at a single line; desktop keeps two.
-            isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
-          ),
+      : variant === 'modal'
+        ? 'min-h-[132px] border-transparent bg-transparent px-0 py-0'
+        : isLanding
+          ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
+          : cn(
+              'text-sm leading-6',
+              'border-transparent bg-transparent px-1 py-0',
+              // Mobile session composer floors at a single line; desktop keeps two.
+              isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
+            ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
     'text-input-foreground placeholder:text-input-placeholder/85'
   );
@@ -372,7 +450,6 @@ export function ChatComposer({
   revealCommentReferenceRemoveOnClick = false,
   visualAnnotationReferenceItems = [],
   onVisualAnnotationReferenceRemove,
-  selector,
   topSelector,
   footerSelector,
   bottomBar,
@@ -396,6 +473,7 @@ export function ChatComposer({
   const isDialog = variant === 'dialog';
   const isLanding = variant === 'landing';
   const isSheet = variant === 'sheet';
+  const isModal = variant === 'modal';
   // Mobile session composer starts at a single line to save vertical space
   // (desktop keeps its 2-line default); it still auto-grows as the user types.
   const singleLineMobile = isMobile && variant === 'session';
@@ -444,9 +522,9 @@ export function ChatComposer({
     }
     if (removed.value !== promptValue) return;
     removedQuoteCaret.current = null;
-    const input = composerBoxRef.current?.querySelector('textarea');
+    const input = composerBoxRef.current?.querySelector<HTMLElement>('[data-lody-composer-input]');
     input?.focus({ preventScroll: true });
-    input?.setSelectionRange(removed.position, removed.position);
+    setComposerSelection(input, removed.position, removed.position);
   }, [draftKey, promptValue]);
   const [useCompactPlaceholder, setUseCompactPlaceholder] = useState(false);
   useLayoutEffect(() => {
@@ -628,14 +706,14 @@ export function ChatComposer({
     ]
   );
   const handlePromptCopy = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       const input = event.currentTarget;
       // Expand session/skill/role/pasted mentions to the agent-facing plain
       // text — same rewrites as send. Native copy stays when nothing expands.
       const clipboardText = getExpandedClipboardTextForSelection({
         value: promptValue,
-        selectionStart: input.selectionStart,
-        selectionEnd: input.selectionEnd,
+        selectionStart: getComposerSelection(input).start,
+        selectionEnd: getComposerSelection(input).end,
         rewrites: getMentionPromptRewrites({
           text: promptValue,
           mentions: mentionRanges,
@@ -708,9 +786,9 @@ export function ChatComposer({
         ? promptRef.current
         : null;
     if (!textarea) return;
-    const caret = textarea.value.length;
+    const caret = getComposerText(textarea).length;
     textarea.focus();
-    textarea.setSelectionRange(caret, caret);
+    setComposerSelection(textarea, caret, caret);
   }, [promptRef, promptValue]);
   const promptInputProps = {
     disabled: promptDisabled && !preservePromptFocus,
@@ -718,10 +796,10 @@ export function ChatComposer({
     onValueChange: (value: string) => {
       if (!promptDisabled) onPromptChange(value);
     },
-    onBeforeInput: (event: React.FormEvent<HTMLTextAreaElement>) => {
+    onBeforeInput: (event: React.FormEvent<ComposerInputElement>) => {
       if (promptDisabled) event.preventDefault();
     },
-    onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    onKeyDown: (event: KeyboardEvent<ComposerInputElement>) => {
       if (promptDisabled) {
         if (event.key !== 'Tab') event.preventDefault();
         return;
@@ -746,7 +824,7 @@ export function ChatComposer({
       }
       onPromptKeyDown?.(event);
     },
-    onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    onPaste: (event: ClipboardEvent<ComposerInputElement>) => {
       if (promptDisabled) event.preventDefault();
       else onPromptPaste?.(event);
     },
@@ -825,7 +903,7 @@ export function ChatComposer({
   );
 
   // Auto-resize effect: adjust textarea height based on content
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!autoResize) return;
 
     // Get the textarea element from the ref
@@ -835,37 +913,53 @@ export function ChatComposer({
         : null;
     if (!textarea) return;
 
-    // Calculate line height and max height
-    const computedStyle = getComputedStyle(textarea);
-    const lineHeight = parseInt(computedStyle.lineHeight || '24', 10) || 24;
-    const paddingTop = parseInt(computedStyle.paddingTop || '0', 10);
-    const paddingBottom = parseInt(computedStyle.paddingBottom || '0', 10);
-    const minHeight = lineHeight * effectivePromptRows + paddingTop + paddingBottom;
-    const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
+    const resize = () => {
+      // Calculate line height and max height
+      const computedStyle = getComputedStyle(textarea);
+      const lineHeight = parseInt(computedStyle.lineHeight || '24', 10) || 24;
+      const paddingTop = parseInt(computedStyle.paddingTop || '0', 10);
+      const paddingBottom = parseInt(computedStyle.paddingBottom || '0', 10);
+      const minHeight = lineHeight * effectivePromptRows + paddingTop + paddingBottom;
+      const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
 
-    // When empty, the height is simply minHeight — and must be: Chromium includes
-    // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
-    // placeholder would grow the box past minHeight and then visibly shrink on
-    // the first keystroke. Skipping measurement also avoids constructing a
-    // mirror and forcing layout while an empty composer mounts on session switch.
-    const hasValue = (promptValue ?? '').length > 0;
-    if (!hasValue) {
-      // A visible prompt suggestion overlays the empty box; grow to hold it so
-      // a wrapped hint never runs over the footer.
-      const suggestionHeight =
-        promptSuggestionHeight > 0 ? promptSuggestionHeight + paddingTop + paddingBottom : 0;
-      textarea.style.height = `${Math.min(maxHeight, Math.max(minHeight, suggestionHeight))}px`;
-      textarea.style.overflowY = 'hidden';
-      return;
-    }
+      // When empty, the height is simply minHeight — and must be: Chromium includes
+      // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
+      // placeholder would grow the box past minHeight and then visibly shrink on
+      // the first keystroke. Skipping measurement also avoids constructing a
+      // mirror and forcing layout while an empty composer mounts on session switch.
+      const hasValue = (promptValue ?? '').length > 0;
+      if (!hasValue) {
+        // A visible prompt suggestion overlays the empty box; grow to hold it so
+        // a wrapped hint never runs over the footer.
+        const suggestionHeight =
+          promptSuggestionHeight > 0 ? promptSuggestionHeight + paddingTop + paddingBottom : 0;
+        textarea.style.height = `${Math.min(maxHeight, Math.max(minHeight, suggestionHeight))}px`;
+        textarea.style.overflowY = 'hidden';
+        return;
+      }
 
-    // Measure outside the flex layout. A temporary height:auto on the live
-    // textarea expands the conversation viewport and can clamp its scrollTop.
-    const scrollHeight = measureTextareaScrollHeight(textarea, computedStyle);
-    const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
+      // Measure outside the flex layout. A temporary height:auto on the live
+      // textarea expands the conversation viewport and can clamp its scrollTop.
+      const scrollHeight = measureComposerContentHeight(textarea, computedStyle);
+      const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
 
-    textarea.style.height = `${newHeight}px`;
-    textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+      textarea.style.height = `${newHeight}px`;
+      textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+    };
+    resize();
+    // Lexical commits externally inserted chips after the owner's layout effect.
+    // Measure that committed layout as well, before restoring caret visibility.
+    const frame = requestAnimationFrame(() => {
+      resize();
+      if (textarea.ownerDocument.activeElement !== textarea) return;
+      const caret = getComposerCaretRect(textarea, getComposerSelection(textarea).end);
+      const bounds = textarea.getBoundingClientRect();
+      const top = bounds.top + textarea.clientTop;
+      const bottom = top + textarea.clientHeight;
+      if (caret.bottom > bottom) textarea.scrollTop += caret.bottom - bottom;
+      else if (caret.top < top) textarea.scrollTop -= top - caret.top;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows, promptSuggestionHeight]);
 
   const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
@@ -916,9 +1010,11 @@ export function ChatComposer({
   const sheetContainerClassName = 'flex h-full min-h-0 flex-col px-0 py-0';
   const boxContainerClassName = isSheet
     ? sheetContainerClassName
-    : isLanding
-      ? landingContainerClassName
-      : sessionContainerClassName;
+    : isModal
+      ? stylex.props(modalStyles.box).className
+      : isLanding
+        ? landingContainerClassName
+        : sessionContainerClassName;
   const composerHasAttachments =
     imageItems.length > 0 ||
     fileItems.length > 0 ||
@@ -927,7 +1023,9 @@ export function ChatComposer({
   const focusHintBinding = commands.getKeybindingsFor('session.focusInput')[0];
   // Only when the box is idle: desktop, has a focus binding, and nothing entered/attached
   // yet (so the chip never collides with text or thumbnails). focus-within hides it too.
+  // A dialog's prompt already holds focus; ⌘L names the page's composer.
   const showFocusHint =
+    !isModal &&
     focusHintSupported &&
     Boolean(focusHintBinding) &&
     !promptValue &&
@@ -984,7 +1082,7 @@ export function ChatComposer({
             )}
           >
             {/* Top selector (repo, branch) - shown outside and above the input box */}
-            {topSelector ? (
+            {topSelector && !isModal ? (
               <div className="flex w-full min-w-0 select-none items-center gap-1">
                 {topSelector}
               </div>
@@ -1377,50 +1475,75 @@ export function ChatComposer({
                 </div>
               ) : null}
 
-              <div className={boxFooterClassName}>
-                {/* Single bottom-left "+" attachment entry (replaces the old
-                    image + paperclip icons). Hidden when neither add callback
-                    is provided. */}
-                <AttachmentAddMenu
-                  isMobile={isMobile}
-                  isLanding={isLanding}
-                  isSheet={isSheet}
-                  disabled={promptDisabled}
-                  onAddAttachment={onAttachmentAddClick}
-                  attachmentDisabled={attachmentAddDisabled}
-                  mcp={mcp}
-                  onScheduleSend={onScheduleSend}
-                  scheduleDisabledReason={scheduleDisabledReason}
-                />
-
-                {/* Single row only: long model names must shrink/truncate inside
-                    the run-config face rather than wrapping config chips onto a
-                    second line (especially on mobile). */}
-                <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
-                  {footerSelector ?? selector}
-                </div>
-
-                <div className="ml-auto flex shrink-0 items-center gap-2">
-                  {secondaryAction ? (
-                    <Button
-                      type="button"
-                      variant={secondaryAction.variant ?? 'ghost'}
-                      onClick={() => {
-                        void secondaryAction.onClick();
-                      }}
-                      disabled={secondaryAction.disabled}
-                      className={cn(
-                        actionWidthClassName,
-                        secondaryButtonClassName,
-                        secondaryAction.className
-                      )}
-                    >
-                      {secondaryAction.label}
-                    </Button>
+              {isModal ? (
+                <>
+                  {topSelector || footerSelector ? (
+                    <div {...stylex.props(modalStyles.pills)}>
+                      {topSelector}
+                      {footerSelector ? (
+                        <div {...stylex.props(modalStyles.face)}>{footerSelector}</div>
+                      ) : null}
+                    </div>
                   ) : null}
-                  {primaryAction}
+                  <div {...stylex.props(modalStyles.footer)}>
+                    <AttachmentAddMenu
+                      isMobile={isMobile}
+                      disabled={promptDisabled}
+                      onAddAttachment={onAttachmentAddClick}
+                      attachmentDisabled={attachmentAddDisabled}
+                      mcp={mcp}
+                      onScheduleSend={onScheduleSend}
+                      scheduleDisabledReason={scheduleDisabledReason}
+                    />
+                    <div {...stylex.props(modalStyles.actions)}>{primaryAction}</div>
+                  </div>
+                </>
+              ) : (
+                <div className={boxFooterClassName}>
+                  {/* Single bottom-left "+" attachment entry (replaces the old
+                      image + paperclip icons). Hidden when neither add callback
+                      is provided. */}
+                  <AttachmentAddMenu
+                    isMobile={isMobile}
+                    isLanding={isLanding}
+                    isSheet={isSheet}
+                    disabled={promptDisabled}
+                    onAddAttachment={onAttachmentAddClick}
+                    attachmentDisabled={attachmentAddDisabled}
+                    mcp={mcp}
+                    onScheduleSend={onScheduleSend}
+                    scheduleDisabledReason={scheduleDisabledReason}
+                  />
+
+                  {/* Single row only: long model names must shrink/truncate inside
+                      the run-config face rather than wrapping config chips onto a
+                      second line (especially on mobile). */}
+                  <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
+                    {footerSelector}
+                  </div>
+
+                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                    {secondaryAction ? (
+                      <Button
+                        type="button"
+                        variant={secondaryAction.variant ?? 'ghost'}
+                        onClick={() => {
+                          void secondaryAction.onClick();
+                        }}
+                        disabled={secondaryAction.disabled}
+                        className={cn(
+                          actionWidthClassName,
+                          secondaryButtonClassName,
+                          secondaryAction.className
+                        )}
+                      >
+                        {secondaryAction.label}
+                      </Button>
+                    ) : null}
+                    {primaryAction}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
             {bottomBar ? <div className="select-none px-4 pt-1">{bottomBar}</div> : null}
           </div>
@@ -1468,7 +1591,7 @@ export function ChatComposer({
             ) : null}
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex w-full flex-wrap select-none items-end gap-2">{selector}</div>
+              <div className="flex w-full flex-wrap select-none items-end gap-2" />
 
               <div className="flex w-full flex-col select-none gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center sm:justify-end">
                 {secondaryAction ? (
