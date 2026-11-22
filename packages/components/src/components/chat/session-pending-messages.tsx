@@ -25,14 +25,20 @@ import {
   SessionFileCardList,
 } from '@/components/ai-gui/session-file-card';
 import { peekSessionImageUrl } from '@/lib/session-image-cache';
-import { UserChatBubble, type SessionChatUser } from '@/components/ai-gui/view';
+import { conversationSurface } from '@/components/ai-gui/surface';
+import {
+  UserChatBubble,
+  UserMessageAuthorSlot,
+  UserMessageMetadataAuthor,
+  type SessionChatUser,
+} from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { UserAvatar } from '@/components/user-avatar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { ConversationView } from '@/lib/conversation-view/types';
 import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp';
 import { toIntlLocale } from '@/lib/intl-locale';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
+import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { isQueueBoundSend } from '@/lib/session-send-status';
 import { cn } from '@/lib/utils';
@@ -122,11 +128,39 @@ function PendingFailureNotice({
 
 const styles = stylex.create({
   progress: { position: 'absolute', insetInline: 0, bottom: 0, pointerEvents: 'none' },
-  metadata: { maxWidth: '100%' },
-  timestamp: { flexShrink: 0, whiteSpace: 'nowrap' },
-  status: { minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' },
+  status: {
+    display: 'inline-flex',
+    minWidth: 0,
+    alignItems: 'center',
+    columnGap: space[1],
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    color: colors.secondaryLabel,
+  },
   statusLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' },
-  acceptedBubble: { position: 'relative', minWidth: 0, maxWidth: '100%' },
+  selectableBubble: {
+    minWidth: 0,
+    maxWidth: '100%',
+    width: 'fit-content',
+    color: colors.label,
+  },
+  pendingDraftStack: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: '100%',
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    rowGap: space[2],
+  },
+  pendingActions: {
+    display: 'flex',
+    minHeight: `calc(${space[6]} + ${space[1]})`,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[2],
+  },
   sendingSpinner: {
     position: 'absolute',
     bottom: 13,
@@ -287,14 +321,18 @@ function PendingFileAttachment({
 export function PendingMessageRow({
   record,
   user,
+  showSenderIdentity = false,
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+  onNavigateSession,
   onRetry,
   onCancel,
   busy = false,
 }: {
   record: PendingSessionSend;
   user?: SessionChatUser;
+  showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
   busy?: boolean;
   onRetry: () => void;
   onCancel: () => void;
@@ -319,8 +357,6 @@ export function PendingMessageRow({
   const images = record.attachments.filter((attachment) => attachment.kind === 'image');
   const files = record.attachments.filter((attachment) => attachment.kind === 'file');
   const uploading = record.attachments.some((attachment) => !attachment.ready);
-  // Only fall back to the record-level reason when no card shows one, so the
-  // same failure is never spelled out twice. Image frames carry no caption.
   const reasonOnACard = files.some((attachment) => attachmentState(attachment) === 'failed');
   const messageStatus = failed
     ? t('sessions.pendingMessageUploadFailed')
@@ -329,29 +365,39 @@ export function PendingMessageRow({
       : t('sessions.pendingMessageWaiting');
 
   return (
-    <ConversationColumn className="py-2 sm:py-3">
-      <article className={cn('flex w-full flex-row-reverse', isMobile ? 'gap-2 pl-7' : 'gap-2.5')}>
-        <div className="mt-0.5 shrink-0 text-muted-foreground">
-          <UserAvatar user={user} size="large" showIcon />
-        </div>
+    <ConversationColumn
+      {...stylex.props(conversationSurface.message, conversationSurface.userMessage)}
+    >
+      <article
+        {...stylex.props(
+          conversationSurface.userRow,
+          isMobile && conversationSurface.mobileUserRow
+        )}
+      >
+        <UserMessageAuthorSlot
+          author={record.entry.author}
+          user={user}
+          isMobile={isMobile}
+          showSenderIdentity={showSenderIdentity}
+          onNavigateSession={onNavigateSession}
+        />
         <div
-          className={cn(
-            'flex min-w-0 flex-1 flex-col items-end text-left',
-            isMobile
-              ? 'max-w-[min(100%,28rem)] gap-1'
-              : 'max-w-full gap-1.5 @[520px]:max-w-[80%] @[720px]:max-w-[70%]'
+          {...stylex.props(
+            conversationSurface.userStack,
+            isMobile && conversationSurface.mobileUserStack
           )}
         >
-          <div
-            className={cn(
-              'flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground',
-              stylex.props(styles.metadata).className
-            )}
-          >
+          <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
+            <UserMessageMetadataAuthor
+              author={record.entry.author}
+              sessionId={record.sessionId}
+              user={user}
+              showSenderIdentity={showSenderIdentity}
+              isMobile={isMobile}
+              onNavigateSession={onNavigateSession}
+            />
             {timestampLabel ? (
-              <span className={cn('tabular-nums', stylex.props(styles.timestamp).className)}>
-                {timestampLabel}
-              </span>
+              <span {...stylex.props(conversationSurface.metadataTimestamp)}>{timestampLabel}</span>
             ) : null}
             {acceptedInput ? (
               <span
@@ -368,14 +414,7 @@ export function PendingMessageRow({
                 )}
               </span>
             ) : (
-              <span
-                className={cn(
-                  'inline-flex items-center gap-1 text-muted-foreground',
-                  stylex.props(styles.status).className
-                )}
-                role="status"
-                title={messageStatus}
-              >
+              <span {...stylex.props(styles.status)} role="status" title={messageStatus}>
                 {failed ? (
                   <AlertCircle className="size-3.5" strokeWidth={2} aria-hidden="true" />
                 ) : (
@@ -390,20 +429,24 @@ export function PendingMessageRow({
             )}
           </div>
           {acceptedInput ? (
-            <div {...stylex.props(styles.acceptedBubble)}>
-              {showSendingSpinner ? (
-                <span {...stylex.props(styles.sendingSpinner)}>
-                  <Spinner {...stylex.props(styles.sendingGlyph)} />
-                </span>
-              ) : null}
-              <UserChatBubble
-                message={{ id: record.id, items: record.entry.items ?? [] }}
-                sessionId={record.sessionId}
-                conversationFontSize={conversationFontSize}
-              />
+            <div {...stylex.props(conversationSurface.userBubbleSlot)}>
+              <div {...stylex.props(conversationSurface.userBubbleFrame)}>
+                {showSendingSpinner ? (
+                  <span {...stylex.props(styles.sendingSpinner)}>
+                    <Spinner {...stylex.props(styles.sendingGlyph)} />
+                  </span>
+                ) : null}
+                <div {...stylex.props(styles.selectableBubble)} data-text-selectable>
+                  <UserChatBubble
+                    message={{ id: record.id, items: record.entry.items ?? [] }}
+                    sessionId={record.sessionId}
+                    conversationFontSize={conversationFontSize}
+                  />
+                </div>
+              </div>
             </div>
           ) : (
-            <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
+            <div {...stylex.props(styles.pendingDraftStack)}>
               {images.length ? (
                 <div className="flex w-full flex-wrap justify-end gap-2 px-2 pt-1">
                   {images.map((attachment) => (
@@ -430,13 +473,18 @@ export function PendingMessageRow({
                 </SessionFileCardList>
               ) : null}
               {text ? (
-                <div className="flex max-w-full justify-end sm:pl-2">
-                  <div className="min-w-0 max-w-full rounded-[1.15rem] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
-                    <div
-                      className="min-w-0 max-w-full whitespace-pre-wrap text-reading [overflow-wrap:anywhere]"
-                      style={conversationTextFontSizeStyle(conversationFontSize)}
-                    >
-                      {text}
+                <div {...stylex.props(conversationSurface.userBubbleSlot)}>
+                  <div {...stylex.props(conversationSurface.userBubbleFrame)}>
+                    <div {...stylex.props(conversationSurface.bubbleRow)}>
+                      <div {...stylex.props(conversationSurface.bubble)} data-user-message-bubble="">
+                        <div
+                          {...stylex.props(conversationSurface.userText)}
+                          style={conversationTextFontSizeStyle(conversationFontSize)}
+                          data-text-selectable
+                        >
+                          {text}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -444,21 +492,18 @@ export function PendingMessageRow({
             </div>
           )}
           {failed && !reasonOnACard ? <PendingFailureNotice reason={record.error!} clamp /> : null}
-          {/* Always in the flow at the delivered row's 28px action height, so
-              committing (which swaps these for hover-revealed copy/fork) does
-              not move anything below. */}
-          <div className="flex min-h-7 flex-wrap items-center justify-end gap-2">
-            {!acceptedInput || failed ? (
+          {!acceptedInput || failed ? (
+            <div {...stylex.props(styles.pendingActions)}>
               <Button size="small" variant="ghost" disabled={busy} onClick={onCancel}>
                 {t(acceptedInput ? 'sessions.removeLocalInput' : 'sessions.cancelPendingSend')}
               </Button>
-            ) : null}
-            {failed ? (
-              <Button size="small" disabled={busy} onClick={onRetry}>
-                {t('sessions.retryPendingSend')}
-              </Button>
-            ) : null}
-          </div>
+              {failed ? (
+                <Button size="small" disabled={busy} onClick={onRetry}>
+                  {t('sessions.retryPendingSend')}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </article>
     </ConversationColumn>
@@ -474,12 +519,16 @@ export function useSessionPendingMessages({
   sessionId,
   history,
   user,
+  showSenderIdentity = false,
   conversationFontSize,
+  onNavigateSession,
 }: {
   sessionId: SessionId;
   history?: Pick<ConversationView, 'indexOf' | 'turn' | 'subscribe'> | null;
   user?: SessionChatUser;
+  showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
 }) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const pendingSends = runtime?.pendingSends;
@@ -547,14 +596,16 @@ export function useSessionPendingMessages({
             key={send.id}
             record={send}
             user={user}
+            showSenderIdentity={showSenderIdentity}
             conversationFontSize={conversationFontSize}
+            onNavigateSession={onNavigateSession}
             busy={busy === send.id}
             onRetry={() => void action(send, 'retry')}
             onCancel={() => void action(send, 'cancel')}
           />
         ),
       })),
-    [pending, user, conversationFontSize, busy, action]
+    [pending, user, showSenderIdentity, conversationFontSize, onNavigateSession, busy, action]
   );
   const failureNotice = useMemo(
     () =>

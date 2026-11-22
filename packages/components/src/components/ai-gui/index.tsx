@@ -8,7 +8,7 @@ import type {
 } from '@lody/shared';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import { getSavedAnchorTurnId } from '@/lib/conversation-scroll/saved-state';
-import { cloudOperations } from '@/lib/cloud-api-operations';
+import { useWorkspaceSenderProfile } from '@/hooks/use-workspace-sender-profile';
 import type { AgentActivityTone } from './view';
 import type { HistoryLiveWindow, LiveTurnActivity } from './assistant-turn-timing';
 import {
@@ -26,7 +26,6 @@ import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import { useConversationVersion } from '@/hooks/use-conversation-view';
 import { findLastIndex, type ConversationView } from '@/lib/conversation-view';
-import { useCloudQuery } from '@lody/platform/react';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import type {
   SessionForkDestination,
@@ -141,10 +140,11 @@ const MessageRowConnected = memo(function MessageRowConnected({
   conversationFontSize: ConversationFontSize;
   editMentionContext?: UserMessageEditMentionContext;
 }) {
-  const userInfo = useCloudQuery(
-    cloudOperations.auth.getUserById,
-    message.userId && workspaceId ? { userId: message.userId, workspaceId } : 'skip'
-  );
+  const userInfo = useWorkspaceSenderProfile({
+    userId: message.userId,
+    workspaceId,
+    enabled: message.role === 'user' && message.author?.kind !== 'agent',
+  });
 
   return (
     <MessageRowView

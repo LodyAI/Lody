@@ -282,6 +282,7 @@ import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-dr
 import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
+import { useWorkspaceSenderProfile } from '@/hooks/use-workspace-sender-profile';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import {
   unlinkSessionPullRequestFromUi,
@@ -4553,16 +4554,19 @@ export const SessionChatInterface = memo(
       workspaceId,
     ]);
     const isFinalizing = isSessionFinalizing(liveSessionStatus);
-    // Resolve the same sender as the formal user row before owner confirmation.
-    const pendingSender = useCloudQuery(
-      cloudOperations.auth.getUserById,
-      currentUser?.id && workspaceId ? { userId: currentUser.id, workspaceId } : 'skip'
-    );
+    const pendingSenderUserId =
+      (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ?? currentUser?.id ?? null;
+    const pendingSender = useWorkspaceSenderProfile({
+      userId: pendingSenderUserId,
+      workspaceId,
+    });
     const pendingMessages = useSessionPendingMessages({
       sessionId: session.id,
       history: conversationView,
       user: pendingSender,
+      showSenderIdentity: isMultiMember,
       conversationFontSize,
+      onNavigateSession,
     });
     // Presence owns liveness; the same pending queue as the composer supplies
     // the kind of human input. Core metadata works for every ACP provider.

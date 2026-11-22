@@ -50,7 +50,9 @@ export function UserAvatar({ user, size = 'medium', className, showIcon = false 
 
   return (
     <Avatar.Root size={size} className={className}>
-      {avatarImage ? <Avatar.Image src={avatarImage} alt={user?.name || 'User'} /> : null}
+      {avatarImage ? (
+        <Avatar.Image src={avatarImage} alt={user?.name || 'User'} referrerPolicy="no-referrer" />
+      ) : null}
       <Avatar.Fallback>
         {showIcon || !initials ? (
           // The glyph box is the primitive's and follows the rung; the icon

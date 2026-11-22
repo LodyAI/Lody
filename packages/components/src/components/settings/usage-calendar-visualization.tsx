@@ -21,6 +21,7 @@ import i18next from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { Avatar } from '@lody/ui/avatar';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
@@ -2410,7 +2411,7 @@ function UsageDayDetailPanel({
                       tokens: row.tokens,
                       icon: (
                         <Avatar.Root size="mini">
-                          {user?.image ? <Avatar.Image src={user.image} alt="" /> : null}
+                          <CachedAvatarImage src={user?.image} alt="" />
                           <Avatar.Fallback>{label.slice(0, 2).toUpperCase()}</Avatar.Fallback>
                         </Avatar.Root>
                       ),
