@@ -21,6 +21,8 @@ export type OutlineIntent =
   | { type: 'focus-next-start' }
   | { type: 'block-select' }
   | { type: 'cycle-todo' }
+  | { type: 'zoom-in' }
+  | { type: 'zoom-out' }
   /** Shift+Up/Down reached the first/last line: select to the node edge. */
   | { type: 'extend-text'; anchor: number; focus: number }
   /** Shift+Up/Down with the selection already at the node edge: select the node. */
@@ -93,10 +95,18 @@ export function resolveOutlineKey(
       return null;
     }
     case 'ArrowLeft':
+      if (event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        const atStart = !caret.hasSelection && caret.offset === 0;
+        return platform !== 'mac' || atStart ? { type: 'zoom-out' } : null;
+      }
       return plain && !caret.hasSelection && caret.offset === 0
         ? { type: 'focus-previous-end' }
         : null;
     case 'ArrowRight':
+      if (event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        const atEnd = !caret.hasSelection && caret.offset === caret.length;
+        return platform !== 'mac' || atEnd ? { type: 'zoom-in' } : null;
+      }
       return plain && !caret.hasSelection && caret.offset === caret.length
         ? { type: 'focus-next-start' }
         : null;

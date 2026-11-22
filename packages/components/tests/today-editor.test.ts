@@ -129,6 +129,21 @@ describe('Today outline keys', () => {
     expect(resolveOutlineKey(key('Escape'), base, 'mac')).toEqual({ type: 'block-select' });
   });
 
+  it("⌥→/⌥← zoom elsewhere, but on the Mac only from the node's end or start (word moves stay)", () => {
+    const alt = { altKey: true };
+    expect(resolveOutlineKey(key('ArrowRight', alt), { ...base, offset: 1 }, 'other')).toEqual({
+      type: 'zoom-in',
+    });
+    expect(resolveOutlineKey(key('ArrowRight', alt), { ...base, offset: 1 }, 'mac')).toBeNull();
+    expect(resolveOutlineKey(key('ArrowRight', alt), { ...base, offset: 3 }, 'mac')).toEqual({
+      type: 'zoom-in',
+    });
+    expect(resolveOutlineKey(key('ArrowLeft', alt), { ...base, offset: 0 }, 'mac')).toEqual({
+      type: 'zoom-out',
+    });
+    expect(resolveOutlineKey(key('ArrowLeft', alt), { ...base, offset: 2 }, 'mac')).toBeNull();
+  });
+
   it('Mod+A leaves a partial text selection to the editor, then selects the node', () => {
     const mod = { metaKey: true };
     expect(resolveOutlineKey(key('a', mod), { ...base, offset: 1 }, 'mac')).toBeNull();
@@ -1232,6 +1247,151 @@ describe('Today to-dos and the selection bar', () => {
     expect(ctx.controller.isActive(ctx.store, id)).toBe(true);
     await press();
     expect(ctx.rows()).toEqual([['abc', undefined]]);
+    ctx.done();
+  });
+});
+
+describe('Today focus view', () => {
+  async function zoomed(lines: string, rootText: string | null) {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const { TodayEditorController } =
+      await import('../src/components/today/editor/today-editor-controller');
+    const { TodayEditorContext } =
+      await import('../src/components/today/editor/today-editor-context');
+    const { parseTodayPasteText } = await import('@lody/shared');
+    const store = createTodayPageStore({
+      docId: 'today-u1-2026-11-16',
+      doc: new LoroDoc(),
+      registered: true,
+      join: async () => ({ room: { unsubscribe: () => {} }, synced: Promise.resolve() }),
+      register: async () => {},
+      setTimer: () => () => {},
+      retryDelayMs: () => 1000,
+    });
+    store.outline.paste({ kind: 'page-start' }, parseTodayPasteText(lines));
+    const id = (text: string) => store.outline.getAllNodes().find((n) => n.text === text)!.id;
+    const cache = {
+      peek: () => store,
+      acquire: async () => store,
+      releaseRef: () => {},
+    } as unknown as TodayPageStoreCache;
+    const controller = new TodayEditorController(cache);
+    const events: string[] = [];
+    controller.onZoom = (_store, nodeId) => events.push(`zoom:${nodeId}`);
+    controller.onZoomOut = () => events.push('out');
+    controller.onNodeMenu = (_store, nodeId) => events.push(`menu:${nodeId}`);
+    const root = rootText ? id(rootText) : null;
+    controller.setFocus({ date: '2026-11-16' as never, rootId: root });
+    const surface = document.createElement('div');
+    surface.tabIndex = -1;
+    document.body.append(surface);
+    controller.attachSurface(surface);
+    const reactRoot = createRoot(surface);
+    await act(async () =>
+      reactRoot.render(
+        withTestI18n(
+          createElement(
+            TodayEditorContext.Provider,
+            { value: controller },
+            createElement(TodayDaySection, {
+              cache,
+              userId: 'u1',
+              date: '2026-11-16' as never,
+              today: '2026-11-16' as never,
+              isTop: true,
+              onEmptyChange: () => {},
+              zoomRoot: root,
+            })
+          ),
+          createTestI18n()
+        )
+      )
+    );
+    const rows = () =>
+      [...surface.querySelectorAll<HTMLElement>('[data-today-node]')].map((row) =>
+        row.textContent?.replaceAll('\u200b', '')
+      );
+    const mod = navigator.platform.includes('Mac') ? { metaKey: true } : { ctrlKey: true };
+    const pressIn = async (key: string, init: KeyboardEventInit = {}) =>
+      act(async () => {
+        window.getSelection()?.removeAllRanges();
+        surface
+          .querySelector<HTMLElement>('[contenteditable="true"]')!
+          .dispatchEvent(
+            new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
+          );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    const done = () => {
+      act(() => reactRoot.unmount());
+      controller.dispose();
+      store.dispose();
+      surface.remove();
+    };
+    return { store, controller, surface, id, root, rows, events, mod, pressIn, done };
+  }
+
+  it('a bullet click zooms in and "⋯" opens the node menu', async () => {
+    const ctx = await zoomed('a\n  b', null);
+    const row = ctx.surface.querySelectorAll<HTMLElement>('[data-today-node]')[1]!;
+    await act(async () => {
+      row
+        .querySelector('[data-today-bullet]')!
+        .dispatchEvent(
+          new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 5, clientY: 5 })
+        );
+      window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 5, clientY: 5 }));
+    });
+    await act(async () => row.querySelector<HTMLElement>('[data-today-more]')!.click());
+    expect(ctx.events).toEqual([`zoom:${ctx.id('b')}`, `menu:${ctx.id('b')}`]);
+    ctx.done();
+  });
+
+  it('shows the zoomed node as the title over its subtree and keeps keys inside it', async () => {
+    const ctx = await zoomed('a\n  b\n    c\n  d\ne', 'b');
+    expect(ctx.rows()).toEqual(['b', 'c']);
+    await act(async () => ctx.controller.activate(ctx.store, ctx.id('b'), 1));
+    await ctx.pressIn('Enter');
+    expect(ctx.rows()).toEqual(['b', '', 'c']);
+    await act(async () => ctx.controller.activate(ctx.store, ctx.id('b'), 0));
+    await ctx.pressIn('Enter');
+    expect(ctx.rows()).toEqual(['b', '', '', 'c']);
+    expect(ctx.store.outline.getNode(ctx.id('b'))?.parentId).toBe(ctx.id('a'));
+    await act(async () => ctx.controller.activate(ctx.store, ctx.id('c'), 'end'));
+    await ctx.pressIn('Tab', { shiftKey: true });
+    expect(ctx.store.outline.getNode(ctx.id('c'))?.parentId).toBe(ctx.id('b'));
+    await act(async () => ctx.controller.activate(ctx.store, ctx.id('b'), 0));
+    await ctx.pressIn('ArrowUp');
+    expect(ctx.controller.isActive(ctx.store, ctx.id('b'))).toBe(true);
+    await ctx.pressIn('Backspace');
+    expect(ctx.store.outline.getNode(ctx.id('b'))?.text).toBe('b');
+    await act(async () => ctx.controller.selectBlocks(ctx.store, [ctx.id('c')]));
+    const block = (key: string, init: KeyboardEventInit) =>
+      act(
+        async () => void ctx.controller.onBlockKey(new KeyboardEvent('keydown', { key, ...init }))
+      );
+    await block('a', ctx.mod);
+    expect(ctx.controller.getBlockSelection()?.ids).toEqual([ctx.id('b')]);
+    await block('a', ctx.mod);
+    expect(ctx.controller.getBlockSelection()?.ids).toEqual([ctx.id('b')]);
+    await block('Backspace', {});
+    expect(ctx.store.outline.getNode(ctx.id('b'))).toBeDefined();
+    await block('ArrowLeft', { altKey: true });
+    expect(ctx.events).toEqual(['out']);
+    ctx.done();
+  });
+
+  it('says the zoomed node is gone when a peer deletes it, and offers the way back', async () => {
+    const ctx = await zoomed('a\n  b', 'b');
+    await act(async () => void ctx.store.outline.deleteNodes([ctx.id('b')]));
+    expect(ctx.surface.textContent).toContain('This node was deleted.');
+    await act(async () =>
+      [...ctx.surface.querySelectorAll('button')]
+        .find((b) => b.textContent === 'Back to the parent')!
+        .click()
+    );
+    expect(ctx.events).toEqual(['out']);
     ctx.done();
   });
 });
