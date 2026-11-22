@@ -32,6 +32,11 @@ import {
   sessionSendStatusAtomFamily,
   sessionUnsentNewConversationAtomFamily,
 } from '@/atoms/session-send-status';
+import {
+  sessionPrMergeStatusAtomFamily,
+  type SessionPrMergePhase,
+  type SessionPrMergeStatus,
+} from '@/atoms/session-pr-merge-status';
 import type { SessionSendState } from '@/lib/session-send-status';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
@@ -159,7 +164,13 @@ const SEND_RING_SHIMMER_LENGTH = 5;
  * size the same ring turns with a quarter arc. The turn rides an HTML wrapper,
  * like `@lody/ui`'s Spinner: a rotating svg does not composite at DPR≠1.
  */
-export function SessionSendProgressRing({ progress }: { progress?: number }) {
+export function SessionSendProgressRing({
+  progress,
+  className,
+}: {
+  progress?: number;
+  className?: string;
+}) {
   const known = typeof progress === 'number';
   const filled = known ? Math.min(100, Math.max(4, progress)) : 25;
   const maskId = `session-send-ring-${useId().replace(/:/g, '')}`;
@@ -177,7 +188,8 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
     <span
       className={cn(
         'flex h-3 w-3 text-primary',
-        !known && 'animate-spin [animation-duration:1.2s] motion-reduce:animate-none'
+        !known && 'animate-spin [animation-duration:1.2s] motion-reduce:animate-none',
+        className
       )}
       data-session-send-ring={known ? 'determinate' : 'indeterminate'}
     >
@@ -252,6 +264,8 @@ export function SessionRowStatusIndicator({
   sendState,
   sendProgress,
   sendLabel,
+  prMergePhase,
+  prMergeLabel,
 }: {
   isWaitingPermission?: boolean;
   /** Something Lody ran for this session stopped and needs the person (Auto delivery). */
@@ -264,6 +278,8 @@ export function SessionRowStatusIndicator({
   sendProgress?: number;
   /** Spoken name of the send mark ("Sending · 12.4 MB / 38.0 MB"). */
   sendLabel?: string;
+  prMergePhase?: Exclude<SessionPrMergePhase, 'merged'> | null;
+  prMergeLabel?: string;
 }) {
   let icon: ReactNode = null;
   let label: string | undefined;
@@ -271,6 +287,9 @@ export function SessionRowStatusIndicator({
   if (sendState === 'failed') {
     icon = <CircleAlert className="h-3 w-3 text-destructive" strokeWidth={2.25} />;
     label = sendLabel;
+  } else if (prMergePhase === 'failed') {
+    icon = <CircleAlert className="h-3 w-3 text-destructive" strokeWidth={2.25} />;
+    label = prMergeLabel;
   } else if (isWaitingPermission === true) {
     icon = <Hand className="h-3 w-3 text-primary" />;
   } else if (needsAttention === true && isWorking !== true) {
@@ -278,6 +297,9 @@ export function SessionRowStatusIndicator({
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
+  } else if (isWorking !== true && prMergePhase === 'merging') {
+    icon = <SessionSendProgressRing className="text-pr-merged" />;
+    label = prMergeLabel;
   } else if (isWorking === true || hasUnreadMessages === true) {
     // Working grid, the working → unread "done" transition, and the unread dot
     // are one component so it stays mounted across that change and can see it.
@@ -296,8 +318,10 @@ export function SessionRowStatusIndicator({
     <div
       data-session-row-indicator=""
       data-session-send-state={sendState ?? undefined}
+      data-session-pr-merge-phase={prMergePhase ?? undefined}
       role={label ? 'img' : undefined}
       aria-label={label}
+      title={label}
       className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
     >
       {icon}
@@ -312,10 +336,37 @@ function hasSessionRowStatus({
   isWorking,
   hasUnreadMessages,
   sendState,
-}: SessionRowStatusFlags & { needsAttention?: boolean }): boolean {
+  prMergePhase,
+}: SessionRowStatusFlags & {
+  needsAttention?: boolean;
+  prMergePhase?: Exclude<SessionPrMergePhase, 'merged'> | null;
+}): boolean {
   return Boolean(
-    isWaitingPermission || needsAttention || isWorking || hasUnreadMessages || sendState
+    isWaitingPermission ||
+    needsAttention ||
+    isWorking ||
+    hasUnreadMessages ||
+    sendState ||
+    prMergePhase
   );
+}
+
+function useSessionPrMergeLabel(status: SessionPrMergeStatus | null): string | undefined {
+  const { t } = useTranslation();
+  if (!status || status.phase === 'merged') return undefined;
+  if (status.phase === 'merging') {
+    return status.prNumber
+      ? t('sessions.prMergeStatus.mergingNumber', 'Merging PR #{{number}}…', {
+          number: status.prNumber,
+        })
+      : t('sessions.prMergeStatus.merging', 'Merging PR…');
+  }
+  const base = status.prNumber
+    ? t('sessions.prMergeStatus.failedNumber', 'Failed to merge PR #{{number}}', {
+        number: status.prNumber,
+      })
+    : t('sessions.prMergeStatus.failed', 'Failed to merge PR');
+  return status.error ? `${base}: ${status.error}` : base;
 }
 
 /**
@@ -826,8 +877,14 @@ export function SidebarRowEndSlot({
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
+  const prMergeStatus = useAtomValue(sessionPrMergeStatusAtomFamily(sessionId ?? ''));
   const shortcut = useSidebarRowShortcut(sessionId);
   const sendLabel = useSessionSendLabel(sendStatus);
+  const prMergeLabel = useSessionPrMergeLabel(prMergeStatus);
+  const activePrMergePhase =
+    prMergeStatus?.phase === 'merging' || prMergeStatus?.phase === 'failed'
+      ? prMergeStatus.phase
+      : null;
   const showStatus =
     !shortcut &&
     hasSessionRowStatus({
@@ -836,6 +893,7 @@ export function SidebarRowEndSlot({
       isWorking: drawWorking,
       hasUnreadMessages,
       sendState: sendStatus?.state,
+      prMergePhase: activePrMergePhase,
     });
   const restContent = shortcut ? (
     <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
@@ -848,7 +906,11 @@ export function SidebarRowEndSlot({
       sendState={sendStatus?.state}
       sendProgress={sendStatus && sendStatus.totalBytes > 0 ? sendStatus.progress : undefined}
       sendLabel={sendLabel}
+      prMergePhase={activePrMergePhase}
+      prMergeLabel={prMergeLabel}
     />
+  ) : prMergeStatus?.phase === 'merged' ? (
+    <SessionPrIcon compact prStatus="merged" />
   ) : (
     restIcon
   );

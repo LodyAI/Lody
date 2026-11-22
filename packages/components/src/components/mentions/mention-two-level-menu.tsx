@@ -11,6 +11,7 @@ import {
   File,
   GitPullRequest,
   MessageSquare,
+  ScrollText,
   Terminal,
   UserRoundCog,
 } from 'lucide-react';
@@ -205,7 +206,7 @@ const styles = stylex.create({
   },
   glyphHighlighted: { color: colors.secondaryLabel },
   glyphSvg: { display: 'block', flexShrink: 0, width: '16px', height: '16px' },
-  /** An emoji standing for a Role or a shortcut: text, sized like a glyph. */
+  /** An emoji standing for a Role: text, sized like a glyph. */
   emoji: { fontSize: text.subheadlineSize, lineHeight: 1 },
   text: {
     display: 'flex',
@@ -476,8 +477,9 @@ function CandidateIcon({
     case 'skill':
       return <Boxes className={className} strokeWidth={1.75} />;
     case 'command':
-    case 'prompt_shortcut':
       return <Terminal className={className} strokeWidth={1.75} />;
+    case 'prompt_shortcut':
+      return <ScrollText className={className} strokeWidth={1.75} />;
     case 'session':
       return <MessageSquare className={className} strokeWidth={1.75} />;
     case 'agent_role':
@@ -495,7 +497,12 @@ function CandidateIcon({
  */
 function carriesOwnMark(candidate: MentionCandidate, category: MentionCategory): boolean {
   return (
-    Boolean(candidate.iconEmoji) || candidate.icon === 'file' || candidate.icon !== category.icon
+    Boolean(candidate.iconEmoji) ||
+    candidate.icon === 'file' ||
+    // A saved Prompt keeps one fixed glyph on every row, so the `/` list reads
+    // the same whether it is browsed inside its category or merged with others.
+    candidate.icon === 'prompt_shortcut' ||
+    candidate.icon !== category.icon
   );
 }
 

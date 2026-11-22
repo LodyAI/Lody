@@ -34,7 +34,7 @@ import { useLatestRef } from '@/hooks/use-latest-ref';
 import { cn } from '@/lib/utils';
 import { CSS as DndCss } from '@dnd-kit/utilities';
 import { useTranslation } from 'react-i18next';
-import { Eye, EyeOff, FolderPlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, FolderPlus, MoreHorizontal, Pencil, SquarePen, Trash2 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { PIN_SECTION_NAME_MAX_LENGTH } from '@lody/shared';
@@ -93,6 +93,7 @@ export type SidebarPinSectionActions = {
   onCreateSection: (name: string, moveItemId?: string) => void | Promise<void>;
   onRenameSection: (sectionId: string, name: string) => void | Promise<void>;
   onDeleteSection: (sectionId: string) => void;
+  onNewChat?: (sectionId: string) => void;
 };
 
 type SharedListProps = Omit<
@@ -475,6 +476,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         visible: !isHidden(section),
       }))
     : [];
+  const onNewChat = listProps.isMobile ? undefined : actions?.onNewChat;
   const sectionMenuFor = (section: SidebarPinnedSection) => {
     if (!actions && !onSetSectionHidden) return null;
     const sectionId = section.id;
@@ -482,6 +484,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
       <PinSectionHeaderMenu
         label={t('sidebar.pinSections.sectionActions', 'Section actions')}
         revealOnHover={!listProps.isMobile}
+        onNewChat={onNewChat && sectionId !== null ? () => onNewChat(sectionId) : undefined}
         onNewSection={actions ? () => setNameDialog({ kind: 'create' }) : undefined}
         onHide={
           sectionId !== null && onSetSectionHidden
@@ -846,6 +849,7 @@ function withHeaderAction(menu: ReactNode, action: ReactNode): ReactNode {
 function PinSectionHeaderMenu({
   label,
   revealOnHover,
+  onNewChat,
   onNewSection,
   onHide,
   onRename,
@@ -856,6 +860,7 @@ function PinSectionHeaderMenu({
   label: string;
   /** Pointer surfaces show the ⋯ only while its header row is hovered, focused or open. */
   revealOnHover: boolean;
+  onNewChat?: () => void;
   /** Absent for viewers who cannot manage sections. */
   onNewSection?: () => void;
   onHide?: () => void;
@@ -887,6 +892,14 @@ function PinSectionHeaderMenu({
         />
       </span>
       <Menu.Content align="end" className="min-w-[160px]">
+        {onNewChat ? (
+          <>
+            <Menu.Item icon={SquarePen} onClick={onNewChat}>
+              {t('sidebar.pinSections.newChat', 'New Chat in This Section')}
+            </Menu.Item>
+            <Menu.Separator />
+          </>
+        ) : null}
         {onNewSection ? (
           <Menu.Item icon={FolderPlus} onClick={onNewSection}>
             {t('sidebar.pinSections.newSection', 'New Section…')}
