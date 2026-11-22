@@ -1,4 +1,5 @@
 import {
+  COORDINATOR_CARD_DISMISSED_ACTION_ID,
   COORDINATOR_CLIENT_COMMANDS,
   computeCoordinatorActionDedupKey,
   extractActionLinkedSessionIds,
@@ -58,6 +59,7 @@ export type ResolvedCoordinatorAction = {
 };
 
 export const COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID = '__custom_feedback__';
+export { COORDINATOR_CARD_DISMISSED_ACTION_ID };
 
 export type ResolvedCoordinatorProactiveCard = {
   readonly kind: CoordinatorCardKind;
@@ -67,6 +69,7 @@ export type ResolvedCoordinatorProactiveCard = {
   readonly actions: readonly ResolvedCoordinatorAction[];
   readonly chosenAction?: ResolvedCoordinatorAction;
   readonly customFeedbackSummary?: string;
+  readonly isDismissed?: boolean;
 };
 
 export type CoordinatorActionCommandContext = {
@@ -711,6 +714,7 @@ export function resolveCoordinatorProactiveCard(args: {
   }
 
   const customFeedback = resolutions[COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID];
+  const isDismissed = resolutions[COORDINATOR_CARD_DISMISSED_ACTION_ID]?.status === 'dismissed';
   if (resolvedActions.length === 0 && !customFeedback) return null;
 
   const chosenAction =
@@ -737,6 +741,7 @@ export function resolveCoordinatorProactiveCard(args: {
     chosenAction,
     customFeedbackSummary:
       customFeedback?.status === 'executed' ? customFeedback.summary : undefined,
+    isDismissed,
   };
 }
 
@@ -773,6 +778,7 @@ export function buildSupersededCoordinatorCardKeys(args: {
         const actions = normalizedCard ? normalizedCard.actions : legacyActions;
         const resolutions = normalizeCoordinatorActionResolutions(entry.actionResolutions);
         const alreadyChosen =
+          resolutions[COORDINATOR_CARD_DISMISSED_ACTION_ID]?.status === 'dismissed' ||
           Boolean(resolutions[COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID]?.status === 'executed') ||
           actions.some((act) => {
             const st = resolutions[act.id]?.status;

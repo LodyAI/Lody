@@ -20,6 +20,7 @@ import {
   MessageSquare,
   Play,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -595,18 +596,21 @@ export function CoordinatorProactiveCard({
   card,
   superseded = false,
   onExecuteAction,
+  onDismiss,
   onOpenTask,
   onOpenPr,
 }: {
   card: ResolvedCoordinatorProactiveCard;
   superseded?: boolean;
   onExecuteAction?: (action: CoordinatorActionSpec) => Promise<void> | void;
+  onDismiss?: () => Promise<void> | void;
   onOpenTask?: (sessionId: string) => void;
   onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
 }) {
   const { t } = useTranslation();
   const [inFlightId, setInFlightId] = useState<string | null>(null);
   const [optimisticChoice, setOptimisticChoice] = useState<OptimisticCardChoice | null>(null);
+  const [optimisticDismissed, setOptimisticDismissed] = useState(false);
   const [manualExpanded, setManualExpanded] = useState(false);
 
   const activeSummary = (() => {
@@ -645,14 +649,15 @@ export function CoordinatorProactiveCard({
     return null;
   })();
 
-  const shouldHideAsSuperseded = superseded && activeSummary === null;
-  const [mountedVisible, setMountedVisible] = useState(() => !shouldHideAsSuperseded);
+  const isCardDismissed = Boolean(card.isDismissed || optimisticDismissed);
+  const shouldHideCard = isCardDismissed || (superseded && activeSummary === null);
+  const [mountedVisible, setMountedVisible] = useState(() => !shouldHideCard);
 
   useEffect(() => {
-    if (!shouldHideAsSuperseded) {
+    if (!shouldHideCard) {
       setMountedVisible(true);
     }
-  }, [shouldHideAsSuperseded]);
+  }, [shouldHideCard]);
 
   useEffect(() => {
     if (
@@ -664,7 +669,7 @@ export function CoordinatorProactiveCard({
     }
   }, [card.chosenAction, optimisticChoice]);
 
-  if (shouldHideAsSuperseded && !mountedVisible) {
+  if (shouldHideCard && !mountedVisible) {
     return null;
   }
 
@@ -700,18 +705,23 @@ export function CoordinatorProactiveCard({
       });
   };
 
+  const handleDismissClick = () => {
+    setOptimisticDismissed(true);
+    void onDismiss?.();
+  };
+
   return (
     <div
-      aria-hidden={shouldHideAsSuperseded}
-      inert={shouldHideAsSuperseded}
+      aria-hidden={shouldHideCard}
+      inert={shouldHideCard}
       onTransitionEnd={(event) => {
-        if (shouldHideAsSuperseded && event.target === event.currentTarget) {
+        if (shouldHideCard && event.target === event.currentTarget) {
           setMountedVisible(false);
         }
       }}
       {...stylex.props(
         styles.outerPresenceGrid,
-        shouldHideAsSuperseded && styles.outerPresenceHidden
+        shouldHideCard && styles.outerPresenceHidden
       )}
     >
       <div {...stylex.props(styles.collapseInner)}>
@@ -719,11 +729,12 @@ export function CoordinatorProactiveCard({
           {...stylex.props(
             styles.card,
             isCollapsed && styles.cardCollapsed,
-            shouldHideAsSuperseded && styles.cardSuperseded
+            shouldHideCard && styles.cardSuperseded
           )}
           data-coordinator-proactive-card=""
           data-coordinator-card-collapsed={isCollapsed ? '' : undefined}
-          data-coordinator-card-superseded={shouldHideAsSuperseded ? '' : undefined}
+          data-coordinator-card-superseded={shouldHideCard ? '' : undefined}
+          data-coordinator-card-dismissed={isCardDismissed ? '' : undefined}
         >
           <div
             aria-hidden={!isCollapsed}
@@ -903,6 +914,20 @@ export function CoordinatorProactiveCard({
                       {...stylex.props(styles.expandToggleBtn)}
                     >
                       <ChevronUp size={14} aria-hidden="true" />
+                    </button>
+                  ) : onDismiss ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDismissClick();
+                      }}
+                      title={t('projectMode.card.dismiss', 'Dismiss')}
+                      aria-label={t('projectMode.card.dismiss', 'Dismiss')}
+                      data-coordinator-card-dismiss=""
+                      {...stylex.props(styles.expandToggleBtn)}
+                    >
+                      <X size={14} aria-hidden="true" />
                     </button>
                   ) : null}
                 </div>

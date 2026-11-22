@@ -7022,6 +7022,7 @@
   "projectMode.card.statusFeedbackSent": "已反馈",
   "projectMode.card.expandDetails": "展开卡片详情",
   "projectMode.card.collapseDetails": "收起卡片",
+  "projectMode.card.dismiss": "忽略",
   "projectMode.childAttention.permissionBadge": "权限申请",
   "projectMode.childAttention.questionBadge": "子对话提问",
   "projectMode.childAttention.awaitingReplyBadge": "等待回复",

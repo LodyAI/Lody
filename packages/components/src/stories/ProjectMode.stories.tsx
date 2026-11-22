@@ -623,6 +623,7 @@ function CoordinatorPage({
             onOpenThread: openThread,
             onExecuteBubbleAction: () => {},
             onSubmitCardFeedback: () => true,
+            onDismissBubbleCard: () => {},
             previewChildAttention: [
               {
                 sessionId: 'permission' as SessionId,

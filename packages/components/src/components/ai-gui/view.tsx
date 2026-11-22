@@ -313,6 +313,7 @@ import { seedCoordinatorAvatarStreamSnapshot } from '@/components/project-mode/c
 import { CoordinatorBubbleAvatar } from '@/components/project-mode/coordinator-bubble-avatar';
 import { CoordinatorChildAttentionCards } from '@/components/project-mode/coordinator-child-attention-cards';
 import {
+  COORDINATOR_CARD_DISMISSED_ACTION_ID,
   buildLatestCoordinatorBubbleByTaskId,
   buildSupersededCoordinatorCardKeys,
   formatCoordinatorBubbleKey,
@@ -6633,7 +6634,11 @@ const AssistantChatItem = memo(function AssistantChatItem({
   const supersededCoordinatorCards = useContext(CoordinatorSupersededCardsContext);
   const isSupersededCoordinatorCard =
     content.kind === 'coordinator_card' &&
-    Boolean(supersededCoordinatorCards?.has(formatCoordinatorBubbleKey(message.id, content.entry.id)));
+    (Boolean(
+      supersededCoordinatorCards?.has(formatCoordinatorBubbleKey(message.id, content.entry.id))
+    ) ||
+      content.entry.actionResolutions?.[COORDINATOR_CARD_DISMISSED_ACTION_ID]?.status ===
+        'dismissed');
 
   const turnSiblingGap = conversationSurface.proseRow;
   const cardSiblingGap = conversationSurface.surfaceRow;
@@ -7126,6 +7131,15 @@ function CoordinatorProactiveCardRow({
         superseded={isSuperseded}
         onOpenTask={coordinator?.openTask}
         onOpenPr={coordinator?.openPr}
+        onDismiss={
+          coordinator?.onDismissBubbleCard
+            ? () =>
+                coordinator.onDismissBubbleCard!({
+                  turnId: messageId,
+                  bubbleId: entry.id,
+                })
+            : undefined
+        }
         onExecuteAction={
           coordinator?.onExecuteBubbleAction
             ? (action) =>

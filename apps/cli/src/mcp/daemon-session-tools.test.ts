@@ -13,6 +13,7 @@ import { LoroRepo } from 'loro-repo';
 import { makePromiseRepoNetwork } from '@/lib/loro/promise-repo-network.test-support';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  COORDINATOR_CARD_DISMISSED_ACTION_ID,
   getSessionRoomId,
   getMachineFlockDocId,
   getMachineRoomId,
@@ -3124,5 +3125,39 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(implicitCardHeader).toContain('<related_card_context');
     expect(implicitCardHeader).toContain('排查已完成，下一步如何推进？');
     expect(implicitCardHeader).toContain('child-ios-fix');
+
+    const cardItem = storedAfterCard.turn.items[2] as { id: string };
+    const dismissRes = await backend.applyHistoryAction({
+      kind: 'coordinator-action-resolved',
+      turnId: 'assistant:user-reply-turn',
+      bubbleId: cardItem.id,
+      actionId: COORDINATOR_CARD_DISMISSED_ACTION_ID,
+      resolution: {
+        status: 'dismissed',
+        resolvedAt: 1_700_000_007_000,
+      },
+    });
+    expect(dismissRes.matched).toBe(true);
+
+    await backend.appendHistoryTurn({
+      id: 'user-after-card-dismiss',
+      role: 'user',
+      timestamp: new Date(1_700_000_008_000).toISOString(),
+      inputConfig: {
+        prompt: '另外帮忙开一个新任务整理发布说明',
+        inputBlocks: [{ type: 'text', text: '另外帮忙开一个新任务整理发布说明' }],
+        cliType: 'builtin',
+        agentType: 'claude',
+      },
+      items: [{ type: 'text', text: '另外帮忙开一个新任务整理发布说明' }],
+    });
+
+    const headerAfterDismiss = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-after-card-dismiss',
+      isCoordinator: true,
+    });
+    expect(headerAfterDismiss).toBeUndefined();
   });
 });

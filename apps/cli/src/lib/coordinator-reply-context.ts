@@ -1,4 +1,5 @@
 import {
+  COORDINATOR_CARD_DISMISSED_ACTION_ID,
   COORDINATOR_LINKED_SESSIONS_MAX_COUNT,
   createCoordinatorReplyRef,
   extractActionLinkedSessionIds,
@@ -262,10 +263,12 @@ async function resolveImplicitRelatedCardHeader(args: {
         const card = normalizeCoordinatorProactiveCard(item.card);
         if (!card) continue;
         const resolutions = normalizeCoordinatorActionResolutions(item.actionResolutions);
-        const alreadyHandled = card.actions.some((act) => {
-          const st = resolutions[act.id]?.status;
-          return st === 'executed' || st === 'dismissed';
-        });
+        const alreadyHandled =
+          resolutions[COORDINATOR_CARD_DISMISSED_ACTION_ID]?.status === 'dismissed' ||
+          card.actions.some((act) => {
+            const st = resolutions[act.id]?.status;
+            return st === 'executed' || st === 'dismissed';
+          });
         if (alreadyHandled) continue;
 
         const bubbleId = String(item.id ?? '');

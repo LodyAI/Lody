@@ -18,6 +18,7 @@ import {
   filterThreadStreamItems,
 } from '../src/components/project-mode/coordinator-thread-model';
 import {
+  COORDINATOR_CARD_DISMISSED_ACTION_ID,
   COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID,
   buildLatestCoordinatorBubbleByTaskId,
   buildSupersededCoordinatorCardKeys,
@@ -1109,6 +1110,33 @@ describe('coordinator conversation bubbles and search', () => {
     expect(
       supersededKeys.has(formatCoordinatorBubbleKey('assistant:card-turn', 'b-with-card'))
     ).toBe(false);
+
+    const dismissedCardResolved = resolveCoordinatorProactiveCard({
+      entry: {
+        type: 'coordinator_message',
+        id: 'b-dismissed',
+        body: '可创建 PR 或安排审查',
+        card: {
+          title: '下一步建议',
+          actions: [
+            {
+              id: 'act-1',
+              label: '创建 PR',
+              intent: { kind: 'coordinator_prompt', prompt: '创建 PR', mode: 'send' },
+            },
+          ],
+        },
+        actionResolutions: {
+          [COORDINATOR_CARD_DISMISSED_ACTION_ID]: {
+            status: 'dismissed',
+            resolvedAt: 1000,
+          },
+        },
+      },
+      tasksById: tasksMap,
+      translate: (_key, fallback) => fallback,
+    });
+    expect(dismissedCardResolved?.isDismissed).toBe(true);
   });
 
   it('selects coordinator avatar moods from message content and restricts Lottie playback to one-shot live arrivals', () => {

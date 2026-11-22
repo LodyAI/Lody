@@ -78,6 +78,7 @@ import { ProjectBoardPrMenu } from './project-board-pr-menu';
 import {
   useCoordinatorActionExecutor,
   type CoordinatorBubbleActionExecutionRequest,
+  type CoordinatorCardDismissRequest,
 } from './use-coordinator-action-executor';
 
 const STATE_LABELS: Record<ProjectBoardBucket, [key: string, fallback: string]> = {
@@ -247,6 +248,7 @@ export interface CoordinatorThreadPanelProps {
   preferredMergeMethod?: GitHubMergeMethod;
   supportedActionCommands?: ReadonlySet<string>;
   onExecuteBubbleAction?: (req: CoordinatorBubbleActionExecutionRequest) => Promise<void> | void;
+  onDismissBubbleCard?: (req: CoordinatorCardDismissRequest) => Promise<void> | void;
   prefillBridgeRef?: React.MutableRefObject<
     ((prompt: string, replyTo: CoordinatorReplyRef) => void) | null
   >;
@@ -272,6 +274,7 @@ export function CoordinatorThreadPanel({
   preferredMergeMethod,
   supportedActionCommands,
   onExecuteBubbleAction,
+  onDismissBubbleCard,
   prefillBridgeRef,
   agentActivityLabel = null,
   agentActivityTone = 'primary',
@@ -601,10 +604,12 @@ export function CoordinatorThreadPanel({
       preferredMergeMethod,
       supportedActionCommands,
       onExecuteBubbleAction,
+      onDismissBubbleCard,
     }),
     [
       canonicalRootId,
       handleReplyInsideThread,
+      onDismissBubbleCard,
       onExecuteBubbleAction,
       onOpenExternalLink,
       onOpenTask,
@@ -750,7 +755,11 @@ export function ConnectedCoordinatorThreadPanel({
   ...rest
 }: Omit<
   CoordinatorThreadPanelProps,
-  'tasks' | 'preferredMergeMethod' | 'supportedActionCommands' | 'onExecuteBubbleAction'
+  | 'tasks'
+  | 'preferredMergeMethod'
+  | 'supportedActionCommands'
+  | 'onExecuteBubbleAction'
+  | 'onDismissBubbleCard'
 > & {
   project: CoordinatorProjectKey | null;
   onPrefillChildSession?: (sessionId: SessionId, prompt: string) => void;
@@ -773,7 +782,7 @@ export function ConnectedCoordinatorThreadPanel({
     },
     []
   );
-  const { executeBubbleAction, supportedCommands, preferredMergeMethod } =
+  const { executeBubbleAction, dismissCard, supportedCommands, preferredMergeMethod } =
     useCoordinatorActionExecutor({
       coordinatorSessionId,
       tasks,
@@ -797,6 +806,7 @@ export function ConnectedCoordinatorThreadPanel({
       preferredMergeMethod={preferredMergeMethod}
       supportedActionCommands={supportedCommands}
       onExecuteBubbleAction={executeBubbleAction}
+      onDismissBubbleCard={dismissCard}
       prefillBridgeRef={prefillBridgeRef}
       {...rest}
     />

@@ -39,6 +39,7 @@ import {
 import { openExternalUrl } from '@/lib/native-browser';
 import { toast } from '@/lib/toast';
 import {
+  COORDINATOR_CARD_DISMISSED_ACTION_ID,
   COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID,
   createCoordinatorActionCommandRegistry,
   type CoordinatorActionCommandContext,
@@ -64,6 +65,11 @@ export type CoordinatorCardFeedbackRequest = {
   readonly bubbleReplyTo?: CoordinatorReplyRef;
   readonly activeThreadRootId?: string | null;
   readonly feedback: string;
+};
+
+export type CoordinatorCardDismissRequest = {
+  readonly turnId: string;
+  readonly bubbleId: string;
 };
 
 function readParamString(
@@ -106,6 +112,7 @@ export function useCoordinatorActionExecutor(options: {
 }): {
   executeBubbleAction: (req: CoordinatorBubbleActionExecutionRequest) => Promise<void>;
   submitCardFeedback: (req: CoordinatorCardFeedbackRequest) => Promise<boolean>;
+  dismissCard: (req: CoordinatorCardDismissRequest) => Promise<void>;
   supportedCommands: ReadonlySet<string>;
   preferredMergeMethod: GitHubMergeMethod;
 } {
@@ -520,9 +527,20 @@ export function useCoordinatorActionExecutor(options: {
     [onSendCoordinatorPrompt, persistActionResolution]
   );
 
+  const dismissCard = useCallback(
+    async (req: CoordinatorCardDismissRequest): Promise<void> => {
+      await persistActionResolution(req.turnId, req.bubbleId, COORDINATOR_CARD_DISMISSED_ACTION_ID, {
+        status: 'dismissed',
+        resolvedAt: getServerNow(),
+      });
+    },
+    [persistActionResolution]
+  );
+
   return {
     executeBubbleAction,
     submitCardFeedback,
+    dismissCard,
     supportedCommands,
     preferredMergeMethod,
   };

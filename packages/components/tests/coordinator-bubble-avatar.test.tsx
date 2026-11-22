@@ -15,6 +15,8 @@ import {
   CoordinatorBubbleAvatar,
   loadCoordinatorAvatarMoodData,
 } from '../src/components/project-mode/coordinator-bubble-avatar';
+import { CoordinatorProactiveCard } from '../src/components/project-mode/coordinator-action-bar';
+import { initI18n } from '../src/i18n';
 import {
   mountCoordinatorLottieOnce,
   type CoordinatorLottieData,
@@ -160,5 +162,68 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
     const remounted = container!.querySelector('[data-coordinator-bubble-avatar]');
     expect(remounted?.getAttribute('data-avatar-state')).toBe('idle');
     expect(remounted?.querySelector('svg')).toBeNull();
+  });
+
+  it('dismisses a proactive action card on click and omits already-dismissed cards on mount', async () => {
+    await initI18n('zh_CN');
+    let dismissedCount = 0;
+    const sampleCard = {
+      kind: 'next_step' as const,
+      title: '10 种 Lottie 头像可离线试玩',
+      summary: '水母是默认角色，可安排审核员预览或导出。',
+      linkedTasks: [],
+      actions: [
+        {
+          spec: {
+            id: 'act-preview',
+            label: '检查小尺寸效果',
+            tone: 'primary' as const,
+            intent: { kind: 'coordinator_prompt' as const, prompt: '检查小尺寸效果', mode: 'send' as const },
+          },
+          dedupKey: 'act-preview',
+          liveState: 'ready' as const,
+          displayLabel: '检查小尺寸效果',
+        },
+      ],
+    };
+
+    await act(async () => {
+      root!.render(
+        React.createElement(CoordinatorProactiveCard, {
+          card: sampleCard,
+          onExecuteAction: () => undefined,
+          onDismiss: () => {
+            dismissedCount += 1;
+          },
+        })
+      );
+    });
+
+    const dismissBtn = container!.querySelector<HTMLButtonElement>('[data-coordinator-card-dismiss]');
+    expect(dismissBtn).not.toBeNull();
+
+    await act(async () => {
+      dismissBtn!.click();
+    });
+
+    expect(dismissedCount).toBe(1);
+    const cardEl = container!.querySelector('[data-coordinator-proactive-card]');
+    expect(cardEl?.hasAttribute('data-coordinator-card-dismissed')).toBe(true);
+
+    await act(async () => {
+      root!.unmount();
+    });
+    root = createRoot(container!);
+    await act(async () => {
+      root!.render(
+        React.createElement(CoordinatorProactiveCard, {
+          card: { ...sampleCard, isDismissed: true },
+          onExecuteAction: () => undefined,
+          onDismiss: () => undefined,
+        })
+      );
+    });
+
+    expect(container!.querySelector('[data-coordinator-proactive-card]')).toBeNull();
   });
 });

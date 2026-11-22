@@ -22,6 +22,7 @@ import type {
 import {
   useCoordinatorActionExecutor,
   type CoordinatorBubbleActionExecutionRequest,
+  type CoordinatorCardDismissRequest,
   type CoordinatorCardFeedbackRequest,
 } from './use-coordinator-action-executor';
 import type { CoordinatorPreviewChildAttentionItem } from './coordinator-child-attention-cards';
@@ -48,6 +49,7 @@ type CoordinatorConversationValue = {
   supportedActionCommands?: ReadonlySet<string>;
   onExecuteBubbleAction?: (req: CoordinatorBubbleActionExecutionRequest) => Promise<void> | void;
   onSubmitCardFeedback?: (req: CoordinatorCardFeedbackRequest) => Promise<boolean> | boolean;
+  onDismissBubbleCard?: (req: CoordinatorCardDismissRequest) => Promise<void> | void;
   previewChildAttention?: readonly CoordinatorPreviewChildAttentionItem[];
 };
 
@@ -94,17 +96,22 @@ export function CoordinatorConversationProvider({
   children: ReactNode;
 }) {
   const tasks = useCoordinatorTasksData(coordinatorSessionId, project);
-  const { executeBubbleAction, submitCardFeedback, supportedCommands, preferredMergeMethod } =
-    useCoordinatorActionExecutor({
-      coordinatorSessionId: coordinatorSessionId as SessionId,
-      tasks,
-      onOpenTask,
-      onOpenPr: onOpenPr ?? noopVoid,
-      onOpenExternalLink,
-      onSendCoordinatorPrompt: onSendCoordinatorPrompt ?? noopAsyncFalse,
-      onPrefillCoordinatorPrompt: onPrefillCoordinatorPrompt ?? noopVoid,
-      onPrefillChildSession: onPrefillChildSession ?? noopVoid,
-    });
+  const {
+    executeBubbleAction,
+    submitCardFeedback,
+    dismissCard,
+    supportedCommands,
+    preferredMergeMethod,
+  } = useCoordinatorActionExecutor({
+    coordinatorSessionId: coordinatorSessionId as SessionId,
+    tasks,
+    onOpenTask,
+    onOpenPr: onOpenPr ?? noopVoid,
+    onOpenExternalLink,
+    onSendCoordinatorPrompt: onSendCoordinatorPrompt ?? noopAsyncFalse,
+    onPrefillCoordinatorPrompt: onPrefillCoordinatorPrompt ?? noopVoid,
+    onPrefillChildSession: onPrefillChildSession ?? noopVoid,
+  });
   const value = useMemo<CoordinatorConversationValue>(
     () => ({
       tasks,
@@ -119,9 +126,11 @@ export function CoordinatorConversationProvider({
       supportedActionCommands: supportedCommands,
       onExecuteBubbleAction: executeBubbleAction,
       onSubmitCardFeedback: submitCardFeedback,
+      onDismissBubbleCard: dismissCard,
     }),
     [
       activeThreadRootId,
+      dismissCard,
       executeBubbleAction,
       onOpenExternalLink,
       onOpenPr,

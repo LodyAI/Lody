@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import coordinatorIdleAvatarUrl from '@/assets/coordinator-avatar/idle.png';
+import coordinatorIdleAvatarUrl from '../../assets/coordinator-avatar/idle.png';
 import {
   claimCoordinatorBubbleAvatarPlayback,
   inferCoordinatorBubbleMood,
@@ -26,19 +26,19 @@ export async function loadCoordinatorAvatarMoodData(
   let loaded: unknown;
   switch (mood) {
     case 'thinking':
-      loaded = await import('@/assets/coordinator-avatar/thinking.json');
+      loaded = await import('../../assets/coordinator-avatar/thinking.json');
       break;
     case 'happy':
-      loaded = await import('@/assets/coordinator-avatar/happy.json');
+      loaded = await import('../../assets/coordinator-avatar/happy.json');
       break;
     case 'confused':
-      loaded = await import('@/assets/coordinator-avatar/confused.json');
+      loaded = await import('../../assets/coordinator-avatar/confused.json');
       break;
     case 'sad':
-      loaded = await import('@/assets/coordinator-avatar/sad.json');
+      loaded = await import('../../assets/coordinator-avatar/sad.json');
       break;
     case 'angry':
-      loaded = await import('@/assets/coordinator-avatar/angry.json');
+      loaded = await import('../../assets/coordinator-avatar/angry.json');
       break;
   }
   const resolved =

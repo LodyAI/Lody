@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     /* Bundler mode */
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "moduleDetection": "force",
     "noEmit": true,
@@ -40,6 +41,7 @@
       "@/hooks/*": ["../../packages/components/src/hooks/*"],
       "@/atoms": ["../../packages/components/src/atoms"],
       "@/atoms/*": ["../../packages/components/src/atoms/*"],
+      "@/assets/*": ["../../packages/components/src/assets/*"],
       "@/i18n": ["../../packages/components/src/i18n"],
       "@/theme-provider": ["../../packages/components/src/theme-provider"]
     }

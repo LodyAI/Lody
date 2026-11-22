@@ -187,6 +187,26 @@ const styles = stylex.create({
     cursor: 'pointer',
     flexShrink: 0,
   },
+  topRight: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+  },
+  dismissIconBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: radius.small,
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    color: colors.tertiaryLabel,
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
 
   headingBlock: {
     display: 'flex',
@@ -444,6 +464,7 @@ function PermissionCardContent({
   permission,
   isReady,
   onOpenTask,
+  onDismiss,
   onSelectOption,
   onRejectWithFeedback,
 }: {
@@ -453,6 +474,7 @@ function PermissionCardContent({
   permission: PermissionRequest;
   isReady: boolean;
   onOpenTask?: () => void;
+  onDismiss?: () => void;
   onSelectOption: (optionId: string) => Promise<void>;
   onRejectWithFeedback?: (dismissOptionId: string | null, feedback: string) => Promise<void>;
 }) {
@@ -539,11 +561,27 @@ function PermissionCardContent({
             <span {...stylex.props(styles.taskTitle)}>{taskTitle}</span>
           </button>
         </div>
-        {onOpenTask ? (
-          <button type="button" onClick={onOpenTask} {...stylex.props(styles.openLinkBtn)}>
-            <span>{t('projectMode.childAttention.openChild', 'Open task')}</span>
-            <ExternalLink size={11} aria-hidden="true" />
-          </button>
+        {onOpenTask || onDismiss ? (
+          <div {...stylex.props(styles.topRight)}>
+            {onOpenTask ? (
+              <button type="button" onClick={onOpenTask} {...stylex.props(styles.openLinkBtn)}>
+                <span>{t('projectMode.childAttention.openChild', 'Open task')}</span>
+                <ExternalLink size={11} aria-hidden="true" />
+              </button>
+            ) : null}
+            {onDismiss ? (
+              <button
+                type="button"
+                onClick={onDismiss}
+                title={t('projectMode.card.dismiss', 'Dismiss')}
+                aria-label={t('projectMode.card.dismiss', 'Dismiss')}
+                data-coordinator-card-dismiss=""
+                {...stylex.props(styles.dismissIconBtn)}
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -711,6 +749,7 @@ function LiveChildAttentionCard({
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
 
   const pendingPermissions = useMemo(
     () => findPendingChildPermissions(availableTurns),
@@ -724,6 +763,15 @@ function LiveChildAttentionCard({
         : null,
     [activePermission, availableTurns, row.session.awaitingUserSince]
   );
+  const activeAttentionKey = activePermission
+    ? `perm:${activePermission.turnId}:${activePermission.permission.requestId}`
+    : awaitingTextExcerpt
+      ? `await:${String(row.session.awaitingUserSince)}`
+      : null;
+
+  if (activeAttentionKey && dismissedKey === activeAttentionKey) {
+    return null;
+  }
 
   const taskTitle =
     row.session.title?.trim() || t('sessions.untitled', 'Untitled session');
@@ -792,14 +840,26 @@ function LiveChildAttentionCard({
               <span {...stylex.props(styles.taskTitle)}>{taskTitle}</span>
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => onOpenTask(childSessionId)}
-            {...stylex.props(styles.openLinkBtn)}
-          >
-            <span>{t('projectMode.childAttention.openChild', 'Open task')}</span>
-            <ExternalLink size={11} aria-hidden="true" />
-          </button>
+          <div {...stylex.props(styles.topRight)}>
+            <button
+              type="button"
+              onClick={() => onOpenTask(childSessionId)}
+              {...stylex.props(styles.openLinkBtn)}
+            >
+              <span>{t('projectMode.childAttention.openChild', 'Open task')}</span>
+              <ExternalLink size={11} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissedKey(activeAttentionKey)}
+              title={t('projectMode.card.dismiss', 'Dismiss')}
+              aria-label={t('projectMode.card.dismiss', 'Dismiss')}
+              data-coordinator-card-dismiss=""
+              {...stylex.props(styles.dismissIconBtn)}
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
         </div>
         <AskUserQuestionCard
           meta={meta}
@@ -857,6 +917,7 @@ function LiveChildAttentionCard({
         permission={activePermission.permission}
         isReady={isReady}
         onOpenTask={() => onOpenTask(childSessionId)}
+        onDismiss={() => setDismissedKey(activeAttentionKey)}
         onSelectOption={(optionId) =>
           respondToPermission(
             childSessionId,
@@ -899,14 +960,26 @@ function LiveChildAttentionCard({
               <span {...stylex.props(styles.taskTitle)}>{taskTitle}</span>
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => onOpenTask(childSessionId)}
-            {...stylex.props(styles.openLinkBtn)}
-          >
-            <span>{t('projectMode.childAttention.openChild', 'Open task')}</span>
-            <ExternalLink size={11} aria-hidden="true" />
-          </button>
+          <div {...stylex.props(styles.topRight)}>
+            <button
+              type="button"
+              onClick={() => onOpenTask(childSessionId)}
+              {...stylex.props(styles.openLinkBtn)}
+            >
+              <span>{t('projectMode.childAttention.openChild', 'Open task')}</span>
+              <ExternalLink size={11} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissedKey(activeAttentionKey)}
+              title={t('projectMode.card.dismiss', 'Dismiss')}
+              aria-label={t('projectMode.card.dismiss', 'Dismiss')}
+              data-coordinator-card-dismiss=""
+              {...stylex.props(styles.dismissIconBtn)}
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
         </div>
         <p {...stylex.props(styles.questionExcerpt)}>{awaitingTextExcerpt}</p>
         <div {...stylex.props(styles.composerRow)}>
