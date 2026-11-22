@@ -4,12 +4,14 @@ import type {
   CodeCollabOpenDiffManifestRequest,
   CodeCollabOpenDiffManifestResponse,
   CodeCollabReadBlobRequest,
-  CodeCollabReadBlobResponse} from '@lody/shared';
+  CodeCollabReadBlobResponse,
+} from '@lody/shared';
 import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
   MemoryProviderRequest,
   MemoryProviderResponse,
-  ProjectProbeLocalMemberResult} from '@lody/shared';
+  ProjectProbeLocalMemberResult,
+} from '@lody/shared';
 import type { PendingSessionSends } from '../lib/session-pending-sends';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -81,8 +83,12 @@ import type {
   CodeCollabV2SaveTextRequest,
   CodeCollabV2SaveTextResponse,
   FilePreviewV3Request,
-  FilePreviewV3Response} from '@lody/shared';
-import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
+  FilePreviewV3Response,
+} from '@lody/shared';
+import type {
+  LocalProjectGitStateRpcResponse,
+  LocalProjectListBranchesRpcResponse,
+} from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
 import type { CodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { readStoredAuthToken } from '@/lib/auth-bootstrap';
@@ -601,6 +607,12 @@ export type WorkspaceRuntime = {
     requestedByUserId: string,
     options?: { timeoutMs?: number }
   ) => Promise<LocalProjectGitStateRpcResponse | null>;
+  requestLocalProjectBranches: (
+    machineId: MachineId,
+    localProjectId: LocalProjectId,
+    requestedByUserId: string,
+    options?: { query?: string; limit?: number; cursor?: string; timeoutMs?: number }
+  ) => Promise<LocalProjectListBranchesRpcResponse | null>;
   /** Read-only `.gitmodules` probe of one local project, for the Project group editor. */
   requestProjectProbeLocalMember: (
     machineId: MachineId,

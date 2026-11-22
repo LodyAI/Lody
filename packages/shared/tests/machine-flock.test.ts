@@ -257,6 +257,39 @@ describe('machine Flock helpers', () => {
     expect(projects['b' as LocalProjectId]?.githubRepoFullName).toBeUndefined();
   });
 
+  it('normalizes lightweight Git summary fields on localProject rows', () => {
+    const flock = new FakeMachineFlock();
+    flock.set(machineFlockKeys.localProject('git-proj' as LocalProjectId), {
+      id: 'git-proj',
+      name: 'git-proj',
+      rootPath: '/Users/developer/Code/git-proj',
+      createdAtMs: 1,
+      git: true,
+      defaultBranch: 'lody:branch:local:main',
+      currentBranch: 'feat/sync',
+    });
+    flock.set(machineFlockKeys.localProject('empty-git' as LocalProjectId), {
+      id: 'empty-git',
+      name: 'empty-git',
+      rootPath: '/Users/developer/Code/empty-git',
+      createdAtMs: 2,
+      git: true,
+      defaultBranch: null,
+      currentBranch: '   ',
+    });
+    const projects = getMachineFlockLocalProjects(readMachineFlockRowsFromFlock(flock));
+    expect(projects['git-proj' as LocalProjectId]).toMatchObject({
+      git: true,
+      defaultBranch: 'lody:branch:local:main',
+      currentBranch: 'feat/sync',
+    });
+    expect(projects['empty-git' as LocalProjectId]).toMatchObject({
+      git: true,
+      defaultBranch: null,
+    });
+    expect(projects['empty-git' as LocalProjectId]?.currentBranch).toBeUndefined();
+  });
+
   it('extracts ACP capability rows independently for configs sharing a provider', () => {
     const configId = 'config-1' as AgentConfigId;
     const secondConfigId = 'config-2' as AgentConfigId;

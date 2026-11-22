@@ -165,12 +165,36 @@ function isLocalProjectGitState(value) {
     (value.currentBranch === null || typeof value.currentBranch === 'string') &&
     (value.defaultBranch === null || typeof value.defaultBranch === 'string') &&
     (value.githubRepoFullName === null || typeof value.githubRepoFullName === 'string') &&
-    isObjectRecord(value.workingTree) &&
-    typeof value.workingTree.clean === 'boolean' &&
-    typeof value.workingTree.staged === 'boolean' &&
-    typeof value.workingTree.unstaged === 'boolean' &&
-    typeof value.workingTree.untracked === 'boolean' &&
-    typeof value.workingTree.conflicted === 'boolean'
+    (value.workingTree === undefined ||
+      (isObjectRecord(value.workingTree) &&
+        typeof value.workingTree.clean === 'boolean' &&
+        typeof value.workingTree.staged === 'boolean' &&
+        typeof value.workingTree.unstaged === 'boolean' &&
+        typeof value.workingTree.untracked === 'boolean' &&
+        typeof value.workingTree.conflicted === 'boolean'))
+  );
+}
+
+function isLocalProjectBranchListResult(value) {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  if (value.git === false) {
+    return true;
+  }
+
+  return (
+    value.git === true &&
+    (value.currentBranch === null || typeof value.currentBranch === 'string') &&
+    (value.defaultBranch === null || typeof value.defaultBranch === 'string') &&
+    isStringArray(value.pinnedBranches) &&
+    isStringArray(value.branches) &&
+    typeof value.truncated === 'boolean' &&
+    (value.nextCursor === undefined || typeof value.nextCursor === 'string') &&
+    typeof value.totalCount === 'number' &&
+    Number.isInteger(value.totalCount) &&
+    value.totalCount >= 0
   );
 }
 
@@ -347,6 +371,17 @@ function isLocalProjectControlRequest(value) {
 
   if (value.type === 'local-project/git-state') {
     return typeof value.workspaceId === 'string' && typeof value.localProjectId === 'string';
+  }
+
+  if (value.type === 'local-project/list-branches') {
+    return (
+      typeof value.workspaceId === 'string' &&
+      typeof value.localProjectId === 'string' &&
+      isOptionalString(value.query) &&
+      isOptionalInteger(value.limit) &&
+      isOptionalString(value.cursor) &&
+      isOptionalString(value.requestedByUserId)
+    );
   }
 
   if (value.type === 'local-project/list-files') {
@@ -590,6 +625,10 @@ function isLocalProjectControlResponse(value) {
 
   if (value.type === 'local-project/git-state') {
     return isLocalProjectGitState(value.result);
+  }
+
+  if (value.type === 'local-project/list-branches') {
+    return isLocalProjectBranchListResult(value.result);
   }
 
   if (value.type === 'local-project/checkout-branch') {

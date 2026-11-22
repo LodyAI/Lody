@@ -257,6 +257,7 @@ describe('MessageHandler machine registration', () => {
         iosSimulatorShutdown: 1,
         localProjectRemoval: 1,
         localProjectCreateDirectory: 1,
+        localProjectBranchListing: 1,
         localProjectHistoryProvider: 1,
         localFileResources: 1,
         fileDownload: 1,

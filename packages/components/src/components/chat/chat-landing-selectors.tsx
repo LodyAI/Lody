@@ -171,15 +171,12 @@ export interface BranchSelectorProps {
   loadingText?: string;
   className?: string;
   contentClassName?: string;
-  /**
-   * The options are one partial listing of the repository: keep search visible
-   * however few are loaded, and report queries and list-end scrolls so the
-   * owner can fetch the rest.
-   */
   hasMore?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onSearchQueryChange?: (query: string) => void;
+  remoteSearchable?: boolean;
+  disableClientFilter?: boolean;
   onReachEnd?: () => void;
-  /** Status row under the options while more of them load. */
   footer?: ReactNode;
 }
 
@@ -199,27 +196,33 @@ export function BranchSelector({
   className,
   contentClassName,
   hasMore = false,
+  onOpenChange,
   onSearchQueryChange,
+  remoteSearchable = false,
+  disableClientFilter = false,
   onReachEnd,
   footer,
 }: BranchSelectorProps) {
+  const showTriggerLoading = loading && options.length === 0 && !value;
   return (
     <OptionSelector
       value={value}
       onSelect={(option) => onChange(option.value)}
       options={options}
       placeholder={placeholder}
-      disabled={disabled || loading || options.length === 0}
+      disabled={disabled || showTriggerLoading || (!remoteSearchable && options.length === 0)}
       align="start"
       side="top"
       avoidCollisions={false}
       placeholderIcon={GitBranch}
-      searchable={!loading && (hasMore || options.length > 6)}
+      searchable={remoteSearchable || (!showTriggerLoading && (hasMore || options.length > 6))}
+      searchPlaceholder={searchPlaceholder}
+      emptyText={loading && options.length === 0 ? loadingText : emptyText}
+      onOpenChange={onOpenChange}
       onQueryChange={onSearchQueryChange}
+      disableClientFilter={disableClientFilter}
       onReachEnd={hasMore ? onReachEnd : undefined}
       footer={footer}
-      searchPlaceholder={searchPlaceholder}
-      emptyText={emptyText}
       appearance="toolbar"
       size="sm"
       className={className}
@@ -231,13 +234,13 @@ export function BranchSelector({
       )}
       renderTriggerValue={(option) => (
         <>
-          {loading ? (
+          {showTriggerLoading ? (
             <Spinner size="small" label={null} />
           ) : (
             <GitBranch {...stylex.props(composerSurface.glyph16)} aria-hidden="true" />
           )}
           <span {...stylex.props(composerSurface.truncate)}>
-            {loading ? loadingText : (option?.label ?? placeholder ?? '')}
+            {showTriggerLoading ? loadingText : (option?.label ?? value ?? placeholder ?? '')}
           </span>
         </>
       )}

@@ -51,8 +51,8 @@ import {
   type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
-  type LocalProjectGitState,
   type LocalProjectId,
+  type LocalProjectMeta,
   type MachineId,
   type MachineViewMeta,
   type ProjectMember,
@@ -191,13 +191,18 @@ import { useOrganization } from '@/hooks/useOrganization';
 import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
 import { useResolvedTheme } from '../../theme-provider';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { normalizeChatLandingBranches } from '@/lib/chat-landing-branches';
 import {
+  LOCAL_PROJECT_BRANCH_PAGE_SIZE,
+  LocalProjectBranchSwrCache,
+  deriveLocalProjectGitStateFromMeta,
   getLocalProjectBranchLabel,
   getLocalProjectGitStateLoadKey,
   getLocalProjectWorktreeAvailability,
   isLocalProjectMachineOffline,
+  normalizeOrderedLocalProjectBranches,
   resolveLocalProjectBranchSelection,
+  toObservedLocalProjectGitState,
+  type LocalProjectObservedGitState,
 } from '@/lib/chat-landing-git-state';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import {
@@ -606,13 +611,22 @@ const warnWorkspaceRuntimeUnavailable = (message: string, context: string): void
 };
 
 const resolveLocalProjectGithubRepoFullName = (
-  gitState: LocalProjectGitState | null | undefined
-): string | null => (gitState?.git ? gitState.githubRepoFullName?.trim() || null : null);
+  gitState: { git: boolean; githubRepoFullName?: string | null } | null | undefined,
+  meta?: LocalProjectMeta | null
+): string | null => {
+  if (gitState?.git === false) return null;
+  return (
+    (gitState?.git ? gitState.githubRepoFullName?.trim() : null) ||
+    meta?.githubRepoFullName?.trim() ||
+    null
+  );
+};
 
 type LocalProjectGitStateEntry = {
   machineId: MachineId;
   localProjectId: LocalProjectId;
-  state: LocalProjectGitState;
+  query: string;
+  state: LocalProjectObservedGitState;
 };
 
 type LocalProjectBranchSelection = {
@@ -625,14 +639,8 @@ type LocalProjectWorkdirModeSelection = {
   mode: WorkdirMode;
 };
 
-type LocalProjectGitStateCacheEntry = {
-  state: LocalProjectGitState;
-  expiresAtMs: number;
-};
-
-const LOCAL_PROJECT_GIT_STATE_CACHE_TTL_MS = 20_000;
-const LOCAL_PROJECT_GIT_STATE_CACHE_MAX_ENTRIES = 64;
 const LOCAL_PROJECT_GIT_STATE_RPC_TIMEOUT_MS = 30_000;
+const LOCAL_PROJECT_BRANCH_SEARCH_DEBOUNCE_MS = 150;
 const CHAT_LANDING_MACHINE_FLOCK_FAMILIES = [
   'localProject',
   'deleteLocalProjectCommand',
@@ -641,29 +649,20 @@ const CHAT_LANDING_MACHINE_FLOCK_FAMILIES = [
   'agentConfig',
   'providerSetup',
 ] as const;
-// FIFO eviction relies on Map iteration order matching insertion order so the oldest
-// entry can be dropped without an additional bookkeeping structure.
-const localProjectGitStateCache = new Map<string, LocalProjectGitStateCacheEntry>();
-const localProjectGitStateDedupe = new InFlightDedupe<string, LocalProjectGitState>();
+const localProjectBranchSwrCache = new LocalProjectBranchSwrCache();
+const localProjectBranchDedupe = new InFlightDedupe<
+  string,
+  import('@lody/shared').LocalProjectBranchListResult
+>();
 
-const getLocalProjectGitStateCacheKey = (
+const getLocalProjectBranchCacheKey = (
   workspaceId: WorkspaceId,
   machineId: MachineId,
-  localProjectId: LocalProjectId
-): string => `${workspaceId}:${machineId}:${localProjectId}`;
-
-const setLocalProjectGitStateCacheEntry = (
-  cacheKey: string,
-  entry: LocalProjectGitStateCacheEntry
-): void => {
-  localProjectGitStateCache.delete(cacheKey);
-  localProjectGitStateCache.set(cacheKey, entry);
-  while (localProjectGitStateCache.size > LOCAL_PROJECT_GIT_STATE_CACHE_MAX_ENTRIES) {
-    const oldestKey = localProjectGitStateCache.keys().next().value;
-    if (oldestKey === undefined) break;
-    localProjectGitStateCache.delete(oldestKey);
-  }
-};
+  localProjectId: LocalProjectId,
+  query: string,
+  cursor?: string
+): string =>
+  `${workspaceId}:${machineId}:${localProjectId}:${query.trim().toLowerCase()}:${cursor ?? ''}`;
 
 export function ChatLanding(props: ChatLandingProps) {
   return <WorkspaceChatLanding key={props.workspaceSlug} {...props} />;
@@ -1320,6 +1319,10 @@ function WorkspaceChatLanding({
   const [selectedWorkdirModeState, setSelectedWorkdirModeState] =
     useState<LocalProjectWorkdirModeSelection | null>(null);
   const [loadingLocalGitState, setLoadingLocalGitState] = useState(false);
+  const [loadingMoreLocalBranches, setLoadingMoreLocalBranches] = useState(false);
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false);
+  const [branchSearchInput, setBranchSearchInput] = useState('');
+  const [debouncedBranchQuery, setDebouncedBranchQuery] = useState('');
 
   const promptTextareaRef = useRef<ComposerInputElement>(null);
   // Scope root for the keyboard-nav controller (arrow roving over the desktop landing's
@@ -1395,7 +1398,25 @@ function WorkspaceChatLanding({
       visibleLocalMachineId === selectedLocalProjectMachineId,
     [isElectron, selectedLocalProjectMachineId, visibleLocalMachineId]
   );
-  const activeLocalGitState = useMemo(() => {
+  const selectedLocalProjectMeta = useMemo<LocalProjectMeta | null>(() => {
+    if (!selectedLocalProject) return null;
+    const key = getLocalProjectVisibilityKey(
+      selectedLocalProject.machineId,
+      selectedLocalProject.localProjectId
+    );
+    return (
+      visibleLocalProjectMap.get(key)?.project ??
+      machines.get(selectedLocalProject.machineId)?.localProjects?.[
+        selectedLocalProject.localProjectId
+      ] ??
+      null
+    );
+  }, [machines, selectedLocalProject, visibleLocalProjectMap]);
+  const syncedLocalGitSummary = useMemo(
+    () => deriveLocalProjectGitStateFromMeta(selectedLocalProjectMeta),
+    [selectedLocalProjectMeta]
+  );
+  const activeFetchedLocalGitState = useMemo(() => {
     if (
       !selectedLocalProject ||
       localGitState?.machineId !== selectedLocalProject.machineId ||
@@ -1405,15 +1426,28 @@ function WorkspaceChatLanding({
     }
     return localGitState.state;
   }, [localGitState, selectedLocalProject]);
-  const selectedLocalBranch = useMemo(() => {
-    if (
-      !activeLocalProjectId ||
-      selectedLocalBranchState?.localProjectId !== activeLocalProjectId
-    ) {
-      return null;
+  const activeLocalGitState = useMemo<LocalProjectObservedGitState | null>(() => {
+    if (activeFetchedLocalGitState) {
+      if (!activeFetchedLocalGitState.git) return activeFetchedLocalGitState;
+      return {
+        ...activeFetchedLocalGitState,
+        githubRepoFullName:
+          activeFetchedLocalGitState.githubRepoFullName ??
+          selectedLocalProjectMeta?.githubRepoFullName?.trim() ??
+          null,
+      };
     }
-    return selectedLocalBranchState.branch;
-  }, [activeLocalProjectId, selectedLocalBranchState]);
+    return syncedLocalGitSummary;
+  }, [activeFetchedLocalGitState, selectedLocalProjectMeta, syncedLocalGitSummary]);
+  const selectedLocalBranch = useMemo(() => {
+    if (!activeLocalProjectId) return null;
+    const explicitBranch =
+      selectedLocalBranchState?.localProjectId === activeLocalProjectId
+        ? selectedLocalBranchState.branch
+        : null;
+    if (!activeLocalGitState) return explicitBranch;
+    return resolveLocalProjectBranchSelection(activeLocalGitState, explicitBranch);
+  }, [activeLocalGitState, activeLocalProjectId, selectedLocalBranchState]);
   const selectedWorkdirMode = useMemo<WorkdirMode>(() => {
     if (
       !activeLocalProjectId ||
@@ -1433,6 +1467,22 @@ function WorkspaceChatLanding({
     },
     [activeLocalProjectId]
   );
+  useEffect(() => {
+    setBranchPickerOpen(false);
+    setBranchSearchInput('');
+    setDebouncedBranchQuery('');
+  }, [activeLocalProjectId, selectedLocalProjectMachineId]);
+  useEffect(() => {
+    const trimmed = branchSearchInput.trim();
+    if (!trimmed) {
+      setDebouncedBranchQuery('');
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedBranchQuery(trimmed);
+    }, LOCAL_PROJECT_BRANCH_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [branchSearchInput]);
   useEffect(() => {
     setComposerStatus(null);
   }, [
@@ -2612,15 +2662,22 @@ function WorkspaceChatLanding({
     setSelectedBranch,
   });
 
-  const applyLocalGitState = useCallback(
-    (machineId: MachineId, localProjectId: LocalProjectId, result: LocalProjectGitState) => {
+  const applyLocalBranchListResult = useCallback(
+    (
+      machineId: MachineId,
+      localProjectId: LocalProjectId,
+      query: string,
+      result: import('@lody/shared').LocalProjectBranchListResult
+    ) => {
+      const observed = toObservedLocalProjectGitState(result);
       setLocalGitState({
         machineId,
         localProjectId,
-        state: result,
+        query,
+        state: observed,
       });
       setLocalGitStateError(null);
-      if (!result.git) {
+      if (!observed.git) {
         setSelectedLocalBranchState({
           localProjectId,
           branch: null,
@@ -2628,30 +2685,38 @@ function WorkspaceChatLanding({
         return;
       }
 
-      setSelectedLocalBranchState((prev) => {
-        const previousBranch = prev?.localProjectId === localProjectId ? prev.branch : null;
-        return {
-          localProjectId,
-          branch: resolveLocalProjectBranchSelection(result, previousBranch),
-        };
-      });
+      if (!query) {
+        setSelectedLocalBranchState((prev) => {
+          const previousBranch = prev?.localProjectId === localProjectId ? prev.branch : null;
+          return {
+            localProjectId,
+            branch: resolveLocalProjectBranchSelection(observed, previousBranch),
+          };
+        });
+      }
     },
     []
   );
 
-  const fetchLocalGitState = useCallback(
+  const fetchLocalProjectBranchesPage = useCallback(
     async (
       targetWorkspaceId: WorkspaceId,
-      project: LocalProjectSelection
-    ): Promise<LocalProjectGitState> => {
-      const cacheKey = getLocalProjectGitStateCacheKey(
+      project: LocalProjectSelection,
+      options: { query?: string; cursor?: string; forceNetwork?: boolean } = {}
+    ): Promise<import('@lody/shared').LocalProjectBranchListResult> => {
+      const normalizedQuery = options.query?.trim() ?? '';
+      const cacheKey = getLocalProjectBranchCacheKey(
         targetWorkspaceId,
         project.machineId,
-        project.localProjectId
+        project.localProjectId,
+        normalizedQuery,
+        options.cursor
       );
-      const cached = localProjectGitStateCache.get(cacheKey);
-      if (cached && cached.expiresAtMs > Date.now()) {
-        return cached.state;
+      if (!options.forceNetwork && !options.cursor) {
+        const cached = localProjectBranchSwrCache.get(cacheKey);
+        if (cached?.isFresh) {
+          return cached.result;
+        }
       }
 
       if (
@@ -2675,20 +2740,24 @@ function WorkspaceChatLanding({
         defaultValue: 'Failed to load local project Git state',
       });
 
-      return await localProjectGitStateDedupe.run(cacheKey, async () => {
+      return await localProjectBranchDedupe.run(cacheKey, async () => {
         let fastPathError: string | null = null;
         const canUseElectronFastPath = isElectron && visibleLocalMachineId === project.machineId;
 
         if (canUseElectronFastPath && window.__LODY_ELECTRON__ && getIpcServices()) {
-          const result = await getIpcServices()!.localProjects.getGitState(
+          const result = await getIpcServices()!.localProjects.listBranches(
             targetWorkspaceId,
-            project.localProjectId
+            project.localProjectId,
+            {
+              ...(normalizedQuery ? { query: normalizedQuery } : {}),
+              limit: LOCAL_PROJECT_BRANCH_PAGE_SIZE,
+              ...(options.cursor ? { cursor: options.cursor } : {}),
+            }
           );
           if (result && !('error' in result)) {
-            setLocalProjectGitStateCacheEntry(cacheKey, {
-              state: result,
-              expiresAtMs: Date.now() + LOCAL_PROJECT_GIT_STATE_CACHE_TTL_MS,
-            });
+            if (!options.cursor) {
+              localProjectBranchSwrCache.set(cacheKey, result);
+            }
             return result;
           }
           fastPathError = result?.error?.trim() || fallbackMessage;
@@ -2698,11 +2767,16 @@ function WorkspaceChatLanding({
           throw new Error(fastPathError ?? fallbackMessage);
         }
 
-        const response = await runtime.requestLocalProjectGitState(
+        const response = await runtime.requestLocalProjectBranches(
           project.machineId,
           project.localProjectId,
           userId,
-          { timeoutMs: LOCAL_PROJECT_GIT_STATE_RPC_TIMEOUT_MS }
+          {
+            ...(normalizedQuery ? { query: normalizedQuery } : {}),
+            limit: LOCAL_PROJECT_BRANCH_PAGE_SIZE,
+            ...(options.cursor ? { cursor: options.cursor } : {}),
+            timeoutMs: LOCAL_PROJECT_GIT_STATE_RPC_TIMEOUT_MS,
+          }
         );
         if (!response) {
           throw new Error(
@@ -2715,11 +2789,10 @@ function WorkspaceChatLanding({
           );
         }
 
-        setLocalProjectGitStateCacheEntry(cacheKey, {
-          state: response.state,
-          expiresAtMs: Date.now() + LOCAL_PROJECT_GIT_STATE_CACHE_TTL_MS,
-        });
-        return response.state;
+        if (!options.cursor) {
+          localProjectBranchSwrCache.set(cacheKey, response.result);
+        }
+        return response.result;
       });
     },
     [isElectron, runtime, t, userId, visibleLocalMachineId]
@@ -2745,43 +2818,60 @@ function WorkspaceChatLanding({
     selectedLocalProjectMachineId,
     visibleLocalMachineId,
   ]);
-  const localGitStateLoadKey = useMemo(
-    () =>
-      getLocalProjectGitStateLoadKey({
-        workspaceId,
-        machineId: selectedLocalProjectMachineId,
-        localProjectId: activeLocalProjectId,
-        userId: userId ?? null,
-        machineOnline: selectedLocalProjectMachineOnline,
-        retryNonce: localGitStateRetryNonce,
-        hasRuntime: hasWorkspaceRuntime,
-        hasDesktopControl: canUseSelectedLocalProjectDesktopControl,
-      }),
-    [
-      activeLocalProjectId,
-      canUseSelectedLocalProjectDesktopControl,
-      hasWorkspaceRuntime,
-      localGitStateRetryNonce,
-      selectedLocalProjectMachineId,
-      selectedLocalProjectMachineOnline,
-      userId,
+  const shouldLoadLocalBranchPage = useMemo(() => {
+    if (contextType !== 'local' || !selectedLocalProject) return false;
+    if (syncedLocalGitSummary === null) return true;
+    if (syncedLocalGitSummary.git === false) return false;
+    if (effectiveWorkdirMode === 'worktree' && branchPickerOpen) return true;
+    if (selectedWorkdirMode === 'worktree' && !selectedLocalBranch) return true;
+    return localGitStateRetryNonce > 0 && effectiveWorkdirMode === 'worktree';
+  }, [
+    branchPickerOpen,
+    contextType,
+    effectiveWorkdirMode,
+    localGitStateRetryNonce,
+    selectedLocalBranch,
+    selectedLocalProject,
+    selectedWorkdirMode,
+    syncedLocalGitSummary,
+  ]);
+  const activeBranchQuery = branchPickerOpen ? debouncedBranchQuery : '';
+  const localGitStateLoadKey = useMemo(() => {
+    const baseKey = getLocalProjectGitStateLoadKey({
       workspaceId,
-    ]
-  );
+      machineId: selectedLocalProjectMachineId,
+      localProjectId: activeLocalProjectId,
+      userId: userId ?? null,
+      machineOnline: selectedLocalProjectMachineOnline,
+      retryNonce: localGitStateRetryNonce,
+      hasRuntime: hasWorkspaceRuntime,
+      hasDesktopControl: canUseSelectedLocalProjectDesktopControl,
+    });
+    if (!baseKey || !shouldLoadLocalBranchPage) return null;
+    return `${baseKey}:${activeBranchQuery}`;
+  }, [
+    activeBranchQuery,
+    activeLocalProjectId,
+    canUseSelectedLocalProjectDesktopControl,
+    hasWorkspaceRuntime,
+    localGitStateRetryNonce,
+    selectedLocalProjectMachineOnline,
+    selectedLocalProjectMachineId,
+    shouldLoadLocalBranchPage,
+    userId,
+    workspaceId,
+  ]);
 
-  // `localGitStateLoadKey` fully identifies a load (workspace/machine/project/user/
-  // reachability/loader/runtime-refresh/retry). Snapshot every other input through a
-  // ref so the effect depends ONLY on that key + contextType: callback identity churn
-  // (`fetchLocalGitState` rebuilds whenever `runtime`/`t` change) can no longer re-run
-  // the effect against an unchanged key, which is what previously looped failed loads.
   const gitStateLoadInputs = {
     workspaceId,
     machineId: selectedLocalProjectMachineId,
     localProjectId: activeLocalProjectId,
     canLoad: hasWorkspaceRuntime || canUseSelectedLocalProjectDesktopControl,
     machineOnline: selectedLocalProjectMachineOnline,
-    fetchLocalGitState,
-    applyLocalGitState,
+    query: activeBranchQuery,
+    hasUsableFallback: Boolean(syncedLocalGitSummary?.git && selectedLocalBranch),
+    fetchLocalProjectBranchesPage,
+    applyLocalBranchListResult,
     t,
   };
   const gitStateLoadInputsRef = useRef(gitStateLoadInputs);
@@ -2790,6 +2880,14 @@ function WorkspaceChatLanding({
   useEffect(() => {
     if (contextType !== 'local') return undefined;
     const load = gitStateLoadInputsRef.current;
+    if (!shouldLoadLocalBranchPage) {
+      setLoadingLocalGitState(false);
+      setLoadingMoreLocalBranches(false);
+      if (syncedLocalGitSummary !== null) {
+        setLocalGitStateError(null);
+      }
+      return undefined;
+    }
     if (
       !localGitStateLoadKey ||
       !load.canLoad ||
@@ -2797,13 +2895,41 @@ function WorkspaceChatLanding({
       !load.machineId ||
       !load.localProjectId
     ) {
-      setLocalGitState(null);
+      if (!load.hasUsableFallback) setLocalGitState(null);
       setLocalGitStateError(null);
       setLoadingLocalGitState(false);
       return undefined;
     }
+
+    const targetWorkspaceId = load.workspaceId;
+    const localProject: LocalProjectSelection = {
+      machineId: load.machineId,
+      localProjectId: load.localProjectId,
+    };
+    const cacheKey = getLocalProjectBranchCacheKey(
+      targetWorkspaceId,
+      localProject.machineId,
+      localProject.localProjectId,
+      load.query
+    );
+    const swrHit = localProjectBranchSwrCache.get(cacheKey);
+    if (swrHit) {
+      load.applyLocalBranchListResult(
+        localProject.machineId,
+        localProject.localProjectId,
+        load.query,
+        swrHit.result
+      );
+      if (swrHit.isFresh && localGitStateRetryNonce === 0) {
+        setLoadingLocalGitState(false);
+        return undefined;
+      }
+    }
+
     if (!load.machineOnline) {
-      setLocalGitState(null);
+      if (!swrHit && !load.hasUsableFallback) {
+        setLocalGitState(null);
+      }
       setLocalGitStateError(
         load.t('chat.localGitStateMachineOffline', {
           defaultValue:
@@ -2818,20 +2944,24 @@ function WorkspaceChatLanding({
     let unsubscribeCliState: (() => void) | null = null;
     let retryCount = 0;
     const MAX_DAEMON_RETRIES = 5;
-    const targetWorkspaceId = load.workspaceId;
-    const localProject: LocalProjectSelection = {
-      machineId: load.machineId,
-      localProjectId: load.localProjectId,
-    };
+    const isBackgroundRevalidate = Boolean(swrHit || load.hasUsableFallback);
 
     const attemptLoad = async () => {
       let pendingRetry = false;
       setLoadingLocalGitState(true);
       setLocalGitStateError(null);
       try {
-        const result = await load.fetchLocalGitState(targetWorkspaceId, localProject);
+        const result = await load.fetchLocalProjectBranchesPage(targetWorkspaceId, localProject, {
+          query: load.query,
+          forceNetwork: !swrHit?.isFresh || localGitStateRetryNonce > 0,
+        });
         if (cancelled) return;
-        load.applyLocalGitState(localProject.machineId, localProject.localProjectId, result);
+        load.applyLocalBranchListResult(
+          localProject.machineId,
+          localProject.localProjectId,
+          load.query,
+          result
+        );
       } catch (error) {
         if (cancelled) return;
         const errorMessage =
@@ -2841,7 +2971,7 @@ function WorkspaceChatLanding({
           });
         if (isWorkspaceRuntimeUnavailableMessage(errorMessage)) {
           warnWorkspaceRuntimeUnavailable(errorMessage, 'local git state unavailable');
-          setLocalGitState(null);
+          if (!isBackgroundRevalidate) setLocalGitState(null);
           setLocalGitStateError(null);
           return;
         }
@@ -2850,7 +2980,7 @@ function WorkspaceChatLanding({
           retryCount += 1;
           if (retryCount > MAX_DAEMON_RETRIES) {
             console.warn('[chat-landing] CLI daemon retry limit reached', errorMessage);
-            setLocalGitState(null);
+            if (!isBackgroundRevalidate) setLocalGitState(null);
             setLocalGitStateError(null);
             return;
           }
@@ -2858,16 +2988,18 @@ function WorkspaceChatLanding({
             `[chat-landing] CLI daemon not ready (attempt ${retryCount}/${MAX_DAEMON_RETRIES}), waiting…`,
             errorMessage
           );
-          setLocalGitState(null);
+          if (!isBackgroundRevalidate) setLocalGitState(null);
           setLocalGitStateError(null);
           pendingRetry = true;
           waitForCliReady();
           return;
         }
-        console.warn('Failed to load local project git state', error, {
+        console.warn('Failed to load local project branches', error, {
           loadKey: localGitStateLoadKey,
         });
-        setLocalGitState(null);
+        if (!isBackgroundRevalidate) {
+          setLocalGitState(null);
+        }
         setLocalGitStateError(errorMessage);
       } finally {
         if (!cancelled && !pendingRetry) setLoadingLocalGitState(false);
@@ -2924,15 +3056,90 @@ function WorkspaceChatLanding({
       cancelled = true;
       unsubscribeCliState?.();
     };
-  }, [contextType, localGitStateLoadKey]);
+  }, [
+    contextType,
+    localGitStateLoadKey,
+    localGitStateRetryNonce,
+    shouldLoadLocalBranchPage,
+    syncedLocalGitSummary,
+  ]);
+
+  const handleLoadMoreLocalBranches = useCallback(async () => {
+    if (
+      contextType !== 'local' ||
+      !workspaceId ||
+      !selectedLocalProject ||
+      loadingLocalGitState ||
+      loadingMoreLocalBranches ||
+      !activeLocalGitState?.git ||
+      !activeLocalGitState.truncated ||
+      !activeLocalGitState.nextCursor
+    ) {
+      return;
+    }
+    const queryAtStart = activeBranchQuery;
+    const cursor = activeLocalGitState.nextCursor;
+    const targetProject = selectedLocalProject;
+    setLoadingMoreLocalBranches(true);
+    try {
+      const nextPage = await fetchLocalProjectBranchesPage(workspaceId, targetProject, {
+        query: queryAtStart,
+        cursor,
+      });
+      if (!nextPage.git) return;
+      setLocalGitState((prev) => {
+        if (
+          !prev ||
+          !prev.state.git ||
+          prev.machineId !== targetProject.machineId ||
+          prev.localProjectId !== targetProject.localProjectId ||
+          prev.query !== queryAtStart
+        ) {
+          return prev;
+        }
+        const mergedBranches = normalizeOrderedLocalProjectBranches({
+          branches: [...prev.state.branches, ...nextPage.branches],
+        });
+        return {
+          ...prev,
+          state: {
+            ...prev.state,
+            branches: mergedBranches,
+            truncated: nextPage.truncated,
+            nextCursor: nextPage.nextCursor,
+            totalCount: nextPage.totalCount,
+            summaryOnly: false,
+          },
+        };
+      });
+    } catch (error) {
+      console.warn('Failed to load next branch page', error);
+    } finally {
+      setLoadingMoreLocalBranches(false);
+    }
+  }, [
+    activeBranchQuery,
+    activeLocalGitState,
+    contextType,
+    fetchLocalProjectBranchesPage,
+    loadingLocalGitState,
+    loadingMoreLocalBranches,
+    selectedLocalProject,
+    workspaceId,
+  ]);
 
   const resolveSelectedLocalProjectGitHubRepo = useCallback(
-    (gitStateOverride?: LocalProjectGitState | null): string | null => {
+    (
+      gitStateOverride?: { git: boolean; githubRepoFullName?: string | null } | null
+    ): string | null => {
       const effectiveLocalGitState = gitStateOverride ?? activeLocalGitState;
       if (!selectedLocalProject) return null;
-      return resolveLocalProjectGithubRepoFullName(effectiveLocalGitState);
+      return resolveLocalProjectGithubRepoFullName(
+        effectiveLocalGitState,
+        selectedLocalProjectMeta
+      );
     },
-    [activeLocalGitState, selectedLocalProject]
+    [activeLocalGitState, selectedLocalProject, selectedLocalProjectMeta]
   );
 
   const branchOptions = useMemo<AcpSessionSelectOption[]>(() => {
@@ -2940,10 +3147,16 @@ function WorkspaceChatLanding({
       if (!activeLocalGitState?.git) {
         return [];
       }
-      return normalizeChatLandingBranches(
-        activeLocalGitState.branches,
-        activeLocalGitState.defaultBranch
-      ).map((branch) => ({
+      const orderedBranches = activeBranchQuery
+        ? normalizeOrderedLocalProjectBranches({
+            branches: activeLocalGitState.branches,
+          })
+        : normalizeOrderedLocalProjectBranches({
+            pinnedBranches: activeLocalGitState.pinnedBranches,
+            selectedBranch: selectedLocalBranch,
+            branches: activeLocalGitState.branches,
+          });
+      return orderedBranches.map((branch) => ({
         value: branch,
         label: getLocalProjectBranchLabel(branch, {
           local: t('chat.branchLocal'),
@@ -2954,7 +3167,7 @@ function WorkspaceChatLanding({
     // If no branches loaded (e.g. empty repo), show empty list instead of a fake "main"
     if (repoBranches.length === 0) return [];
     return repoBranches.map((b) => ({ value: b, label: b }));
-  }, [activeLocalGitState, contextType, repoBranches, t]);
+  }, [activeBranchQuery, activeLocalGitState, contextType, repoBranches, selectedLocalBranch, t]);
 
   const currentBranch = contextType === 'local' ? selectedLocalBranch : selectedBranch;
   const setCurrentBranch =
@@ -3207,7 +3420,12 @@ function WorkspaceChatLanding({
     const githubBranch = selectedBranch?.trim() || '';
     const localWorktreeBranch =
       effectiveWorkdirMode === 'worktree' ? selectedLocalBranch?.trim() || undefined : undefined;
-    if (contextType === 'local' && localGitStateError && selectedWorkdirMode === 'worktree') {
+    if (
+      contextType === 'local' &&
+      selectedWorkdirMode === 'worktree' &&
+      localGitStateError &&
+      !localWorktreeBranch
+    ) {
       captureSessionInputBlocked('local_project_git_state_failed', {
         error_message: localGitStateError,
       });
@@ -3687,6 +3905,8 @@ function WorkspaceChatLanding({
     () => (selectedMachineId && isSelectedMachineValid ? selectedMachineId : localProjectMachineId),
     [localProjectMachineId, selectedMachineId, isSelectedMachineValid]
   );
+  const isBlockingLocalGitLoading =
+    contextType === 'local' && loadingLocalGitState && !worktreeAvailable;
   const { showBranchSelector, isBranchDisabled, branchSelectorKey } =
     getChatLandingBranchSelectorState({
       contextType,
@@ -3697,12 +3917,32 @@ function WorkspaceChatLanding({
       hasSelectedLocalProject: Boolean(selectedLocalProject),
       selectedLocalProjectId: selectedLocalProject?.localProjectId ?? null,
       isRuntimeInitializing: runtimeInitializing,
-      isLoadingLocalGitState: loadingLocalGitState,
+      isLoadingLocalGitState: isBlockingLocalGitLoading,
       hasLocalGit: activeLocalGitState?.git === true,
-      branchOptionsCount: branchOptions.length,
+      branchOptionsCount:
+        contextType === 'local' && activeLocalGitState?.git
+          ? Math.max(branchOptions.length, selectedLocalBranch ? 1 : 0)
+          : branchOptions.length,
     });
 
   const isGitHubBranchList = contextType === 'github';
+  const localBranchesHaveMore = Boolean(
+    contextType === 'local' && activeLocalGitState?.git && activeLocalGitState.truncated
+  );
+  const branchListHasMore = isGitHubBranchList ? repoBranchesHasMore : localBranchesHaveMore;
+  const onBranchSearchQueryChange = isGitHubBranchList
+    ? handleRepoBranchSearchQueryChange
+    : setBranchSearchInput;
+  const onBranchListEnd = isGitHubBranchList
+    ? handleRepoBranchListEnd
+    : () => void handleLoadMoreLocalBranches();
+  const branchListFooter =
+    contextType === 'local' && (loadingLocalGitState || loadingMoreLocalBranches)
+      ? t('chat.branchLoading', { defaultValue: 'Loading branches...' })
+      : isGitHubBranchList && loadingMoreRepoBranches
+        ? t('chat.branchLoadingMore', { defaultValue: 'Loading more branches...' })
+        : null;
+
   const branchSelectorNode = showBranchSelector ? (
     <span className="inline-flex min-w-0 items-center gap-1">
       <BranchSelector
@@ -3719,16 +3959,15 @@ function WorkspaceChatLanding({
         }
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
+        hasMore={branchListHasMore}
+        onOpenChange={contextType === 'local' ? setBranchPickerOpen : undefined}
+        onSearchQueryChange={onBranchSearchQueryChange}
+        remoteSearchable={contextType === 'local'}
+        disableClientFilter={contextType === 'local' && Boolean(activeBranchQuery)}
+        onReachEnd={onBranchListEnd}
+        footer={branchListFooter}
         className="min-w-0 max-w-full"
         disabled={isBranchDisabled}
-        hasMore={isGitHubBranchList && repoBranchesHasMore}
-        onSearchQueryChange={isGitHubBranchList ? handleRepoBranchSearchQueryChange : undefined}
-        onReachEnd={isGitHubBranchList ? handleRepoBranchListEnd : undefined}
-        footer={
-          isGitHubBranchList && loadingMoreRepoBranches
-            ? t('chat.branchLoadingMore', { defaultValue: 'Loading more branches...' })
-            : undefined
-        }
       />
     </span>
   ) : null;
@@ -3761,7 +4000,10 @@ function WorkspaceChatLanding({
     ) : null;
 
   const worktreeLoading = Boolean(
-    contextType === 'local' && selectedLocalProject && (loadingLocalGitState || runtimeInitializing)
+    contextType === 'local' &&
+    selectedLocalProject &&
+    activeLocalGitState === null &&
+    (loadingLocalGitState || runtimeInitializing)
   );
   const worktreeUnavailableReason = worktreeLoading
     ? t('chat.workdir.loading', 'Loading Git status…')
@@ -4536,8 +4778,11 @@ function WorkspaceChatLanding({
   }, [freshRepositories, selectedRepo]);
   const selectedLocalProjectGithubRepoFullName = useMemo(() => {
     if (contextType !== 'local') return undefined;
-    return resolveLocalProjectGithubRepoFullName(activeLocalGitState) ?? undefined;
-  }, [activeLocalGitState, contextType]);
+    return (
+      resolveLocalProjectGithubRepoFullName(activeLocalGitState, selectedLocalProjectMeta) ??
+      undefined
+    );
+  }, [activeLocalGitState, contextType, selectedLocalProjectMeta]);
 
   const mentionSource = useMemo(() => {
     if (contextType === 'chat') return undefined;
@@ -4589,8 +4834,8 @@ function WorkspaceChatLanding({
       workdirMode: selectedWorkdirMode,
       hasSelectedLocalProject: Boolean(selectedLocalProject),
       isRuntimeInitializing: runtimeInitializing,
-      isLoadingLocalGitState: loadingLocalGitState,
-      hasLocalGitStateError: Boolean(localGitStateError),
+      isLoadingLocalGitState: loadingLocalGitState && !selectedLocalBranch,
+      hasLocalGitStateError: Boolean(localGitStateError) && !selectedLocalBranch,
       mcpDefaultsPending: !mcpSelection.ready && !mcpSelection.defaultsFailed,
     });
   const selectedMachineHasVisibleLocalProject = useMemo(
@@ -6659,9 +6904,17 @@ function WorkspaceChatLanding({
                 disabled={
                   isBranchDisabled || (mobileLocalGitProject && effectiveWorkdirMode !== 'worktree')
                 }
-                loading={contextType === 'local' && (loadingLocalGitState || runtimeInitializing)}
+                loading={
+                  contextType === 'local' &&
+                  !selectedLocalBranch &&
+                  (loadingLocalGitState || runtimeInitializing)
+                }
                 searchable
-                onQueryChange={isGitHubBranchList ? handleRepoBranchSearchQueryChange : undefined}
+                onOpenChange={contextType === 'local' ? setBranchPickerOpen : undefined}
+                onQueryChange={onBranchSearchQueryChange}
+                disableClientFilter={contextType === 'local' && Boolean(activeBranchQuery)}
+                onReachEnd={branchListHasMore ? onBranchListEnd : undefined}
+                footer={branchListFooter}
                 emptyText={
                   isGitHubBranchList && searchingRepoBranches
                     ? t('chat.branchSearching', { defaultValue: 'Searching branches...' })

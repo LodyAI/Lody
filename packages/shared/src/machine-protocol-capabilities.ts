@@ -36,6 +36,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
+  localProjectBranchListing: 'localProjectBranchListing',
   providerSetup: 'providerSetup',
   schedules: 'schedules',
   sessionAutomations: 'sessionAutomations',
@@ -110,6 +111,7 @@ export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION = 1;
+export const LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 // v2 preserves ACP string/boolean values and reads legacy stringified booleans.
 const SCHEDULES_PROMPT_PROTOCOL_VERSION = 2;
@@ -248,6 +250,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection]: PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
     LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing]:
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
@@ -470,6 +474,16 @@ export function machineSupportsLocalProjectRemovalProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval,
     LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsLocalProjectBranchListing(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing,
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION
   );
 }
 

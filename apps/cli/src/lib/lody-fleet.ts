@@ -1461,7 +1461,8 @@ export class LodyFleet {
           workspace.id as WorkspaceId,
           this.machineId,
           startedLody.documentManager,
-          stop.signal
+          stop.signal,
+          { verifyProjectIdentity: startedLody.documentManager.isEncryptedWorkspace?.() === true }
         ).catch((error: unknown) => {
           workspaceLogger.warn(`Failed to reconcile local projects: ${formatErrorMessage(error)}`);
         });
@@ -2862,6 +2863,23 @@ export class LodyFleet {
           ok: true,
           type: 'local-project/git-state',
           result: await this.localProjectControlService.getProjectGitState(rootPath),
+        };
+      }
+
+      if (message.type === 'local-project/list-branches') {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId);
+        const rootPath = await this.resolveWorkspaceProjectRootPath(
+          runtime,
+          message.localProjectId
+        );
+        return {
+          ok: true,
+          type: 'local-project/list-branches',
+          result: await this.localProjectControlService.listProjectBranches(rootPath, {
+            query: message.query,
+            limit: message.limit,
+            cursor: message.cursor,
+          }),
         };
       }
 

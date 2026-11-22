@@ -7,6 +7,7 @@ import type {
   WorkspaceId,
   ProjectRef,
   LocalProjectId,
+  LocalProjectBranchListResult,
   LocalProjectGitState,
   LocalProjectHistoryCatalogItem,
   LocalProjectHistoryProvider,
@@ -1210,6 +1211,16 @@ export type LocalProjectControlRequest =
       localProjectId: LocalProjectId;
     }
   | {
+      type: 'local-project/list-branches';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      query?: string;
+      limit?: number;
+      cursor?: string;
+      requestedByUserId?: string;
+    }
+  | {
       type: 'local-project/list-files';
       machineId: MachineId;
       workspaceId: WorkspaceId;
@@ -1414,6 +1425,7 @@ export type LocalProjectControlResponse =
       { workspaces: LocalProjectWorkspaceSummary[] }
     >
   | LocalProjectControlOkResponse<'local-project/git-state', LocalProjectGitState>
+  | LocalProjectControlOkResponse<'local-project/list-branches', LocalProjectBranchListResult>
   | LocalProjectControlOkResponse<'local-project/list-files', LocalProjectFileListResult>
   | LocalProjectControlOkResponse<'local-project/search-files', LocalProjectFileSearchResult>
   | LocalProjectControlOkResponse<'local-project/list-dir', LocalProjectDirectoryListResult>

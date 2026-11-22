@@ -1505,6 +1505,13 @@ export class LocalProjectControlService {
     return await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
   }
 
+  async listProjectBranches(
+    rootPath: string,
+    options?: { query?: string; limit?: number; cursor?: string }
+  ) {
+    return await localProjectsLegacy.listLocalProjectBranchesAtRootPath(rootPath, options);
+  }
+
   async listBrowseRoots(): Promise<LocalProjectBrowseRootsResult> {
     const platform = getLocalProjectBrowsePlatform();
     const homeDir = await fs.promises.realpath(os.homedir());

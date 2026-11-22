@@ -275,7 +275,9 @@ export function makeE2eeFeatureRpcClient(options: {
     const machineId = args.request.machineId;
     // History reads and forks may target another member's machine; the receiver applies
     // that machine's sharing policy. Every other feature stays same-member.
-    const sharedExecution = args.request.method === 'session/fork';
+    const sharedExecution =
+      args.request.method === 'session/fork' ||
+      args.request.method === 'local-project/list-branches';
     const sharedTarget = args.request.method === 'session/history-read' || sharedExecution;
     const signer = yield* options.targetSigner(machineId, sharedTarget);
     if (

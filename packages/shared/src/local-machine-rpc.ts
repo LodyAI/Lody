@@ -22,7 +22,11 @@ import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspa
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
-import { SessionHistoryReadQuerySchema, SessionHistoryReadResponseSchema } from './message-schemas';
+import {
+  LocalProjectBranchListResultSchema,
+  SessionHistoryReadQuerySchema,
+  SessionHistoryReadResponseSchema,
+} from './message-schemas';
 import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
 import { SESSION_GOAL_ACTIONS } from './goal';
@@ -351,6 +355,18 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     params: z.object({ localProjectId: z.string().trim().min(1) }).strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('local-project/list-branches'),
+    params: z
+      .object({
+        localProjectId: z.string().trim().min(1),
+        requestedByUserId: z.string().trim().min(1),
+        query: z.string().max(256).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().trim().min(1).max(512).optional(),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('ios-simulator/agent-control'),
     params: z.object({ sessionId: SessionIdSchema, command: IosSimulatorCommandSchema }).strict(),
   }).strict(),
@@ -623,6 +639,35 @@ export const ProjectProbeLocalMemberResultSchema = ProjectLocalMemberProbeSchema
 
 export type ProjectProbeLocalMemberResult = z.infer<typeof ProjectProbeLocalMemberResultSchema>;
 
+export const LocalProjectListBranchesRpcResponseSchema = z.discriminatedUnion('success', [
+  z
+    .object({
+      type: z.literal('local-project/list-branches_response'),
+      machineId: z.string().trim().min(1),
+      workspaceId: z.string().trim().min(1),
+      localProjectId: z.string().trim().min(1),
+      success: z.literal(true),
+      result: LocalProjectBranchListResultSchema,
+      observedAtMs: z.number().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('local-project/list-branches_response'),
+      machineId: z.string().trim().min(1),
+      workspaceId: z.string().trim().min(1),
+      localProjectId: z.string().trim().min(1),
+      success: z.literal(false),
+      error: z.string().trim().min(1),
+      message: z.string().trim().min(1).optional(),
+    })
+    .strict(),
+]);
+
+export type LocalProjectListBranchesRpcResponse = z.infer<
+  typeof LocalProjectListBranchesRpcResponseSchema
+>;
+
 const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
 
 /**
@@ -697,6 +742,7 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionLiveStatusResponseSchema,
   FileDownloadResponseSchema,
   ProjectProbeLocalMemberResultSchema,
+  LocalProjectListBranchesRpcResponseSchema,
   MemoryProviderResponseSchema,
   IosSimulatorResponseSchema,
   AndroidEmulatorResponseSchema,

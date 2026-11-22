@@ -80,11 +80,9 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
   showChevron?: boolean;
   /** When false, the search input won't auto-focus when the popover opens. */
   autoFocusSearch?: boolean;
-  /** Reports each search edit, e.g. to look up options the list has not loaded. */
   onQueryChange?: (query: string) => void;
-  /** Called when the list is scrolled to (near) its end, to load further options. */
+  disableClientFilter?: boolean;
   onReachEnd?: () => void;
-  /** A status row under the options, such as "Loading more...". */
   footer?: ReactNode;
 }
 
@@ -138,6 +136,7 @@ export function OptionSelector<TValue extends string | number = string>({
   showChevron = true,
   autoFocusSearch = true,
   onQueryChange,
+  disableClientFilter = false,
   onReachEnd,
   footer,
 }: OptionSelectorProps<TValue>) {
@@ -195,7 +194,7 @@ export function OptionSelector<TValue extends string | number = string>({
   // to virtualize), reusing the command-palette's fuzzy scorer. Small lists keep cmdk's
   // built-in filtering untouched.
   const filteredOptions = useMemo(() => {
-    if (!virtualize) return options;
+    if (disableClientFilter || !virtualize) return options;
     const q = query.trim();
     if (!q) return options;
     return options
@@ -206,7 +205,7 @@ export function OptionSelector<TValue extends string | number = string>({
       )
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.option);
-  }, [virtualize, options, query]);
+  }, [disableClientFilter, virtualize, options, query]);
 
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: filteredOptions.length,
@@ -382,7 +381,7 @@ export function OptionSelector<TValue extends string | number = string>({
         }}
       >
         <CommandPrimitive
-          shouldFilter={!virtualize}
+          shouldFilter={!disableClientFilter && !virtualize}
           value={highlighted}
           onValueChange={setHighlighted}
           {...stylex.props(surface.popupList)}
