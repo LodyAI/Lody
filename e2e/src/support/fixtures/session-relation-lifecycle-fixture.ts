@@ -48,10 +48,17 @@ export type RelationGraphSeed = {
   openedFromTabSessionId: string;
 };
 
+/**
+ * Native Workspace Meta serves Session documents to the renderer only as checked
+ * remote documents, so a renderer cannot write a Session body; the daemon owns it.
+ * The relations under test live in the metadata rows, which both modes write.
+ */
+const nativeWorkspaceMeta = () => process.env.LODY_NATIVE_WORKSPACE_META === '1';
+
 export class SessionRelationLifecycleFixture {
   async seedRelationGraph(page: Page, relationGraph: RelationGraphSeed): Promise<void> {
     await page.evaluate(
-      async ({ graph, openedFromTabTitle, openedTitle, tabId, tabTitle }) => {
+      async ({ graph, native, openedFromTabTitle, openedTitle, tabId, tabTitle }) => {
         const repo = window.repo;
         if (!repo || !window.ipc) throw new Error('Local workspace repo is unavailable');
         const rootEntry = await repo.getDocMeta(`session-${graph.rootSessionId}`);
@@ -61,10 +68,12 @@ export class SessionRelationLifecycleFixture {
           userId: string;
         };
         const roomId = `session-${tabId}`;
-        const handle = await repo.openPersistedDoc(roomId);
-        handle.doc.getMap('session').set('id', tabId);
-        handle.doc.commit();
-        await repo.persistDocNow(roomId, handle.doc);
+        if (!native) {
+          const handle = await repo.openPersistedDoc(roomId);
+          handle.doc.getMap('session').set('id', tabId);
+          handle.doc.commit();
+          await repo.persistDocNow(roomId, handle.doc);
+        }
         await repo.upsertDocMeta(roomId, {
           id: tabId,
           machineId: rootMeta.machineId,
@@ -99,6 +108,7 @@ export class SessionRelationLifecycleFixture {
       },
       {
         graph: relationGraph,
+        native: nativeWorkspaceMeta(),
         openedFromTabTitle: OPENED_FROM_TAB_TITLE,
         openedTitle: OPENED_SESSION_TITLE,
         tabId: RELATION_TAB_ID,
@@ -109,7 +119,7 @@ export class SessionRelationLifecycleFixture {
 
   async seedColdHydrationPair(page: Page): Promise<void> {
     await page.evaluate(
-      async ({ rootId, rootTitle, tabId, tabTitle }) => {
+      async ({ native, rootId, rootTitle, tabId, tabTitle }) => {
         const repo = window.repo;
         if (!repo || !window.ipc) throw new Error('Local workspace repo is unavailable');
         const snapshot = (await window.ipc.invoke('localPlatform.getSnapshot')) as {
@@ -119,7 +129,7 @@ export class SessionRelationLifecycleFixture {
         if (!machine) throw new Error('Bundled CLI did not publish a local machine');
         const machineId = String(machine.meta.id ?? machine.docId.slice('machine-'.length));
 
-        for (const sessionId of [rootId, tabId]) {
+        for (const sessionId of native ? [] : [rootId, tabId]) {
           const roomId = `session-${sessionId}`;
           const handle = await repo.openPersistedDoc(roomId);
           handle.doc.getMap('session').set('id', sessionId);
@@ -151,6 +161,7 @@ export class SessionRelationLifecycleFixture {
         });
       },
       {
+        native: nativeWorkspaceMeta(),
         rootId: COLD_ROOT_ID,
         rootTitle: COLD_ROOT_TITLE,
         tabId: COLD_TAB_ID,
