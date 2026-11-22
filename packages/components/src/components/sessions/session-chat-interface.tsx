@@ -217,7 +217,12 @@ import {
   resolveSessionConversationPreparationState,
   type SessionConversationPreparationState,
 } from '@/lib/session-conversation-preparation';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import {
+  clearSessionPrMergeStatus,
+  sessionPrMergeStatusAtomFamily,
+} from '@/atoms/session-pr-merge-status';
+import { isGitHubOperationTokenConnectionLostError } from '@/lib/github-token';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -5694,16 +5699,41 @@ export const SessionChatInterface = memo(
       workspaceDirty,
     ]);
 
-    const effectivePrStatus = latestPr?.status ?? null;
+    const jotaiStore = useStore();
+    const prMergeStatus = useAtomValue(sessionPrMergeStatusAtomFamily(prSessionId ?? ''));
+    const effectivePrStatus =
+      latestPr?.status === 'merged'
+        ? 'merged'
+        : prMergeStatus?.phase === 'merged' &&
+            (!prMergeStatus.prNumber || prMergeStatus.prNumber === latestPrNumber)
+          ? 'merged'
+          : (latestPr?.status ?? null);
+
+    useEffect(() => {
+      if (prSessionId) {
+        clearSessionPrMergeStatus(jotaiStore, prSessionId, 'failed');
+      }
+    }, [jotaiStore, prSessionId]);
+
+    useEffect(() => {
+      if (prSessionId && latestPr?.status === 'merged') {
+        clearSessionPrMergeStatus(jotaiStore, prSessionId, 'merged');
+      }
+    }, [jotaiStore, latestPr?.status, prSessionId]);
+
     const { awaiting: awaitedPrStatus, awaitStatus: awaitPrStatus } = useAwaitedPrStatus(
       latestPr?.url ?? null,
       effectivePrStatus
     );
-    const isMergeSettling = isActivePrMerging || !!awaitedPrStatus?.includes('merged');
+    const isMergeSettling =
+      isActivePrMerging ||
+      prMergeStatus?.phase === 'merging' ||
+      !!awaitedPrStatus?.includes('merged');
     const isReadySettling = isActivePrMarkingReady || !!awaitedPrStatus?.includes('open');
 
     const handleMergePullRequest = useCallback(
       async (method: GitHubMergeMethod) => {
+        const targetPrNumber = latestPrNumber;
         captureSessionEvent('session/quick_action_selected', {
           action_id: 'merge',
           merge_method: method,
@@ -5713,12 +5743,27 @@ export const SessionChatInterface = memo(
         try {
           if (await mergeActivePullRequest(method)) awaitPrStatus(['merged']);
         } catch (error) {
-          toast.error(t('sessions.prTab.mergeError', 'Failed to merge'), {
-            description: getErrorMessage(error),
-          });
+          if (isGitHubOperationTokenConnectionLostError(error)) return;
+          toast.error(
+            targetPrNumber
+              ? t('sessions.prMergeStatus.failedNumber', 'Failed to merge PR #{{number}}', {
+                  number: targetPrNumber,
+                })
+              : t('sessions.prTab.mergeError', 'Failed to merge'),
+            {
+              description: getErrorMessage(error),
+            }
+          );
         }
       },
-      [awaitPrStatus, captureSessionEvent, mergeActivePullRequest, t, workspaceDirty]
+      [
+        awaitPrStatus,
+        captureSessionEvent,
+        latestPrNumber,
+        mergeActivePullRequest,
+        t,
+        workspaceDirty,
+      ]
     );
 
     const handleMarkReadyForReview = useCallback(async () => {

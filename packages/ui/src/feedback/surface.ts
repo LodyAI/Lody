@@ -181,7 +181,10 @@ export const feedbackSurface = stylex.create({
    */
   viewport: {
     position: 'fixed',
-    insetBlockStart: `calc(${feedback.viewportInset} + env(safe-area-inset-top, 0px))`,
+    insetBlockStart: {
+      default: `calc(${feedback.viewportInset} + env(safe-area-inset-top, 0px))`,
+      '@media (max-width: 767px)': `calc(3.75rem + ${space[2]} + env(safe-area-inset-top, 0px))`,
+    },
     insetInlineStart: '50%',
     translate: '-50% 0',
     display: 'flex',
