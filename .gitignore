@@ -162,3 +162,6 @@ apps/electron/resources/roost/
 
 # Explicit local test output is outside the packaged Electron app directory.
 /.test-build/
+
+# Rust workspace build artifacts
+/apps/cli-rs/target/

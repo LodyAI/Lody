@@ -1,0 +1,13 @@
+[package]
+name = "lody-runtime"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+lody-app.workspace = true
+lody-kernel.workspace = true
+lody-ports.workspace = true
+tokio.workspace = true

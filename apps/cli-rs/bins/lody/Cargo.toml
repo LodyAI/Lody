@@ -1,0 +1,28 @@
+[package]
+name = "lody"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lody"
+path = "src/main.rs"
+
+[features]
+default = []
+connected = ["dep:lody-backend", "dep:serde_json"]
+
+[dependencies]
+lody-acp.workspace = true
+lody-app.workspace = true
+lody-backend = { workspace = true, optional = true }
+lody-engine.workspace = true
+lody-entry.workspace = true
+lody-kernel.workspace = true
+lody-ports.workspace = true
+lody-runtime.workspace = true
+lody-sqlite.workspace = true
+lody-worktree.workspace = true
+serde_json = { workspace = true, optional = true }
