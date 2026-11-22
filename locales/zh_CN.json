@@ -7057,5 +7057,8 @@
   "chat.mobileHome.status.moveUp": "上移",
   "chat.mobileHome.status.moveDown": "下移",
   "chat.mobileHome.filters.view.byStatus": "按状态分组",
-  "chat.mobileHome.status.deleteSectionDescription": "删除“{{name}}”？其中的对话仍保持置顶，移到“置顶”。"
+  "chat.mobileHome.status.deleteSectionDescription": "删除“{{name}}”？其中的对话仍保持置顶，移到“置顶”。",
+  "settings.account.cliAuth.signInGroup": "登录时自动创建",
+  "settings.account.cliAuth.signInGroupHelper_one": "{{count}} 个 Token 由电脑登录时自动创建",
+  "settings.account.cliAuth.signInGroupHelper_other": "{{count}} 个 Token 由电脑登录时自动创建"
 }

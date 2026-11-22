@@ -85,3 +85,19 @@ export function describeCliApiKey(
     lastUsed: lastUsed ? t('settings.account.cliAuth.lastUsed', { at: lastUsed }) : null,
   };
 }
+
+/**
+ * Tokens a sign-in created on its own (`source: 'auto'`) fold into one group;
+ * the ones a person made or paired stay in the list. Order is kept within each.
+ */
+export function partitionCliApiKeys(apiKeys: readonly CliApiKeyRecord[]): {
+  listed: CliApiKeyRecord[];
+  signIn: CliApiKeyRecord[];
+} {
+  const listed: CliApiKeyRecord[] = [];
+  const signIn: CliApiKeyRecord[] = [];
+  for (const apiKey of apiKeys) {
+    (apiKey.source === 'auto' ? signIn : listed).push(apiKey);
+  }
+  return { listed, signIn };
+}
