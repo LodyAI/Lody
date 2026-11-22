@@ -67,7 +67,7 @@ vi.mock('jotai', async (importOriginal) => ({
   ...(await importOriginal<typeof import('jotai')>()),
   useAtomValue: () => fixture.creationEnabled,
 }));
-vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => null }));
 const platform = vi.hoisted(() => ({
   e2eeWorkspaces: {
     prepareCreation: async (input: { requestId: string; name: string; slug: string }) => ({

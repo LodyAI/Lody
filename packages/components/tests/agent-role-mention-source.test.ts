@@ -325,6 +325,42 @@ describe('a role on several machines', () => {
     expect(rows[1]?.role).toMatchObject({ machineId: 'machine-2', agentConfigId: 'config-2' });
   });
 
+  it('shows in settings the exact @ token the composer completes for each machine', async () => {
+    const { AgentRoleForm } = await import('../src/components/settings/agent-role-form');
+    const { buildAgentRoleFormValue } = await import('../src/lib/agent-role-form');
+    const { initI18n } = await import('../src/i18n');
+    await initI18n('en');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(AgentRoleForm, {
+          value: { ...buildAgentRoleFormValue(multi), activeMachineId: null },
+          onChange: () => undefined,
+          machines: Object.entries(names).map(([id, label]) => ({
+            machineId: id as MachineId,
+            label,
+            online: true,
+          })),
+          agentConfigs: [],
+          selectorOptions: null,
+          issues: [],
+          errors: [],
+          onSubmit: () => undefined,
+          onCancel: () => undefined,
+        })
+      );
+    });
+    const shown = [...container.querySelectorAll('[data-machine-id]')].map((row) => [
+      row.getAttribute('data-machine-id'),
+      row.textContent?.match(/@\S+/u)?.[0],
+    ]);
+    expect(shown).toEqual(targetItems().map((item) => [item.role.machineId, `@${item.slug}`]));
+    act(() => root.unmount());
+    container.remove();
+  });
+
   it("puts the composer's own machine first", () => {
     expect(targetItems('machine-2' as MachineId).map((item) => item.value)).toEqual([
       'role-1@machine-2',

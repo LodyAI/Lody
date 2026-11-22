@@ -177,6 +177,7 @@ describe('MessageHandler file preview workspace lifecycle', () => {
     ['machine/memory', { action: 'list', providerId: 'nowledge-mem' }],
     ['project/probe-local-member', { localProjectId: 'synthetic', requestedByUserId: 'user-1' }],
     ['local-project/git-state', { localProjectId: 'synthetic', requestedByUserId: 'user-1' }],
+    ['local-project/list-branches', { localProjectId: 'synthetic', requestedByUserId: 'user-1' }],
     ['session/history-read', { sessionId, query: { kind: 'count' } }],
     ['session/history-subscribe', { sessionId, subscription: { action: 'open', id: 'synthetic' } }],
     ['code-collab/open-current-diff', { sessionId, path: 'artifact.txt' }],
@@ -626,6 +627,87 @@ describe('MessageHandler file preview workspace lifecycle', () => {
           params: { localProjectId: 'unregistered' },
         })
       ).toEqual({ ok: false, error: 'Project group probe scope mismatch' });
+    }
+  });
+
+  it('serves encrypted local-project/list-branches for verified project roots and refuses tampered paths', async () => {
+    await encryptedHandler();
+    const { localProjectsLegacy } = await import('@lody/shared/node/local-project');
+    const plainDir = path.join(dataDir, 'plain-dir');
+    fs.mkdirSync(plainDir);
+    const validId = localProjectsLegacy.createLocalProjectId(plainDir);
+    writeMachineFlockRowToFlock(
+      localProjects,
+      {
+        key: machineFlockKeys.localProject(validId),
+        value: { id: validId, name: 'Plain', rootPath: plainDir, createdAtMs: 1 },
+      },
+      1
+    );
+    writeMachineFlockRowToFlock(
+      localProjects,
+      {
+        key: machineFlockKeys.localProject('local-project-tampered' as never),
+        value: {
+          id: 'local-project-tampered',
+          name: 'Tampered',
+          rootPath: plainDir,
+          createdAtMs: 1,
+        },
+      },
+      1
+    );
+    const f = encryptedRpcFixture();
+    try {
+      const context = {
+        requestId: 'cc'.repeat(16),
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        signal: new AbortController().signal,
+      };
+      const okResult = await callEncryptedReadFeature({
+        workspaceId,
+        machineId,
+        method: 'local-project/list-branches',
+        params: { localProjectId: validId, requestedByUserId: 'user-1', limit: 10 },
+        timeoutMs: 30_000,
+        request: async (request) => {
+          const prepared = await Effect.runPromise(
+            f.sender.prepareFeature({ requestId: 'cc'.repeat(16), request })
+          );
+          const opened = await Effect.runPromise(
+            f.receiver.openFeature(f.machineId, prepared.frameHex)
+          );
+          if (!opened) throw new Error('missing request');
+          return handler.readEncryptedMachineRequest(opened.input.request, context);
+        },
+      });
+      expect(okResult).toMatchObject({
+        result: {
+          type: 'local-project/list-branches_response',
+          success: true,
+          result: { git: false },
+        },
+      });
+
+      const tamperedResponse = await handler.readEncryptedMachineRequest(
+        {
+          workspaceId,
+          machineId,
+          method: 'local-project/list-branches',
+          params: { localProjectId: 'local-project-tampered', requestedByUserId: 'user-1' },
+        },
+        context
+      );
+      expect(tamperedResponse).toMatchObject({
+        ok: true,
+        result: {
+          type: 'local-project/list-branches_response',
+          success: false,
+          error: 'local_project_not_found',
+        },
+      });
+    } finally {
+      f.close();
     }
   });
 

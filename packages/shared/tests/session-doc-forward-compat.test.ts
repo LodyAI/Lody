@@ -9,7 +9,8 @@ import {
   isSessionDocRoomId,
   type WorkspaceId,
 } from '../src';
-import { sessionDocSchema, type MessageQueueItem } from '../src/schema';
+import { sessionDocSchema } from '../src/session-doc-schemas';
+import type { MessageQueueItem } from '../src/schema';
 import { createSessionControlPlaneMirror } from '../src/session-control-plane';
 import { createSessionMirror as createProductionSessionMirror } from '../src/session-mirror';
 

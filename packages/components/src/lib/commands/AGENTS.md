@@ -17,12 +17,24 @@ only tells global dispatch to yield for events originating in its subtree.
   dispatch honor it; do not add screen-specific filters elsewhere.
 - `built-ins.ts` registers `when: () => false` placeholders so configurable shortcuts
   remain visible when their real component is unmounted. A mounted implementation
-  shadows the placeholder and removal restores it.
+  shadows the placeholder and removal restores it. A command that belongs to an
+  experiment is not a built-in: its placeholder is registered by an always-mounted
+  component of that experiment, before the routes (`TodayCommandPlaceholder`), so it
+  is listed only while the experiment is on and never masks the mounted command.
 - The registry is a per-id stack. Multiple `register` calls push implementations and
   the most recently mounted one wins. Hidden retained tabs/toolbars must pass
   `enabled=false` to `useCommand` or they can shadow the active surface.
 - Binding-level `when` limits only the default binding. User overrides do not inherit
   it. Command-level `when` limits the command through every execution path.
+- `KeyBinding.surface` is the declarative projection of a focus-scoped `when`
+  (`whileComposerFocused` writes both). `COMMAND_SHORTCUTS` fails compilation when two
+  commands' literal bindings overlap on key × runtimes × platforms × surface; the
+  canonicalized-spelling backstop lives in `tests/commands-shortcuts.test.ts`.
+- A composer command mounted once per composer box wraps its defaults in
+  `composerScopedKeybindings` so each surface answers only its own field's chords;
+  `commandsEnabled` still gates which visible surfaces register.
+- A hint renderer calls `useCommands()` for the registry subscription alone, so a
+  rebound binding re-renders the formatted hint.
 - `useKeyScope(id, ref)` registers a scope and automatically removes it. Dispatch finds
   scopes containing `event.target`, preferring the innermost. A matched scope yields all
   app shortcuts unless the command has `allowInTextInput: true`; `claims` narrows the

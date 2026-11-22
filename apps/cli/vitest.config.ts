@@ -12,6 +12,7 @@ const isolatedFiles = new Set([
   // Factory registration and live Flock timers outlive their importing module.
   'src/session/session-backend.test.ts',
   'tests/streams-relay-authorship.repro.test.ts',
+  'tests/cli-streams-replica-checkpoints.test.ts',
   'src/lib/loro/presence.test.ts',
   // These suites replace process.env itself; Vitest retains the original object
   // for vi.stubEnv, so subsequent files must start with fresh worker state.
@@ -22,6 +23,7 @@ const isolatedFiles = new Set([
   'tests/loro-doc-unload-data-plane-integration.test.ts',
   // Draining all fake timers must not execute another suite's retained background timers.
   'tests/session-dispatch-watcher.test.ts',
+  'tests/local-loro-data-plane-bug-repro.test.ts',
 ]);
 // Global timer-count assertions need their own native timer context.
 const isolatedState =

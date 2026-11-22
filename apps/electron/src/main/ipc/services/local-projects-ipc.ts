@@ -316,6 +316,27 @@ export class LocalProjectsIpc extends ProductWindowIpcService {
   }
 
   @IpcMethod()
+  async listBranches(
+    workspaceId: string,
+    localProjectId: string,
+    optionsArg?: { query?: string; limit?: number; cursor?: string }
+  ) {
+    const response = await sendLocalProjectControl({
+      type: 'local-project/list-branches',
+      workspaceId: workspaceId as WorkspaceId,
+      localProjectId: localProjectId as LocalProjectId,
+      ...(optionsArg?.query ? { query: optionsArg.query } : {}),
+      ...(optionsArg?.limit !== undefined ? { limit: optionsArg.limit } : {}),
+      ...(optionsArg?.cursor ? { cursor: optionsArg.cursor } : {})
+    })
+    if (!response.ok) return { error: response.message }
+    if (response.type !== 'local-project/list-branches') {
+      return { error: `Unexpected response type: ${response.type}` }
+    }
+    return response.result
+  }
+
+  @IpcMethod()
   async listFiles(workspaceId: string, localProjectId: string, optionsArg?: { maxFiles?: number }) {
     const response = await sendLocalProjectControl({
       type: 'local-project/list-files',

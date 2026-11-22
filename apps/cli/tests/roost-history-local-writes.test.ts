@@ -1,14 +1,11 @@
+import { prepareReplacement } from '@lody/shared/history-writer';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Identity, decodeBatch, decodeJson } from '@loro-dev/roost';
-import {
-  planAgentHistoryMutation,
-  prepareReplacement,
-  type SessionHistoryInput,
-} from '@lody/shared';
+import { planAgentHistoryMutation, type SessionHistoryInput } from '@lody/shared';
 import {
   fromApplicationJson,
   toApplicationJson,

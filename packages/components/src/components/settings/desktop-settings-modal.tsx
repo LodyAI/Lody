@@ -8,7 +8,7 @@ import {
   loadStatsSettingsComponent,
   loadProjectSettingsComponent,
   loadMachineAgentSettings,
-  loadLodyAgentSetting,
+  loadHarness,
   loadIntegrationsSettingsComponent,
   loadKeyboardShortcutsSetting,
   loadAboutSettingsComponent,
@@ -19,9 +19,7 @@ import {
   loadWorkspaceDataSetting,
   preloadSettingsPanel,
 } from './settings-code';
-const WorkspaceSettings = lazy(loadWorkspaceSettings);
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
-const MemorySetting = lazy(loadMemorySetting);
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import {
   lazy,
@@ -62,6 +60,8 @@ import {
   type SettingsTabId,
 } from './settings-tabs';
 import { SettingsAccountEntry } from './settings-account-entry';
+const WorkspaceSettings = lazy(loadWorkspaceSettings);
+const MemorySetting = lazy(loadMemorySetting);
 const GeneralSettingsComponent = lazy(loadGeneralSettingsComponent);
 const AppearanceSettingsComponent = lazy(loadAppearanceSettingsComponent);
 const AccountSettingsComponent = lazy(loadAccountSettingsComponent);
@@ -69,7 +69,7 @@ const BillingSettingsComponent = lazy(loadBillingSettingsComponent);
 const StatsSettingsComponent = lazy(loadStatsSettingsComponent);
 const ProjectSettingsComponent = lazy(loadProjectSettingsComponent);
 const MachineAgentSettings = lazy(loadMachineAgentSettings);
-const LodyAgentSetting = lazy(loadLodyAgentSetting);
+const Harness = lazy(loadHarness);
 const IntegrationsSettingsComponent = lazy(loadIntegrationsSettingsComponent);
 const KeyboardShortcutsSetting = lazy(loadKeyboardShortcutsSetting);
 const AboutSettingsComponent = lazy(loadAboutSettingsComponent);
@@ -621,7 +621,7 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
         />
       );
     case 'lody-agent':
-      return <LodyAgentSetting />;
+      return <Harness />;
     case 'memory':
       return <MemorySetting />;
     case 'agent-roles':

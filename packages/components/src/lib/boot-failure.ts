@@ -301,14 +301,12 @@ async function copyToClipboard(text: string): Promise<boolean> {
   return ok;
 }
 
-// ---------------------------------------------------------------------------
 // The screen. It draws the column `components/status-page.tsx` draws, without
 // React or StyleX: this page has to render when neither did (a StyleX runtime
 // error is one of the boot failures it reports). So the V2 token values are
 // restated here as custom properties on the page root — the literals in
 // `@lody/ui/src/tokens/*.stylex.ts` — and a change to those tokens that should
 // reach this page has to be copied here by hand.
-// ---------------------------------------------------------------------------
 
 const ROOT_CLASS = 'lody-boot-failure';
 const THEME_STORAGE_KEY = 'vite-ui-theme';

@@ -475,7 +475,11 @@ See [the contract](../../../../specs/github-identity-fallback.md) and
 retries once, and returns personal identity disabled after two failures. Startup publishes
 `Resolving Git identity`; cancellation interrupts the waiter and fences identity updates
 and agent launch. Late policy results have no side effects. This deadline also covers
-per-turn identity refresh; it is separate from network credential fallback.
+per-turn identity refresh. The workspace token manager reuses its last confirmed disabled
+commit preference for the same requester and machine for up to 30 seconds from lookup
+start. Enabling personal attribution can take that long to appear. Approvals and failures
+are checked again on the next turn. Global invalidation and shutdown discard the entry.
+Network credential selection remains independent.
 
 Precedence: for owner turns, the workdir repository's own configured identity; then an approved
 ("Act as you") requester; then the owner's other native Git identity; then neutral LodyAI (`session.ts` `updateGitIdentity`, re-applied per turn via the execution

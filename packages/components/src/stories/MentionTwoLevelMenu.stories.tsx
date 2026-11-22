@@ -784,6 +784,46 @@ export const CategoryError: Story = {
   },
 };
 
+/** `@op` with a full list while Issues and PRs fail: each wrapped error keeps its own height. */
+export const AggregateSearchSourceError: Story = {
+  args: {
+    search: 'op',
+    narrow: true,
+    categories: [
+      category(
+        'file',
+        'file',
+        'Files',
+        'file',
+        Array.from({ length: 4 }, (_, index) =>
+          toFileCandidate({
+            kind: 'file',
+            path: `apps/desktop-setup-notes-${index}/op.ts`,
+            token: `apps/desktop-setup-notes-${index}/op.ts`,
+          })
+        )
+      ),
+      category(
+        'command',
+        'cmd',
+        'Commands',
+        'command',
+        ['output-style', 'computer-use', 'compact-op', 'open-pr'].map((name) =>
+          toCommandCandidate({ name, description: `Run ${name}` })
+        ),
+        { directTrigger: '/' }
+      ),
+      ...(['issue', 'pr'] as const).map((type) =>
+        category(type, type, type === 'issue' ? 'Issues' : 'Pull Requests', type, [], {
+          status: 'error' as const,
+          message:
+            'GitHub could not list issues for "example/example-repository-with-a-long-name". Check the integration in Settings → Integrations and try again.',
+        })
+      ),
+    ],
+  },
+};
+
 /** A very large repo: the file list is truncated and says so. */
 export const FileCategoryTruncated: Story = {
   args: {
@@ -932,4 +972,49 @@ export const EditorOverflow: Story = {
 export const EditorBehaviourEditorUndo: Story = {
   args: { search: '' },
   render: () => <EditorBehaviourHarness undoHistory={false} />,
+};
+
+/**
+ * A Role on three machines is three rows, one per machine: picking a row picks
+ * where it runs. The alias replaces `name · machine`; an offline machine's row
+ * stays listed but cannot be chosen.
+ */
+const MULTI_MACHINE_ROLE = agentRole({
+  id: 'multi-role' as AgentRoleId,
+  name: 'Code Reviewer',
+  promptPrefix: 'Review the diff for correctness before style.',
+});
+const multiMachineRoleItem = (
+  machineId: string,
+  machineName: string,
+  alias?: string,
+  online = true
+) =>
+  toAgentRoleCandidate(
+    {
+      availability: online
+        ? { kind: 'available' }
+        : { kind: 'unavailable', reason: 'machine_offline' },
+      slug: alias ?? `Code-Reviewer-${machineName.replace(/\s+/g, '-')}`,
+      value: `${MULTI_MACHINE_ROLE.id}@${machineId}`,
+      label: alias ?? `${MULTI_MACHINE_ROLE.name} · ${machineName}`,
+      role: { ...MULTI_MACHINE_ROLE, machineId: machineId as MachineId },
+      machine: { name: machineName },
+      agentConfig: ROLE_AGENT_CONFIG,
+    },
+    online ? undefined : 'Unavailable: its machine is offline'
+  );
+export const AgentRoleOnSeveralMachines: Story = {
+  args: {
+    search: 'role:',
+    withDetail: true,
+    categories: [
+      category('agent_role', 'role', 'Agent Roles', 'agent_role', [
+        multiMachineRoleItem('m-studio', 'Studio'),
+        multiMachineRoleItem('m-build', 'Build box', 'Reviewer-CI'),
+        multiMachineRoleItem('m-linux', 'Linux runner', undefined, false),
+        ...AGENT_ROLES.slice(1),
+      ]),
+    ],
+  },
 };

@@ -1,5 +1,6 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { LoroRepo } from 'loro-repo';
-import { ScheduleRepository, type SessionMeta, type WorkspaceId } from '@lody/shared';
+import { type SessionMeta, type WorkspaceId } from '@lody/shared';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';

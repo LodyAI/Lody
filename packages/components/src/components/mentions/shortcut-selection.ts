@@ -1,10 +1,10 @@
 import {
   PromptShortcutError,
   resolveShortcutAvailability,
-  type PromptShortcutIndexEntry,
-  type PromptShortcutRuntime,
   type ShortcutAvailability,
-} from '@lody/shared/prompt-shortcuts';
+} from '@lody/shared/prompt-shortcuts/model';
+import type { PromptShortcutIndexEntry } from '@lody/shared/prompt-shortcuts/catalog';
+import type { PromptShortcutRuntime } from '@lody/shared/prompt-shortcuts/runtime';
 import type { MentionPrepare, PreparedMention } from '@/ui/mention/index';
 import {
   unverifiedShortcutDependency,

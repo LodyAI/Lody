@@ -19,8 +19,11 @@ File attachments use `file` blocks; the product contract is in
   Beside it, the name is the only line at full ink; under it, `secondaryLabel` spells the type and
   size ("PDF · 2.4 MB", via `formatSessionFileMeta`, which the pending row shares so the handoff
   to history does not change the text; no short extension means the size alone) or the status. The
-  action chip trails and rests at `secondaryLabel` (a dimmer rest read as disabled), sinking into a
-  well on hover of the main button. The sheet scales with Appearance (`captionSize` units). On a card that opens something
+  action chip trails at `secondaryLabel` (a dimmer rest read as disabled) with no fill of its own.
+  Preview and download actions appear only while the card is hovered or holds focus; devices
+  without hover (`@media (hover: hover)` fails) keep them visible. Only the control under the
+  pointer changes: it brightens and sinks into a well. Hovering the card never paints the chip,
+  and status glyphs (upload spinner, expiry clock, a download in flight) stay visible. The sheet scales with Appearance (`captionSize` units). On a card that opens something
   the sheet lifts and tilts a hair and takes `shadow.raised`; pending and expired dim it, and a
   failed card tints the tray toward `destructive` and its reason takes label ink. Under
   `prefers-reduced-motion` the lift is instant, not animated. There is no colour per file kind,
@@ -32,22 +35,30 @@ File attachments use `file` blocks; the product contract is in
 - One card, one primary action — EXCEPT an HTML attachment, which also gets a separate
   download button for the source bytes. Its click opens the RENDERED page (browser
   surface or live file preview), a surface with no control of its own for the file that
-  was uploaded; every other previewable file opens the preview dialog, which already
+  was uploaded; every other previewable file opens the attachment preview, which already
   downloads from inside, so it must not grow a duplicate control. That button carries the
   in-flight spinner, and the primary affordance keeps reading as preview.
 - `session-file-preview-dialog.tsx` — `SessionFilePreviewPanel` (status-driven;
   markdown reuses `MarkdownRenderer`, raw toggle, copy=raw, truncation) and dialog wrapper.
+  `session-file-attachment.tsx` owns the preview fetch and download for every host.
+  A desktop Session opens the preview as a closeable side-panel viewer tab
+  (`openFileAttachment` on `SessionChatActionContext`, tab id
+  `attachment:<storage session>:<fileId>`), deduped and focused like file tabs and
+  not restored after reload. The `pane` variant puts the name, size and actions in
+  one toolbar under the tab strip and lets the body fill the panel, with no card,
+  border, radius or close button. Hosts without a side panel keep the modal:
+  mobile uses the Drawer below, and the desktop history reader the Dialog.
   Complete HTML fallback attachments open in the shared `ReadOnlyHtmlPreview`, with
   an eye toggle beside Copy in the existing header. Source mode and Copy retain
   the original text; loading, errors and truncated HTML never mount the iframe.
   On mobile, all these file types use a bottom Drawer/Sheet taking approximately
   94dvh (respecting top and bottom safe areas), with a fixed header and scrolling
-  body; HTML fills the available body. Desktop retains the centered Dialog and
+  body; HTML fills the available body. The desktop Dialog fallback keeps its
   55vh content cap. Preview uses the script-free sandbox, with no
   live-file provenance or Browser connection required.
-  Story: `SessionFilePreviewPanel.stories.tsx`.
-- `view.tsx` `SessionFileGroup` owns atoms/download/preview-fetch and resolves the pending
-  machine name. Both render switches and `UserChatBubble` route `file` blocks through it.
+  Story: `SessionFilePreviewPanel.stories.tsx` (`SidePanel*` for the pane).
+- `view.tsx` `SessionFileGroup` routes previews (HTML surface, side-panel tab, modal
+  fallback) and resolves the pending machine name. Both render switches and `UserChatBubble` route `file` blocks through it.
   Upload/download/preview helpers: `@/lib/session-file-{upload,download,presentation}.ts`.
 - Agent-uploaded blocks may carry a workspace-relative `sourcePath` proven by the CLI's
   containment check. It is provenance for reopening the live file, never a download path.

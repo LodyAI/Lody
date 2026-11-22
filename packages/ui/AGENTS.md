@@ -3,6 +3,8 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
 Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-options.ts`.
+StyleX rules must land in the initial renderer stylesheet: `index` for Web and
+`main` for Electron, including hashed filenames, never a lazy feature chunk.
 
 - Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge` or
   `@source` scanning here. Component props own visual variants, sizes, tones and
@@ -120,3 +122,6 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
   superellipse; round is the non-Chromium fallback.
 - `ScrollArea` exposes its native viewport ref. Delete obsolete Radix files once
   all in-repo callers migrate; private consumers sync on typecheck.
+- Scrollbars are hidden at rest. Native thumbs paint only under the attributes
+  `installScrollbarPresence` publishes, which a host mounts once at its root;
+  never reveal a bar on container hover.

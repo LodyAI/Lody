@@ -1,4 +1,4 @@
-import { PDFDataRangeTransport } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import type { PDFDataRangeTransport } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 export const PDF_RANGE_CHUNK_BYTES = 64 * 1024;
 
@@ -10,7 +10,7 @@ interface PdfRangeTransportOptions {
   readonly fetchImpl?: typeof fetch;
 }
 
-interface PdfRangeResult {
+export interface PdfRangeResult {
   readonly bytes: Uint8Array;
   readonly length: number;
 }
@@ -20,41 +20,19 @@ export async function createLocalPdfRangeTransport({
   signal,
   fetchImpl = fetch,
 }: PdfRangeTransportOptions): Promise<PDFDataRangeTransport> {
+  // `pdfjs-dist` is loaded lazily: this module stays on the eager file-viewer
+  // path for `isPdfFilePath`, so the transport implementation is imported
+  // only when a PDF preview actually runs. The dynamic import resolves to
+  // an already-loaded module once the preview bundle is up.
+  const { createPdfRangeTransport } = await import('./pdf-range-transport');
   const initial = await readPdfRange(fetchImpl, url, 0, PDF_RANGE_CHUNK_BYTES, signal);
-  return new LocalPdfRangeTransport(url, initial, fetchImpl, signal);
+  return createPdfRangeTransport(initial, signal, (begin, end, rangeSignal, knownLength) =>
+    readPdfRange(fetchImpl, url, begin, end, rangeSignal, knownLength)
+  );
 }
 
-class LocalPdfRangeTransport extends PDFDataRangeTransport {
-  private readonly controller = new AbortController();
-
-  constructor(
-    private readonly url: string,
-    initial: PdfRangeResult,
-    private readonly fetchImpl: typeof fetch,
-    signal: AbortSignal
-  ) {
-    super(initial.length, initial.bytes);
-    if (signal.aborted) {
-      this.abort();
-    } else {
-      signal.addEventListener('abort', () => this.abort(), { once: true });
-    }
-  }
-
-  override requestDataRange(begin: number, end: number): void {
-    void readPdfRange(this.fetchImpl, this.url, begin, end, this.controller.signal, this.length)
-      .then(({ bytes }) => this.onDataRange(begin, bytes))
-      .catch(() => {
-        if (!this.controller.signal.aborted) {
-          this.onDataRange(begin, new Uint8Array());
-          this.abort();
-        }
-      });
-  }
-
-  override abort(): void {
-    this.controller.abort();
-  }
+export interface PdfRangeReader {
+  (begin: number, end: number, signal: AbortSignal, knownLength?: number): Promise<PdfRangeResult>;
 }
 
 async function readPdfRange(

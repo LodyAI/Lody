@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2023",
+    "useDefineForClassFields": true,
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "experimentalDecorators": true,
+    "module": "ESNext",
+    "skipLibCheck": true,
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "paths": {
+      "@/components/settings/account-setting": ["./src/recovery/recovery-account-setting.tsx"],
+      "*": ["./*"],
+      "react": ["./node_modules/@types/react"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
+      "react/jsx-dev-runtime": ["./node_modules/@types/react/jsx-dev-runtime"],
+      "@lody/components": ["../../packages/components/src"],
+      "@lody/components/*": ["../../packages/components/src/*"],
+      "@lody/routes": ["../../packages/components/src/routes"],
+      "@lody/routes/*": ["../../packages/components/src/routes/*"],
+      "@lody/shared": ["../../packages/shared/src"],
+      "@/ui": ["../../packages/components/src/ui"],
+      "@/ui/*": ["../../packages/components/src/ui/*"],
+      "@/components": ["../../packages/components/src/components"],
+      "@/components/*": ["../../packages/components/src/components/*"],
+      "@/lib": ["../../packages/components/src/lib"],
+      "@/lib/*": ["../../packages/components/src/lib/*"],
+      "@/hooks": ["../../packages/components/src/hooks"],
+      "@/hooks/*": ["../../packages/components/src/hooks/*"],
+      "@/atoms": ["../../packages/components/src/atoms"],
+      "@/atoms/*": ["../../packages/components/src/atoms/*"],
+      "@/i18n": ["../../packages/components/src/i18n"],
+      "@/theme-provider": ["../../packages/components/src/theme-provider"]
+    }
+  },
+  "include": ["src"]
+}

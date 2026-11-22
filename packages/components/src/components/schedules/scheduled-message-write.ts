@@ -1,6 +1,5 @@
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import {
-  ScheduleRepository,
   ScheduledMessageSchema,
   getServerNow,
   type ScheduleDraft,
@@ -98,6 +97,9 @@ export async function saveScheduledMessage(args: {
   if (args.draft.trigger.kind !== 'once' || Date.parse(args.draft.trigger.at) <= now)
     throw new Error('SCHEDULE_TIME_PASSED');
 
+  // Boot-path module: keep `loro-mirror`/`loro-crdt` out of the initial
+  // chunk; the repository loads on first use.
+  const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
   return args.runtime.withScheduleStore(
     args.scheduleId,
     () =>

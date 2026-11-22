@@ -7,6 +7,7 @@ import type {
   WorkspaceId,
   ProjectRef,
   LocalProjectId,
+  LocalProjectBranchListResult,
   LocalProjectGitState,
   LocalProjectHistoryCatalogItem,
   LocalProjectHistoryProvider,
@@ -57,15 +58,10 @@ export type {
   SessionPreviewStatusResponse,
 } from './preview';
 
-// ============================================
-// CONTROL PROTOCOL MESSAGES
-// ============================================
-
 export type SessionStartMeta = {
   fromFeedbackPostId?: string;
 };
 
-// Session Create Messages
 export interface SessionCreateRequest {
   type: 'session/create';
   sessionId: SessionId;
@@ -94,7 +90,6 @@ export type SessionCreateResponse = {
   error?: string;
 };
 
-// Session Create Ack - sent immediately when local control accepts the request
 export type SessionCreateAck = {
   type: 'session/create_ack';
   sessionId: SessionId;
@@ -130,7 +125,6 @@ export interface SessionChatResponse {
   error?: string;
 }
 
-// Session Chat Ack - sent immediately when local control accepts the request
 export type SessionChatAck = {
   type: 'session/chat_ack';
   sessionId: SessionId;
@@ -211,7 +205,6 @@ export interface SessionGoalResponse {
   error?: string;
 }
 
-// Permission Messages
 export interface PermissionRequestMessage {
   type: 'session/permission_request';
   sessionId: SessionId;
@@ -226,11 +219,6 @@ export interface PermissionResponseMessage {
   outcome: PermissionOutcome;
 }
 
-// ============================================
-// MACHINE STATUS AND CONTROL MESSAGES
-// ============================================
-
-// Machine resource information
 export interface MachineResourceInfo {
   totalMemoryGB: number;
   usedMemoryGB: number;
@@ -239,7 +227,6 @@ export interface MachineResourceInfo {
   cpuUsagePercent: number;
 }
 
-// Machine Status Request (Client -> Server -> Machine)
 export interface MachineStatusRequest {
   type: 'machine/status';
   machineId: MachineId;
@@ -260,7 +247,6 @@ export interface MachineLifecycleCapability {
   reason?: MachineLifecycleUnsupportedReason;
 }
 
-// Machine Status Response (Machine -> Server -> Client)
 export interface MachineStatusResponse {
   type: 'machine/status_response';
   machineId: MachineId;
@@ -995,7 +981,6 @@ export interface SessionHistoryWriteResponse {
   error?: string;
 }
 
-// Local CLI control (Electron -> local CLI) message subsets
 export type DshProvidersRequest = { type: 'machine/dsh-providers'; machineId: MachineId };
 export type DshProvidersResponse = {
   type: 'machine/dsh-providers_response';
@@ -1067,6 +1052,13 @@ export type LocalSessionControlResponse =
 
 export type LocalProjectFileListResult = {
   paths: string[];
+  truncated: boolean;
+};
+
+export type LocalProjectFileSearchResult = {
+  /** Best matches first, at most the requested limit. */
+  paths: string[];
+  /** The host's file index hit its size cap, so a match may be missing. */
   truncated: boolean;
 };
 
@@ -1254,11 +1246,36 @@ export type LocalProjectControlRequest =
       localProjectId: LocalProjectId;
     }
   | {
+      type: 'local-project/list-branches';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      query?: string;
+      limit?: number;
+      cursor?: string;
+      requestedByUserId?: string;
+    }
+  | {
       type: 'local-project/list-files';
       machineId: MachineId;
       workspaceId: WorkspaceId;
       localProjectId: LocalProjectId;
       maxFiles?: number;
+      requestedByUserId?: string;
+    }
+  | {
+      /**
+       * Host-side path search: the machine matches `query` against its own
+       * file list and returns only the best `limit` paths, so a client never
+       * pulls the full list to filter it. Older daemons reject this type; the
+       * client then falls back to `local-project/list-files`.
+       */
+      type: 'local-project/search-files';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      query: string;
+      limit?: number;
       requestedByUserId?: string;
     }
   | {
@@ -1276,12 +1293,14 @@ export type LocalProjectControlRequest =
       workspaceId: WorkspaceId;
       localProjectId: LocalProjectId;
       skillDirs: string[];
+      knownFingerprint?: string;
       requestedByUserId?: string;
     }
   | {
       type: 'local-project/list-global-skills';
       machineId: MachineId;
       workspaceId: WorkspaceId;
+      knownFingerprint?: string;
       requestedByUserId?: string;
     }
   | {
@@ -1441,7 +1460,9 @@ export type LocalProjectControlResponse =
       { workspaces: LocalProjectWorkspaceSummary[] }
     >
   | LocalProjectControlOkResponse<'local-project/git-state', LocalProjectGitState>
+  | LocalProjectControlOkResponse<'local-project/list-branches', LocalProjectBranchListResult>
   | LocalProjectControlOkResponse<'local-project/list-files', LocalProjectFileListResult>
+  | LocalProjectControlOkResponse<'local-project/search-files', LocalProjectFileSearchResult>
   | LocalProjectControlOkResponse<'local-project/list-dir', LocalProjectDirectoryListResult>
   | LocalProjectControlOkResponse<'local-project/list-skills', ProjectSkillsResult>
   | LocalProjectControlOkResponse<'local-project/list-global-skills', ProjectSkillsResult>
@@ -1467,11 +1488,6 @@ export type LocalProjectControlResponse =
   | LocalProjectControlOkResponse<'worktree/read-file', LocalProjectFileReadResult | null>
   | LocalProjectControlErrorResponse;
 
-// ============================================
-// MESSAGE TYPE UNIONS
-// ============================================
-
-// Client to Server Messages
 export type ClientToServer =
   | SessionCreateRequest
   | SessionChatRequest
@@ -1487,7 +1503,6 @@ export type ClientToServer =
   | MachineAcpBinaryStatusRequest
   | MachineAcpBinaryInstallRequest;
 
-// Server to Client Messages
 export type ServerToClient =
   | SessionCreateResponse
   | SessionCreateAck
@@ -1507,7 +1522,6 @@ export type ServerToClient =
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage;
 
-// Machine to Server Messages
 export type MachineToServer =
   | PermissionRequestMessage
   | SessionCreateResponse
@@ -1525,7 +1539,6 @@ export type MachineToServer =
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage;
 
-// Server to Machine Messages
 export type ServerToMachine =
   | SessionCreateRequest
   | SessionChatRequest
@@ -1541,9 +1554,7 @@ export type ServerToMachine =
   | MachineAcpBinaryStatusRequest
   | MachineAcpBinaryInstallRequest;
 
-// Combined message types
 export type ServerReceiveMessage = ClientToServer | MachineToServer;
 export type ServerSendMessage = ServerToClient | ServerToMachine;
 
-// WebSocket message type for general use
 export type WebSocketMessage = ServerReceiveMessage | ServerSendMessage;

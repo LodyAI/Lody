@@ -47,3 +47,32 @@ export const withProjectGroupPrScope = (prompt: string): string =>
   ].join(' ')}`;
 
 export const COMMIT_AND_PUSH_PROMPT = 'Commit the uncommitted changes and push the current branch.';
+
+/** A pull request named in a repair or merge request. */
+export type PrPromptTarget = {
+  repoFullName: string;
+  prNumber: number | null;
+  prUrl: string;
+};
+
+const prLabel = (target: PrPromptTarget) =>
+  target.prNumber ? `#${target.prNumber}` : target.prUrl;
+
+/** English text of the Fix CI request; the UI sends its localized copy. */
+export const buildFixCiRequest = (target: PrPromptTarget): string =>
+  `Fix the failing CI checks of ${target.repoFullName} pull request ${prLabel(target)}: ${target.prUrl}`;
+
+/** English text of the Resolve Conflicts request; the UI sends its localized copy. */
+export const buildResolveConflictsRequest = (target: PrPromptTarget): string =>
+  `Resolve the merge conflicts of ${target.repoFullName} pull request ${prLabel(target)}: ${target.prUrl}`;
+
+/**
+ * Auto delivery's merge request: the request plus the commit whose checks Lody
+ * observed passing, which the agent cannot otherwise tie to this message.
+ */
+export const buildMergePrRequest = (target: PrPromptTarget & { headSha: string }): string =>
+  `Merge ${target.repoFullName} pull request ${prLabel(target)}: ${target.prUrl}. Its checks passed on head commit ${target.headSha}. ${GH_AUTH_FACT}`;
+
+/** Origin line of every request Auto delivery sends, like the Info Bar's button lines. */
+export const AUTO_DELIVERY_ORIGIN_PROMPT =
+  '(Sent by **Auto delivery** in Lody, which the user turned on for this pull request.)';

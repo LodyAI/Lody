@@ -27,10 +27,22 @@ function ChatRoute() {
   // a visit to a new page, so the mirror always replaces.
   const handleSelectionUrlSync = useCallback(
     (selectionSearch: ChatLandingSearch) => {
-      void navigate({ search: selectionSearch, replace: true });
+      void navigate({
+        search: (previous) =>
+          previous.pinSection
+            ? { ...selectionSearch, pinSection: previous.pinSection }
+            : selectionSearch,
+        replace: true,
+      });
     },
     [navigate]
   );
+  const handleClearPinSection = useCallback(() => {
+    void navigate({
+      search: ({ pinSection: _cleared, ...rest }) => rest,
+      replace: true,
+    });
+  }, [navigate]);
 
   /* On mobile the home/project landing is owned by `MobileWorkspaceStack` (so
      it stays mounted beneath the session overlay). Publish this route's
@@ -61,6 +73,8 @@ function ChatRoute() {
         preSelectedProject={search.project}
         preSelectedRepo={search.repo}
         preSelectedGroup={search.group}
+        pinSectionId={search.pinSection}
+        onClearPinSection={handleClearPinSection}
         onSelectionUrlSync={handleSelectionUrlSync}
       />
     </div>

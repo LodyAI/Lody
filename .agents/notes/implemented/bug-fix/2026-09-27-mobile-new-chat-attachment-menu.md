@@ -37,3 +37,11 @@ checks cannot run. Validate home and project entry points on iOS: open new chat,
 tap + then Add attachment, choose/cancel a file and reopen the picker. Also check
 the MCP panel and back action, and verify the sheet remains open after selection.
 Documentation checking has pre-existing missing-submodule link errors.
+
+## Follow-up: picker dismissed by focus restore
+
+A 2026-11-20 iOS 17 recording showed the picker still failing: tapping Add
+attachment brought the keyboard back and no picker appeared. The menu's close
+returned focus to the composer, and iOS dismisses the file picker when an editable
+element gains focus. `AttachmentAddMenu` now skips that focus restore when the
+picker item was chosen; other selections still return to the composer.

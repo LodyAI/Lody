@@ -2,6 +2,7 @@ import { daemonLossProbeEnabled } from './e2ee/client-loss-observer';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type { EncryptedFeatureContext } from './e2ee/feature-rpc';
 import {
+  isLocalOnlyMemoryProvider,
   type LocalSessionControlRequestValidated,
   type LocalSessionControlResponse,
   type LocalMachineRpcRequestValidated,
@@ -48,11 +49,9 @@ export class MachineRuntime {
     request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
     context?: EncryptedFeatureContext
   ) {
-    if (
-      (request.method === 'sorbet/credentials-list' ||
-        request.method === 'sorbet/credentials-logout') &&
-      !context
-    )
+    // Sorbet's credential and Provider stores are the owner's: every method,
+    // read or write, needs the verified signer context.
+    if (request.method.startsWith('sorbet/') && !context)
       throw new Error('e2ee_feature_unavailable');
     const config = this.options.handlerConfig;
     if (
@@ -71,6 +70,21 @@ export class MachineRuntime {
         requester.executionUserId
       );
     }
+    if (request.method === 'local-project/list-branches') {
+      const requester = context?.requester;
+      if (!requester || request.params.requestedByUserId !== requester.accountId)
+        throw new Error('e2ee_feature_requester');
+      return this.requireHandler().readEncryptedMachineRequest(
+        {
+          ...request,
+          params: {
+            ...request.params,
+            requestedByUserId: requester.executionUserId,
+          },
+        },
+        context
+      );
+    }
     if ('requestedByUserId' in request.params && request.params.requestedByUserId !== config.userId)
       throw new Error('e2ee_feature_requester');
     if (isE2eeReadQuery(request.method, request.params)) {
@@ -82,6 +96,10 @@ export class MachineRuntime {
         throw new Error('e2ee_feature_unavailable');
       return this.requireHandler().handleEncryptedAcpInteraction(request, context);
     }
+    // This ingress ends in the local dispatcher but arrives from another
+    // device, so account memory providers stay with the local channel.
+    if (request.method === 'machine/memory' && isLocalOnlyMemoryProvider(request.params.providerId))
+      throw new Error('e2ee_feature_unavailable');
     return this.dispatchLocalMachineRpc(request, context?.signal);
   }
   resolveSessionHistoryAccessTarget(sessionId: string) {

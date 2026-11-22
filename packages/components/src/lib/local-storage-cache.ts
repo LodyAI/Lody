@@ -3,6 +3,7 @@ import {
   WorktreeSetupScriptConfigSchema,
   type AcpConfigOptionValue,
   type AgentConfigId,
+  type AgentConfigMeta,
   type WorktreeSetupScriptConfig,
 } from '@lody/shared';
 
@@ -97,6 +98,27 @@ export const agentDefaultsCache = createLocalStorageCache<AgentSessionDefaults>(
   agentSessionDefaultsSchema
 );
 
+/**
+ * What a new conversation with a Provider starts from: the combination the
+ * person last ran with it on this device, under the Provider's own session
+ * defaults (Settings > Lody Agent). Those are an explicit setting, so for the
+ * values they name they win over what was merely used last.
+ */
+export function readAgentStartDefaults(
+  config: Pick<AgentConfigMeta, 'id' | 'sessionDefaults'> | undefined
+): AgentSessionDefaults | null {
+  if (!config) return null;
+  const cached = agentDefaultsCache.get(config.id) ?? null;
+  const provider = config.sessionDefaults;
+  if (!provider) return cached;
+  const configOptionValues = { ...cached?.configOptionValues, ...provider.configOptionValues };
+  return {
+    modeId: cached?.modeId ?? null,
+    modelId: provider.modelId ?? cached?.modelId ?? null,
+    ...(Object.keys(configOptionValues).length ? { configOptionValues } : {}),
+  };
+}
+
 // GitHub repos cache
 export const cachedGitHubRepoSchema = z.object({
   fullName: z.string(),
@@ -122,6 +144,8 @@ export const githubReposCache = createLocalStorageCache<WorkspaceReposCache>(
 export const githubBranchesCacheSchema = z.object({
   branches: z.array(z.string()),
   defaultBranch: z.string().nullable(),
+  // Cursor for the next unloaded page; entries written before paging are complete lists.
+  nextPageUrl: z.string().nullable().optional(),
   updatedAt: z.number(),
 });
 

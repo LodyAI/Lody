@@ -106,10 +106,6 @@ const isFiniteNumber = (value: unknown): value is number =>
 export const isAgentRoleVisibility = (value: unknown): value is AgentRoleVisibility =>
   value === 'private' || value === 'workspace';
 
-// ---------------------------------------------------------------------------
-// Name, emoji, and the mention token derived from them
-// ---------------------------------------------------------------------------
-
 /** Long enough to stay readable inline, short enough not to dominate a prompt. */
 export const AGENT_ROLE_MENTION_SLUG_MAX_LENGTH = 40;
 export const AGENT_ROLE_NAME_MAX_LENGTH = 60;
@@ -137,6 +133,25 @@ export const AGENT_ROLE_EMOJI_MAX_LENGTH = 8;
  */
 export const getAgentRoleMentionSlug = (role: Pick<AgentRole, 'name'>): string =>
   normalizeAgentRoleMentionSlug(role.name);
+
+/**
+ * The `@` token for one target of a Role.
+ *
+ * A single-target Role is mentioned by its name. On several machines each
+ * target is its own mention — the alias, or the name and machine — so the
+ * token names where the work runs. Settings shows this exact token beside each
+ * machine, and the composer completes it, so the two can never disagree.
+ */
+export const getAgentRoleTargetMentionSlug = (input: {
+  roleName: string;
+  alias?: string;
+  machineName: string;
+  multiTarget: boolean;
+}): string =>
+  input.multiTarget
+    ? normalizeAgentRoleMentionSlug(input.alias || `${input.roleName} ${input.machineName}`) ||
+      normalizeAgentRoleMentionSlug(input.roleName)
+    : normalizeAgentRoleMentionSlug(input.roleName);
 
 /**
  * Normalize a name into a token the composer can carry.
@@ -184,10 +199,6 @@ export const normalizeAgentRoleEmoji = (value: unknown): string | undefined => {
   const capped = Array.from(stripped).slice(0, AGENT_ROLE_EMOJI_MAX_LENGTH).join('');
   return capped || undefined;
 };
-
-// ---------------------------------------------------------------------------
-// Run config
-// ---------------------------------------------------------------------------
 
 /**
  * Option keys a Role may never persist.
@@ -264,10 +275,6 @@ const serializeRunConfig = (value: AgentRoleRunConfig): string => {
 
 const runConfigsEqual = (left: AgentRoleRunConfig, right: AgentRoleRunConfig): boolean =>
   serializeRunConfig(left) === serializeRunConfig(right);
-
-// ---------------------------------------------------------------------------
-// Role validation
-// ---------------------------------------------------------------------------
 
 const isStoredRunConfig = (value: unknown): boolean =>
   value === undefined ||
@@ -544,10 +551,6 @@ export const isAgentRoleContentEqual = (left: AgentRole, right: AgentRole): bool
   );
 };
 
-// ---------------------------------------------------------------------------
-// Visibility and ownership
-// ---------------------------------------------------------------------------
-
 /**
  * The authoritative trusted-UI discovery rule for Settings and the mention menu.
  */
@@ -562,10 +565,6 @@ export const listAccessibleAgentRoles = (
   roles: readonly AgentRole[],
   userId: string | null | undefined
 ): AgentRole[] => roles.filter((role) => canReadAgentRole(role, userId));
-
-// ---------------------------------------------------------------------------
-// Availability
-// ---------------------------------------------------------------------------
 
 export type AgentRoleUnavailableReason =
   | 'memory_unsupported'

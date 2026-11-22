@@ -19,7 +19,7 @@ describe('hasBuiltinEnvAuthentication', () => {
 
 describe('supportsBuiltinAuthentication', () => {
   it('allows sign-in for managed built-in agents without env credentials', () => {
-    for (const agentType of ['claude', 'codex', 'kimi', 'grok']) {
+    for (const agentType of ['claude', 'codex', 'kimi', 'grok', 'antigravity']) {
       expect(supportsBuiltinAuthentication({ cliType: 'builtin', agentType, env: {} })).toBe(true);
     }
   });
@@ -125,11 +125,11 @@ describe('supportsAuthenticationWhenRequired', () => {
   });
 });
 
-it('authenticates managed Antigravity through the methods advertised by ACP', () => {
-  expect(usesAcpProtocolAuthentication('builtin', 'antigravity')).toBe(true);
+it('offers managed Antigravity browser sign-in without protocol terminal authentication', () => {
+  expect(usesAcpProtocolAuthentication('builtin', 'antigravity')).toBe(false);
   expect(
     supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'antigravity', env: {} })
-  ).toBe(false);
+  ).toBe(true);
   expect(supportsAuthenticationWhenRequired({ cliType: 'builtin', agentType: 'antigravity' })).toBe(
     true
   );

@@ -32,6 +32,11 @@ import {
   sessionSendStatusAtomFamily,
   sessionUnsentNewConversationAtomFamily,
 } from '@/atoms/session-send-status';
+import {
+  sessionPrMergeStatusAtomFamily,
+  type SessionPrMergePhase,
+  type SessionPrMergeStatus,
+} from '@/atoms/session-pr-merge-status';
 import type { SessionSendState } from '@/lib/session-send-status';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
@@ -159,7 +164,13 @@ const SEND_RING_SHIMMER_LENGTH = 5;
  * size the same ring turns with a quarter arc. The turn rides an HTML wrapper,
  * like `@lody/ui`'s Spinner: a rotating svg does not composite at DPR≠1.
  */
-export function SessionSendProgressRing({ progress }: { progress?: number }) {
+export function SessionSendProgressRing({
+  progress,
+  className,
+}: {
+  progress?: number;
+  className?: string;
+}) {
   const known = typeof progress === 'number';
   const filled = known ? Math.min(100, Math.max(4, progress)) : 25;
   const maskId = `session-send-ring-${useId().replace(/:/g, '')}`;
@@ -177,7 +188,8 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
     <span
       className={cn(
         'flex h-3 w-3 text-primary',
-        !known && 'animate-spin [animation-duration:1.2s] motion-reduce:animate-none'
+        !known && 'animate-spin [animation-duration:1.2s] motion-reduce:animate-none',
+        className
       )}
       data-session-send-ring={known ? 'determinate' : 'indeterminate'}
     >
@@ -232,7 +244,7 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
 /**
  * ③ The 14px status mark, rendered at the row's TRAILING edge inside
  * {@link SidebarRowEndSlot}. Single-mark priority:
- * `sendFailed > waitingPermission > isWorking > sending > hasUnread`. A failed
+ * `sendFailed > waitingPermission > needsAttention > isWorking > sending > hasUnread`. A failed
  * local send outranks everything because nothing else will retry it; an upload
  * in progress yields to the agent's own activity. Returns `null` when the
  * session is idle and read, which is what lets the end slot fall back to its
@@ -246,13 +258,18 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
  */
 export function SessionRowStatusIndicator({
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   sendState,
   sendProgress,
   sendLabel,
+  prMergePhase,
+  prMergeLabel,
 }: {
   isWaitingPermission?: boolean;
+  /** Something Lody ran for this session stopped and needs the person (Auto delivery). */
+  needsAttention?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   /** Renderer-local state of this session's held (in-memory) sends. */
@@ -261,6 +278,8 @@ export function SessionRowStatusIndicator({
   sendProgress?: number;
   /** Spoken name of the send mark ("Sending · 12.4 MB / 38.0 MB"). */
   sendLabel?: string;
+  prMergePhase?: Exclude<SessionPrMergePhase, 'merged'> | null;
+  prMergeLabel?: string;
 }) {
   let icon: ReactNode = null;
   let label: string | undefined;
@@ -268,11 +287,19 @@ export function SessionRowStatusIndicator({
   if (sendState === 'failed') {
     icon = <CircleAlert className="h-3 w-3 text-destructive" strokeWidth={2.25} />;
     label = sendLabel;
+  } else if (prMergePhase === 'failed') {
+    icon = <CircleAlert className="h-3 w-3 text-destructive" strokeWidth={2.25} />;
+    label = prMergeLabel;
   } else if (isWaitingPermission === true) {
     icon = <Hand className="h-3 w-3 text-primary" />;
+  } else if (needsAttention === true && isWorking !== true) {
+    icon = <CircleAlert className="h-3 w-3 text-status-warning" strokeWidth={2.25} />;
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
+  } else if (isWorking !== true && prMergePhase === 'merging') {
+    icon = <SessionSendProgressRing className="text-pr-merged" />;
+    label = prMergeLabel;
   } else if (isWorking === true || hasUnreadMessages === true) {
     // Working grid, the working → unread "done" transition, and the unread dot
     // are one component so it stays mounted across that change and can see it.
@@ -291,8 +318,10 @@ export function SessionRowStatusIndicator({
     <div
       data-session-row-indicator=""
       data-session-send-state={sendState ?? undefined}
+      data-session-pr-merge-phase={prMergePhase ?? undefined}
       role={label ? 'img' : undefined}
       aria-label={label}
+      title={label}
       className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
     >
       {icon}
@@ -303,11 +332,41 @@ export function SessionRowStatusIndicator({
 /** True when {@link SessionRowStatusIndicator} would draw a mark for this row. */
 function hasSessionRowStatus({
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   sendState,
-}: SessionRowStatusFlags): boolean {
-  return Boolean(isWaitingPermission || isWorking || hasUnreadMessages || sendState);
+  prMergePhase,
+}: SessionRowStatusFlags & {
+  needsAttention?: boolean;
+  prMergePhase?: Exclude<SessionPrMergePhase, 'merged'> | null;
+}): boolean {
+  return Boolean(
+    isWaitingPermission ||
+    needsAttention ||
+    isWorking ||
+    hasUnreadMessages ||
+    sendState ||
+    prMergePhase
+  );
+}
+
+function useSessionPrMergeLabel(status: SessionPrMergeStatus | null): string | undefined {
+  const { t } = useTranslation();
+  if (!status || status.phase === 'merged') return undefined;
+  if (status.phase === 'merging') {
+    return status.prNumber
+      ? t('sessions.prMergeStatus.mergingNumber', 'Merging PR #{{number}}…', {
+          number: status.prNumber,
+        })
+      : t('sessions.prMergeStatus.merging', 'Merging PR…');
+  }
+  const base = status.prNumber
+    ? t('sessions.prMergeStatus.failedNumber', 'Failed to merge PR #{{number}}', {
+        number: status.prNumber,
+      })
+    : t('sessions.prMergeStatus.failed', 'Failed to merge PR');
+  return status.error ? `${base}: ${status.error}` : base;
 }
 
 /**
@@ -633,11 +692,8 @@ export function SessionOpenedByTreeRow({
  * ③ The hover-revealed ⋯ action. It opens the row's ordinary right-click menu from
  * a left click by re-dispatching `contextmenu` at its own corner, so the button and
  * the right-click gesture can never diverge. `SidebarRowEndSlot` reserves its own
- * 20px column left of Archive and paints its revealed-action area with the row's
- * fill, so the trigger sits on the same opaque `--sidebar-hover` /
- * `--sidebar-selection` as the row beneath it. The pressed tint shades that fill
- * as an inset shadow rather than a translucent background-color that would let
- * content through again.
+ * 20px column left of Archive, so the trigger sits on the row's own fill with the
+ * title already truncated before it. The pressed tint is an inset shadow.
  */
 export function SessionRowMenuButton({
   label,
@@ -784,14 +840,15 @@ export function SidebarRowActionButton({
  * The hover actions (the ⋯ menu, then Archive) are absolutely overlaid on hover, so a
  * wide rest cluster never causes layout movement. The slot reserves one 20px
  * column per action even when no rest content shows, so the ⋯ stays inside the
- * row's trailing edge instead of overlaying the title, and while its actions
- * are revealed the slot paints itself with the row's own fill — every end-slot
- * action, present or added later, is opaque over its column.
+ * row's trailing edge instead of overlaying the title. The slot paints no fill
+ * of its own: the title is a flex sibling that truncates before it, so the
+ * actions sit directly on the row's hover or selection fill.
  */
 export function SidebarRowEndSlot({
   sessionId,
   selected = false,
   isWaitingPermission,
+  needsAttention,
   isWorking,
   hasUnreadMessages,
   restIcon,
@@ -808,6 +865,7 @@ export function SidebarRowEndSlot({
   /** Whether the hosting row is currently selected, used to tune pill contrast. */
   selected?: boolean;
   isWaitingPermission?: boolean;
+  needsAttention?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
   restIcon?: ReactNode;
@@ -819,24 +877,40 @@ export function SidebarRowEndSlot({
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
+  const prMergeStatus = useAtomValue(sessionPrMergeStatusAtomFamily(sessionId ?? ''));
   const shortcut = useSidebarRowShortcut(sessionId);
   const sendLabel = useSessionSendLabel(sendStatus);
-  const restContent = shortcut ? (
-    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
-  ) : hasSessionRowStatus({
+  const prMergeLabel = useSessionPrMergeLabel(prMergeStatus);
+  const activePrMergePhase =
+    prMergeStatus?.phase === 'merging' || prMergeStatus?.phase === 'failed'
+      ? prMergeStatus.phase
+      : null;
+  const showStatus =
+    !shortcut &&
+    hasSessionRowStatus({
       isWaitingPermission,
+      needsAttention,
       isWorking: drawWorking,
       hasUnreadMessages,
       sendState: sendStatus?.state,
-    }) ? (
+      prMergePhase: activePrMergePhase,
+    });
+  const restContent = shortcut ? (
+    <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
+  ) : showStatus ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
+      needsAttention={needsAttention}
       isWorking={drawWorking}
       hasUnreadMessages={hasUnreadMessages}
       sendState={sendStatus?.state}
       sendProgress={sendStatus && sendStatus.totalBytes > 0 ? sendStatus.progress : undefined}
       sendLabel={sendLabel}
+      prMergePhase={activePrMergePhase}
+      prMergeLabel={prMergeLabel}
     />
+  ) : prMergeStatus?.phase === 'merged' ? (
+    <SessionPrIcon compact prStatus="merged" />
   ) : (
     restIcon
   );
@@ -853,30 +927,21 @@ export function SidebarRowEndSlot({
     // the row's navigation; the hover action buttons re-enable pointer events on hover.
     // justify-end keeps a narrower resting mark's right edge exactly where the
     // revealed action lands, so the row's rightmost mark never shifts on hover.
-    // The revealed fill keeps the same color the row paints under these states:
-    // --sidebar-hover on hover and menu-open alike. aria-current lives on the
-    // same group element, so the selection overrides compound the state into
-    // one ancestor selector to win over the plain hover fill.
     <div
       data-session-row-end-slot=""
       className={cn(
         'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
-        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0',
-        showActions && cn(
-          'transition-colors duration-100',
-          'group-hover:bg-sidebar-hover group-hover/row:bg-sidebar-hover',
-          'group-data-[menu-open]:bg-sidebar-hover group-data-[menu-open]/row:bg-sidebar-hover',
-          '[.group:hover[aria-current=page]_&]:bg-sidebar-selection',
-          '[.group\\/row:hover[aria-current=page]_&]:bg-sidebar-selection',
-          '[.group[data-menu-open][aria-current=page]_&]:bg-sidebar-selection',
-          '[.group\\/row[data-menu-open][aria-current=page]_&]:bg-sidebar-selection'
-        )
+        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0'
       )}
     >
       {hasRest ? (
+        // A status mark centres in one 20px column, the same column the revealed
+        // actions and a folded group's mark centre their 14px icons in, so it
+        // lines up with both instead of sitting 3px right of them.
         <span
           className={cn(
             'flex',
+            showStatus && 'w-5 justify-center',
             showActions && cn('transition-opacity duration-100', fadeClassName)
           )}
         >
@@ -1307,7 +1372,7 @@ export function SidebarSectionHeader({
     </div>
   );
   return (
-    <div className="group flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
+    <div className="group group/section-header flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
       {wrapToggle ? wrapToggle(toggle) : toggle}
       {action ? <div className="mr-2 shrink-0">{action}</div> : null}
     </div>

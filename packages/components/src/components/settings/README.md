@@ -30,6 +30,17 @@ PR review Markdown offers per-image HTTPS loading; automatic loading is a
 device-local preference, off by default. The isolated desktop image document
 keeps the main renderer's image policy unchanged. [Decision](../../../../../.agents/notes/implemented/feature/2026-11-02-pr-remote-images.md).
 
+## Helper text and info buttons
+
+A visible helper under a row, field or form section is reserved for what the
+reader must see to act: current state, errors, and consequences such as an
+unencrypted export or a project share that also shares its machine. Optional
+background (what a switch affects, syntax notes, troubleshooting) goes behind
+the `info` prop of `CompactRow`, `Field` or `Section`, which renders
+`settings-info.tsx`: an "i" button opening a popover on hover or click. Copy
+that only restates the label is removed. A page lead stays one short sentence,
+and an empty state does not repeat it.
+
 ## Ordinary member approval
 
 The join-request subscription and Better Auth's member cache have different owners.
@@ -60,7 +71,26 @@ the selected method against the agent before requesting credentials.
 Connection management uses the target machine’s local capabilities for same-machine
 IPC and its remote capabilities for encrypted workspace RPC. A remote machine in a
 plaintext workspace can use the existing ACP sign-in flow, but cannot manage Sorbet
-custom endpoints through the encrypted-only Provider API.
+custom endpoints through the encrypted-only Provider API. Every remote `sorbet/*`
+request requires the verified signer context, as credential requests already did.
+A custom endpoint row lists the models Sorbet discovered for it (`sorbet/models-list`),
+refreshes discovery for that endpoint alone, and edits its name, protocol and base URL
+through `sorbet/providers-update` (Providers protocol v3). The daemon applies an edit
+over the stored definition, so discovered models and catalog references survive.
+
+### Session defaults
+
+The Models and Permissions pages write the Sorbet Provider's `sessionDefaults`
+(`AgentConfigMeta`), keyed by Sorbet's own config ids: `model`, `thought_level` and
+`permission_mode` (`ask`, `auto`, `full-access`). They take effect in three places:
+the capability probe sets them on its session, so the advertised `currentValue` is
+the default; `readAgentStartDefaults` lets them win over the device's last-used run
+configuration when a conversation starts; and the daemon fills whatever a turn leaves
+unset from them, which covers CLI and MCP sessions. A write re-probes each written
+machine. Controls Sorbet has no setting for (subagent model, fallback, file access,
+network, guarded actions) stay visible and disabled. The Plugins page toggles the
+workspace MCP servers' `enabledByDefault`, which is workspace-wide, and lists Sorbet's
+built-in plugins, which Sorbet configures per conversation.
 
 ## Usage range transitions
 

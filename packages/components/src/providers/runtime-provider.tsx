@@ -67,14 +67,14 @@ import {
 import { API_BASE_URL } from '@/lib';
 import { getCachedWorkspaceId } from '@/lib/local-storage-cache';
 import { recordClientError } from '@/lib/client-log';
-import { usePostHog } from '@posthog/react';
-import { createWorkspaceRuntime } from './create-workspace-runtime';
+import { usePostHog } from '@/lib/posthog-context';
+import type { createWorkspaceRuntime } from './create-workspace-runtime';
 import { reportWorkspaceCloseFailure } from './workspace-close-diagnostics';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
 import type { EagerSyncSurface } from './background-sync-coordinator';
 import { resolveEffectiveWorkspaceId } from './resolve-effective-workspace-id';
 import { getLocalWorkspaceSlug, useImplicitLocalWorkspace } from './local-platform-provider';
-import { isWarmWindow } from '@/lib/desktop-window';
+import { isTodayWindow, isWarmWindow } from '@/lib/desktop-window';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { maybeClearLodyCacheOnBoot } from '@/lib/clear-local-cache';
 import { describeErrorType } from '@/lib/workspace-data-scope';
@@ -1211,6 +1211,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           eagerSyncSurface,
         });
         repoResource = targetRepo;
+        // loro-repo/streams-crdt/flock stay out of the boot chunk: this provider
+        // module is statically reachable from the root route, so the workspace
+        // runtime stack loads only once a workspace runtime is actually needed.
+        const { createWorkspaceRuntime } = await import('./create-workspace-runtime');
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },
           ...(!isLocalPlatform && !encryptedAccess && !storedDescriptor
@@ -1225,6 +1229,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           workspaceId: effectiveWorkspaceId,
           apiBaseUrl: API_BASE_URL,
           eagerSyncSurface,
+          backgroundWork: !isTodayWindow(),
           // Platform assembly is the only authority for room topology. Do not
           // re-probe Electron or cloud configuration inside the runtime.
           syncMode: encryptedAccess ? 'cloud' : runtimeSyncMode,

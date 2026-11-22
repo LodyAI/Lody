@@ -38,7 +38,12 @@ function copyDir(fromDir, toDir) {
 }
 
 function writeCliPackageMetadata() {
+  const cliPackage = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, '../../cli/package.json'), 'utf8')
+  )
   const metadata = {
+    name: cliPackage.name || 'lody',
+    version: cliPackage.version || '0.0.0',
     private: true,
     type: 'module',
     main: 'index.js'

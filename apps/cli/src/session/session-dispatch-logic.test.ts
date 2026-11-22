@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { describe, expect, it } from 'vitest';
 import {
   SessionStatusFactory,
@@ -15,7 +16,6 @@ import {
 } from './session-dispatch-logic';
 import { SessionExecutionService } from './session-execution-service';
 import { LoroDoc } from 'loro-crdt';
-import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import { readDispatchHistory, readDispatchSelection } from './session-dispatch-history';
 import { isActivationAwaitingHistory } from './session-dispatch-logic';

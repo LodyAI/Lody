@@ -11,14 +11,16 @@ import { createStore, Provider } from 'jotai';
 import { LoroSidebar, type LoroSidebarProps } from '../src/components/loro-sidebar';
 import { initI18n } from '../src/i18n';
 import type { SessionListRow } from '../src/components/session-list';
-import { ONLY_CHATS_KEY, sidebarShowFullListAtom } from '../src/atoms/focus-layer';
+import { ONLY_CHATS_KEY, sidebarRevealedRowsAtom } from '../src/atoms/focus-layer';
 
 const repositories = Array.from({ length: 8 }, (_, index) => `lody/project-${index + 1}`);
 const fullListStore = createStore();
 const previewStore = createStore();
-fullListStore.set(sidebarShowFullListAtom, {
-  [ONLY_CHATS_KEY]: true,
-  ...Object.fromEntries(repositories.map((name) => [name, true])),
+// Reveal far beyond any group: "Show more" pages of 5, so a large count is
+// what shows all 180 rows.
+fullListStore.set(sidebarRevealedRowsAtom, {
+  [ONLY_CHATS_KEY]: 1000,
+  ...Object.fromEntries(repositories.map((name) => [name, 1000])),
 });
 const sessions: SessionListRow[] = Array.from({ length: 180 }, (_, index) => ({
   sessionId: `bench-${index + 1}`,

@@ -8,8 +8,8 @@ Translation: current
 ## Scenario and ownership
 
 A user chooses a machine in Settings → Memory and manages Lody's saved memory
-associations. Add Memory opens an Agent Config-style editor with a provider rail
-and Create / Import tabs. Create enrolls an identity and immediately imports it; Import
+associations. Each provider has its own block, and a block's Add Memory opens an
+editor for that provider with Create / Import tabs. Create enrolls an identity and immediately imports it; Import
 lists the device's identities with checkboxes for batch import and copies each selected
 identity's name and description. Already-linked identities remain visible but cannot be linked again.
 
@@ -22,20 +22,21 @@ name/description into Lody; deleting removes only this association, never provid
 A failed local save after enrollment can retry linking without enrolling again.
 Existing provider identities are not automatically imported.
 
-Cards show a vertically centered grayscale provider logo before the name and description, with edit/delete
-actions on hover or keyboard focus. The page has top-right Add Memory and Refresh
-actions. A successful provider inventory that omits a saved identity shows a
+A provider block is headed by its logo, name and one line saying how it divides memory,
+with Add Memory beside it. Each record shows a dot for whether any Role uses it, then
+its name and a one-line description, with edit/delete actions on hover or keyboard
+focus. The page has a top-right Refresh action. A successful provider inventory that omits a saved identity shows a
 warning; offline, inactive and failed probes do not prove deletion. Probes run on
 entry, focus and every 30 seconds while visible, skipping pending requests.
 Memory settings and the Role editor's memory section keep saved cards visible during probing
 without a loading indicator; completed failures still show inline status.
 
-The Role editor has Configuration and Team tabs sharing one draft and save
-action. Memory belongs to a machine, so it is a section of each machine tab in the
-Configuration tab ([machine targets](agent-role-machine-targets.md)). It lists saved
-associations on that tab's exact machine, using the same logo/name/description
+The Role editor is one form with one save action. Memory belongs to a machine, so
+it is part of each machine row of the "Runs on" list
+([machine targets](agent-role-machine-targets.md)). It lists saved
+associations on that row's exact machine, using the same logo/name/description
 cards as Memory settings. Clicking a card selects it; unlinking remains available.
-Workspace sharing is shown only in the Team tab. Each machine target's run
+Workspace sharing is one switch among the fields shared by every machine. Each machine target's run
 configuration and turn input still store only `{ providerId, memoryId }`; adding a
 target links memory only when that machine has the same association.
 Removing a catalog association does not rewrite existing Roles or accepted turns.
@@ -76,8 +77,19 @@ adapter and injects `NMEM_AGENT_ID=<memoryId>` for Nowledge Mem after environmen
 assembly. Changing identities between turns restarts the ACP process through the
 existing resume path; the environment of a live process cannot be changed.
 Forks and restores use their frozen history rather than rereading a mutable Role.
-Unknown providers fail explicitly. Other provider integrations and automatic
-installation/configuration of agent-side Mem plugins are outside this change.
+Unknown providers fail explicitly. Further providers, and installing Nowledge Mem's
+agent-side plugins, are outside this change.
+
+## EverMe
+
+EverMe holds one memory per account, so it has no identities to create, import or
+pick, and the Role editor does not offer it. Each agent on the machine is instead
+connected or disconnected on its own; a connected agent reads and writes that
+account's memory through its own configuration, and ACP startup injects nothing for
+EverMe. Sign-in, setup and agent connections happen only on the machine itself:
+Settings never sends them to another machine, and the daemon refuses them when they
+arrive over the workspace relay or the encrypted feature ingress, because an
+approval made elsewhere would bind this machine to whoever made it.
 
 ## Evidence
 
@@ -85,17 +97,19 @@ installation/configuration of agent-side Mem plugins are outside this change.
 - [Daemon adapter](../apps/cli/src/lib/memory-providers.ts)
 - [Settings](../packages/components/src/components/settings/memory-setting.tsx)
 - [Process boundary](../apps/cli/src/session/session.ts)
+- [EverMe adapter](../apps/cli/src/lib/everme-provider.ts)
+- [EverMe decision note](../.agents/notes/implemented/feature/2026-11-03-everme-memory-provider.md)
 
-The memory editor is window-centered, with a compact 900 × 600 px desktop size
-clamped to 96dvw × 92dvh.
+The memory editor is window-centered and a single column, with a compact
+620 × 600 px desktop size clamped to 96dvw × 92dvh.
 Creation requires a non-blank Name and places Name and Agent ID on one row, in that order. Until manually edited,
 the ID follows the lowercase name. Space is hidden and omitted by default. Nowledge
 enrollment fixes source-app to lody.ai. Link rows show only name and description, including after selection. No expanded
 profile details are requested or displayed.
 
-The provider rail uses the same flat selected list rows as Agent Config, including
-when only one provider exists. Import is the settings label for saving an association;
-Role binding continues to use Link.
+The editor has no provider rail: the block that opened it has already chosen the
+provider. Import is the settings label for saving an association; Role binding
+continues to use Link.
 
 Machine tabs show online status dots and default to the local machine. The Nowledge
 edit form mirrors creation with a read-only ID and editable name, description and
@@ -105,8 +119,8 @@ claim a successful local metadata save.
 
 A memory with no binding in the accessible Role catalog shows a Link to a role
 action before edit/delete, once the catalog is loaded. It opens Agent Roles,
-scrolls to the first Role running on that machine and opens Roles on that machine's
-tab; new Roles preselect that machine. The action does not mutate a Role or
+scrolls to the first Role running on that machine and opens Roles with that machine's
+row open; new Roles preselect that machine. The action does not mutate a Role or
 auto-select an identity. The Role page has no machine tabs or machine filtering.
 
 Assigned memories show “Linked:” followed by the accessible bound Roles’ emoji avatars.

@@ -6,8 +6,8 @@ Parent `AGENTS.md` files also apply.
 Settings owns the workspace catalog surfaces (Providers, MCP servers, Agent
 Roles). Before saving a catalog row, follow the durability rule in
 [shared source contracts](../../../../shared/src/AGENTS.md#workspace-mcp--roles).
-Lody Agent connections and Sorbet endpoints follow
-[Lody Agent setup](README.md#lody-agent-setup).
+Lody Agent connections, Sorbet endpoints and [the harness surface](../harness/AGENTS.md)
+follow [Lody Agent setup](README.md#lody-agent-setup).
 
 ## Layout and components
 
@@ -107,7 +107,7 @@ component details.
 
 - Before changing Role settings or dispatch, read the authoritative
   [shared Role contracts](../../../../shared/AGENTS.md#workspace-mcp-and-agent-roles).
-  Each machine tab of the editor owns that target's agent, run config and memory;
+  Each "Runs on" row of the editor owns that target's agent, run config and memory;
   discovery and creation use that exact machine's Provider RPC. Memory settings
   reuse Agents machine tabs/pills and catalog rows. A missing nmem install stays
   on the page with the provider URL; it must not open a blocking dialog. Adding a

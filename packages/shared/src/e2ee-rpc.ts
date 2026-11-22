@@ -39,7 +39,10 @@ export const isE2eeFeatureMethod = (method: string): boolean =>
   method === 'sorbet/credentials-logout' ||
   method === 'sorbet/providers-list' ||
   method === 'sorbet/providers-create' ||
+  method === 'sorbet/providers-update' ||
   method === 'sorbet/providers-delete' ||
+  method === 'sorbet/providers-refresh' ||
+  method === 'sorbet/models-list' ||
   method === 'file/preview' ||
   method === 'session/fork' ||
   method === 'session/edit-and-resend' ||
@@ -64,6 +67,7 @@ export const E2EE_READ_QUERY_METHODS = [
   'machine/ping',
   'machine/acp-binary-status',
   'session/live-status',
+  'local-project/list-branches',
   'file/preview',
   'file/download-chunk',
   'code-collab/open-text',

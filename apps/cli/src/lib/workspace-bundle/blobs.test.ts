@@ -1,7 +1,8 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createSessionMirror, type SessionId } from '@lody/shared';
+import { type SessionId } from '@lody/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getSessionFileBlobPath } from '@/lib/session-file-blob-store';
 import { createBundleWriter, openBundle } from './bundle-file';

@@ -6,15 +6,6 @@ import {
   createAntigravityQuotaReader,
   isAntigravityRegistryAgent,
 } from './antigravity-quota';
-import {
-  createSorbetAcpCustomProvider,
-  deleteSorbetAcpCustomProvider,
-  listSorbetAcpCredentials,
-  listSorbetAcpCustomProviders,
-  logoutSorbetAcpCredential,
-  type SorbetAcpCredential,
-  type SorbetAcpCustomProvider,
-} from './sorbet-acp-credentials';
 import { platformLayer, toShared } from '@/platform/process-options';
 import { Effect } from 'effect';
 import { prepareDeepSeekNodeEnvironment } from './deepseek-system-node';
@@ -420,174 +411,15 @@ export async function initializeAndReadAcpRateLimits(
       isAntigravityRegistryAgent(agent) &&
       initialized.agentInfo?.name === 'antigravity-acp'
     ) {
-      return antigravity.read(connection, agent.workdir);
+      return antigravity.read(connection, agent.workdir, {
+        deleteSession: initialized.agentCapabilities?.sessionCapabilities?.delete != null,
+      });
     }
     throw new Error('Rate-limit query unsupported');
   }
   return parseRateLimitsSnapshot(
     await connection.request(LODY_EXTENSION_METHODS.rateLimitsGet, {})
   );
-}
-
-export type SorbetAcpOperation =
-  | { type: 'list' }
-  | { type: 'logout'; providerId: string }
-  | { type: 'providers-list' }
-  | { type: 'providers-create'; provider: SorbetCustomProviderInput }
-  | { type: 'providers-delete'; providerId: string };
-
-/** What one bounded Sorbet operation produced; the caller narrows by the operation it ran. */
-export type SorbetAcpOperationOutcome =
-  | { kind: 'credentials'; credentials: SorbetAcpCredential[] }
-  | { kind: 'providers'; providers: SorbetAcpCustomProvider[] }
-  | { kind: 'provider'; provider: SorbetAcpCustomProvider }
-  | { kind: 'none' };
-
-function openSorbetConnection(stream: Stream) {
-  return new ClientSideConnection(
-    () => ({
-      requestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
-      sessionUpdate: async () => {},
-    }),
-    stream
-  );
-}
-
-export async function initializeAndRunSorbetCredentials(
-  stream: Stream,
-  signal: AbortSignal,
-  operation: { type: 'list' } | { type: 'logout'; providerId: string },
-  onInitialized?: () => void
-) {
-  const connection = openSorbetConnection(stream);
-  const initialized = await connection.initialize({
-    protocolVersion: PROTOCOL_VERSION,
-    clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
-  });
-  onInitialized?.();
-  signal.throwIfAborted();
-  if (operation.type === 'list') {
-    return await listSorbetAcpCredentials(connection, initialized.agentCapabilities);
-  }
-  await logoutSorbetAcpCredential(connection, initialized.agentCapabilities, operation.providerId);
-  return [];
-}
-
-/** Custom Provider operations run on their own bounded connection, like credentials. */
-export async function initializeAndRunSorbetOperation(
-  stream: Stream,
-  signal: AbortSignal,
-  operation: SorbetAcpOperation,
-  onInitialized?: () => void
-): Promise<SorbetAcpOperationOutcome> {
-  if (operation.type === 'list' || operation.type === 'logout') {
-    const credentials = await initializeAndRunSorbetCredentials(
-      stream,
-      signal,
-      operation,
-      onInitialized
-    );
-    return { kind: 'credentials', credentials };
-  }
-  const connection = openSorbetConnection(stream);
-  const initialized = await connection.initialize({
-    protocolVersion: PROTOCOL_VERSION,
-    clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
-  });
-  onInitialized?.();
-  signal.throwIfAborted();
-  if (operation.type === 'providers-list') {
-    return {
-      kind: 'providers',
-      providers: await listSorbetAcpCustomProviders(connection, initialized.agentCapabilities),
-    };
-  }
-  if (operation.type === 'providers-create') {
-    return {
-      kind: 'provider',
-      provider: await createSorbetAcpCustomProvider(
-        connection,
-        initialized.agentCapabilities,
-        operation.provider
-      ),
-    };
-  }
-  await deleteSorbetAcpCustomProvider(
-    connection,
-    initialized.agentCapabilities,
-    operation.providerId
-  );
-  return { kind: 'none' };
-}
-
-/** A dedicated, bounded Sorbet process; no session, terminal, filesystem or MCP access. */
-export async function runLocalSorbetCredentials(
-  logger: Logger,
-  operation: SorbetAcpOperation,
-  requestSignal?: AbortSignal,
-  testOptions?: { spawnImpl?: NodeProcessApi['spawn'] }
-) {
-  const timeoutSignal = AbortSignal.timeout(25_000);
-  const signal = requestSignal ? AbortSignal.any([timeoutSignal, requestSignal]) : timeoutSignal;
-  signal.throwIfAborted();
-  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-sorbet-credentials-'));
-  let initialized = false;
-  try {
-    const started = await startLocalAcpProtocol(
-      {
-        cliType: 'builtin',
-        agentType: 'sorbet',
-        workdir,
-        logger,
-        signal,
-        spawnImpl: testOptions?.spawnImpl,
-        terminalEnabled: false,
-        terminalManager: {
-          createTerminal: async () => {
-            throw new Error('Terminal unavailable');
-          },
-          terminalOutput: async () => {
-            throw new Error('Terminal unavailable');
-          },
-          releaseTerminal: async () => {},
-          waitForTerminalExit: async () => ({ exitCode: null, signal: null }),
-          killTerminal: async () => {},
-        },
-        onUpdateMessage: () => {},
-        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-      },
-      async ({ stream, startupAbort }) => {
-        return {
-          outcome: await Promise.race([
-            initializeAndRunSorbetOperation(stream, signal, operation, () => {
-              initialized = true;
-            }),
-            ...(startupAbort ? [startupAbort] : []),
-          ]),
-        };
-      },
-      true,
-      true,
-      () => !initialized && !signal.aborted
-    );
-    try {
-      await terminateAcpProcessTree(started.agentProcess, {
-        logger,
-        sessionLabel: 'sorbet-credentials',
-        exitTimeoutMs: 3000,
-      });
-    } catch (cause) {
-      throw new AcpQuotaCleanupError(started.agentProcess, cause);
-    }
-    signal.throwIfAborted();
-    return started.outcome;
-  } finally {
-    try {
-      fs.rmSync(workdir, { recursive: true, force: true });
-    } catch {
-      /* best effort */
-    }
-  }
 }
 
 /** Core queries need no session; official Antigravity /usage needs an isolated scratch session. */
@@ -1053,6 +885,11 @@ export type ShutdownLocalAcpAgentOptions = {
   acpSessionId?: ACPSessionId | null;
   logger: Logger;
   sessionLabel: string;
+  /**
+   * The session is one-shot scratch work: remove it from the agent's history with
+   * `session/delete` when advertised, else close it as usual.
+   */
+  deleteSession?: boolean;
   closeSessionTimeoutMs?: number;
   exitTimeoutMs?: number;
   /** Test seam for the OS process table. */
@@ -1065,10 +902,13 @@ export async function shutdownLocalAcpAgent(options: ShutdownLocalAcpAgentOption
 
   if (options.client && options.acpSessionId) {
     try {
-      await options.client.closeSession(options.acpSessionId, closeSessionTimeoutMs);
+      const deleted =
+        options.deleteSession === true &&
+        (await options.client.deleteSession(options.acpSessionId, closeSessionTimeoutMs));
+      if (!deleted) await options.client.closeSession(options.acpSessionId, closeSessionTimeoutMs);
     } catch (error) {
       options.logger.debug(
-        `[${options.sessionLabel}] ACP session close failed during local agent shutdown: ${
+        `[${options.sessionLabel}] ACP session ${options.deleteSession ? 'delete' : 'close'} failed during local agent shutdown: ${
           error instanceof Error ? error.message : String(error)
         }`
       );

@@ -56,6 +56,8 @@ finalization does not commit and the user asked for a PR that tracks the work
 
 ## Consequences
 
+The one later owner-approved exception, a sentence recommending Lody-managed runs for long
+commands, is recorded in [managed long runs](../feature/2026-11-16-managed-long-runs.md).
 `lody_session_create` guidance states facts about delegated prompts (history is not
 copied) instead of prescribing their content. Native iOS and Android clients keep
 their own longer copies of the quick-action strings; they are out of scope here.

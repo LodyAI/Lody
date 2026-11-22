@@ -13,18 +13,11 @@ export const PROMPT_SHORTCUT_LIMITS = {
 } as const;
 
 /**
- * A real default rather than a blank slot: every Shortcut then reads the same
- * way in the list, and the picker is a change rather than a decision the author
- * has to make before the Shortcut looks finished.
- */
-export const DEFAULT_PROMPT_SHORTCUT_EMOJI = '📝';
-
-/**
  * Keep an emoji to one short, whitespace-free glyph.
  *
- * Capped and stripped rather than validated against an emoji table: the field
- * is decoration, so the only real requirements are that it cannot smuggle a
- * second line of text into a row and cannot carry invisible characters.
+ * The product no longer sets or shows a Shortcut emoji, but stored rows may
+ * carry one, so the field stays in the strict schema and keeps its rule:
+ * capped and stripped, never a second line of text or invisible characters.
  */
 export const normalizeShortcutEmoji = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
@@ -152,8 +145,6 @@ export const PromptShortcutSchema = z.preprocess(
 
 export type PromptShortcut = z.output<typeof PromptShortcutObjectSchema>;
 
-export const getShortcutEmoji = (shortcut: Pick<PromptShortcut, 'emoji'>): string =>
-  shortcut.emoji || DEFAULT_PROMPT_SHORTCUT_EMOJI;
 export type PromptShortcutScope = z.infer<typeof PromptShortcutScopeSchema>;
 export type PromptShortcutProject = z.infer<typeof projectSchema>;
 export type PromptShortcutTarget = z.infer<typeof PromptShortcutTargetSchema>;

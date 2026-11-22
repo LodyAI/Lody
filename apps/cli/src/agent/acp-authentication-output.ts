@@ -27,6 +27,9 @@ function isTrustedAuthorizationUrl(agentType: BuiltinCliType, url: URL): boolean
       url.pathname.includes('/oauth/')
     );
   }
+  if (agentType === 'antigravity') {
+    return url.hostname === 'accounts.google.com' && url.pathname === '/o/oauth2/auth';
+  }
   if (agentType === 'codex') {
     return (
       url.hostname === 'auth.openai.com' &&
@@ -133,7 +136,10 @@ class AuthorizationOutputParser {
 /** Pinned provider CLI output, restricted to that provider's allowlisted hosts. */
 export class BuiltinAuthenticationOutputParser extends AuthorizationOutputParser {
   constructor(agentType: BuiltinCliType) {
-    super((url) => isTrustedAuthorizationUrl(agentType, url), agentType === 'claude');
+    super(
+      (url) => isTrustedAuthorizationUrl(agentType, url),
+      agentType === 'claude' || agentType === 'antigravity'
+    );
   }
 }
 

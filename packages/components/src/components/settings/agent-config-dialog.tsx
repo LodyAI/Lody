@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from '@/lib/toast';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   computeTitleGenerationDefaults,
   DEEPSEEK_HARNESS_API_KEY_ENV,
@@ -138,10 +138,6 @@ import { settingsType as type } from './type.stylex';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
 type Translate = ReturnType<typeof useTranslation>['t'];
-
-// =============================================================================
-// Styles
-// =============================================================================
 
 const SM = '@media (min-width: 640px)';
 /** A block inside the dialog: the region rung, a fill with no edge. */
@@ -660,10 +656,6 @@ const styles = stylex.create({
   optionList: { display: 'flex', flexDirection: 'column', gap: space[2], paddingTop: space[1] },
 });
 
-// =============================================================================
-// Preset definitions
-// =============================================================================
-
 const LEGACY_DSH_MODELS_ENV = 'ACP_EXTENSION_DSH_MODELS';
 type DeepSeekEndpointMode = 'official' | 'custom';
 export const MIMO_CLAUDE_PRESET_ID = 'mimo-over-claude-code';
@@ -951,10 +943,6 @@ const PRESETS_BY_ID: Record<string, PresetDefinition> = Object.fromEntries(
   PRESETS.map((p) => [p.id, p])
 );
 
-// =============================================================================
-// Agent type options (left rail)
-// =============================================================================
-
 type AgentTypeOption = {
   kind: 'builtin' | 'preset' | 'registry' | 'custom';
   value: string;
@@ -1128,10 +1116,6 @@ const ALL_OPTIONS: AgentTypeOption[] = [
   CUSTOM_OPTION,
   ...REGISTRY_OPTIONS,
 ];
-
-// =============================================================================
-// Form data
-// =============================================================================
 
 export type AgentConfigFormData = {
   codexAuth?: CodexAuthProfile;
@@ -1502,10 +1486,6 @@ function resolveInitialTestedCustomKey(
   if (hasEmptyModelSelectOption(entry.configOptions)) return null;
   return formatCustomAcpCommandLine(config.customAcp);
 }
-
-// =============================================================================
-// Main dialog
-// =============================================================================
 
 export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const reason = useMachineRpcFeatureReason(props.machine.id);
@@ -2001,8 +1981,8 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           'settings.agent.dialog.nodeVersionRequired',
           'Kimi Code requires Node ≥{{required}}; this machine is using {{current}}.',
           {
-            required: effectiveBinaryState?.required ?? t('common.unknown', 'unknown'),
-            current: effectiveBinaryState?.current ?? t('common.unknown', 'unknown'),
+            required: effectiveBinaryState?.required ?? t('common.unknown', 'Unknown'),
+            current: effectiveBinaryState?.current ?? t('common.unknown', 'Unknown'),
           }
         )
       : null;
@@ -2760,7 +2740,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         )}
         {filteredOptions.length === 0 && (
           <div {...stylex.props(styles.railEmpty)}>
-            {t('settings.agent.dialog.noResults', 'No agents match that search')}
+            {t('settings.agent.dialog.noResults', 'No providers match that search')}
           </div>
         )}
       </nav>
@@ -2886,7 +2866,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   setTestingBuiltinSetup(false);
                 } catch (error) {
                   toast.error(
-                    t('settings.agent.setup.deleteFailed', 'Could not delete provider setup')
+                    t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup')
                   );
                   throw error;
                 }
@@ -2900,14 +2880,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           // `hidden` alone loses to a stylesheet's `display`.
           {...stylex.props(styles.groups, waitingForBuiltinSetup && styles.hidden)}
         >
-          <Field
-            htmlFor="agent-config-name"
-            label={t('agents.configName', 'Name')}
-            hint={t(
-              'settings.agent.dialog.nameHint',
-              'Shown in the provider list and session menus.'
-            )}
-          >
+          <Field htmlFor="agent-config-name" label={t('agents.configName', 'Name')}>
             <Input
               id="agent-config-name"
               value={formData.name}
@@ -2942,7 +2915,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           {managedCodexForm && codexAuth ? (
             <Field
               label={t('settings.agent.codex.authentication', 'Authentication')}
-              hint={t(
+              info={t(
                 'settings.agent.codex.storage',
                 'Credentials stay on the selected machine. Each provider has its own account.'
               )}
@@ -2983,7 +2956,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 <Field
                   htmlFor="codex-base-url"
                   label={t('settings.agent.codex.baseUrl', 'Base URL')}
-                  hint={t(
+                  info={t(
                     'settings.agent.codex.keyNext',
                     'Enter the API Key securely during sign-in. To change the destination, add a new provider.'
                   )}
@@ -3027,9 +3000,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <Field
                 htmlFor="custom-acp-command"
                 label={t('settings.agent.dialog.custom.commandLabel', 'Launch command')}
-                hint={t(
+                info={t(
                   'settings.agent.dialog.custom.commandHint',
-                  'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not.'
+                  'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not. Custom providers are only probed when you click Test, so re-test after changing the command.'
                 )}
                 icon={<SquareTerminal aria-hidden="true" {...stylex.props(catalog.icon)} />}
               >
@@ -3057,12 +3030,6 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   />
                 </div>
               </Field>
-              <p {...stylex.props(styles.hint)}>
-                {t(
-                  'settings.agent.dialog.custom.testHint',
-                  'Custom providers are only probed when you click Test — re-test after changing the command.'
-                )}
-              </p>
             </div>
           )}
 
@@ -3071,7 +3038,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <Field
                 htmlFor="builtin-runtime-path"
                 label={t('settings.agent.dialog.runtimeOverride.label', 'Runtime binary path')}
-                hint={t(
+                info={t(
                   'settings.agent.dialog.runtimeOverride.hint',
                   'Advanced: leave empty to let Lody install and verify the managed runtime. Filling this is not recommended unless you need a local enterprise mirror or are debugging runtime startup.'
                 )}
@@ -3398,7 +3365,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   disabled={!capabilitiesReady}
                   disabledHint={
                     probing
-                      ? t('settings.agent.dialog.probing', 'Probing…')
+                      ? t('settings.agent.dialog.probing', 'Probing capabilities…')
                       : t(
                           'settings.agent.dialog.testToRefreshCapabilities',
                           'Click Test to refresh available options.'
@@ -3467,7 +3434,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                 <p {...stylex.props(styles.note)}>
                   {t(
                     'settings.agent.dialog.presetEnvHint',
-                    'Preset variables (shown above) are injected automatically and cannot be overridden here.'
+                    'Preset variables are injected automatically and cannot be overridden here.'
                   )}
                 </p>
               ) : null}
@@ -3640,10 +3607,6 @@ function useNarrowDialogLayout() {
   return narrow;
 }
 
-// =============================================================================
-// Presentational helpers
-// =============================================================================
-
 function isAutoGeneratedName(name: string) {
   const n = name.trim();
   if (!n) return true;
@@ -3792,7 +3755,7 @@ function ProbeStatus({
     return (
       <span {...stylex.props(styles.probing)}>
         <Spinner size="small" aria-hidden="true" />
-        {t('settings.agent.dialog.probing', 'Probing…')}
+        {t('settings.agent.dialog.probing', 'Probing capabilities…')}
       </span>
     );
   }
@@ -3878,7 +3841,7 @@ function DeepSeekApiKeyField({
     <Field
       htmlFor="deepseek-api-key"
       label={label ?? t('settings.agent.dialog.deepseek.apiKeyLabel', 'DeepSeek API Key')}
-      hint={t(
+      info={t(
         'settings.agent.dialog.deepseek.apiKeyHelp',
         'Saved with this provider and injected as DEEPSEEK_API_KEY when DSH starts.'
       )}
@@ -3927,7 +3890,7 @@ function DeepSeekHarnessPanel({
           {t('settings.agent.dialog.deepseek.officialTab', 'DeepSeek official')}
         </Tabs.Tab>
         <Tabs.Tab value="custom">
-          {t('settings.agent.dialog.deepseek.customTab', 'Custom Endpoint')}
+          {t('settings.agent.dialog.deepseek.customTab', 'Custom endpoint')}
         </Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="official">
@@ -3937,8 +3900,8 @@ function DeepSeekHarnessPanel({
         <div {...stylex.props(styles.stack)}>
           <Field
             htmlFor="deepseek-endpoint"
-            label={t('settings.agent.dialog.deepseek.endpointLabel', 'API Endpoint')}
-            hint={t(
+            label={t('settings.agent.dialog.deepseek.endpointLabel', 'API endpoint')}
+            info={t(
               'settings.agent.dialog.deepseek.endpointHelp',
               'Required HTTP or HTTPS URL. Saved as DEEPSEEK_BASE_URL without adding or removing /v1.'
             )}

@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Menu } from '../src/ui/menu';
+import { Dialog } from '../src/ui/dialog';
 import { handleMenuCloseAutoFocus } from '../src/lib/menu-focus';
 
 describe('dropdown-menu', () => {
@@ -121,6 +122,59 @@ describe('dropdown-menu', () => {
       expect(document.activeElement).toBe(textarea);
       expect(document.activeElement).not.toBe(runConfig);
       expect(document.activeElement).not.toBe(permission);
+    });
+
+    it("returns a selection inside a dialog to that dialog's composer, not the page's", async () => {
+      const renderDialog = async (withComposer: boolean) => {
+        await act(async () => {
+          root?.render(
+            <div>
+              <textarea data-keyboard-nav="composer" aria-label="Page prompt" />
+              <Dialog.Root open>
+                <Dialog.Content>
+                  <Dialog.Title>Convert to task</Dialog.Title>
+                  {withComposer ? (
+                    <textarea data-keyboard-nav="composer" aria-label="Dialog prompt" />
+                  ) : null}
+                  <Menu.Root>
+                    <Menu.Trigger>Machine</Menu.Trigger>
+                    <Menu.Content>
+                      <Menu.Item>This machine</Menu.Item>
+                    </Menu.Content>
+                  </Menu.Root>
+                </Dialog.Content>
+              </Dialog.Root>
+            </div>
+          );
+        });
+        await flushFrame();
+      };
+      const selectMachine = async () => {
+        const trigger = getButton('Machine');
+        await act(async () => {
+          trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        });
+        await flushFrame();
+        const item = getMenuItem('This machine');
+        await act(async () => {
+          item.focus();
+          item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+        await flushFrame();
+        expect(document.body.textContent).not.toContain('This machine');
+      };
+      const pagePrompt = () => document.querySelector('textarea[aria-label="Page prompt"]');
+
+      await renderDialog(true);
+      await selectMachine();
+      expect(document.activeElement).toBe(
+        document.querySelector('[data-lody-dialog-content] textarea[aria-label="Dialog prompt"]')
+      );
+
+      // A dialog without a composer (settings) keeps its focus.
+      await renderDialog(false);
+      await selectMachine();
+      expect(document.activeElement).not.toBe(pagePrompt());
     });
 
     function getButton(name: string): HTMLButtonElement {

@@ -22,6 +22,9 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import { registerBuiltInCommands } from '@/lib/commands';
+
+registerBuiltInCommands();
 
 /**
  * The desktop composer's two consolidated footer buttons: the run-config
@@ -440,6 +443,61 @@ function LongModelNameShell() {
   );
 }
 
+const speedTierSelectors: AcpConfigOptionSelector[] = [
+  selectors[0]!,
+  {
+    type: 'select',
+    configId: 'fast-mode',
+    category: 'fast-mode',
+    label: 'Speed',
+    currentValue: 'off',
+    options: [
+      { value: 'off', label: 'Standard' },
+      { value: 'fast', label: 'Fast' },
+      { value: 'ultrafast', label: 'Ultrafast' },
+    ],
+  },
+];
+
+/** The face for each speed tier: no glyph, the Fast bolt, and the stacked Ultrafast bolts. */
+function SpeedTierShell() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(agents.map((agent) => [getAgentConfigRoomId(agent.id), agent]))
+    );
+    return next;
+  }, []);
+  return (
+    <Provider store={store}>
+      <div className="flex min-h-dvh flex-col items-start justify-end gap-4 bg-background p-8">
+        {['off', 'fast', 'ultrafast'].map((tier) => (
+          <div
+            key={tier}
+            data-speed-tier-row={tier}
+            style={{ width: 420 }}
+            className="@container/composer-face flex items-center rounded-xl bg-input/90 px-2 py-1.5"
+          >
+            <DesktopRunConfigMenu
+              agentSelection={{ agentId: codexId, machineId }}
+              allowedMachineIds={[machineId]}
+              availableAgentConfigs={agents}
+              showAgentNameInTrigger
+              agentLocked
+              modelOptions={modelOptions}
+              selectedModelId={modelOptions[0]!.value}
+              configOptionSelectors={speedTierSelectors}
+              configOptionValues={{ reasoning_effort: 'medium', 'fast-mode': tier }}
+              onConfigOptionChange={fn()}
+            />
+          </div>
+        ))}
+      </div>
+    </Provider>
+  );
+}
+
 function EmptyMachineScopeShell() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background p-8">
@@ -498,4 +556,8 @@ export const MachineScopeEmpty: Story = {
 export const LongModelName: Story = {
   args: { isEmptyConversation: false },
   render: () => <LongModelNameShell />,
+};
+export const SpeedTiers: Story = {
+  args: { isEmptyConversation: false },
+  render: () => <SpeedTierShell />,
 };

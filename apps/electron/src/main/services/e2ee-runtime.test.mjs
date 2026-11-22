@@ -385,6 +385,38 @@ void test('a different account retains its KeyPackage, joins as Member, exchange
         yield* owner.host.openContent(workspaceId, { room, context, ...reply, additionalData }),
         plaintext
       )
+      for (const [statusRoom, write] of [
+        [
+          { kind: 'flock', flockDocId: `${workspaceId}:wf:workspace` },
+          { key: ['pinSection', 'section-synthetic'], value: { name: 'Review', orderKey: 'a0' } }
+        ],
+        [
+          { kind: 'meta' },
+          {
+            snoozedUntil: 9_000_000_000_000,
+            settledAt: null,
+            focusRestoredAt: 8_999_999_999_000,
+            orderKey: 'a0V',
+            pinSectionId: 'section-synthetic'
+          }
+        ]
+      ]) {
+        const bytes = new TextEncoder().encode(JSON.stringify(write))
+        const sealed = yield* member.host.seal(workspaceId, {
+          epoch: 0,
+          room: statusRoom,
+          context,
+          plaintext: bytes,
+          additionalData
+        })
+        const opened = yield* owner.host.openContent(workspaceId, {
+          room: statusRoom,
+          context,
+          ...sealed,
+          additionalData
+        })
+        assert.deepEqual(JSON.parse(new TextDecoder().decode(opened)), write)
+      }
       const personalOffer = yield* member.host.personalPairingOffer(workspaceId)
       const additional = yield* openMember(join(directory, 'member-additional'))
       const personalRequest = yield* additional.bootstrap.preparePersonalJoin(personalOffer)

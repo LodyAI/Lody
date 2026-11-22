@@ -11,7 +11,7 @@ import {
   type FocusEvent as ReactFocusEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Popover } from '@/ui/armed-overlays';

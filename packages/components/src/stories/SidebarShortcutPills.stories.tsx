@@ -17,7 +17,7 @@ import { Tooltip } from '@lody/ui/tooltip';
 import {
   sidebarCollapsedOpenedBySessionsAtom,
   sidebarNavItemsAtom,
-  sidebarShowFullListAtom,
+  sidebarRevealedRowsAtom,
   toggleSidebarCollapsedOpenedBySessionAtom,
 } from '@/atoms/focus-layer';
 import {
@@ -38,7 +38,7 @@ import {
   buildSidebarNavigationItems,
 } from '@/components/sidebar-navigation-model';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
-import { SidebarShortcutPill } from '@/components/sidebar-shortcut-pill';
+import { SidebarBindingPill, SidebarShortcutPill } from '@/components/sidebar-shortcut-pill';
 import {
   SidebarUpdatedSessionList,
   type SidebarUpdatedBucketKey,
@@ -63,10 +63,6 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const NOW = Date.UTC(2026, 10, 20, 12, 0, 0);
 const MACHINE_ID = 'machine-mac-studio' as MachineId;
-
-// ---------------------------------------------------------------------------
-// Story 1: Pill style & row-state review gallery
-// ---------------------------------------------------------------------------
 
 const GALLERY_ROWS: SidebarUpdatedItem[] = [
   {
@@ -234,6 +230,17 @@ export const PillGallery: Story = {
         </div>
 
         <div className="space-y-3">
+          <h2 className="text-sm font-semibold">Navigation Row Bindings</h2>
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sidebar-border/80 bg-sidebar p-4 text-sidebar-foreground">
+            {['Mod+N', 'Mod+Shift+D', 'Mod+,', 'Alt+Shift+P', 'Ctrl+Alt+T', 'Shift+Enter'].map(
+              (binding) => (
+                <SidebarBindingPill key={binding} binding={binding} />
+              )
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-3">
           <h2 className="text-sm font-semibold">Sidebar Row Replacement &amp; Alignment</h2>
           <p className="max-w-2xl text-xs text-muted-foreground">
             Holding the primary modifier swaps trailing row status / PR / Mergeable / countdown
@@ -254,10 +261,6 @@ export const PillGallery: Story = {
     </Tooltip.Provider>
   ),
 };
-
-// ---------------------------------------------------------------------------
-// Story 2: Full interactive sidebar playground across all views & sections
-// ---------------------------------------------------------------------------
 
 type PlaygroundSession = {
   id: string;
@@ -357,7 +360,7 @@ const DEMO_SESSIONS: PlaygroundSession[] = [
     isWaitingPermission: true,
     orderKey: '81',
   },
-  // Local project: loro (6 sessions -> folds at 5 with "Show all (6)")
+  // Local project: loro (6 sessions -> folds at 5 with "Show more")
   {
     id: 'local-loro-1',
     title: 'Benchmark movable list CRDT',
@@ -546,8 +549,8 @@ function PlaygroundContent() {
   const [updatedBucketsCollapsed, setUpdatedBucketsCollapsed] = useState<
     Partial<Record<SidebarUpdatedBucketKey, boolean>>
   >({});
-  const [updatedBucketsShowFull, setUpdatedBucketsShowFull] = useState<
-    Partial<Record<SidebarUpdatedBucketKey, boolean>>
+  const [updatedBucketsRevealed, setUpdatedBucketsRevealed] = useState<
+    Partial<Record<SidebarUpdatedBucketKey, number>>
   >({});
 
   return (
@@ -595,9 +598,12 @@ function PlaygroundContent() {
             [key]: !isSidebarBucketCollapsed(key, prev),
           }))
         }
-        updatedBucketsShowFull={updatedBucketsShowFull}
-        onToggleUpdatedShowFull={(key) =>
-          setUpdatedBucketsShowFull((prev) => ({ ...prev, [key]: !prev[key] }))
+        updatedBucketsRevealed={updatedBucketsRevealed}
+        onShowMoreUpdatedRows={(key) =>
+          setUpdatedBucketsRevealed((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 20 }))
+        }
+        onShowLessUpdatedRows={(key) =>
+          setUpdatedBucketsRevealed((prev) => ({ ...prev, [key]: 0 }))
         }
       />
     </Provider>
@@ -632,8 +638,9 @@ function PlaygroundInner({
   onToggleChatsCollapsed,
   updatedBucketsCollapsed,
   onToggleUpdatedBucket,
-  updatedBucketsShowFull,
-  onToggleUpdatedShowFull,
+  updatedBucketsRevealed,
+  onShowMoreUpdatedRows,
+  onShowLessUpdatedRows,
 }: {
   store: ReturnType<typeof createStore>;
   organizeMode: LoroSidebarOrganizeMode;
@@ -662,11 +669,12 @@ function PlaygroundInner({
   onToggleChatsCollapsed: () => void;
   updatedBucketsCollapsed: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
   onToggleUpdatedBucket: (key: SidebarUpdatedBucketKey) => void;
-  updatedBucketsShowFull: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
-  onToggleUpdatedShowFull: (key: SidebarUpdatedBucketKey) => void;
+  updatedBucketsRevealed: Partial<Record<SidebarUpdatedBucketKey, number>>;
+  onShowMoreUpdatedRows: (key: SidebarUpdatedBucketKey) => void;
+  onShowLessUpdatedRows: (key: SidebarUpdatedBucketKey) => void;
 }) {
-  const showFullGroups = useAtomValue(sidebarShowFullListAtom);
-  const setShowFullGroups = useSetAtom(sidebarShowFullListAtom);
+  const revealedGroups = useAtomValue(sidebarRevealedRowsAtom);
+  const setRevealedGroups = useSetAtom(sidebarRevealedRowsAtom);
   const collapsedOpenedBySessions = useAtomValue(sidebarCollapsedOpenedBySessionsAtom);
   const toggleOpenedBySession = useSetAtom(toggleSidebarCollapsedOpenedBySessionAtom);
   const overlayActive = useAtomValue(sidebarShortcutOverlayActiveAtom);
@@ -749,7 +757,7 @@ function PlaygroundInner({
     () =>
       buildSidebarNavigationItems({
         organizeMode,
-        showFullSessionGroups: showFullGroups,
+        revealedRowsByGroup: revealedGroups,
         collapsedOpenedBySessions,
         pinnedSections: pinnedSections.map((section) => ({
           id: section.id,
@@ -765,8 +773,8 @@ function PlaygroundInner({
                 machineId: MACHINE_ID,
                 localProjectId: project.id,
                 collapsed: localProjectCollapsed[project.id] === true,
-                showFull:
-                  showFullGroups[getLocalProjectSessionGroupKey(MACHINE_ID, project.id)] === true,
+                revealedRows:
+                  revealedGroups[getLocalProjectSessionGroupKey(MACHINE_ID, project.id)] ?? 0,
                 sessions: (localMetasByProject.get(project.id) ?? []).map((meta) => ({
                   id: meta.id,
                   openedByRowSessionId: meta.openedByRootSessionId ?? null,
@@ -784,7 +792,7 @@ function PlaygroundInner({
         updated: {
           items: updatedItems,
           collapsedBuckets: updatedBucketsCollapsed,
-          showFullBuckets: updatedBucketsShowFull,
+          revealedRowsByBucket: updatedBucketsRevealed,
         },
       }),
     [
@@ -801,9 +809,9 @@ function PlaygroundInner({
       pinnedSections,
       repoRows,
       repos,
-      showFullGroups,
+      revealedGroups,
       updatedBucketsCollapsed,
-      updatedBucketsShowFull,
+      updatedBucketsRevealed,
       updatedItems,
     ]
   );
@@ -846,11 +854,17 @@ function PlaygroundInner({
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [platform, slotSessionIds.length, triggerSlot]);
 
-  const toggleProjectFullList = useCallback(
+  const showMoreProjectRows = useCallback(
     (groupKey: string) => {
-      setShowFullGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+      setRevealedGroups((prev) => ({ ...prev, [groupKey]: (prev[groupKey] ?? 0) + 5 }));
     },
-    [setShowFullGroups]
+    [setRevealedGroups]
+  );
+  const showLessProjectRows = useCallback(
+    (groupKey: string) => {
+      setRevealedGroups((prev) => ({ ...prev, [groupKey]: 0 }));
+    },
+    [setRevealedGroups]
   );
 
   const topContent = (
@@ -874,7 +888,7 @@ function PlaygroundInner({
                   project={project}
                   canRemoveProject={false}
                   collapsed={localProjectCollapsed[project.id] === true}
-                  whetherShowFullList={showFullGroups[groupKey] === true}
+                  revealedRows={revealedGroups[groupKey] ?? 0}
                   isSelected={false}
                   sessionsForProject={localMetasByProject.get(project.id) ?? []}
                   childSessionsByParent={emptyChildren}
@@ -894,7 +908,8 @@ function PlaygroundInner({
                   collapsedOpenedBySessionIds={collapsedOpenedBySessions}
                   onToggleOpenedBySessions={toggleOpenedBySession}
                   onToggleCollapsed={(_m, pId) => onToggleLocalProjectCollapsed(pId)}
-                  onToggleFullList={toggleProjectFullList}
+                  onShowMore={showMoreProjectRows}
+                  onShowLess={showLessProjectRows}
                   onRequestRemoval={() => {}}
                 />
               );
@@ -953,9 +968,10 @@ function PlaygroundInner({
         updatedItems={updatedItems}
         updatedSelectedItemId={selectedId}
         updatedBucketsCollapsed={updatedBucketsCollapsed}
-        updatedShowFullBuckets={updatedBucketsShowFull}
+        updatedRevealedRows={updatedBucketsRevealed}
         onToggleUpdatedBucket={onToggleUpdatedBucket}
-        onToggleUpdatedShowFullBucket={onToggleUpdatedShowFull}
+        onShowMoreUpdatedRows={onShowMoreUpdatedRows}
+        onShowLessUpdatedRows={onShowLessUpdatedRows}
         onSelectUpdatedItem={(id) => onSelectSession(id)}
       />
 
@@ -1043,7 +1059,7 @@ function PlaygroundInner({
           </p>
           <p>
             Collapse/expand any section (Pinned, Maintenance, Mac Studio, projects, GitHub repos,
-            Focus, Later, Settled, Chats) or click <em>Show all</em> to see slots 1–9 adapt live.
+            Focus, Later, Settled, Chats) or click <em>Show more</em> to see slots 1–9 adapt live.
             Note: web browsers reserve <code>⌘1–⌘9</code> for browser tabs, so use{' '}
             <code>Control+1–9</code> in Windows mode or click any slot below to test switching.
           </p>

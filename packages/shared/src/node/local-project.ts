@@ -2,8 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type {
+  LocalProjectBranchListResult,
   LocalProjectGitState,
+  LocalProjectGitSummary,
   LocalProjectId,
+  LocalProjectListBranchesOptions,
   LocalProjectWorkingTreeState,
 } from '../project';
 import { parseGitHubRepo } from '../worktree-paths';
@@ -179,13 +182,13 @@ const isUnbornHead = (result: GitCommandResult) =>
   result.status === 128 &&
   result.stderr.includes("ambiguous argument 'HEAD': unknown revision or path");
 
-function isGitRepositoryImpl(
-  rootPath: string
+function isGitRepositoryNormalizedImpl(
+  normalizedRootPath: string
 ): Effect.Effect<boolean, LocalProjectError, NativeServices> {
   return Effect.gen(function* () {
     // Git inherits repository context from parent directories. A registered local
     // project is Git-capable only when its own root is the worktree root.
-    const probe = yield* runGitCommandImpl(rootPath, ['rev-parse', '--show-toplevel']);
+    const probe = yield* runGitCommandImpl(normalizedRootPath, ['rev-parse', '--show-toplevel']);
     if (
       probe.status === 128 &&
       (probe.stderr.startsWith('fatal: not a git repository') ||
@@ -198,11 +201,14 @@ function isGitRepositoryImpl(
       return yield* Effect.fail(
         new LocalProjectGitError({ message: 'Git repository probe returned no root' })
       );
-    return (
-      (yield* normalizeLocalProjectRootPathImpl(repositoryRoot)) ===
-      (yield* normalizeLocalProjectRootPathImpl(rootPath))
-    );
+    return (yield* normalizeLocalProjectRootPathImpl(repositoryRoot)) === normalizedRootPath;
   });
+}
+
+function isGitRepositoryImpl(
+  rootPath: string
+): Effect.Effect<boolean, LocalProjectError, NativeServices> {
+  return Effect.flatMap(normalizeLocalProjectRootPathImpl(rootPath), isGitRepositoryNormalizedImpl);
 }
 
 function assertGitRepositoryImpl(
@@ -646,22 +652,63 @@ function parseRemoteAsGitHubRepo(remoteUrl: string): string | null {
     return null;
   }
 }
-function resolveCurrentBranchRemoteImpl(
-  rootPath: string,
-  remotes: string[]
+const DEFAULT_LOCAL_PROJECT_BRANCH_PAGE_LIMIT = 50;
+const MAX_LOCAL_PROJECT_BRANCH_PAGE_LIMIT = 200;
+
+function readCommittedHeadBranchNameImpl(
+  rootPath: string
 ): Effect.Effect<string | null, LocalProjectError, NativeServices> {
   return Effect.gen(function* () {
-    const currentBranchResult = yield* runGitCommandImpl(rootPath, [
-      'rev-parse',
-      '--abbrev-ref',
-      'HEAD',
-    ]);
-    if (isUnbornHead(currentBranchResult)) return null;
-    yield* checkGitStatus(currentBranchResult, 'Failed to inspect current git branch');
-    const currentBranch = currentBranchResult.stdout.trim();
-    if (!currentBranch || currentBranch === 'HEAD') {
-      return null;
+    const currentResult = yield* runGitCommandImpl(rootPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    if (isUnbornHead(currentResult)) return null;
+    yield* checkGitStatus(currentResult, 'Failed to inspect current git branch');
+    const currentBranch = currentResult.stdout.trim();
+    return currentBranch && currentBranch !== 'HEAD' ? currentBranch : null;
+  });
+}
+
+function resolveRemoteDefaultBranchesImpl(
+  rootPath: string,
+  remotes: string[]
+): Effect.Effect<
+  { branchName: string; remoteName: string } | null,
+  LocalProjectError,
+  NativeServices
+> {
+  return Effect.gen(function* () {
+    if (remotes.length === 0) return null;
+    const results = yield* Effect.all(
+      remotes.map((remote) =>
+        runGitCommandImpl(rootPath, [
+          'symbolic-ref',
+          '--quiet',
+          '--short',
+          `refs/remotes/${remote}/HEAD`,
+        ]).pipe(
+          Effect.tap((result) =>
+            checkGitStatus(result, 'Failed to inspect remote default branch', [0, 1])
+          ),
+          Effect.map((result) => ({ remote, result }))
+        )
+      ),
+      { concurrency: 'unbounded' }
+    );
+    for (const { remote, result } of results) {
+      if (result.status === 1) continue;
+      const defaultBranch = parseGitRemoteDefaultBranch(result.stdout, remote);
+      if (defaultBranch) return { branchName: defaultBranch, remoteName: remote };
     }
+    return null;
+  });
+}
+
+function resolveCurrentBranchRemoteNormalizedImpl(
+  rootPath: string,
+  remotes: string[],
+  currentBranch: string | null
+): Effect.Effect<string | null, LocalProjectError, NativeServices> {
+  return Effect.gen(function* () {
+    if (!currentBranch || remotes.length === 0) return null;
     const remoteResult = yield* runGitCommandImpl(rootPath, [
       'config',
       `branch.${currentBranch}.remote`,
@@ -676,7 +723,11 @@ function resolveCurrentBranchRemoteImpl(
   });
 }
 
-function probeGitHubRemoteAtRootPathImpl(rootPath: string): Effect.Effect<
+function probeGitHubRemoteNormalizedImpl(
+  rootPath: string,
+  remotes: string[],
+  currentBranch: string | null
+): Effect.Effect<
   {
     repoFullName: string;
     remoteName: string;
@@ -686,12 +737,12 @@ function probeGitHubRemoteAtRootPathImpl(rootPath: string): Effect.Effect<
   NativeServices
 > {
   return Effect.gen(function* () {
-    if (!(yield* isGitRepositoryImpl(rootPath))) {
-      return null;
-    }
-    const remotes = yield* listGitRemotesImpl(rootPath);
     if (remotes.length === 0) return null;
-    const currentBranchRemote = yield* resolveCurrentBranchRemoteImpl(rootPath, remotes);
+    const currentBranchRemote = yield* resolveCurrentBranchRemoteNormalizedImpl(
+      rootPath,
+      remotes,
+      currentBranch
+    );
     const prioritizedRemotes: string[] = [];
     if (currentBranchRemote && remotes.includes(currentBranchRemote)) {
       prioritizedRemotes.push(currentBranchRemote);
@@ -733,20 +784,54 @@ function probeGitHubRemoteAtRootPathImpl(rootPath: string): Effect.Effect<
   });
 }
 
+function probeGitHubRemoteAtRootPathImpl(rootPath: string): Effect.Effect<
+  {
+    repoFullName: string;
+    remoteName: string;
+    remoteUrl: string;
+  } | null,
+  LocalProjectError,
+  NativeServices
+> {
+  return Effect.gen(function* () {
+    const normalizedRootPath = yield* normalizeLocalProjectRootPathImpl(rootPath);
+    if (!(yield* isGitRepositoryNormalizedImpl(normalizedRootPath))) {
+      return null;
+    }
+    const [remotes, currentBranch] = yield* Effect.all(
+      [listGitRemotesImpl(normalizedRootPath), readCommittedHeadBranchNameImpl(normalizedRootPath)],
+      { concurrency: 'unbounded' }
+    );
+    return yield* probeGitHubRemoteNormalizedImpl(normalizedRootPath, remotes, currentBranch);
+  });
+}
+
 function getLocalProjectGitHubRepoAtRootPathImpl(
   rootPath: string
 ): Effect.Effect<string | null, LocalProjectError, NativeServices> {
   return Effect.gen(function* () {
-    return (
-      (yield* probeGitHubRemoteAtRootPathImpl(yield* normalizeLocalProjectRootPathImpl(rootPath)))
-        ?.repoFullName ?? null
-    );
+    return (yield* probeGitHubRemoteAtRootPathImpl(rootPath))?.repoFullName ?? null;
   });
 }
 
-function listLocalProjectBranchesAtRootPathImpl(rootPath: string): Effect.Effect<
+type InspectedBranchCandidate = {
+  kind: 'local' | 'remote';
+  branchName: string;
+  exactRef: string;
+  selector: string;
+  remoteName?: string;
+  orderIndex: number;
+};
+
+function inspectLocalProjectBranchesNormalizedImpl(
+  rootPath: string,
+  remotes: string[],
+  currentBranchName: string | null,
+  options: { sortByCommitterDate?: boolean } = {}
+): Effect.Effect<
   {
-    branches: string[];
+    candidates: InspectedBranchCandidate[];
+    alphabeticalBranches: string[];
     currentBranch: string | null;
     defaultBranch: string | null;
   },
@@ -754,41 +839,42 @@ function listLocalProjectBranchesAtRootPathImpl(rootPath: string): Effect.Effect
   NativeServices
 > {
   return Effect.gen(function* () {
-    yield* assertGitRepositoryImpl(rootPath);
-    const remotes = yield* listGitRemotesImpl(rootPath);
-    const refsResult = yield* runGitCommandImpl(rootPath, [
-      'for-each-ref',
-      '--format=%(refname)',
-      'refs/heads',
-      ...remotes.map((remote) => `refs/remotes/${remote}`),
-    ]);
+    const [refsResult, defaultBranchFromRemote] = yield* Effect.all(
+      [
+        runGitCommandImpl(rootPath, [
+          'for-each-ref',
+          ...(options.sortByCommitterDate ? ['--sort=-committerdate'] : []),
+          '--format=%(refname)',
+          'refs/heads',
+          ...remotes.map((remote) => `refs/remotes/${remote}`),
+        ]),
+        resolveRemoteDefaultBranchesImpl(rootPath, remotes),
+      ],
+      { concurrency: 'unbounded' }
+    );
     if (refsResult.status !== 0) {
       const reason = refsResult.stderr.trim() || refsResult.stdout.trim() || 'unknown error';
       return yield* Effect.fail(
         new LocalProjectGitError({ message: `Failed to list git branches: ${reason}` })
       );
     }
-    type BranchCandidate = {
-      kind: 'local' | 'remote';
-      branchName: string;
-      exactRef: string;
-      selector: string;
-      remoteName?: string;
-    };
-    const remoteSet = new Set(remotes);
+    const sortedRemotes = [...remotes].sort((a, b) => b.length - a.length);
     const localBranchNames = new Set<string>();
-    const candidates: BranchCandidate[] = [];
+    const candidates: InspectedBranchCandidate[] = [];
     const remoteRefsByBranch = new Map<
       string,
       Array<{
         remoteName: string;
         qualifiedName: string;
         exactRef: string;
+        orderIndex: number;
       }>
     >();
+    let lineOrder = 0;
     for (const line of refsResult.stdout.split('\n')) {
       const ref = line.trim();
       if (!ref) continue;
+      const orderIndex = lineOrder++;
       if (ref.startsWith('refs/heads/')) {
         const localName = ref.slice('refs/heads/'.length).trim();
         if (localName) {
@@ -798,6 +884,7 @@ function listLocalProjectBranchesAtRootPathImpl(rootPath: string): Effect.Effect
             branchName: localName,
             exactRef: ref,
             selector: localName,
+            orderIndex,
           });
         }
         continue;
@@ -805,24 +892,16 @@ function listLocalProjectBranchesAtRootPathImpl(rootPath: string): Effect.Effect
       if (!ref.startsWith('refs/remotes/')) continue;
       const remoteRef = ref.slice('refs/remotes/'.length).trim();
       if (!remoteRef) continue;
-      const remoteName = [...remoteSet]
-        .sort((a, b) => b.length - a.length)
-        .find((remote) => remoteRef.startsWith(`${remote}/`));
+      const remoteName = sortedRemotes.find((remote) => remoteRef.startsWith(`${remote}/`));
       if (!remoteName) continue;
       const branchName = remoteRef.slice(remoteName.length + 1).trim();
       if (branchName && branchName !== 'HEAD') {
         const qualifiedName = `${remoteName}/${branchName}`;
         const refs = remoteRefsByBranch.get(branchName) ?? [];
-        refs.push({ remoteName, qualifiedName, exactRef: ref });
+        refs.push({ remoteName, qualifiedName, exactRef: ref, orderIndex });
         remoteRefsByBranch.set(branchName, refs);
       }
     }
-    const currentResult = yield* runGitCommandImpl(rootPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
-    if (!isUnbornHead(currentResult))
-      yield* checkGitStatus(currentResult, 'Failed to inspect current git branch');
-    const currentBranchRaw = currentResult.status === 0 ? currentResult.stdout.trim() : '';
-    const currentBranchName =
-      currentBranchRaw && currentBranchRaw !== 'HEAD' ? currentBranchRaw : null;
     if (currentBranchName && !localBranchNames.has(currentBranchName)) {
       localBranchNames.add(currentBranchName);
       candidates.push({
@@ -830,25 +909,8 @@ function listLocalProjectBranchesAtRootPathImpl(rootPath: string): Effect.Effect
         branchName: currentBranchName,
         exactRef: `refs/heads/${currentBranchName}`,
         selector: currentBranchName,
+        orderIndex: -1,
       });
-    }
-    let defaultBranchFromRemote: {
-      branchName: string;
-      remoteName: string;
-    } | null = null;
-    for (const remote of remotes) {
-      const defaultResult = yield* runGitCommandImpl(rootPath, [
-        'symbolic-ref',
-        '--quiet',
-        '--short',
-        `refs/remotes/${remote}/HEAD`,
-      ]);
-      yield* checkGitStatus(defaultResult, 'Failed to inspect remote default branch', [0, 1]);
-      if (defaultResult.status === 1) continue;
-      const defaultBranch = parseGitRemoteDefaultBranch(defaultResult.stdout, remote);
-      if (!defaultBranch) continue;
-      defaultBranchFromRemote = { branchName: defaultBranch, remoteName: remote };
-      break;
     }
     for (const [branchName, remoteRefs] of remoteRefsByBranch) {
       const looksQualified = remotes.some((remote) => branchName.startsWith(`${remote}/`));
@@ -861,10 +923,11 @@ function listLocalProjectBranchesAtRootPathImpl(rootPath: string): Effect.Effect
           remoteName: remoteRef.remoteName,
           exactRef: remoteRef.exactRef,
           selector: useShortName ? branchName : remoteRef.qualifiedName,
+          orderIndex: remoteRef.orderIndex,
         });
       }
     }
-    const candidatesBySelector = new Map<string, BranchCandidate[]>();
+    const candidatesBySelector = new Map<string, InspectedBranchCandidate[]>();
     for (const candidate of candidates) {
       const matching = candidatesBySelector.get(candidate.selector) ?? [];
       matching.push(candidate);
@@ -904,7 +967,7 @@ function listLocalProjectBranchesAtRootPathImpl(rootPath: string): Effect.Effect
       const { branchName, remoteName } = defaultBranchFromRemote;
       defaultBranch = localSelector(branchName) ?? remoteSelector(remoteName, branchName);
     }
-    const branches = candidates
+    const alphabeticalBranches = candidates
       .map((candidate) => candidate.selector)
       .sort((a, b) => a.localeCompare(b));
     if (!defaultBranch) {
@@ -913,13 +976,236 @@ function listLocalProjectBranchesAtRootPathImpl(rootPath: string): Effect.Effect
       } else if (localSelector('master')) {
         defaultBranch = localSelector('master');
       } else {
-        defaultBranch = branches[0] ?? null;
+        defaultBranch = alphabeticalBranches[0] ?? null;
       }
     }
     return {
-      branches,
+      candidates,
+      alphabeticalBranches,
       currentBranch: currentBranchName ? localSelector(currentBranchName) : null,
       defaultBranch,
+    };
+  });
+}
+
+function isSubsequenceMatch(needle: string, haystack: string): boolean {
+  if (!needle) return true;
+  if (needle.length > haystack.length) return false;
+  let needleIndex = 0;
+  for (let i = 0; i < haystack.length && needleIndex < needle.length; i += 1) {
+    if (haystack.charCodeAt(i) === needle.charCodeAt(needleIndex)) {
+      needleIndex += 1;
+    }
+  }
+  return needleIndex === needle.length;
+}
+
+function scoreBranchCandidateQuery(
+  candidate: InspectedBranchCandidate,
+  normalizedQuery: string
+): number | null {
+  const q = normalizedQuery.toLowerCase();
+  const branchLower = candidate.branchName.toLowerCase();
+  const qualifiedLower =
+    candidate.kind === 'remote'
+      ? `${candidate.remoteName}/${candidate.branchName}`.toLowerCase()
+      : branchLower;
+  if (branchLower === q || qualifiedLower === q) return 0;
+  if (branchLower.startsWith(q) || qualifiedLower.startsWith(q)) return 1;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const searchable = `${qualifiedLower} ${candidate.kind}`;
+  if (tokens.every((token) => searchable.includes(token))) return 2;
+  if (tokens.length === 1 && q.length >= 2 && isSubsequenceMatch(q, qualifiedLower)) return 3;
+  return null;
+}
+
+function parseBranchListCursor(
+  cursor: string | undefined
+): Effect.Effect<number, LocalProjectGitError> {
+  if (!cursor) return Effect.succeed(0);
+  if (!/^[0-9]+$/.test(cursor)) {
+    return Effect.fail(new LocalProjectGitError({ message: 'Branch list cursor is invalid.' }));
+  }
+  return Effect.succeed(Number.parseInt(cursor, 10));
+}
+
+function listLocalProjectBranchesPageAtRootPathImpl(
+  rootPath: string,
+  options: LocalProjectListBranchesOptions = {}
+): Effect.Effect<LocalProjectBranchListResult, LocalProjectError, NativeServices> {
+  return Effect.gen(function* () {
+    const limit = Math.min(
+      MAX_LOCAL_PROJECT_BRANCH_PAGE_LIMIT,
+      Math.max(
+        1,
+        typeof options.limit === 'number' && Number.isFinite(options.limit)
+          ? Math.trunc(options.limit)
+          : DEFAULT_LOCAL_PROJECT_BRANCH_PAGE_LIMIT
+      )
+    );
+    const offset = yield* parseBranchListCursor(options.cursor?.trim() || undefined);
+    const normalizedRootPath = yield* ensureLocalProjectRootPathImpl(rootPath);
+    if (!(yield* isGitRepositoryNormalizedImpl(normalizedRootPath))) {
+      return { git: false };
+    }
+    const [remotes, currentBranchName] = yield* Effect.all(
+      [listGitRemotesImpl(normalizedRootPath), readCommittedHeadBranchNameImpl(normalizedRootPath)],
+      { concurrency: 'unbounded' }
+    );
+    const inspected = yield* inspectLocalProjectBranchesNormalizedImpl(
+      normalizedRootPath,
+      remotes,
+      currentBranchName,
+      { sortByCommitterDate: true }
+    );
+    const pinnedBranches: string[] = [];
+    for (const pinned of [inspected.defaultBranch, inspected.currentBranch]) {
+      if (pinned && !pinnedBranches.includes(pinned)) {
+        pinnedBranches.push(pinned);
+      }
+    }
+    const pinnedIndex = new Map(pinnedBranches.map((selector, index) => [selector, index]));
+    const orderedCandidates = [...inspected.candidates].sort((a, b) => {
+      const aPinned = pinnedIndex.get(a.selector);
+      const bPinned = pinnedIndex.get(b.selector);
+      if (aPinned !== undefined && bPinned !== undefined) return aPinned - bPinned;
+      if (aPinned !== undefined) return -1;
+      if (bPinned !== undefined) return 1;
+      if (a.orderIndex !== b.orderIndex) return a.orderIndex - b.orderIndex;
+      return a.selector.localeCompare(b.selector);
+    });
+    const normalizedQuery = options.query?.trim() ?? '';
+    const matchedSelectors = normalizedQuery
+      ? orderedCandidates
+          .map((candidate, order) => ({
+            selector: candidate.selector,
+            score: scoreBranchCandidateQuery(candidate, normalizedQuery),
+            order,
+          }))
+          .filter(
+            (entry): entry is { selector: string; score: number; order: number } =>
+              entry.score !== null
+          )
+          .sort((a, b) => (a.score !== b.score ? a.score - b.score : a.order - b.order))
+          .map((entry) => entry.selector)
+      : orderedCandidates.map((candidate) => candidate.selector);
+    const totalCount = matchedSelectors.length;
+    const pageBranches = matchedSelectors.slice(offset, offset + limit);
+    const nextOffset = offset + pageBranches.length;
+    const truncated = nextOffset < totalCount;
+    return {
+      git: true,
+      currentBranch: inspected.currentBranch,
+      defaultBranch: inspected.defaultBranch,
+      pinnedBranches,
+      branches: pageBranches,
+      truncated,
+      ...(truncated ? { nextCursor: String(nextOffset) } : {}),
+      totalCount,
+    };
+  });
+}
+
+function getLocalProjectGitSummaryAtRootPathImpl(
+  rootPath: string
+): Effect.Effect<LocalProjectGitSummary, LocalProjectError, NativeServices> {
+  return Effect.gen(function* () {
+    const normalizedRootPath = yield* ensureLocalProjectRootPathImpl(rootPath);
+    if (!(yield* isGitRepositoryNormalizedImpl(normalizedRootPath))) {
+      return { git: false };
+    }
+    const [remotes, currentBranchName] = yield* Effect.all(
+      [listGitRemotesImpl(normalizedRootPath), readCommittedHeadBranchNameImpl(normalizedRootPath)],
+      { concurrency: 'unbounded' }
+    );
+    const [githubRemote, defaultBranchFromRemote] = yield* Effect.all(
+      [
+        probeGitHubRemoteNormalizedImpl(normalizedRootPath, remotes, currentBranchName),
+        resolveRemoteDefaultBranchesImpl(normalizedRootPath, remotes),
+      ],
+      { concurrency: 'unbounded' }
+    );
+    const probeNames = new Set<string>(
+      [defaultBranchFromRemote?.branchName, currentBranchName, 'main', 'master'].filter(
+        (value): value is string => Boolean(value)
+      )
+    );
+    const probeRefs = new Set<string>();
+    for (const name of probeNames) {
+      probeRefs.add(`refs/heads/${name}`);
+      if (findQualifiedRemoteName(remotes, name)) {
+        probeRefs.add(`refs/remotes/${name}`);
+      }
+      for (const remote of remotes) {
+        probeRefs.add(`refs/remotes/${remote}/${name}`);
+        probeRefs.add(`refs/heads/${remote}/${name}`);
+      }
+    }
+    const existingRefs = new Set<string>();
+    if (probeRefs.size > 0) {
+      const refsResult = yield* runGitCommandImpl(normalizedRootPath, [
+        'for-each-ref',
+        '--format=%(refname)',
+        ...probeRefs,
+      ]);
+      yield* checkGitStatus(refsResult, 'Failed to inspect summary git refs');
+      for (const line of refsResult.stdout.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed) existingRefs.add(trimmed);
+      }
+    }
+    if (currentBranchName) {
+      existingRefs.add(`refs/heads/${currentBranchName}`);
+    }
+    const resolveSummaryLocalSelector = (branchName: string): string | null => {
+      if (!existingRefs.has(`refs/heads/${branchName}`)) return null;
+      const qualifiedRemote = findQualifiedRemoteName(remotes, branchName);
+      const collides = qualifiedRemote
+        ? existingRefs.has(`refs/remotes/${branchName}`)
+        : remotes.some((remote) => existingRefs.has(`refs/remotes/${remote}/${branchName}`));
+      return collides
+        ? createLocalProjectBranchSelector({ kind: 'local', branchName })
+        : branchName;
+    };
+    const resolveSummaryRemoteSelector = (
+      remoteName: string,
+      branchName: string
+    ): string | null => {
+      if (!existingRefs.has(`refs/remotes/${remoteName}/${branchName}`)) return null;
+      if (existingRefs.has(`refs/heads/${branchName}`)) return null;
+      const matchingRemotes = remotes.filter((remote) =>
+        existingRefs.has(`refs/remotes/${remote}/${branchName}`)
+      );
+      const looksQualified = remotes.some((remote) => branchName.startsWith(`${remote}/`));
+      if (matchingRemotes.length === 1 && !looksQualified) return branchName;
+      return existingRefs.has(`refs/heads/${remoteName}/${branchName}`)
+        ? createLocalProjectBranchSelector({ kind: 'remote', remoteName, branchName })
+        : `${remoteName}/${branchName}`;
+    };
+    const currentBranch = currentBranchName ? resolveSummaryLocalSelector(currentBranchName) : null;
+    let defaultBranch =
+      (defaultBranchFromRemote
+        ? (resolveSummaryLocalSelector(defaultBranchFromRemote.branchName) ??
+          resolveSummaryRemoteSelector(
+            defaultBranchFromRemote.remoteName,
+            defaultBranchFromRemote.branchName
+          ))
+        : null) ??
+      resolveSummaryLocalSelector('main') ??
+      resolveSummaryLocalSelector('master');
+    if (!defaultBranch) {
+      const inspected = yield* inspectLocalProjectBranchesNormalizedImpl(
+        normalizedRootPath,
+        remotes,
+        currentBranchName
+      );
+      defaultBranch = inspected.defaultBranch;
+    }
+    return {
+      git: true,
+      currentBranch,
+      defaultBranch,
+      githubRepoFullName: githubRemote?.repoFullName ?? null,
     };
   });
 }
@@ -981,19 +1267,26 @@ function getLocalProjectGitStateAtRootPathImpl(
 ): Effect.Effect<LocalProjectGitState, LocalProjectError, NativeServices> {
   return Effect.gen(function* () {
     const normalizedRootPath = yield* ensureLocalProjectRootPathImpl(rootPath);
-    if (!(yield* isGitRepositoryImpl(normalizedRootPath))) {
+    if (!(yield* isGitRepositoryNormalizedImpl(normalizedRootPath))) {
       return { git: false };
     }
-    const branches = yield* listLocalProjectBranchesAtRootPathImpl(normalizedRootPath);
-    const githubRemote = yield* probeGitHubRemoteAtRootPathImpl(normalizedRootPath);
-    const workingTree = yield* getLocalProjectWorkingTreeAtRootPathImpl(normalizedRootPath);
+    const [remotes, currentBranchName] = yield* Effect.all(
+      [listGitRemotesImpl(normalizedRootPath), readCommittedHeadBranchNameImpl(normalizedRootPath)],
+      { concurrency: 'unbounded' }
+    );
+    const [inspected, githubRemote] = yield* Effect.all(
+      [
+        inspectLocalProjectBranchesNormalizedImpl(normalizedRootPath, remotes, currentBranchName),
+        probeGitHubRemoteNormalizedImpl(normalizedRootPath, remotes, currentBranchName),
+      ],
+      { concurrency: 'unbounded' }
+    );
     return {
       git: true,
-      branches: branches.branches,
-      currentBranch: branches.currentBranch,
-      defaultBranch: branches.defaultBranch,
+      branches: inspected.alphabeticalBranches,
+      currentBranch: inspected.currentBranch,
+      defaultBranch: inspected.defaultBranch,
       githubRepoFullName: githubRemote?.repoFullName ?? null,
-      workingTree,
     };
   });
 }
@@ -1224,6 +1517,8 @@ const kernel = {
   resolveLocalProjectLegacyBaseBranchAtRootPath: resolveLocalProjectLegacyBaseBranchAtRootPathImpl,
   resolveLocalProjectBranchAtRootPath: resolveLocalProjectBranchAtRootPathImpl,
   getLocalProjectGitHubRepoAtRootPath: getLocalProjectGitHubRepoAtRootPathImpl,
+  getLocalProjectGitSummaryAtRootPath: getLocalProjectGitSummaryAtRootPathImpl,
+  listLocalProjectBranchesAtRootPath: listLocalProjectBranchesPageAtRootPathImpl,
   getLocalProjectWorkingTreeAtRootPath: getLocalProjectWorkingTreeAtRootPathImpl,
   getLocalProjectGitStateAtRootPath: getLocalProjectGitStateAtRootPathImpl,
   checkoutLocalProjectBranchAtRootPath: checkoutLocalProjectBranchAtRootPathImpl,
@@ -1268,6 +1563,10 @@ export const LocalProjectsLive = Layer.effect(
         provide(resolveLocalProjectBranchAtRootPathImpl(...args)),
       getLocalProjectGitHubRepoAtRootPath: (...args) =>
         provide(getLocalProjectGitHubRepoAtRootPathImpl(...args)),
+      getLocalProjectGitSummaryAtRootPath: (...args) =>
+        provide(getLocalProjectGitSummaryAtRootPathImpl(...args)),
+      listLocalProjectBranchesAtRootPath: (...args) =>
+        provide(listLocalProjectBranchesPageAtRootPathImpl(...args)),
       getLocalProjectWorkingTreeAtRootPath: (...args) =>
         provide(getLocalProjectWorkingTreeAtRootPathImpl(...args)),
       getLocalProjectGitStateAtRootPath: (...args) =>
@@ -1337,6 +1636,16 @@ export const getLocalProjectGitHubRepoAtRootPath = (
   Effect.flatMap(LocalProjects, (projects) =>
     projects.getLocalProjectGitHubRepoAtRootPath(...args)
   );
+export const getLocalProjectGitSummaryAtRootPath = (
+  ...args: Parameters<typeof getLocalProjectGitSummaryAtRootPathImpl>
+) =>
+  Effect.flatMap(LocalProjects, (projects) =>
+    projects.getLocalProjectGitSummaryAtRootPath(...args)
+  );
+export const listLocalProjectBranchesAtRootPath = (
+  ...args: Parameters<typeof listLocalProjectBranchesPageAtRootPathImpl>
+) =>
+  Effect.flatMap(LocalProjects, (projects) => projects.listLocalProjectBranchesAtRootPath(...args));
 export const getLocalProjectWorkingTreeAtRootPath = (
   ...args: Parameters<typeof getLocalProjectWorkingTreeAtRootPathImpl>
 ) =>
@@ -1425,6 +1734,12 @@ export const localProjectsLegacy = {
   getLocalProjectGitHubRepoAtRootPath: (
     ...args: Parameters<typeof getLocalProjectGitHubRepoAtRootPathImpl>
   ) => runLocalProjectPromiseLegacy(getLocalProjectGitHubRepoAtRootPath(...args)),
+  getLocalProjectGitSummaryAtRootPath: (
+    ...args: Parameters<typeof getLocalProjectGitSummaryAtRootPathImpl>
+  ) => runLocalProjectPromiseLegacy(getLocalProjectGitSummaryAtRootPath(...args)),
+  listLocalProjectBranchesAtRootPath: (
+    ...args: Parameters<typeof listLocalProjectBranchesPageAtRootPathImpl>
+  ) => runLocalProjectPromiseLegacy(listLocalProjectBranchesAtRootPath(...args)),
   getLocalProjectWorkingTreeAtRootPath: (
     ...args: Parameters<typeof getLocalProjectWorkingTreeAtRootPathImpl>
   ) => runLocalProjectPromiseLegacy(getLocalProjectWorkingTreeAtRootPath(...args)),

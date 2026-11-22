@@ -39,9 +39,11 @@ this page is the full text of the rules summarised there.
   `child-tab-empty-state.tsx`; it uses the same `px-3` + `ConversationColumn` as
   the composer, so its right edge and max width must stay aligned automatically.
   Desktop run knobs are TWO footer buttons from `desktop-run-config-menu.tsx`:
-  `DesktopRunConfigMenu` (`[agent icon] model · reasoning ⌄` face; dropdown =
-  Agent/Model/Interaction/Reasoning plus provider-defined select side submenus +
-  Plan/Fast toggle rows) and
+  `DesktopRunConfigMenu` (`[agent icon] model · reasoning ⌄` face, plus Plan
+  and speed glyphs: Fast is lucide's `Zap`, Ultrafast the stacked
+  `StackedZapIcon`, with the tier name only in the glyph's `aria-label` and the
+  menu; dropdown = Agent/Model/Interaction/Reasoning plus provider-defined select
+  side submenus, including the Speed select, + Plan/Fast toggle rows) and
   `DesktopPermissionModeButton` (permission icon + full name; flat permission
   list). Its tooltip/aria noun follows what the face resolved — "Permission"
   only for an explicit `_permission` option, otherwise the provider's selector
@@ -60,7 +62,10 @@ this page is the full text of the rules summarised there.
   search header above the row so the option area starts beside it when space permits.
   The shared menu primitive opens toward inline-end
   (right in LTR); horizontal collisions may flip the side, and vertical collisions
-  shift the popup within the viewport. Searchable model menus use the same trigger
+  shift the popup within the viewport. When neither side fits, the product
+  `ui/menu.tsx` measures the submenu as it mounts and switches it to Base UI's
+  side-`shift` mode, so it covers part of the parent instead of being clipped;
+  option widths cap at `--available-width`. Searchable model menus use the same trigger
   anchor while filtering, with dimensions determined by the current results.
   Submenus do not center against the whole parent
   popup or clamp to its bottom. Intent:

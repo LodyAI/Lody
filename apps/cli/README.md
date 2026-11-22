@@ -225,6 +225,10 @@ cache collection. See [SEA packaging](scripts/sea/README.md) and the
 [ownership decision](../../.agents/notes/implemented/bug-fix/2026-10-03-daemon-upgrade-installation.md)
 explains why npm handoff and self-replacement were removed.
 
+The Worker's V8 heap limit is 20% of physical memory, between 768 and 4096 MiB.
+Hosts billed by memory can set `LODY_WORKER_MAX_OLD_SPACE_MB` (a whole number from 256
+to 65536) in the watchdog's service environment; an unusable value is logged and ignored.
+
 ## Structured Session output
 
 Session commands with `--json` or `--jsonl` reserve stdout for structured results.
@@ -250,9 +254,9 @@ lody operation list --workspace team --session SESSION_ID --state active --json
 lody session list --workspace team --query parser --machine-id MACHINE_ID --agent-role-id ROLE_ID --json
 ```
 
-Matching MCP tools are `lody_machine_list`, `lody_project_list`,
-`lody_agent_config_list/get`, `lody_agent_role_list/get`, `lody_mcp_list`, and
-`lody_operation_list`. Session list adds `query`, `machineId`, `agentConfigId`,
+Matching MCP tools are the read-only `lody_catalog` actions `machines`, `projects`,
+`agent_configs`, `agent_roles` and `mcp_servers`, and
+`lody_operation` action `list`. Session list adds `query`, `machineId`, `agentConfigId`,
 and `agentRoleId`. Creation provenance is what the Role filter matches.
 
 `lody_session_create_options` and Agent config discovery expose `runConfig.modes`
@@ -360,3 +364,15 @@ protected replica used by chat, then writes JSON and Markdown on this device.
 are omitted; ordinary workspace exports keep their existing schedule data.
 Desktop conversation copy and image export likewise use the local history and
 save/clipboard bridges, without publishing a share.
+
+## Build platforms
+
+`pnpm --dir apps/cli build` builds the local platform by default. Set
+`LODY_PLATFORM=cloud` explicitly for cloud runtime support. Deployment values are
+read from the invoking process; the build never discovers deployment dotenv files.
+Both platforms use the same worker layout, native externals, bundled Loro WASM,
+and separate runtime/adapter build processes with a 2048 MiB heap.
+
+`prepare:publish` stages npm artifacts under `.publish/`; use pnpm to resolve
+catalog versions when packing. Release-script tests run with `test:release`.
+The [SEA publication guide](SEA.md) covers managed daemon artifacts and installers.

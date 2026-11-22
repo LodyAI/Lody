@@ -5,6 +5,7 @@ import * as stylex from '@stylexjs/stylex';
 import { Collapsible } from '@lody/ui/collapsible';
 import { Button } from '@lody/ui/button';
 import { Avatar } from '@lody/ui/avatar';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { avatar } from '@lody/ui/avatar/avatar.tokens.stylex';
 import { settingsType } from '../type.stylex';
 import { Alert } from '@lody/ui/alert';
@@ -416,7 +417,7 @@ export function E2eeDevicesPanel({
                       aria-hidden="true"
                       data-testid="e2ee-device-owner-avatar"
                     >
-                      {ownerProfile?.image && <Avatar.Image src={ownerProfile.image} alt="" />}
+                      <CachedAvatarImage src={ownerProfile?.image} alt="" />
                       <Avatar.Fallback>
                         {owner ? owner.slice(0, 1).toUpperCase() : <UserRound size={12} />}
                       </Avatar.Fallback>

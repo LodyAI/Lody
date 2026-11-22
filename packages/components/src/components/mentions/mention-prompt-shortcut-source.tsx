@@ -3,11 +3,10 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { compareSlashMatchRanks, rankSlashMatch } from '@/lib/command-slash-search';
 import {
-  getShortcutEmoji,
   resolveShortcutAvailability,
-  type PromptShortcutIndexEntry,
   type ShortcutAvailability,
-} from '@lody/shared/prompt-shortcuts';
+} from '@lody/shared/prompt-shortcuts/model';
+import type { PromptShortcutIndexEntry } from '@lody/shared/prompt-shortcuts/catalog';
 import type { MentionCandidate, MentionCategorySources } from './mention-registry';
 
 export type ShortcutMentionContext = Parameters<typeof resolveShortcutAvailability>[0]['context'];
@@ -94,9 +93,6 @@ export function selectPromptShortcutCandidates(
           insertText: `/${entry.slug}`,
           kind: 'prompt_shortcut',
           icon: 'prompt_shortcut',
-          // Replaces the category glyph on the row, the way a Role's does: the
-          // header already says these are Prompt Shortcuts.
-          iconEmoji: getShortcutEmoji(entry),
           title: `/${entry.slug}`,
           hint: entry.description,
           slashRank,

@@ -1295,9 +1295,14 @@ describe('managed Antigravity', () => {
       resolveBuiltinAuthenticationProcessLaunch({
         cliType: 'builtin',
         agentType: 'antigravity',
+        runtimeOverrides: { antigravityPath: '/test/agy' },
         action: 'login',
       })
-    ).rejects.toThrow('ACP authentication');
+    ).resolves.toEqual({
+      command: '/test/agy',
+      args: ['acp', '--login', '--disable-telemetry'],
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+    });
     const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
       resolveRuntimeForLaunch: async () => ({
         runtimeName: 'antigravity',

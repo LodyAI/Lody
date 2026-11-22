@@ -298,7 +298,7 @@ export function buildSkillMentionRewrites(
   return rewrites;
 }
 
-function hasProjectSkillSource(source: MentionProjectSource | undefined): boolean {
+export function hasProjectSkillSource(source: MentionProjectSource | undefined): boolean {
   if (source?.kind === 'local') {
     return Boolean(source.localProjectId && source.workspaceId && source.machineId);
   }
@@ -306,6 +306,13 @@ function hasProjectSkillSource(source: MentionProjectSource | undefined): boolea
     return Boolean(source.repoFullName);
   }
   if (source?.kind === 'provider') {
+    if (source.localProject) {
+      return Boolean(
+        source.localProject.localProjectId &&
+          source.localProject.workspaceId &&
+          source.localProject.machineId
+      );
+    }
     return Boolean(source.githubRepoFullName);
   }
   return false;
@@ -400,14 +407,19 @@ export function useMentionProjectSkills(
   globalMachineId?: string | null
 ) {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const kind = source?.kind;
-  const localWorkspaceId = source?.kind === 'local' ? source.workspaceId : undefined;
-  const machineId = source?.kind === 'local' ? source.machineId : undefined;
-  const localProjectId = source?.kind === 'local' ? source.localProjectId : undefined;
+  const localProject =
+    source?.kind === 'local'
+      ? source
+      : source?.kind === 'provider'
+        ? source.localProject
+        : undefined;
+  const localWorkspaceId = localProject?.workspaceId;
+  const machineId = localProject?.machineId;
+  const localProjectId = localProject?.localProjectId;
   const repoFullName =
     source?.kind === 'github'
       ? source.repoFullName
-      : source?.kind === 'provider'
+      : source?.kind === 'provider' && !source.localProject
         ? source.githubRepoFullName
         : undefined;
 
@@ -415,7 +427,7 @@ export function useMentionProjectSkills(
     if (!enabled) {
       return null;
     }
-    if (kind === 'local') {
+    if (localProject) {
       if (!localWorkspaceId || !machineId || !localProjectId) {
         return null;
       }
@@ -425,14 +437,14 @@ export function useMentionProjectSkills(
       return null;
     }
     return { kind: 'github', workspaceId, repoFullName };
-  }, [enabled, kind, localWorkspaceId, machineId, localProjectId, repoFullName, workspaceId]);
+  }, [enabled, localProject, localWorkspaceId, machineId, localProjectId, repoFullName, workspaceId]);
 
   const globalSkillsSource = React.useMemo<ProjectSkillsSource | null>(() => {
     if (!enabled) {
       return null;
     }
     // A local source's own scan already lists its machine's global skills.
-    if (kind === 'local') {
+    if (localProject) {
       return null;
     }
     const normalizedMachineId = globalMachineId?.trim();
@@ -440,7 +452,7 @@ export function useMentionProjectSkills(
       return null;
     }
     return { kind: 'global', workspaceId, machineId: normalizedMachineId };
-  }, [enabled, kind, globalMachineId, workspaceId]);
+  }, [enabled, localProject, globalMachineId, workspaceId]);
 
   const projectSkillState = useProjectSkills(skillsSource);
   const globalSkillState = useProjectSkills(globalSkillsSource);
@@ -462,10 +474,6 @@ export function useMentionProjectSkills(
   );
   return { skillState, skillItems, knownSkillTokens };
 }
-
-// ============================================================================
-// Hydrator
-// ============================================================================
 
 export function SkillMentionHydrator({
   text,

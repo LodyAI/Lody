@@ -864,7 +864,6 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
               });
             }
           }
-          // TODO: delete local workspace data
           void refetchOrganizations();
           void refetchActiveOrganization();
         }

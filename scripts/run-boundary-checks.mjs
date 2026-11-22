@@ -17,6 +17,7 @@ export const BOUNDARY_CHECK_SCRIPTS = Object.freeze([
   'scripts/check-local-loro-writer-boundary.mjs',
   'scripts/check-operation-inbox-boundary.mjs',
   'scripts/check-legacy-cloud-access.mjs',
+  'scripts/check-comment-ratchet.mjs',
 ]);
 
 function defaultSpawnCheck(scriptRelPath, cwd = repoRoot) {

@@ -1,7 +1,7 @@
 import { useWorkspaceFeature } from './use-workspace-feature';
 import { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useStore } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import type { SessionShareView, SessionShareManagement } from '@lody/cloud-api';

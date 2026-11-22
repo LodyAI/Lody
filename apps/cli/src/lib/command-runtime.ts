@@ -607,6 +607,7 @@ export async function withWorkspaceManager<T>(
         logger,
         {
           attachRemoteOnCreate: !e2ee,
+          attachCloudEphemeralSinks: false,
           encryptedWorkspace: e2ee,
           streamsTokens:
             e2ee?.tokens ??

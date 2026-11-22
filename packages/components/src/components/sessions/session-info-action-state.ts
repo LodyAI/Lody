@@ -11,7 +11,8 @@ export type SessionInfoBarGitHubActionId =
   | 'fix-ci-errors'
   | 'resolve-conflicts'
   | 'ready-for-review'
-  | 'merge';
+  | 'merge'
+  | 'auto-deliver';
 
 const SESSION_TURN_GITHUB_ACTION_IDS = new Set<SessionInfoBarGitHubActionId>([
   'create-pr',
@@ -40,8 +41,14 @@ export function resolveSessionInfoBarGitHubActionIds({
   prCiState,
   prMergeState,
   prStatus,
+  canAutoDeliver = false,
 }: {
   canShowGitHubActions: boolean;
+  /**
+   * Auto delivery can be started here: the Session's automation settings are
+   * reachable, the workspace observes PRs, and it is not already on.
+   */
+  canAutoDeliver?: boolean;
   /** Direct GitHub mutation API is available, independently of summary observation. */
   canMutatePr: boolean;
   hasExistingPr: boolean;
@@ -100,6 +107,8 @@ export function resolveSessionInfoBarGitHubActionIds({
     if (canMutatePr && (prMergeState === 'c' || prMergeState === 'u')) {
       actions.push('merge');
     }
+    // Last: handing the remaining steps to Lody never outranks doing one now.
+    if (canAutoDeliver) actions.push('auto-deliver');
     return actions;
   }
 
@@ -117,5 +126,6 @@ export function resolveSessionInfoBarGitHubActionIds({
   if (workspaceDirty) {
     actions.push('commit-and-push');
   }
+  if (hasChanges && canAutoDeliver) actions.push('auto-deliver');
   return actions;
 }

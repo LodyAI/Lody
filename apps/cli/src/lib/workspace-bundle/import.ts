@@ -1,3 +1,4 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Flock } from '@loro-dev/flock-wasm';
@@ -5,7 +6,6 @@ import { LoroDoc } from 'loro-crdt';
 import type { JsonObject, LoroRepo } from 'loro-repo';
 import { z } from 'zod';
 import {
-  createSessionMirror,
   type ScheduleImportFence,
   type SessionHistoryInput,
   type SessionImportFence,

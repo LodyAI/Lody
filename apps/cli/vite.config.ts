@@ -3,10 +3,49 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import wasm from 'vite-plugin-wasm';
+import { validateNightlyBuildIdentity } from '../electron/nightly-candidate.mjs';
+import { validateNightlyVersion } from '../electron/nightly-version.mjs';
+import desktopPackage from '../electron/package.json';
 import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
+import { externalWasmPlugin } from './scripts/external-wasm.mjs';
+import { inlinePackageManifestPlugin } from './scripts/inline-package-manifest.mjs';
+import { workspaceModuleSideEffects } from './scripts/workspace-module-side-effects.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const platform = process.env.LODY_PLATFORM?.trim() || 'local';
+if (!['local', 'cloud'].includes(platform))
+  throw new Error(`Unsupported LODY_PLATFORM: ${platform}`);
+const cloud = platform === 'cloud';
+const runtimeEnv = cloud ? (process.env.LODY_ENV ?? '') : '';
+if (
+  cloud &&
+  process.env.LODY_RELEASE_CHANNEL === 'nightly' &&
+  (process.env.LODY_CLI_INLINE_DEPLOY_ENV !== '0' || runtimeEnv !== 'production')
+) {
+  throw new Error('Nightly CLI provenance requires the production desktop bundle');
+}
+// Keep CLI-only installs independent of Electron's packaging dependencies.
+function nightlyDesktopBuild() {
+  const identity = {
+    buildNumber: process.env.LODY_NIGHTLY_BUILD_NUMBER,
+    sourceSha: process.env.LODY_SOURCE_SHA,
+    builtAt: process.env.LODY_BUILD_TIMESTAMP,
+    runId: process.env.LODY_BUILD_RUN_ID,
+  };
+  validateNightlyBuildIdentity(identity);
+  const number = Number(identity.buildNumber);
+  return {
+    channel: 'nightly',
+    version: validateNightlyVersion(process.env.LODY_NIGHTLY_VERSION, desktopPackage.version),
+    ...identity,
+    nativeVersion: `${1 + Math.floor(number / 10000)}.${Math.floor(number / 100) % 100}.${number % 100}`,
+  };
+}
+const desktopBuild =
+  cloud && process.env.LODY_RELEASE_CHANNEL === 'nightly' ? nightlyDesktopBuild() : null;
+const desktopBuildJson = desktopBuild ? JSON.stringify(desktopBuild) : null;
 
 const inlineEnv = {
   // Public production builds cannot opt into the E2E clock at runtime.
@@ -19,10 +58,18 @@ const inlineEnv = {
       !process.env.LODY_ENV &&
       !process.env.LODY_RELEASE_CHANNEL
   ),
-  // The public bundle is local-only. Deployment endpoints must never be baked
-  // into it from a developer shell or an untracked environment file.
-  'process.env.LODY_PLATFORM': JSON.stringify('local'),
-  'process.env.LODY_ENV': JSON.stringify(''),
+  // Local builds ignore deployment endpoints; cloud builds use explicit caller values.
+  'process.env.LODY_PLATFORM': JSON.stringify(platform),
+  'process.env.LODY_ENV': JSON.stringify(runtimeEnv),
+  __LODY_DESKTOP_BUILD_JSON__: JSON.stringify(desktopBuildJson),
+  ...(cloud && process.env.LODY_CLI_INLINE_DEPLOY_ENV !== '0'
+    ? Object.fromEntries(
+        ['LODY_AUTH_URL', 'LODY_AUTH_SITE_URL', 'LODY_SERVER_URL', 'SITE_URL'].map((key) => [
+          `process.env.${key}`,
+          JSON.stringify(process.env[key] ?? ''),
+        ])
+      )
+    : {}),
   'process.env.WS_NO_BUFFER_UTIL': JSON.stringify('true'),
   'process.env.WS_NO_UTF_8_VALIDATE': JSON.stringify('true'),
 };
@@ -81,7 +128,24 @@ export default defineConfig(({ mode }) => ({
   // Node 22 supports native top-level await, including wasm initialization.
   // The browser compatibility transform reparses every emitted chunk into an
   // additional SWC AST and exhausts the 2 GB packaging heap on this bundle.
-  plugins: [wasm(), devinRuntimeContractPlugin()],
+  plugins: [
+    wasm(),
+    externalWasmPlugin(),
+    inlinePackageManifestPlugin(),
+    devinRuntimeContractPlugin(),
+    {
+      name: 'lody-cli-desktop-provenance',
+      generateBundle() {
+        if (desktopBuildJson !== null)
+          this.emitFile({
+            type: 'asset',
+            fileName: 'lody-desktop-build.json',
+            source: `${desktopBuildJson}\n`,
+          });
+      },
+    },
+  ],
+
   define: inlineEnv,
   resolve: {
     alias: [
@@ -126,6 +190,9 @@ export default defineConfig(({ mode }) => ({
         bundledNodeBuiltins.has(id) ||
         explicitlyExternal.has(id) ||
         id.includes('/node_modules/@loro-dev/roost-node/'),
+      treeshake: {
+        moduleSideEffects: workspaceModuleSideEffects(path.resolve(__dirname, '../../packages')),
+      },
       output: {
         // Keep dependency sourcemaps out of the large CLI entry.
         manualChunks(id) {

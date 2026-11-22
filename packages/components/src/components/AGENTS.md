@@ -34,7 +34,7 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   children stay out of `sessionListAtom` rows.
 - Opener and unrelated top-level rows retain flat-list alignment. In the leading slot,
   an opener shows disclosure, a child ├/└, nothing else — the ⋯ menu reveals in the
-  end slot before Archive; it paints revealed actions with the row's fill.
+  end slot before Archive, in reserved columns with no fill of its own.
   Draw nesting regardless of hover or working/unread/waiting status. Children alone widen the slot 14px→26px, a 12px title indent that never
   shifts the background. Keep geometry in `session-row-leading-slot.tsx`; context-menu
   expand/collapse uses the same toggle.
@@ -52,7 +52,7 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   `placeWorkspaceSessionsWithOpeners` first moves a Session whose opener renders in
   another group into that group. Before splitting desktop sections, pinned openers bring
   their visible opened-by descendants into Pinned without changing descendant pin flags. `MAX_VISIBLE_SESSIONS` /
-  `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
+  `UPDATED_BUCKET_PREVIEW_MAX` count top-level rows. Every list passes `rootRank` for
   latest-activity sorting; rank an opener by its freshest opened Session.
 - Collapse state uses `sidebarCollapsedOpenedBySessionsAtom`, default expanded. Keep
   both navigation directions reachable through the tree, every sidebar row's "Go to

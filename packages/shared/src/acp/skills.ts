@@ -318,6 +318,11 @@ export type ProjectSkillGroup = {
 export type ProjectSkillsResult = {
   groups: ProjectSkillGroup[];
   contentFingerprint?: string;
+  /**
+   * The request's `knownFingerprint` still matches: `groups` is empty and the
+   * caller keeps the copy it already holds.
+   */
+  unchanged?: boolean;
 };
 
 const textEncoder = new TextEncoder();

@@ -47,6 +47,21 @@ function parseQuota(text: string): RateLimitsSnapshot {
   };
 }
 
+const QUOTA_SESSION_DELETE_TIMEOUT_MS = 3_000;
+
+/** Best effort: the quota session is scratch, and a failed delete must not discard the reading. */
+async function deleteQuotaSession(connection: ClientSideConnection, sessionId: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    connection.deleteSession({ sessionId }),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, QUOTA_SESSION_DELETE_TIMEOUT_MS);
+    }),
+  ])
+    .catch(() => {})
+    .finally(() => clearTimeout(timer));
+}
+
 /** One external ACP read; its caller owns the process, deadline and scratch directory. */
 export function createAntigravityQuotaReader() {
   let sessionId: string | undefined;
@@ -80,29 +95,34 @@ export function createAntigravityQuotaReader() {
     },
     read: async (
       connection: ClientSideConnection,
-      workdir: string
+      workdir: string,
+      options: { deleteSession: boolean }
     ): Promise<RateLimitsSnapshot> => {
       const session = await connection.newSession({ cwd: workdir, mcpServers: [] });
       sessionId = session.sessionId;
-      if (advertised?.sessionId === sessionId) resolveCommands();
-      await Promise.race([
-        commandsReady,
-        connection.closed.then(() => {
-          throw new Error('Antigravity closed before advertising commands');
-        }),
-      ]);
-      // An unrecognized slash command can become a model prompt. Require the actual announcement.
-      if (!advertised?.names.includes('usage')) throw new Error('Antigravity /usage unsupported');
-      reading = true;
-      const response = await connection.prompt({
-        sessionId,
-        prompt: [{ type: 'text', text: '/usage' }],
-      });
-      reading = false;
-      if (response.stopReason !== 'end_turn')
-        throw new Error('Antigravity quota query did not complete');
-      if (oversized) throw new Error('Antigravity quota output is too large');
-      return parseQuota(text);
+      try {
+        if (advertised?.sessionId === sessionId) resolveCommands();
+        await Promise.race([
+          commandsReady,
+          connection.closed.then(() => {
+            throw new Error('Antigravity closed before advertising commands');
+          }),
+        ]);
+        // An unrecognized slash command can become a model prompt. Require the actual announcement.
+        if (!advertised?.names.includes('usage')) throw new Error('Antigravity /usage unsupported');
+        reading = true;
+        const response = await connection.prompt({
+          sessionId,
+          prompt: [{ type: 'text', text: '/usage' }],
+        });
+        reading = false;
+        if (response.stopReason !== 'end_turn')
+          throw new Error('Antigravity quota query did not complete');
+        if (oversized) throw new Error('Antigravity quota output is too large');
+        return parseQuota(text);
+      } finally {
+        if (options.deleteSession) await deleteQuotaSession(connection, session.sessionId);
+      }
     },
   };
 }

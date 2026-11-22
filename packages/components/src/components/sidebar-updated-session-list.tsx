@@ -107,16 +107,17 @@ import {
   pinnedFirstRootRank,
   type OpenedBySessionTreeNode,
 } from '@/lib/session-opened-by-tree';
+import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import {
   buildSnoozePresets,
-  expiredSnoozeTimestamp,
+  buildStatusViewTiers,
+  flattenStatusViewRows,
   formatSnoozeCountdown,
-  isSidebarBucketCollapsed,
-  SIDEBAR_STATUS_GROUPS,
-  sidebarStatusGroup,
-  type SidebarStatusGroup,
-} from '@/lib/sidebar-status-group';
-import { sortByManualOrder } from '@lody/shared';
+  STATUS_VIEW_TIERS,
+  statusViewTier,
+  type StatusViewSession,
+  type StatusViewTier,
+} from '@lody/shared';
 import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from './sidebar-status-snooze-dialog';
 import { SidebarFocusDndContainer } from './sidebar-status-focus-dnd';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
@@ -197,6 +198,8 @@ export type SidebarUpdatedItem = {
   isWaitingPermission?: boolean;
   /** The latest turn ended in failure; the Status view files the row under Needs you. */
   hasFailedTurn?: boolean;
+  /** Auto delivery stopped for this conversation's PR and needs the person. */
+  deliveryStalled?: boolean;
   prStatus?: PrStatus | null;
   prCiState?: SessionPullRequestCiState | null;
   prReadiness?: SessionPullRequestReadiness | null;
@@ -218,10 +221,10 @@ export type SidebarUpdatedItem = {
 /**
  * The Updated organize mode renders ONE section ("Chats") — a flat
  * recency-sorted list keyed 'all'. The Status organize mode renders one
- * section per {@link SidebarStatusGroup}, keyed by the group, skipping empty
- * groups. Both share the collapse / show-all state maps.
+ * section per {@link StatusViewTier}, keyed by the group, skipping empty
+ * groups. Both share the collapse / reveal state maps.
  */
-export type SidebarUpdatedBucketKey = 'all' | SidebarStatusGroup;
+export type SidebarUpdatedBucketKey = 'all' | StatusViewTier;
 
 /** How the list splits its rows: one recency list, or the status groups. */
 /** `manual` keeps the caller's order (pinned sections); the others sort by activity. */
@@ -319,62 +322,44 @@ export function buildSidebarUpdatedBuckets(
   if (grouping === 'manual') return [{ key: 'all', items: [...items] }];
   if (!items.length) return [];
   if (grouping === 'recency') return [{ key: 'all', items: sortUpdatedItems(items) }];
-  const byGroup = new Map<SidebarStatusGroup, SidebarUpdatedItem[]>();
-  for (const item of items) {
-    const group = sidebarStatusGroup(item, nowMs);
-    const members = byGroup.get(group);
-    if (members) members.push(item);
-    else byGroup.set(group, [item]);
-  }
-  return SIDEBAR_STATUS_GROUPS.flatMap<SidebarUpdatedBucket>((key) => {
-    const members = byGroup.get(key);
-    if (!members?.length) {
-      // Keep Focus mounted even when empty so Later/Settled rows can be dragged back into it.
-      return key === 'focus' ? [{ key, items: [] }] : [];
-    }
-    if (key === 'focus') {
-      const woken: SidebarUpdatedItem[] = [];
-      const regular: SidebarUpdatedItem[] = [];
-      for (const item of members) {
-        if (expiredSnoozeTimestamp(item.snoozedUntil, nowMs) !== null) {
-          woken.push(item);
-        } else {
-          regular.push(item);
-        }
-      }
-      woken.sort((a, b) => {
-        const byWake = (b.snoozedUntil ?? 0) - (a.snoozedUntil ?? 0);
-        return byWake !== 0 ? byWake : a.id.localeCompare(b.id);
-      });
-      const orderedRegular = sortByManualOrder(regular, (item) => ({
-        id: item.id,
-        orderKey: item.orderKey ?? null,
-        recency: getSortKey(item),
-      }));
-      return [{ key, items: [...woken, ...orderedRegular] }];
-    }
-    if (key === 'later') {
-      return [
-        {
-          key,
-          items: [...members].sort((a, b) => {
-            const aUntil =
-              typeof a.snoozedUntil === 'number' ? a.snoozedUntil : Number.MAX_SAFE_INTEGER;
-            const bUntil =
-              typeof b.snoozedUntil === 'number' ? b.snoozedUntil : Number.MAX_SAFE_INTEGER;
-            if (aUntil !== bUntil) return aUntil - bUntil;
-            return a.id.localeCompare(b.id);
-          }),
-        },
-      ];
-    }
-    return [{ key, items: sortUpdatedItems(members) }];
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const tiers = buildStatusViewTiers(items.map(toStatusViewSession), nowMs);
+  return STATUS_VIEW_TIERS.flatMap<SidebarUpdatedBucket>((key) => {
+    const rows = tiers[key];
+    // Keep Focus mounted even when empty so Later/Settled rows can be dragged back into it.
+    if (!rows.length) return key === 'focus' ? [{ key, items: [] }] : [];
+    return [{ key, items: flattenStatusViewRows(rows).map((row) => byId.get(row.id)!) }];
   });
 }
 
 /**
- * Whether a section folds past {@link SHOW_FULL_BUCKET_THRESHOLD} rows behind
- * "Show all". Focus and Later list in full when expanded; Settled and Updated
+ * One sidebar row as the shared Status view reads it. Pinned rows never reach
+ * the Status tiers, so pin fields are left out.
+ */
+export function toStatusViewSession(item: SidebarUpdatedItem): StatusViewSession {
+  return {
+    id: item.id,
+    title: item.title,
+    lastMessageAt: getSortKey(item),
+    activityAt: getSortKey(item),
+    lastReadAt: null,
+    isPinned: false,
+    pinSectionId: null,
+    orderKey: item.orderKey ?? null,
+    snoozedUntil: item.snoozedUntil ?? null,
+    settledAt: item.settledAt ?? null,
+    focusRestoredAt: item.focusRestoredAt ?? null,
+    openedById: SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS.getOpenedBySessionId(item),
+    isWorking: Boolean(item.isWorking),
+    isWaitingPermission: Boolean(item.isWaitingPermission),
+    canManage: true,
+    canPrefer: true,
+  };
+}
+
+/**
+ * Whether a section folds past {@link UPDATED_BUCKET_PREVIEW_MAX} rows behind
+ * "Show more". Focus and Later list in full when expanded; Settled and Updated
  * recency lists fold past the preview cap.
  */
 export function updatedBucketCanFold(key: SidebarUpdatedBucketKey): boolean {
@@ -408,11 +393,11 @@ export function resolveUpdatedItemProjectLabel(item: SidebarUpdatedItem): string
 
 /**
  * When a bucket has more than this many rows, the row list collapses to the
- * latest N and reveals a "Show all (count)" toggle. Mirrors the per-group
- * preview pattern in SessionList, but with a higher threshold because Updated
- * mode is a flat firehose rather than a small per-repo group.
+ * latest N and reveals a "Show more" stepper. Mirrors the per-group preview
+ * pattern in SessionList, but with a higher threshold because Updated mode is
+ * a flat firehose rather than a small per-repo group.
  */
-export const SHOW_FULL_BUCKET_THRESHOLD = 20;
+export const UPDATED_BUCKET_PREVIEW_MAX = 20;
 
 /** Group ranking key: pinned first, then latest activity. */
 function updatedItemRootRank(item: SidebarUpdatedItem): number {
@@ -429,13 +414,13 @@ export const SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS = {
     item.openedByRowSessionId ?? item.openedBySessionId ?? null,
 } as const;
 
-/** TOP-LEVEL row count — what the "Show all" threshold is measured against. */
+/** TOP-LEVEL row count — what the preview threshold is measured against. */
 export function countUpdatedItemRoots(orderedItems: SidebarUpdatedItem[]): number {
   return countOpenedByTreeRoots(orderedItems, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
 }
 
 export function updatedBucketOverflowsPreview(orderedItems: SidebarUpdatedItem[]): boolean {
-  return countUpdatedItemRoots(orderedItems) > SHOW_FULL_BUCKET_THRESHOLD;
+  return countUpdatedItemRoots(orderedItems) > UPDATED_BUCKET_PREVIEW_MAX;
 }
 
 /**
@@ -445,12 +430,12 @@ export function updatedBucketOverflowsPreview(orderedItems: SidebarUpdatedItem[]
  */
 export function getVisibleUpdatedItemTree(
   orderedItems: SidebarUpdatedItem[],
-  canToggleFullList: boolean,
-  showFull: boolean,
+  canRevealRows: boolean,
+  revealedRows: number,
   collapsedOpenedBySessionIds?: Record<string, boolean>,
   preserveOrder = false
 ): OpenedBySessionTreeNode<SidebarUpdatedItem>[] {
-  const capped = canToggleFullList && !showFull && updatedBucketOverflowsPreview(orderedItems);
+  const capped = canRevealRows && updatedBucketOverflowsPreview(orderedItems);
   return buildOpenedBySessionTree(orderedItems, {
     ...SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
     isCollapsed: (openerId) => collapsedOpenedBySessionIds?.[openerId] === true,
@@ -458,21 +443,21 @@ export function getVisibleUpdatedItemTree(
     // Session so nesting can never bury a just-updated row under a stale opener.
     // A manually ordered pin section keeps its roots where the user put them.
     ...(preserveOrder ? {} : { rootRank: updatedItemRootRank }),
-    ...(capped ? { maxRoots: SHOW_FULL_BUCKET_THRESHOLD } : {}),
+    ...(capped ? { maxRoots: UPDATED_BUCKET_PREVIEW_MAX + revealedRows } : {}),
   });
 }
 
 export function getVisibleUpdatedItems(
   orderedItems: SidebarUpdatedItem[],
-  canToggleFullList: boolean,
-  showFull: boolean,
+  canRevealRows: boolean,
+  revealedRows: number,
   collapsedOpenedBySessionIds?: Record<string, boolean>,
   preserveOrder = false
 ): SidebarUpdatedItem[] {
   return getVisibleUpdatedItemTree(
     orderedItems,
-    canToggleFullList,
-    showFull,
+    canRevealRows,
+    revealedRows,
     collapsedOpenedBySessionIds,
     preserveOrder
   ).map((node) => node.item);
@@ -543,12 +528,14 @@ export type SidebarUpdatedSessionListProps = {
   onToggleBucket?: (key: SidebarUpdatedBucketKey) => void;
   toggleBucketLabel?: string;
   /**
-   * Per-bucket "show all" state. When false (default) and the bucket exceeds
-   * {@link SHOW_FULL_BUCKET_THRESHOLD} items, only the latest N render and a
-   * "Show all" button appears.
+   * Per-bucket incremental reveal. When a bucket exceeds
+   * {@link UPDATED_BUCKET_PREVIEW_MAX} top-level rows, only the latest N
+   * render and a "Show more" button uncovers one more page per click; "Show
+   * less" returns to the preview.
    */
-  showFullBuckets?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
-  onToggleFullBucket?: (key: SidebarUpdatedBucketKey) => void;
+  revealedRowsByBucket?: Partial<Record<SidebarUpdatedBucketKey, number>>;
+  onShowMore?: (key: SidebarUpdatedBucketKey) => void;
+  onShowLess?: (key: SidebarUpdatedBucketKey) => void;
   /**
    * Always-visible action rendered at the right end of the FIRST bucket's
    * header row (desktop sidebar filter trigger). While loading or empty the
@@ -587,6 +574,11 @@ export type SidebarUpdatedSessionListProps = {
   onDropPinnedSession?: (sessionId: string, toIndex: number) => void;
   /** Pinned sections only: wraps the section header (the section drag handle). */
   renderHeader?: (header: ReactElement) => ReactNode;
+  /**
+   * Pinned sections only: a quiet line under the section's rows, rendered
+   * only while the section is expanded (e.g. "2 hidden in this view").
+   */
+  footer?: ReactNode;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -622,8 +614,9 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   collapsedBuckets,
   onToggleBucket,
   toggleBucketLabel,
-  showFullBuckets,
-  onToggleFullBucket,
+  revealedRowsByBucket,
+  onShowMore,
+  onShowLess,
   headerAction,
   showProjectContext = false,
   grouping = 'recency',
@@ -631,6 +624,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   pinSectionId,
   onDropPinnedSession,
   renderHeader,
+  footer,
 }: SidebarUpdatedSessionListProps) {
   const preserveOrder = grouping === 'manual';
   const effectiveShowStatusActions = showStatusActions ?? grouping === 'status';
@@ -687,7 +681,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       goToOpenerSession: t('sessions.contextMenu.goToOpenerSession', 'Go to Opener Session'),
       snooze: t('sessions.contextMenu.snooze', 'Later'),
       snoozeOneHour: t('sessions.contextMenu.snoozeOneHour', 'In 1 hour'),
-      snoozeLaterToday: t('sessions.contextMenu.snoozeLaterToday', 'Later today'),
+      snoozeLaterToday: t('sessions.contextMenu.snoozeLaterToday', 'In 3 hours'),
       snoozeTomorrowMorning: t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning'),
       snoozeNextWeek: t('sessions.contextMenu.snoozeNextWeek', 'Next week'),
       snoozeCustom: t('sessions.contextMenu.snoozeCustom', 'Custom time…'),
@@ -715,7 +709,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   const handleToggleOpenedBySessions = useSetAtom(toggleSidebarCollapsedOpenedBySessionAtom);
 
   const canToggleBucket = typeof onToggleBucket === 'function';
-  const canToggleFullBucket = typeof onToggleFullBucket === 'function';
+  const canToggleFullBucket = typeof onShowMore === 'function';
 
   const nowMs = now instanceof Date ? now.getTime() : Date.now();
   const buckets = useMemo(
@@ -746,7 +740,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           nodes: getVisibleUpdatedItemTree(
             bucket.items,
             canToggleFullBucket && updatedBucketCanFold(bucket.key),
-            Boolean(showFullBuckets?.[bucket.key]),
+            revealedRowsByBucket?.[bucket.key] ?? 0,
             collapsedOpenedBySessionIds,
             preserveOrder || bucket.key === 'focus' || bucket.key === 'later'
           ),
@@ -759,7 +753,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       collapsedOpenedBySessionIds,
       preserveOrder,
       sendStates,
-      showFullBuckets,
+      revealedRowsByBucket,
     ]
   );
 
@@ -815,10 +809,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             return (
               <div
                 key={bucket.key}
-                className={cn(
-                  'group flex flex-col gap-0.5',
-                  collapsed ? 'mb-1 last:mb-0' : 'mb-4 last:mb-0'
-                )}
+                className={cn('group flex flex-col gap-0.5', collapsed && 'mb-1 last:mb-0')}
               >
                 <SidebarFocusDndContainer
                   items={bucket.items}
@@ -828,6 +819,12 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                 >
                   {(orderedFocusItems) => (
                     <SidebarUpdatedSessionList
+                      // The space down to the next bucket's label is padding of the
+                      // drop section, not a margin outside it: a release just below
+                      // the last row still lands at the end of Focus.
+                      className={
+                        !collapsed && bucketIndex < buckets.length - 1 ? 'pb-4' : undefined
+                      }
                       items={orderedFocusItems}
                       now={now}
                       selectedItemId={selectedItemId}
@@ -865,7 +862,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
               </div>
             );
           }
-          const showFull = Boolean(showFullBuckets?.[bucket.key]);
+          const revealedRows = revealedRowsByBucket?.[bucket.key] ?? 0;
           const {
             overflows,
             nodes: visibleNodes,
@@ -890,11 +887,14 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           // Only a bucket that actually contains an opened Session enables the
           // tree wrapper. Unrelated top-level rows keep their flat geometry.
           const showTreeGutter = hasOpenedByTreeNesting(visibleNodes);
-          const showToggleFullList =
-            canToggleFullBucket && updatedBucketCanFold(bucket.key) && overflows && !collapsed;
-          const toggleFullListLabel = showFull
-            ? t('sessions.showLess', 'Show less')
-            : t('sessions.showAll', 'Show all ({{count}})', { count: bucket.items.length });
+          const bucketCanFold = canToggleFullBucket && updatedBucketCanFold(bucket.key);
+          const hasMoreRows =
+            bucketCanFold &&
+            countUpdatedItemRoots(bucket.items) > UPDATED_BUCKET_PREVIEW_MAX + revealedRows;
+          const showMoreRow = bucketCanFold && overflows && hasMoreRows && !collapsed;
+          const showLessRow = bucketCanFold && overflows && revealedRows > 0 && !collapsed;
+          const showMoreLabel = t('sessions.showMore', 'Show more');
+          const showLessLabel = t('sessions.showLess', 'Show less');
           return (
             <div
               key={bucket.key}
@@ -974,7 +974,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                             onShareWithTeam={onShareItemWithTeam}
                             onOpenPullRequest={onOpenPullRequest}
                             onBeginRename={beginRename}
-                            pinSectionMenu={pinSectionMenu}
+                            pinSectionMenu={node.item.isPinned ? pinSectionMenu : undefined}
                             nativeDrag={!pinDrag}
                             openedByTree={treeSlot}
                             contextMenuLabels={contextMenuLabels}
@@ -1023,7 +1023,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       );
                     });
                   })()}
-                  {showToggleFullList ? (
+                  {showMoreRow ? (
                     <button
                       type="button"
                       data-sidebar-updated-show-more={bucket.key}
@@ -1033,18 +1033,39 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                         'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                         'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
                       )}
-                      aria-label={toggleFullListLabel}
-                      onClick={() => onToggleFullBucket?.(bucket.key)}
+                      aria-label={showMoreLabel}
+                      onClick={() => onShowMore?.(bucket.key)}
                     >
                       <span
                         className="flex h-4 w-4 items-center justify-center"
                         aria-hidden="true"
                       />
-                      <span>{toggleFullListLabel}</span>
+                      <span>{showMoreLabel}</span>
+                    </button>
+                  ) : null}
+                  {showLessRow ? (
+                    <button
+                      type="button"
+                      data-sidebar-updated-show-less={bucket.key}
+                      className={cn(
+                        'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
+                        'transition-colors',
+                        'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+                      )}
+                      aria-label={showLessLabel}
+                      onClick={() => onShowLess?.(bucket.key)}
+                    >
+                      <span
+                        className="flex h-4 w-4 items-center justify-center"
+                        aria-hidden="true"
+                      />
+                      <span>{showLessLabel}</span>
                     </button>
                   ) : null}
                 </div>
               ) : null}
+              {!collapsed ? footer : null}
             </div>
           );
         })}
@@ -1235,7 +1256,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
   const nowMs = now instanceof Date ? now.getTime() : Date.now();
-  const statusGroup = sidebarStatusGroup(item, nowMs);
+  const statusGroup = statusViewTier({ ...item, activityAt: getSortKey(item) }, nowMs);
   const snoozeCountdown =
     showSnoozeCountdown && typeof item.snoozedUntil === 'number'
       ? formatSnoozeCountdown(item.snoozedUntil, nowMs)
@@ -1472,6 +1493,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             sessionId={item.id}
             selected={showSelectedState}
             isWaitingPermission={item.isWaitingPermission}
+            needsAttention={item.deliveryStalled}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
             fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"

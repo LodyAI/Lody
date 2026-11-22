@@ -80,7 +80,13 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
   showChevron?: boolean;
   /** When false, the search input won't auto-focus when the popover opens. */
   autoFocusSearch?: boolean;
+  onQueryChange?: (query: string) => void;
+  disableClientFilter?: boolean;
+  onReachEnd?: () => void;
+  footer?: ReactNode;
 }
+
+const OPTION_SELECTOR_REACH_END_ROWS = 5;
 
 const styles = stylex.create({
   // The list scrolls under the search field; the cap keeps it clear of the
@@ -129,6 +135,10 @@ export function OptionSelector<TValue extends string | number = string>({
   renderOption,
   showChevron = true,
   autoFocusSearch = true,
+  onQueryChange,
+  disableClientFilter = false,
+  onReachEnd,
+  footer,
 }: OptionSelectorProps<TValue>) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = open !== undefined;
@@ -184,7 +194,7 @@ export function OptionSelector<TValue extends string | number = string>({
   // to virtualize), reusing the command-palette's fuzzy scorer. Small lists keep cmdk's
   // built-in filtering untouched.
   const filteredOptions = useMemo(() => {
-    if (!virtualize) return options;
+    if (disableClientFilter || !virtualize) return options;
     const q = query.trim();
     if (!q) return options;
     return options
@@ -195,7 +205,7 @@ export function OptionSelector<TValue extends string | number = string>({
       )
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.option);
-  }, [virtualize, options, query]);
+  }, [disableClientFilter, virtualize, options, query]);
 
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: filteredOptions.length,
@@ -239,6 +249,7 @@ export function OptionSelector<TValue extends string | number = string>({
       didSelectItemRef.current = false;
     } else {
       setQuery(''); // reopen starts unfiltered
+      onQueryChange?.('');
     }
     if (!isControlled) {
       setInternalOpen(next);
@@ -370,7 +381,7 @@ export function OptionSelector<TValue extends string | number = string>({
         }}
       >
         <CommandPrimitive
-          shouldFilter={!virtualize}
+          shouldFilter={!disableClientFilter && !virtualize}
           value={highlighted}
           onValueChange={setHighlighted}
           {...stylex.props(surface.popupList)}
@@ -382,12 +393,28 @@ export function OptionSelector<TValue extends string | number = string>({
               onValueChange={(nextQuery: string) => {
                 setQuery(nextQuery);
                 setSearchToken((n) => n + 1);
+                onQueryChange?.(nextQuery);
               }}
               {...stylex.props(surface.search)}
             />
           )}
           <CommandPrimitive.List
             ref={listViewportRef}
+            onScroll={
+              onReachEnd
+                ? (event) => {
+                    const viewport = event.currentTarget;
+                    const remaining =
+                      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+                    if (
+                      remaining <=
+                      OPTION_SELECTOR_REACH_END_ROWS * OPTION_SELECTOR_ROW_ESTIMATE_PX
+                    ) {
+                      onReachEnd();
+                    }
+                  }
+                : undefined
+            }
             {...stylex.props(surface.popupScroll, styles.scroll)}
           >
             <CommandPrimitive.Empty {...stylex.props(surface.empty)}>
@@ -411,6 +438,7 @@ export function OptionSelector<TValue extends string | number = string>({
             ) : (
               options.map((option) => renderOptionItem(option))
             )}
+            {footer ? <div {...stylex.props(surface.empty)}>{footer}</div> : null}
           </CommandPrimitive.List>
         </CommandPrimitive>
       </Popover.Content>

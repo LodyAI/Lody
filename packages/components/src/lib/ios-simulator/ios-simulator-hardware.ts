@@ -189,7 +189,6 @@ export function getIosSimulatorHardware(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Controls a device family can take. Unavailable ones stay listed, disabled.
 
 export type IosSimulatorControlId =
@@ -231,7 +230,6 @@ export function getIosSimulatorControlAvailability(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Orientation. The machine's stream turns with the device, so the screen is
 // never rotated here — only the exterior is, and the viewer's coordinates stay
 // its own.

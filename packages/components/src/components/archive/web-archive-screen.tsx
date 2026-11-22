@@ -1,14 +1,15 @@
 import type { ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Archive, ChevronDown, PanelLeft, Trash2, Undo2, X } from 'lucide-react';
+import { Archive, ChevronDown, Trash2, Undo2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
-import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
+import { mainPageAtWindowEdgeAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import {
+  WINDOW_DRAG_EXEMPT_CLASS,
   useMacTrafficLightRowPadClass,
   useWindowDragRegionClass,
   useWindowsCaptionPadClass,
@@ -18,6 +19,8 @@ import { isNativeAppShell } from '@/lib/native-platform';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
 
 type ArchiveScope = 'my' | 'team';
 
@@ -118,7 +121,8 @@ export function WebArchiveScreen({
   children,
 }: WebArchiveScreenProps) {
   const { t } = useTranslation();
-  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
+  // Hidden sidebar and no pinned Today in front: this page owns the window's left edge.
+  const isLeftSidebarHidden = useAtomValue(mainPageAtWindowEdgeAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const isElectronFullscreen = useElectronFullscreen();
   const windowDragClass = useWindowDragRegionClass();
@@ -159,17 +163,13 @@ export function WebArchiveScreen({
           )}
         >
           {isLeftSidebarHidden ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="small"
-              icon
-              onClick={() => showNavigationSidebar()}
-              aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-              className={stylex.props(styles.sidebarToggle).className}
-            >
-              <PanelLeft {...stylex.props(styles.glyph)} />
-            </Button>
+            <SidebarHistoryControls
+              onToggleSidebar={() => showNavigationSidebar()}
+              className={cn(
+                stylex.props(styles.sidebarToggle).className,
+                windowDragClass && WINDOW_DRAG_EXEMPT_CLASS
+              )}
+            />
           ) : null}
           {isMultiSelectMode ? (
             <>

@@ -47,6 +47,21 @@ protocol capability. Missing support preserves drafts and explicitly explains
 unavailability; it never silently downgrades the promised interaction. Existing
 history compatibility and writer ownership continue to apply.
 
+## Native mobile
+
+Native iOS and Android clients keep the same snapshot, projection, capability and
+history guarantees but use a touch-first composer form. Long-press selection in
+one Agent message offers Quote (user messages are not quotable) in the system text menu; it opens a bottom sheet with the
+read-only snapshot and an optional comment. Each quote and its comment become one
+card in the composer attachment strip, which reopens the sheet for editing the
+comment or removing the card. Inline caret insertion does not apply there.
+
+Sending places the composer text first, then each card's quote block followed by
+its comment, in the same versioned text and quote spans Web sends, so either client
+renders and restores the other's messages. Native restoration reads text before the
+first quote as composer text and the text after each quote as that card's comment.
+Native history renders authored quotes as blocks that open the full snapshot.
+
 ## Evidence and acceptance
 
 The [owning research/design note](../.agents/notes/implemented/feature/2026-11-01-conversation-selection-quote-reintroduction.md)

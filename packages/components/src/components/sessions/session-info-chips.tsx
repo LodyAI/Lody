@@ -57,6 +57,10 @@ import { SessionPrIcon } from '@/components/sidebar-row-shared';
 import { PR_STATUS_META } from './pull-request-badge';
 import { useSessionStatusPresentation, type SessionStatusStripState } from './session-status-strip';
 import { PrMergeButton, PrMergeMethodLabel } from './pr-merge-button';
+import {
+  SessionPullRequestLinksPanel,
+  type SessionPullRequestLinksProps,
+} from './session-pr-links';
 
 /**
  * Shared contract: the bar renders each item either collapsed in the cluster
@@ -573,6 +577,7 @@ export function ContextChip({
   onOpenPr,
   prHistory,
   onOpenHistoryPr,
+  prLinks,
   actions,
   onOpenAllChanges,
   diffStat,
@@ -595,6 +600,9 @@ export function ContextChip({
   prHistory?: readonly SessionPullRequestView[];
   /** Open an older PR from the history list; the first entry uses `onOpenPr`. */
   onOpenHistoryPr?: (view: SessionPullRequestView) => void;
+  /** Linked pull requests of the Session. When set, the PR marker opens this
+   *  list (link, unlink, open) instead of `prHistory`. */
+  prLinks?: SessionPullRequestLinksProps;
   /** Agent-driven PR/worktree actions pinned after the context summary. */
   actions?: readonly ContextChipAction[];
   /** Open the complete working-tree diff. */
@@ -660,7 +668,9 @@ export function ContextChip({
     </>
   );
   const prControl = pr ? (
-    prHistory && prHistory.length > 1 ? (
+    prLinks ? (
+      <LinkedPrControl links={prLinks}>{prMarker}</LinkedPrControl>
+    ) : prHistory && prHistory.length > 1 ? (
       <PrHistoryControl history={prHistory} onOpenCurrent={onOpenPr} onOpenOlder={onOpenHistoryPr}>
         {prMarker}
       </PrHistoryControl>
@@ -897,6 +907,61 @@ function PrHistoryControl({
             })}
           </ul>
         </div>
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+
+/**
+ * The PR marker of a Session whose links are manageable: one click lists every
+ * pull request the Session holds (primary first, any repository), with Unlink
+ * on each row and a paste field to link another.
+ */
+function LinkedPrControl({
+  links,
+  children,
+}: {
+  links: SessionPullRequestLinksProps;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const label = t('sessions.prLinks.title', 'Linked pull requests');
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            title={label}
+            className={cn(
+              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+              INFO_BAR_TEXT_CLASS,
+              open && 'bg-muted-foreground/10'
+            )}
+          >
+            {children}
+            {links.items.length > 1 ? (
+              <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+            ) : null}
+          </button>
+        }
+      />
+      <Popover.Content
+        side="top"
+        align="start"
+        sideOffset={8}
+        aria-label={label}
+        className="w-[min(22rem,90vw)] border-border/60 p-0 shadow-xl"
+      >
+        <SessionPullRequestLinksPanel
+          {...links}
+          onOpen={(item) => {
+            setOpen(false);
+            links.onOpen?.(item);
+          }}
+        />
       </Popover.Content>
     </Popover.Root>
   );

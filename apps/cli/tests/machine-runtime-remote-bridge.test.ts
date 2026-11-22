@@ -137,7 +137,20 @@ describe('MachineRuntime remote bridge transitions', () => {
   });
 });
 
-it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
+const sorbetRemoteRequests = {
+  'sorbet/credentials-list': { configId: 'config' },
+  'sorbet/credentials-logout': { configId: 'config', providerId: '提供商 / 账户' },
+  'sorbet/providers-list': { configId: 'config' },
+  'sorbet/providers-update': {
+    configId: 'config',
+    providerId: 'gateway',
+    provider: { name: 'Gateway', protocol: 'openai-responses', baseUrl: 'https://e.test' },
+  },
+  'sorbet/providers-delete': { configId: 'config', providerId: 'gateway' },
+  'sorbet/models-list': { configId: 'config' },
+} as const;
+
+it.each(Object.keys(sorbetRemoteRequests) as Array<keyof typeof sorbetRemoteRequests>)(
   'rejects %s at encrypted remote ingress before dispatch',
   async (method) => {
     const { runtime, handler } = createHarness(true);
@@ -148,15 +161,12 @@ it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
         return { ok: true };
       },
     });
-    const request =
-      method === 'sorbet/credentials-list'
-        ? { method, workspaceId: 'workspace', machineId: 'machine', params: { configId: 'config' } }
-        : {
-            method,
-            workspaceId: 'workspace',
-            machineId: 'machine',
-            params: { configId: 'config', providerId: '提供商 / 账户' },
-          };
+    const request = {
+      method,
+      workspaceId: 'workspace',
+      machineId: 'machine',
+      params: sorbetRemoteRequests[method],
+    } as import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest;
     await expect(runtime.handleEncryptedFeatureRpc(request)).rejects.toThrow(
       'e2ee_feature_unavailable'
     );
@@ -263,6 +273,40 @@ it('forks for the verified signer, owner or shared member, never a claimed reque
     'e2ee_feature_requester'
   );
   expect(forks).toHaveLength(1);
+
+  const branchReads: unknown[] = [];
+  Object.assign(handler, {
+    readEncryptedMachineRequest: async (input: unknown) => {
+      branchReads.push(input);
+      return { ok: true };
+    },
+  });
+  const branchRequest = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    method: 'local-project/list-branches' as const,
+    params: {
+      localProjectId: 'local-project-1',
+      requestedByUserId: 'member-account',
+      limit: 10,
+    },
+  };
+  await expect(runtime.handleEncryptedFeatureRpc(branchRequest, context())).rejects.toThrow(
+    'e2ee_feature_requester'
+  );
+  await expect(
+    runtime.handleEncryptedFeatureRpc(
+      { ...branchRequest, params: { ...branchRequest.params, requestedByUserId: 'owner' } },
+      context(member)
+    )
+  ).rejects.toThrow('e2ee_feature_requester');
+  await runtime.handleEncryptedFeatureRpc(branchRequest, context(member));
+  expect(branchReads).toEqual([
+    {
+      ...branchRequest,
+      params: { ...branchRequest.params, requestedByUserId: 'e2ee-member:aa' },
+    },
+  ]);
 });
 
 it('requires live verified authority for encrypted ACP interaction routing', async () => {
@@ -303,4 +347,33 @@ it('requires live verified authority for encrypted ACP interaction routing', asy
   await expect(runtime.handleEncryptedFeatureRpc(request, verified)).rejects.toThrow(
     'e2ee_feature_unavailable'
   );
+});
+
+it('keeps account memory providers off the encrypted feature ingress', async () => {
+  const { runtime, handler } = createHarness(true);
+  const dispatched: unknown[] = [];
+  Object.assign(handler, {
+    handleLocalMachineRpc: async (request: unknown) => {
+      dispatched.push(request);
+      return { ok: true, result: { type: 'machine/memory', status: 'ready', memories: [] } };
+    },
+  });
+  const base = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    method: 'machine/memory' as const,
+  };
+  for (const params of [
+    { action: 'list' as const, providerId: 'everme' },
+    { action: 'signIn' as const, providerId: 'everme' },
+    { action: 'install' as const, providerId: 'everme' },
+    { action: 'connect' as const, providerId: 'everme', targets: ['codex'] },
+  ])
+    await expect(runtime.handleEncryptedFeatureRpc({ ...base, params })).rejects.toThrow(
+      'e2ee_feature_unavailable'
+    );
+  expect(dispatched).toEqual([]);
+  const identity = { ...base, params: { action: 'list' as const, providerId: 'nowledge-mem' } };
+  await runtime.handleEncryptedFeatureRpc(identity);
+  expect(dispatched).toEqual([identity]);
 });
