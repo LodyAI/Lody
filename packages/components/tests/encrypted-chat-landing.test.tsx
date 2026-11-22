@@ -578,6 +578,47 @@ it('an embedded landing hands the accepted session to its host instead of naviga
   }
 });
 
+it('the Convert-to-task dialog includes parent nodes by default and switches them while the prompt is unedited', async () => {
+  const landing = await renderEmbeddedLanding(
+    async () => {},
+    undefined,
+    () => (
+      <TodayConvertDialog
+        open
+        prompt={'Write the guide'}
+        promptWithAncestors={'- Launch\n  - Write the guide'}
+        onAccepted={() => {}}
+        onOpenChange={() => {}}
+      />
+    )
+  );
+  try {
+    const dialog = document.querySelector('[data-testid="today-convert-dialog"]')!;
+    const prompt = () => dialog.querySelector<HTMLTextAreaElement>('#today-convert-prompt')!.value;
+    const box = () =>
+      dialog.querySelector<HTMLElement>(
+        '[data-testid="today-convert-ancestors"] [role="checkbox"]'
+      )!;
+    expect(prompt()).toBe('- Launch\n  - Write the guide');
+    expect(box().getAttribute('aria-checked')).toBe('true');
+    await act(async () => box().click());
+    expect(prompt()).toBe('Write the guide');
+    expect(box().getAttribute('aria-checked')).toBe('false');
+    await act(async () => box().click());
+    expect(prompt()).toBe('- Launch\n  - Write the guide');
+    await act(async () => {
+      landing.store.set(chatLandingSessionStateAtomFamily(SURFACE_DRAFT_KEY), (previous) => ({
+        ...previous,
+        prompt: 'my own words',
+      }));
+    });
+    expect(box().hasAttribute('data-disabled')).toBe(true);
+    expect(dialog.textContent).toContain('Prompt edited');
+  } finally {
+    await landing.repo.destroy();
+  }
+});
+
 it('a rejected embedded start keeps the dialog draft and reports nothing to the host', async () => {
   const attempts: SessionId[] = [];
   const landing = await renderEmbeddedLanding(async (sessionId) => {

@@ -128,6 +128,24 @@ describe('Today outline keys', () => {
     expect(resolveOutlineKey(key('ArrowDown'), base, 'mac')).toEqual({ type: 'focus-next' });
     expect(resolveOutlineKey(key('Escape'), base, 'mac')).toEqual({ type: 'block-select' });
   });
+
+  it('Mod+A leaves a partial text selection to the editor, then selects the node', () => {
+    const mod = { metaKey: true };
+    expect(resolveOutlineKey(key('a', mod), { ...base, offset: 1 }, 'mac')).toBeNull();
+    expect(
+      resolveOutlineKey(
+        key('a', mod),
+        { ...base, offset: 0, anchor: 0, focus: 3, hasSelection: true },
+        'mac'
+      )
+    ).toEqual({ type: 'select-from-text' });
+    expect(resolveOutlineKey(key('a', mod), { ...base, length: 0 }, 'mac')).toEqual({
+      type: 'select-from-text',
+    });
+    expect(
+      resolveOutlineKey(key('a', { ctrlKey: true }), { ...base, length: 0 }, 'mac')
+    ).toBeNull();
+  });
 });
 
 describe('Today LoroText binding', () => {

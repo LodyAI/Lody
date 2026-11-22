@@ -90,6 +90,10 @@ any time; when off it changes none of the app's existing behavior.
     moving past a day's first/last node enters the adjacent date.
   - `Mod+Shift+↑/↓` moves a node with its children; `Mod+↑/↓` folds/unfolds; `Esc` enters block selection
     (user decision).
+- `Mod+A` widens step by step (user decision, after Logseq and the Obsidian Outliner plugin): while editing it first
+  selects the node's text; once the text is all selected (or empty) it selects the node; each further press selects
+  the parent (several selected nodes go to their lowest common ancestor); at the top it selects the whole day and
+  then stops. It never selects across days.
 - Block selection: Esc, or a drag-selection leaving a node, selects whole nodes; selected nodes can be copied,
   cut, deleted, dragged and indented. Selecting a node includes its whole subtree, and the highlight shows it.
   A selection spanning levels indents and outdents each run of adjacent siblings on its own, as one-by-one
@@ -187,7 +191,9 @@ any time; when off it changes none of the app's existing behavior.
   without leaving Today, so everything that page supports (project groups, attachments, Agent Roles, …) is
   available:
   - The prompt is pre-filled with the node's text and all its children (including folded ones), joined by
-    indentation, and is editable.
+    indentation, and is editable. When the node has parents, the prompt by default nests it under them as one
+    indented list (user decision); an "Include parent nodes" checkbox switches between the two forms while the
+    prompt is unedited.
   - Machine, project, agent config and other defaults match the new-conversation page (the last choice); nothing
     is inherited from the outline context.
   - The dialog uses its own draft and leaves the page's draft untouched. Enter sends (not during IME composition).

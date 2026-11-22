@@ -7015,6 +7015,8 @@
   "today.convertTitle": "Convert to task",
   "today.convertSubmit": "Start task",
   "today.convertToTask": "Convert to task",
+  "today.convertIncludeAncestors": "Include parent nodes",
+  "today.convertAncestorsEdited": "Prompt edited",
   "today.selectionActions": "Selected nodes",
   "today.todo.make": "Turn into to-do",
   "today.todo.markDone": "Mark as done",
