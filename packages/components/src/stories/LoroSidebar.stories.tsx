@@ -1030,7 +1030,7 @@ export const UpdatedMode: Story = {
 /**
  * The "Status" organize mode: the Updated rows split into Needs you, Just
  * finished, Open pull requests, Running and Idle, as on mobile Home. Empty
- * groups are skipped; only Idle folds behind "Show all".
+ * groups are skipped; only Idle folds behind "Show more".
  */
 export const StatusMode: Story = {
   render: (args) => <StoryLayout {...args} />,
@@ -1415,7 +1415,7 @@ function ProductionLikeTopContent({
                         project={project}
                         canRemoveProject
                         collapsed={collapsed}
-                        whetherShowFullList={false}
+                        revealedRows={0}
                         isSelected={false}
                         sessionsForProject={
                           localProjectSessionsByKey?.[key] ??
@@ -1447,7 +1447,8 @@ function ProductionLikeTopContent({
                             [key]: !(previous[key] ?? false),
                           }))
                         }
-                        onToggleFullList={() => {}}
+                        onShowMore={() => {}}
+                  onShowLess={() => {}}
                         onRequestRemoval={() => {}}
                       />
                     );
@@ -1817,7 +1818,7 @@ function MachineGroupScrollFixture() {
                   project={project}
                   canRemoveProject
                   collapsed={collapsedProjects[key] ?? true}
-                  whetherShowFullList={false}
+                  revealedRows={0}
                   isSelected={index === 0}
                   sessionsForProject={[]}
                   childSessionsByParent={new Map()}
@@ -1839,7 +1840,8 @@ function MachineGroupScrollFixture() {
                   onToggleCollapsed={() =>
                     setCollapsedProjects((prev) => ({ ...prev, [key]: !(prev[key] ?? true) }))
                   }
-                  onToggleFullList={() => {}}
+                  onShowMore={() => {}}
+                  onShowLess={() => {}}
                   onRequestRemoval={() => {}}
                 />
               );
