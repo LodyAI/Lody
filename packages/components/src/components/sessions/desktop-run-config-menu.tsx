@@ -828,9 +828,9 @@ export function DesktopRunConfigMenu({
               </Menu.Trigger>
             }
           />
-          <Tooltip.Content side="top">
-            {runConfigButtonAriaLabel}
-            {openRunConfigKey ? <> <Kbd>{formatKeyBinding(openRunConfigKey)}</Kbd></> : null}
+          <Tooltip.Content side="top" className="flex items-center gap-1.5">
+            <span>{runConfigButtonAriaLabel}</span>
+            {openRunConfigKey ? <Kbd>{formatKeyBinding(openRunConfigKey)}</Kbd> : null}
           </Tooltip.Content>
         </Tooltip.Root>
       )}
@@ -1291,9 +1291,9 @@ export function DesktopPermissionModeButton({
             </Menu.Trigger>
           }
         />
-        <Tooltip.Content side="top">
-          {ariaLabel}
-          {cycleModeKey ? <> <Kbd>{formatKeyBinding(cycleModeKey)}</Kbd></> : null}
+        <Tooltip.Content side="top" className="flex items-center gap-1.5">
+          <span>{ariaLabel}</span>
+          {cycleModeKey ? <Kbd>{formatKeyBinding(cycleModeKey)}</Kbd> : null}
         </Tooltip.Content>
       </Tooltip.Root>
       <Menu.Content align="start" className="w-max min-w-44 max-w-64" {...menuSideProps(menuSide)}>

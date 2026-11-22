@@ -225,9 +225,9 @@ export function AttachmentAddMenu({
             </Menu.Trigger>
           }
         />
-        <Tooltip.Content side="top">
-          {triggerLabel}
-          {openAddMenuKey ? <> <Kbd>{formatKeyBinding(openAddMenuKey)}</Kbd></> : null}
+        <Tooltip.Content side="top" className="flex items-center gap-1.5">
+          <span>{triggerLabel}</span>
+          {openAddMenuKey ? <Kbd>{formatKeyBinding(openAddMenuKey)}</Kbd> : null}
         </Tooltip.Content>
       </Tooltip.Root>
       <Menu.Content
