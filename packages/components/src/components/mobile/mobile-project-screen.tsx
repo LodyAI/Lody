@@ -7,6 +7,7 @@ import {
   Archive,
   ChevronDown,
   ChevronLeft,
+  CircleAlert,
   Eye,
   File as FileIcon,
   Github,
@@ -18,6 +19,7 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react';
+import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { Spinner } from '@lody/ui/spinner';
 import { MdChat, MdSettings } from 'react-icons/md';
@@ -30,10 +32,12 @@ import { useLongPress } from '@/hooks/use-long-press';
 import { Checkbox } from '@lody/ui/checkbox';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
+import { sessionPrMergeStatusAtomFamily } from '@/atoms/session-pr-merge-status';
 import {
   SessionMergeablePill,
   SessionPrIcon,
   SessionRowAuthorAvatar,
+  SessionSendProgressRing,
   type SessionRowOpenedByTreeSlot,
 } from '@/components/sidebar-row-shared';
 import { MobileEdgeBackSwipeZone } from './mobile-edge-back-swipe';
@@ -502,6 +506,7 @@ export function ConversationRow({
   treeSlot?: SessionRowOpenedByTreeSlot;
 }) {
   const { t } = useTranslation();
+  const prMergeStatus = useAtomValue(sessionPrMergeStatusAtomFamily(conversation.id));
   const treeChild = treeSlot?.kind === 'child' ? treeSlot : null;
   /* One node, one meaning. An active row shows its status and drops both the
      fold chevron and the ├/└ — same rule the desktop sidebar row applies. */
@@ -517,13 +522,22 @@ export function ConversationRow({
      a bare number covers callers that only carry the compact fields. */
   const showPr =
     Boolean(conversation.prUrl?.trim()) ||
-    (typeof conversation.prNumber === 'number' && conversation.prNumber > 0);
-  const prStatus = conversation.prStatus ?? 'open';
+    (typeof conversation.prNumber === 'number' && conversation.prNumber > 0) ||
+    prMergeStatus != null;
+  const prStatus =
+    prMergeStatus?.phase === 'merged' ? 'merged' : (conversation.prStatus ?? 'open');
+  const isPrMerging = prMergeStatus?.phase === 'merging';
+  const isPrMergeFailed = prMergeStatus?.phase === 'failed';
   /* Readiness can linger on a terminal PR (the webhook fan-out flips status to
      merged but cannot clear the poller's record), so gate the pill on the PR
      still being live — same reasoning as the desktop sidebar row. */
   const isMergeable =
-    showPr && conversation.prReadiness === 'y' && prStatus !== 'merged' && prStatus !== 'closed';
+    showPr &&
+    !isPrMerging &&
+    !isPrMergeFailed &&
+    conversation.prReadiness === 'y' &&
+    prStatus !== 'merged' &&
+    prStatus !== 'closed';
   /* The pill takes the line diff's slot: once a PR is ready, "it can merge" is
      the more useful fact than how many lines changed. Hidden on the open
      conversation, whose own info bar owns the merge control. */
@@ -640,7 +654,26 @@ export function ConversationRow({
           aria-label="Worktree"
         />
       ) : null}
-      {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={conversation.prCiState} /> : null}
+      {isPrMergeFailed ? (
+        <span
+          data-session-pr-merge-phase="failed"
+          className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+        >
+          <CircleAlert className="h-3.5 w-3.5 text-destructive" strokeWidth={2.25} />
+        </span>
+      ) : isPrMerging ? (
+        <span
+          data-session-pr-merge-phase="merging"
+          className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+        >
+          <SessionSendProgressRing className="text-pr-merged" />
+        </span>
+      ) : showPr ? (
+        <SessionPrIcon
+          prStatus={prStatus}
+          prCiState={prMergeStatus?.phase === 'merged' ? null : conversation.prCiState}
+        />
+      ) : null}
     </button>
   );
 

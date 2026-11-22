@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { act, createElement, useEffect } from 'react';
+import { useStore } from 'jotai';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  clearSessionPrMergeStatus,
+  sessionPrMergeStatusesAtom,
+} from '../src/atoms/session-pr-merge-status';
 import type {
   GitHubCheckRunsSummary,
   GitHubMergeResult,
@@ -77,6 +82,8 @@ const githubTokenMockModule = vi.hoisted(() => ({
     _mode: 'read' | 'write',
     run: (token: string) => Promise<unknown>
   ) => run('github-token'),
+  isGitHubOperationTokenConnectionLostError: (error: unknown) =>
+    error instanceof Error && error.message === 'Connection lost while action was in flight',
   isGitHubUnauthorizedTokenError: (error: unknown) =>
     Boolean(
       error &&
@@ -211,6 +218,8 @@ function Probe({
   );
 }
 
+let currentStore: ReturnType<typeof useStore> | null = null;
+
 function AdmittedProbe({
   input,
   onResult,
@@ -218,6 +227,7 @@ function AdmittedProbe({
   input: UseGitHubPrDetailsInput;
   onResult: (result: UseGitHubPrDetailsResult) => void;
 }) {
+  currentStore = useStore();
   const result = useGitHubPrDetails(input);
   useEffect(() => {
     onResult(result);
@@ -864,5 +874,126 @@ describe('useGitHubPrDetails target isolation', () => {
     );
 
     expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps merging and updates session merge status when switching conversations mid-merge', async () => {
+    identityMocks.versions = { repositoryId: 123, repoFullName: 'loro-dev/lody' };
+    const headFetchDeferred = createDeferred<GitHubPullRequestDetails>();
+    const mergeDeferred = createDeferred<GitHubMergeResult>();
+    await renderHook({
+      sessionId: 'session-1',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 1,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 1);
+    const store = currentStore!;
+
+    githubMocks.githubFetchPullRequestDetails.mockReturnValueOnce(headFetchDeferred.promise);
+    githubMocks.githubMergePullRequest.mockReturnValueOnce(mergeDeferred.promise);
+
+    let mergePromise: Promise<boolean> | null = null;
+    await act(async () => {
+      mergePromise = currentResult?.mergePullRequest('merge') ?? null;
+    });
+    expect(store.get(sessionPrMergeStatusesAtom)['session-1']).toEqual({
+      phase: 'merging',
+      prNumber: 1,
+      repoFullName: 'loro-dev/lody',
+    });
+
+    await renderHook({
+      sessionId: 'session-2',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 2,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 2);
+
+    await act(async () => {
+      headFetchDeferred.resolve(createPullRequest(1, { headSha: 'sha-1-fresh' }));
+    });
+    await waitForResult(() => githubMocks.githubMergePullRequest.mock.calls.length === 1);
+    expect(githubMocks.githubMergePullRequest).toHaveBeenCalledWith(
+      'github-token',
+      'loro-dev/lody',
+      1,
+      { method: 'merge', sha: 'sha-1-fresh' }
+    );
+
+    await renderHook({
+      sessionId: 'session-1',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 1,
+    });
+    expect(currentResult?.isMerging).toBe(true);
+
+    await renderHook({
+      sessionId: 'session-2',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 2,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 2);
+
+    await act(async () => {
+      mergeDeferred.resolve({ sha: 'merged-sha', merged: true, message: 'merged' });
+      await mergePromise;
+    });
+
+    expect(currentResult?.data?.pullRequest.number).toBe(2);
+    expect(currentResult?.data?.pullRequest.merged).toBe(false);
+    expect(store.get(sessionPrMergeStatusesAtom)['session-1']).toEqual({
+      phase: 'merged',
+      prNumber: 1,
+      repoFullName: 'loro-dev/lody',
+    });
+    clearSessionPrMergeStatus(store, 'session-1');
+  });
+
+  it('marks session merge failed and rejects when a background merge fails after switching away', async () => {
+    identityMocks.versions = { repositoryId: 123, repoFullName: 'loro-dev/lody' };
+    const mergeDeferred = createDeferred<GitHubMergeResult>();
+    githubMocks.githubMergePullRequest.mockReturnValueOnce(mergeDeferred.promise);
+
+    await renderHook({
+      sessionId: 'session-fail',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 1,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 1);
+    const store = currentStore!;
+
+    let mergePromise: Promise<boolean> | null = null;
+    await act(async () => {
+      mergePromise = currentResult?.mergePullRequest('merge') ?? null;
+    });
+    const mergeOutcome = mergePromise!.catch((err: unknown) => err);
+
+    await renderHook({
+      sessionId: 'session-other',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 2,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 2);
+
+    let caughtError: unknown;
+    await act(async () => {
+      mergeDeferred.reject(new Error('Required status check failed'));
+      caughtError = await mergeOutcome;
+    });
+
+    expect(caughtError).toBeInstanceOf(Error);
+    expect((caughtError as Error).message).toBe('Required status check failed');
+    expect(store.get(sessionPrMergeStatusesAtom)['session-fail']).toEqual({
+      phase: 'failed',
+      prNumber: 1,
+      repoFullName: 'loro-dev/lody',
+      error: 'Required status check failed',
+    });
+    clearSessionPrMergeStatus(store, 'session-fail');
   });
 });
