@@ -132,6 +132,8 @@ export type SessionDocStore = {
   readonly history: ConversationView;
   /** CRDT-neutral history reads, commands and stored-copy capabilities. */
   readonly sessionData: SessionData;
+  /** Forced catch-up of the live cloud room that keeps its status and receipt. */
+  revalidateReceive: () => void;
   dispose: () => void;
   /**
    * Resolves when all pending local CRDT changes have been flushed to the server.

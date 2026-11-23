@@ -2834,6 +2834,7 @@ export const SessionChatInterface = memo(
     } = useSessionDoc(session.id, {
       enabled: !hideMessageArea,
       syncEnabled: !hideMessageArea && syncEnabled,
+      revalidateOnWake: true,
     });
     // History is read through the conversation view: the hydrated tail (which
     // always reaches the latest user turn) for every "latest turn" reader, the
