@@ -182,3 +182,22 @@ test('limits the imperative session-access composition exception to its owner an
     );
   }
 });
+
+test('GitHub metadata wrappers never admit hosted PR caches or legacy identity repair', () => {
+  for (const [name, allowed] of [
+    ['getWorkspaceRepositories', true],
+    ['createGitHubInstallState', true],
+    ['getPrCacheVersions', false],
+    ['resolveLegacyPrRepositoryIdentity', false],
+  ]) {
+    const result = auditLegacyCloudSource(
+      file,
+      `
+      import { cloudOperations } from '@/lib/cloud-api-operations';
+      import { useGithubWorkspaceQuery as read } from '@/hooks/use-github-workspace';
+      read(cloudOperations.github.${name}, { workspaceId });
+    `
+    );
+    assert.equal(result.errors.length, allowed ? 0 : 1);
+  }
+});

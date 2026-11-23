@@ -261,6 +261,10 @@ export type WorkspaceE2eeTransport = {
   supportsRpc?: boolean;
   /** Verified ledger file role; absent means read-only. Never an authorization. */
   codeCollabRole?: ProtectedCodeCollabRole;
+  memberRole?: {
+    get(): 'owner' | 'admin' | 'member' | 'guest' | null;
+    subscribe(listener: () => void): () => void;
+  };
   attachmentToken?: () => Promise<string>;
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   createRpcTokenProvider(
@@ -6452,6 +6456,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     protectedRpcAvailable,
     ...(protectedContent
       ? {
+          protectedMemberRole: deps.e2ee?.memberRole,
           protectedCodeCollabRole: deps.e2ee?.codeCollabRole ?? {
             get: () => 'read' as const,
             subscribe: () => () => undefined,
