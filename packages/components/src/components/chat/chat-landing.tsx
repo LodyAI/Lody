@@ -1,3 +1,7 @@
+import {
+  useWorkspaceNotificationQuery,
+  useWorkspaceNotificationMutation,
+} from '@/hooks/use-workspace-notifications';
 import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
 import { text } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -7,10 +11,7 @@ import { buildDaemonInstallCommands } from '@/lib/daemon-installation';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { McpDefaultsRecovery } from './mcp-defaults-recovery';
-import {
-  useLegacyWorkspaceMutation,
-  useLegacyWorkspaceQuery,
-} from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval, localAgentRunsWorkspace } from '../e2ee-local-agent-approval';
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
@@ -988,6 +989,7 @@ function WorkspaceChatLanding({
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
   const { workspaceId } = useResolvedWorkspaceScope();
   const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const notificationQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId, true);
   const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
   const githubQueryStatus = useGithubWorkspaceStatus(workspaceId);
   const githubQueriesEnabled = githubQueryStatus === 'allowed';
@@ -1034,13 +1036,13 @@ function WorkspaceChatLanding({
       activeWorkspaceId: activeOrganization?.id ?? null,
       memberCount: activeOrganization?.members.length ?? null,
     });
-  const inboxRows = useLegacyWorkspaceQuery(
+  const inboxRows = useWorkspaceNotificationQuery(
     cloudOperations.inbox.listMine,
-    showProjectSharing && workspaceId ? { workspaceId } : 'skip'
+    workspaceId ? { workspaceId } : 'skip'
   );
-  const sharingReviewServerState = useLegacyWorkspaceQuery(
+  const sharingReviewServerState = useWorkspaceNotificationQuery(
     cloudOperations.inbox.getSharingReviewState,
-    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
+    workspaceId ? { workspaceId } : 'skip'
   );
   const sharingReviewInboxRevisionRef = useRef<string | null>(null);
   const sharingReviewReconcileRef = useRef({
@@ -1052,12 +1054,12 @@ function WorkspaceChatLanding({
   if (sharingReviewInboxReady) {
     sharingReviewInboxRevisionRef.current = sharingReviewServerState?.sourceRevision ?? null;
   }
-  const reconcileSharingReview = useLegacyWorkspaceMutation(
+  const reconcileSharingReview = useWorkspaceNotificationMutation(
     cloudOperations.inbox.reconcileSharingReview
   );
-  const markInboxItemRead = useLegacyWorkspaceMutation(cloudOperations.inbox.markRead);
-  const dismissInboxItem = useLegacyWorkspaceMutation(cloudOperations.inbox.dismiss);
-  const suppressSharingReview = useLegacyWorkspaceMutation(
+  const markInboxItemRead = useWorkspaceNotificationMutation(cloudOperations.inbox.markRead);
+  const dismissInboxItem = useWorkspaceNotificationMutation(cloudOperations.inbox.dismiss);
+  const suppressSharingReview = useWorkspaceNotificationMutation(
     cloudOperations.inbox.suppressSharingReview
   );
   const handleShareLocalProjectWithTeam = useCallback(
@@ -5961,11 +5963,11 @@ function WorkspaceChatLanding({
       jotaiStore.set(mobileHomeReturnTabAtom, null);
     }
   }, [jotaiStore]);
-  /* A developer-only beta gate (plus the team-workspace gate) drives the
+  /* A developer beta gate and verified notification admission drive the
      Inbox dock tab on mobile home. When it is off, a stale selection must
      render as Chat — as if the tab were never built. */
   const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
-  const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
+  const showMobileInbox = notificationQueryStatus === 'allowed' && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
     selectedMobileHomeTab === 'inbox' && !showMobileInbox ? 'chat' : selectedMobileHomeTab;
   useEffect(() => {

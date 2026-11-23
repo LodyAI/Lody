@@ -120,9 +120,7 @@ Read those invariants before editing their Swift or image assets.
 
 ## Home Screen widgets
 
-Live Activity summaries and widget publication require a matching, explicitly plaintext
-runtime; other states clear existing native snapshots; decrypted workspace content never enters ActivityKit
-or App Group storage.
+Widget publication requires a matching, explicitly plaintext runtime; other states clear native snapshots. Live Activity also supports admitted E2EE workspaces for GA, sharing summaries with push providers while omitting HTTP permission actions; approvals open the App for signed device actions.
 
 Require matched auth/runtime/workspace; latch logout per page. Token queries use
 identity; metadata reads require readiness. Pending may retain only decoded

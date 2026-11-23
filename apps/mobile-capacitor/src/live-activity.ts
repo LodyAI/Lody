@@ -13,7 +13,15 @@ export function initLiveActivityBridge(): void {
     syncConversationSummary(
       payload: LodyLiveActivitySyncPayload
     ): Promise<LodyLiveActivitySyncResult> {
-      return LodyLiveActivity.syncConversationSummary(payload);
+      return LodyLiveActivity.syncConversationSummary(
+        payload.contentMode === 'e2ee'
+          ? {
+              ...payload,
+              items: payload.items.map(({ permissionRequestId: _requestId, ...item }) => item),
+              permissionAlert: undefined,
+            }
+          : payload
+      );
     },
     endConversationSummary(payload: { activityId: string }): Promise<void> {
       return LodyLiveActivity.endConversationSummary(payload);

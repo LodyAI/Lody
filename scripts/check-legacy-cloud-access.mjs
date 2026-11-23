@@ -18,6 +18,7 @@ const legacyModules = new Set([
   'machineCredentials',
   'activity',
   'notifications',
+  'pushSubscriptions',
 ]);
 const legacyNames = new Set([
   'auth:transferWorkspaceOwnership',
@@ -39,6 +40,14 @@ const safeNames = new Map([
     name,
     'Numeric accounting and own daily activity support active encrypted ledger members; no workspace content.',
   ]),
+  [
+    'pushSubscriptions:configuration',
+    'Authenticated provider configuration; no workspace content.',
+  ],
+  [
+    'pushSubscriptions:unregister',
+    'Own installation cleanup must remain available after workspace revocation.',
+  ],
   [
     'auth:getUserById',
     'Display-only profile lookup returns null on denied membership/mode; never throws the mode refusal into render.',
@@ -123,7 +132,7 @@ const exceptions = new Map([
         'notifications:syncLiveActivitySummary',
       ].map((name) => [
         name,
-        'Ordinary CLI notification port; encrypted machine composition has no ordinary notification capability. Each failed operation is caught at the service boundary.',
+        'CLI notification port; encrypted runtime forwards only its own account recipient and removes HTTP permission actions. Device-only machine composition has no notification port. Failed operations are caught at the service boundary.',
       ]),
     ]),
   ],
@@ -183,6 +192,19 @@ const wrappers = new Set([
   'useLegacyWorkspaceMutation',
   'useLegacyWorkspaceAction',
 ]);
+const notificationNames = new Set([
+  'inbox:listMine',
+  'inbox:getSharingReviewState',
+  'inbox:markRead',
+  'inbox:dismiss',
+  'inbox:reconcileSharingReview',
+  'inbox:suppressSharingReview',
+  'pushSubscriptions:register',
+]);
+const notificationWrappers = new Set([
+  'useWorkspaceNotificationQuery',
+  'useWorkspaceNotificationMutation',
+]);
 const isLegacy = (name) => legacyModules.has(name.split(':')[0]) || legacyNames.has(name);
 
 function chain(node) {
@@ -203,6 +225,7 @@ export function auditLegacyCloudSource(file, source) {
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const apiRoots = new Set();
   const guardedCalls = new Set();
+  const notificationCalls = new Set();
   const githubGuardedCalls = new Set();
   const apiNamespaces = new Map();
   const referenceFactories = new Set(['makeFunctionReference']);
@@ -227,6 +250,8 @@ export function auditLegacyCloudSource(file, source) {
         (module.endsWith('cloud-api-operations') && original === 'cloudOperations')
       )
         apiRoots.add(binding.name.text);
+      if (module.endsWith('use-workspace-notifications') && notificationWrappers.has(original))
+        notificationCalls.add(binding.name.text);
       if (
         module.endsWith('use-github-workspace') &&
         [
@@ -280,6 +305,7 @@ export function auditLegacyCloudSource(file, source) {
       parent.arguments[0] === node &&
       ts.isIdentifier(parent.expression) &&
       (guardedCalls.has(parent.expression.text) ||
+        (notificationNames.has(name) && notificationCalls.has(parent.expression.text)) ||
         (githubGuardedCalls.has(parent.expression.text) && githubMetadataNames.has(name)));
     const reason = safeNames.get(name) ?? exceptions.get(file)?.get(name);
     const line = ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1;

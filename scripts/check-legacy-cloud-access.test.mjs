@@ -201,3 +201,50 @@ test('GitHub metadata wrappers never admit hosted PR caches or legacy identity r
     assert.equal(result.errors.length, allowed ? 0 : 1);
   }
 });
+
+test('notification admission permits only the exact GA inbox and registration operations', () => {
+  const preamble = `import { cloudOperations as api } from '@/lib/cloud-api-operations';
+    import { useWorkspaceNotificationQuery as read, useWorkspaceNotificationMutation as write } from '@/hooks/use-workspace-notifications';`;
+  for (const [method, names] of [
+    ['read', ['inbox.listMine', 'inbox.getSharingReviewState']],
+    [
+      'write',
+      [
+        'inbox.markRead',
+        'inbox.dismiss',
+        'inbox.reconcileSharingReview',
+        'inbox.suppressSharingReview',
+        'pushSubscriptions.register',
+      ],
+    ],
+  ])
+    for (const name of names) {
+      assert.deepEqual(
+        auditLegacyCloudSource(file, `${preamble} ${method}(api.${name});`).errors,
+        []
+      );
+      assert.equal(
+        auditLegacyCloudSource(file, `${preamble} useCloudMutation(api.${name});`).errors.length,
+        1
+      );
+    }
+  for (const name of [
+    'inbox.newEndpoint',
+    'github.getWorkspaceRepositories',
+    'machines.listVisibleMachines',
+    'notifications.syncLiveActivitySummary',
+    'pushSubscriptions.registerActivity',
+  ])
+    assert.equal(auditLegacyCloudSource(file, `${preamble} write(api.${name});`).errors.length, 1);
+  assert.equal(
+    auditLegacyCloudSource(
+      file,
+      `
+    import { cloudOperations } from '@/lib/cloud-api-operations';
+    import { useGithubWorkspaceQuery } from '@/hooks/use-github-workspace';
+    useGithubWorkspaceQuery(cloudOperations.inbox.listMine, { workspaceId });
+  `
+    ).errors.length,
+    1
+  );
+});

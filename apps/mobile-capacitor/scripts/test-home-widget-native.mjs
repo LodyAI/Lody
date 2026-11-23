@@ -17,6 +17,9 @@ if (process.platform !== 'darwin') {
         '-module-cache-path',
         join(temporary, 'modules'),
         fileURLToPath(new URL('../ios/App/App/LodyHomeWidgetStore.swift', import.meta.url)),
+        fileURLToPath(
+          new URL('../ios/App/App/LodyLiveActivityPermissionActionStore.swift', import.meta.url)
+        ),
         fileURLToPath(new URL('../ios/App/App/LodyTokenUsageWidgetStore.swift', import.meta.url)),
         fileURLToPath(
           new URL('../ios/App/App/LodyProviderQuotaWidgetStore.swift', import.meta.url)
