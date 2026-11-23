@@ -1,9 +1,143 @@
 <doc>
   <h1 id="ckwgnBjX"><code>apps/cli-rs</code> 核心接口、领域抽象与私有化自部署契约全景</h1>
-  <p id="EGMqjVeP">本文档完整呈现已在 <code>apps/cli-rs/</code> 落地并通过编译校验的 <b>13 个 Cargo Workspace 成员、20 个核心端口/应用层 Trait、纯函数状态机契约以及面向企业私有化自部署（Self-Hosted）的一等公民抽象设计</b>。所有接口均遵循 <code>specs/rust-cli-daemon-architecture.zh.md</code> 的五项准则：三平面单写者所有权、零 I/O 纯状态机、<code>operations.sqlite3</code> 唯一准入收件箱、唯一应用接口投影，以及端口/实现/组合根物理分离。</p>
+  <p id="EGMqjVeP">本文档完整呈现已在 <code>apps/cli-rs/</code> 落地并通过真实进程黑盒验证的 <b>14 个 Cargo Workspace 成员、21 个核心端口/应用层 Trait、纯函数状态机、单进程单 Fleet 多 Workspace 动态挂载/卸载隔离架构，以及面向企业私有化自部署（Self-Hosted）的一等公民抽象设计</b>。所有模块均遵循 <code>specs/rust-cli-daemon-architecture.zh.md</code> 的核心准则。</p>
   <alert id="hOrBkDSs" type="tip">
-    <p>配套交互探索台：<ref html="ports-inspector">打开交互式 Trait 图鉴、单向依赖沙盘与自部署装配模拟器</ref>（可按分类检索全部 21 项接口签名、点击任意 Crate 高亮编译期依赖边界，并实时模拟开源本地构建 / 公有云 / 企业内网自部署 / 授权到期软降级的鉴权判定）。背景演进记录可参考 <ref document="rust-cli-architecture">早期架构梳理文档</ref>。</p>
+    <p>配套画板与交互台：<ref whiteboard="cli-rs-progress-map">打开架构落地进度白板（已完成 vs 待完成全景图）</ref> · <ref html="ports-inspector">打开交互式 Trait 图鉴与自部署装配模拟器</ref> · 背景记录见 <ref document="rust-cli-architecture">早期架构梳理文档</ref>。</p>
   </alert>
+  <h2 id="xbat9i3d">零、 实时架构落地进度总览（已完成 vs 待完成）</h2>
+  <p id="e4xwkQTf">下图按颜色直观区分当前 <code>apps/cli-rs</code> 各层模块的真实工程状态：<b>绿色实线为已完成并通过真实进程测试</b>，<b>蓝色实线为主干已跑通（外围子能力待补）</b>，<b>橙色虚线为契约已锁定、待接入真实外部实现</b>（点击画布可直接进入白板缩放与批注）：</p>
+  <p id="ubFTVdy6"><ref whiteboard="cli-rs-progress-map" to="KiPf6d0yY1pg9r8QubFv5" frame="f-crate-status" embed="true" /></p>
+  <table id="rtZ9BhJt">
+    <tr>
+      <th>
+        <p>模块 / Crate</p>
+      </th>
+      <th>
+        <p>当前状态</p>
+      </th>
+      <th>
+        <p>已完成能力（均已通过测试闭环）</p>
+      </th>
+      <th>
+        <p>待完成子项（Next）</p>
+      </th>
+    </tr>
+    <tr>
+      <td>
+        <p><code>bins/lody</code> &amp; <code>lody-env</code></p>
+      </td>
+      <td>
+        <p><b>已完成</b></p>
+      </td>
+      <td>
+        <p>唯一组合根（<code>local</code> 编译期物理剥离后端 / <code>connected</code> 按 Profile 目录隔离）；<code>lody-env</code> + <code>clippy.toml</code> 编译期收口全工作区环境变量。</p>
+      </td>
+      <td>
+        <p><code>daemon-runner</code> 远程受管升级原子切换。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-ports</code> &amp; <code>lody-app</code></p>
+      </td>
+      <td>
+        <p><b>已完成</b></p>
+      </td>
+      <td>
+        <p>21 项核心 Trait（数据、单写存储、执行、6 大厂商无关自部署后端）、<code>VerifiedPrincipal</code>、安全模式防降级棘轮、<code>enforce_command_policy</code> 集中门禁。</p>
+      </td>
+      <td>
+        <p>从单一定义自动生成 TypeScript 协议类型与跨语言字节向量。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-kernel</code></p>
+      </td>
+      <td>
+        <p><b>已完成</b></p>
+      </td>
+      <td>
+        <p>零 I/O、零时钟、零克隆原地转移函数 <code>step</code>：统一收件箱去重/暂停/人类抢占自动化、代际隔离、权限挂起、Steer 三态、Goal 上限与单层子会话深度门禁。</p>
+      </td>
+      <td>
+        <p>与旧版 TS 会话历史轨迹做批量回放对拍。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-runtime</code></p>
+      </td>
+      <td>
+        <p><b>主干已通</b></p>
+      </td>
+      <td>
+        <p>单进程单 Fleet 内嵌 <code>FleetWorkspaceTable</code>（多 Workspace 动态挂载、防降级拦截、无锁排空卸载与单工作区擦除）+ 双通道控制优先 <code>SessionActor</code>。</p>
+      </td>
+      <td>
+        <p>本机存储锁让位（<code>StorageLease</code> 文件锁）、内嵌 <code>rquickjs</code> 求值与 Schedule 定时调度器。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-entry</code></p>
+      </td>
+      <td>
+        <p><b>主干已通</b></p>
+      </td>
+      <td>
+        <p><code>clap</code> CLI（<code>daemon start/stop/run/status</code>、<code>project add/list</code>、<code>session history/archive</code>）+ <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code> NDJSON 流，在线自动转发保单写者）。</p>
+      </td>
+      <td>
+        <p>新 <code>lody-mux.sock</code> 多路复用协议、进程内内置 MCP HTTP Server、<code>terminal.sock</code> PTY 服务与远端 Machine RPC 网关。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-sqlite</code> / <code>acp</code> / <code>worktree</code></p>
+      </td>
+      <td>
+        <p><b>主干已通</b></p>
+      </td>
+      <td>
+        <p><code>rusqlite</code> bundled WAL 单写收件箱/项目/历史与工作区擦除；<code>ACP over stdio</code> 握手/流式/权限/PGID 进程组；<code>git worktree add/remove</code> 隔离。</p>
+      </td>
+      <td>
+        <p><code>schedules.sqlite</code> 与 <code>automations</code> 分库读写；受管运行时制品 SHA-256 下载器；FastCDC <code>TurnDiffStore</code> 与并行文件树扫描。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-engine</code> &amp; <code>lody-backend</code></p>
+      </td>
+      <td>
+        <p><b>待实现（仅契约）</b></p>
+      </td>
+      <td>
+        <p>端口契约、组合根条件编译装配与自部署配置隔离模型已就位。</p>
+      </td>
+      <td>
+        <p>对接独立 <code>loro-repo-engine</code> 宿主进程与真实 Roost 存储；实现 <code>/.well-known</code> 自动发现、OIDC/自定义 CA、三模协商上传、多代码托管 SCM、E2EE 账本装钥与原生 <code>lody-iroh</code>。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-conformance</code> &amp; <code>scripted-acp</code></p>
+      </td>
+      <td>
+        <p><b>已完成 · 全绿</b></p>
+      </td>
+      <td>
+        <p>编译出的 Rust <code>lody</code> 二进制已实跑通过全部 6 大进程边界业务闭环 + 共享 <code>LODY_DATA_DIR</code> 重启热接力测试。</p>
+      </td>
+      <td>
+        <p>随新模块推进补充 MCP 子会话真委派与本地 Loopback 自部署 Mock 场景。</p>
+      </td>
+    </tr>
+  </table>
+  <p id="b5HG-Oi5">后续待完成模块的推荐推进顺序如下：</p>
+  <p id="aw3gTnge"><ref whiteboard="cli-rs-progress-map" to="KiPf6d0yY1pg9r8QubFv5" frame="f-next-roadmap" embed="true" /></p>
+  <hr id="1XdNEYiv" />
   <h2 id="ICAsfopc">一、 Workspace 单向依赖拓扑与编译期物理隔离</h2>
   <p id="v4GBtS6Y">整个 <code>apps/cli-rs</code> 去掉了冗余前缀，划分为 1 个二进制组合根（<code>bins/lody</code>）、10 个核心架构 Crate 与 2 个外部进程黑盒对照测试 Crate。依赖方向由各自 <code>Cargo.toml</code> 在编译期硬性锁死，<b>任何反向依赖或叶子实现之间的横向互调都会直接编译失败</b>：</p>
   <mermaid id="hI1hb2wR">flowchart TB
@@ -137,10 +271,10 @@ pub fn enforce_command_policy(
         <p><code>AppCommand</code></p>
       </td>
       <td>
-        <p><code>ConfigureBackendProfile</code>、<code>ClearBackendProfile</code>、<code>RegisterProject</code>、<code>CreateSession</code>、<code>SendChat</code>、<code>SteerTurn</code>、<code>CancelSession</code>、<code>ReplyPermission</code>、<code>DelegateChildSession</code>、<code>ArchiveSession</code></p>
+        <p><code>ConfigureBackendProfile</code>、<code>ClearBackendProfile</code>、<code>AttachWorkspace</code>、<code>DetachWorkspace</code>、<code>RegisterProject</code>、<code>CreateSession</code>、<code>SendChat</code>、<code>SteerTurn</code>、<code>CancelSession</code>、<code>ReplyPermission</code>、<code>DelegateChildSession</code>、<code>ArchiveSession</code></p>
       </td>
       <td>
-        <p>1. <code>ConfigureBackendProfile / ClearBackendProfile / RegisterProject</code> 强制要求 <code>LocalHost</code> 权威，远端调用直接返回 <code>Forbidden</code>；<br />2. 当工作区处于 <code>ExpiredReadOnly</code> 时，远端发起的新协作派发（建会话/发消息/Steer/子会话委派）返回 <code>EntitlementReadOnly</code>，但<b>本机操作与会话归档始终放行</b>。</p>
+        <p>1. <code>ConfigureBackendProfile / ClearBackendProfile / AttachWorkspace / DetachWorkspace / RegisterProject</code> 强制要求 <code>LocalHost</code> 权威，远端调用直接返回 <code>Forbidden</code>；<br />2. 当工作区处于 <code>ExpiredReadOnly</code> 时，远端发起的新协作派发（建会话/发消息/Steer/子会话委派）返回 <code>EntitlementReadOnly</code>，但<b>本机操作与会话归档始终放行</b>。</p>
       </td>
     </tr>
     <tr>
@@ -148,7 +282,7 @@ pub fn enforce_command_policy(
         <p><code>AppQuery</code></p>
       </td>
       <td>
-        <p><code>DaemonStatus</code>、<code>ListProjects</code>、<code>ListSessions</code>、<code>GetSessionHistory</code>、<code>GetTurnDiff</code></p>
+        <p><code>DaemonStatus</code>、<code>ListAttachedWorkspaces</code>、<code>ListProjects</code>、<code>ListSessions</code>、<code>GetSessionHistory</code>、<code>GetTurnDiff</code></p>
       </td>
       <td>
         <p>在任何授权状态（包括企业 License 过期或完全断网）下始终允许本机读取历史、Diff 与状态。</p>
