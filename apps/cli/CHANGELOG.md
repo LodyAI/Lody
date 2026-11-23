@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.114.1](https://github.com/LodyAI/Lody/compare/lody-cli-v0.114.0...lody-cli-v0.114.1) (2026-11-23)
+
+
+### Chores
+
+* **lody-cli:** Synchronize lody-clients versions
+
 ## [0.114.0](https://github.com/LodyAI/Lody/compare/efd385764538ae7d447f30a021737cbf22712a35...lody-cli-v0.114.0) (2026-11-23)
 
 ### Features
