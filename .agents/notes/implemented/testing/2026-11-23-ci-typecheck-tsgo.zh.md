@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/3226
 
 [English](2026-11-23-ci-typecheck-tsgo.md) | 中文
 
