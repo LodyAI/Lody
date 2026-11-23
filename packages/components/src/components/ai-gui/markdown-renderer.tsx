@@ -82,6 +82,7 @@ import {
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
+import { GenuiSurface } from './genui/genui-surface';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { MarkdownMermaidBlock } from './markdown-mermaid-block';
 import {
@@ -1195,6 +1196,11 @@ function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & Extra
     return <MarkdownMermaidBlock code={block.code} />;
   }
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
+  // An incomplete fence is still streaming: keep it as a code block until the
+  // commit boundary, so a half-written surface never renders.
+  if (block.language === 'genui' && !block.isIncomplete) {
+    return <GenuiSurface code={block.code} />;
+  }
   return <MarkdownFencedCodeBlock {...block} />;
 }
 

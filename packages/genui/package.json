@@ -1,0 +1,32 @@
+{
+  "name": "@lody/genui",
+  "version": "0.0.0",
+  "description": "Generative UI surface runtime: a confined JSX-subset view language with host-owned state.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "pnpm typecheck && pnpm test",
+    "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts'",
+    "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts'"
+  },
+  "dependencies": {
+    "acorn": "^8.15.0",
+    "acorn-jsx": "^5.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "^3.2.4"
+  },
+  "license": "Apache-2.0"
+}

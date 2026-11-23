@@ -1,0 +1,35 @@
+import type { Meta, StoryObj } from '@storybook/react';
+import { GenuiSurface } from '@/components/ai-gui/genui/genui-surface';
+
+const meta = {
+  title: 'AI GUI/GenUI Surface',
+  component: GenuiSurface,
+  tags: ['autodocs'],
+} satisfies Meta<typeof GenuiSurface>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+const interactive = `{@state const [value, setValue] = useState(65)}
+{@state const [enabled, setEnabled] = useState(true)}
+<card>
+  <column gap={8}>
+    <row>
+      <heading level={4}>Progress</heading>
+      <badge tone={enabled ? 'success' : 'neutral'}>{enabled ? 'On' : 'Off'}</badge>
+    </row>
+    <slider value={value} min={0} max={100} disabled={!enabled} onChange={(n) => setValue(n)} />
+    <row>
+      <switch checked={enabled} onCheckedChange={(v) => setEnabled(v)} />
+      <button onClick={() => setValue(65)}>Reset</button>
+    </row>
+  </column>
+</card>`;
+
+export const Interactive: Story = {
+  args: { code: interactive },
+};
+
+export const Broken: Story = {
+  args: { code: '<card><unclosed' },
+};
