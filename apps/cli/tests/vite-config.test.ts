@@ -1,6 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { build } from 'vite';
 import { describe, expect, it, vi } from 'vitest';
 
 import { inlinePackageManifestPlugin } from '../scripts/inline-package-manifest.mjs';
@@ -56,6 +58,49 @@ describe('CLI vite config', () => {
       } finally {
         vi.unstubAllEnvs();
       }
+    }
+  });
+
+  it('loads Node HTTP/2 in the packaged ACP ESM bundle', async () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-cli-http2-'));
+    try {
+      const entry = path.join(tmpRoot, 'node_modules', 'guarded-http2.cjs');
+      fs.mkdirSync(path.dirname(entry));
+      fs.writeFileSync(path.join(tmpRoot, 'package.json'), '{"type":"module"}');
+      fs.writeFileSync(
+        entry,
+        `const assert = require('node:assert/strict');
+let http2;
+try {
+  http2 = require('node:http2');
+} catch {
+  http2 = { constants: {} };
+}
+assert.equal(typeof http2.connect, 'function');
+`
+      );
+
+      const acpConfig = createViteConfig({ command: 'build', mode: 'acp-adapters' });
+      await build({
+        configFile: false,
+        root: tmpRoot,
+        logLevel: 'silent',
+        ssr: acpConfig.ssr,
+        build: {
+          ...acpConfig.build,
+          rollupOptions: {
+            ...acpConfig.build?.rollupOptions,
+            input: { 'http2-acp': entry },
+          },
+        },
+      });
+
+      const bundle = path.join(tmpRoot, 'dist', 'http2-acp.js');
+      const result = spawnSync(process.execPath, [bundle], { encoding: 'utf8', timeout: 5_000 });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 
