@@ -591,8 +591,18 @@ export function makeDesktopPersonalPairing(input: {
 }): PersonalPairing {
   const { db } = input
   db.exec(
-    'CREATE TABLE IF NOT EXISTS personal_pairing(session TEXT PRIMARY KEY,pin TEXT NOT NULL,request_hex TEXT,request_id TEXT,record BLOB,invitation_hex TEXT,retired INTEGER NOT NULL DEFAULT 0 CHECK(retired IN(0,1)))'
+    'CREATE TABLE IF NOT EXISTS personal_pairing(session TEXT PRIMARY KEY,pin TEXT NOT NULL,request_hex TEXT,request_id TEXT,record BLOB,invitation_hex TEXT,retired INTEGER NOT NULL DEFAULT 0 CHECK(retired IN(0,1)),completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN(0,1)))'
   )
+  if (
+    !db
+      .prepare('PRAGMA table_info(personal_pairing)')
+      .all()
+      .some((column) => column.name === 'completed')
+  ) {
+    db.exec(
+      'ALTER TABLE personal_pairing ADD COLUMN completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN(0,1))'
+    )
+  }
   type Row = {
     pin: string
     request_hex: string | null
@@ -609,6 +619,12 @@ export function makeDesktopPersonalPairing(input: {
     const member = own && state.members.get(hex(own.membershipId.toBytes()))
     if (!own || own.kind !== 'personal' || !member) throw fail('invalid-input')
     return own.membershipId
+  }
+  const canEndorseSnapshot = (view: LedgerView): boolean => {
+    const state = view.inspectState()
+    const own = state.devices.get(hex(input.signer.publicKey.toBytes()))
+    const role = own && state.members.get(hex(own.membershipId.toBytes()))?.role
+    return role === 'owner' || role === 'admin'
   }
   // Only original records below the verified endpoint can settle a signed CAS.
   // A later head or absent target device alone says nothing about an unknown result.
@@ -661,13 +677,21 @@ export function makeDesktopPersonalPairing(input: {
       const membershipId = hex(manager(view).toBytes())
       const old = db
         .prepare(
-          'SELECT * FROM personal_pairing WHERE invitation_hex IS NULL AND retired=0 ORDER BY rowid DESC LIMIT 1'
+          'SELECT * FROM personal_pairing WHERE invitation_hex IS NULL AND retired=0 AND completed=0 ORDER BY rowid DESC LIMIT 1'
         )
         .get()
       if (old) {
         const pin = PersonalPairingOfferSchema.parse(JSON.parse(String(old.pin)))
-        if (disposition(old as Row, view) !== 'lost') return pin
-        markRetired(pin.pairingSessionId)
+        const state = disposition(old as Row, view)
+        if (state === 'committed' && !canEndorseSnapshot(view)) {
+          db.prepare('UPDATE personal_pairing SET completed=1 WHERE session=?').run(
+            pin.pairingSessionId
+          )
+        } else if (state === 'lost') {
+          markRetired(pin.pairingSessionId)
+        } else {
+          return pin
+        }
       }
       const pin: PersonalPairingOffer = {
         version: 1,
@@ -840,11 +864,14 @@ export function makeDesktopPersonalPairing(input: {
       )
         throw fail('local-evidence-conflict')
     })
-    const own = view.inspectState().devices.get(hex(input.signer.publicKey.toBytes()))
-    const role = own && view.inspectState().members.get(hex(own.membershipId.toBytes()))?.role
     // A Member can admit its own additional personal device, but cannot endorse
     // a manager snapshot. The receiver verifies full history from the saved pin.
-    if (role !== 'owner' && role !== 'admin') return null
+    if (!canEndorseSnapshot(view)) {
+      yield* sql(() =>
+        db.prepare('UPDATE personal_pairing SET completed=1 WHERE session=?').run(pairingSessionId)
+      )
+      return null
+    }
     if (!row.invitation_hex) {
       const signed = yield* signLedgerSnapshot({ signer: input.signer, ledger: input.current })
       const receipt = {
@@ -914,11 +941,9 @@ export function makeDesktopPersonalPairing(input: {
       )
         throw fail('local-evidence-conflict')
     })
-    const own = view.inspectState().devices.get(hex(input.signer.publicKey.toBytes()))
-    const role = own && view.inspectState().members.get(hex(own.membershipId.toBytes()))?.role
     // Same rule as the per-workspace flow: a Member admits its own device but cannot
     // endorse a manager snapshot, so that workspace stays awaiting delivery.
-    if (role !== 'owner' && role !== 'admin') return null
+    if (!canEndorseSnapshot(view)) return null
     const snapshot = yield* signLedgerSnapshot({ signer: input.signer, ledger: input.current })
     const receipt = {
       workspaceId: input.workspaceId,
