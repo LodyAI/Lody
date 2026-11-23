@@ -6,7 +6,6 @@ import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from './conversation-font-size-classes';

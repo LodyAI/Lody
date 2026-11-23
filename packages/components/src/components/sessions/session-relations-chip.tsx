@@ -33,7 +33,6 @@ import {
   hasSessionRelations,
   type SessionRelationTreeNode,
 } from '@/lib/session-relation-tree';
-import { cn } from '@/lib/utils';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { useWorkingHandOver } from '@/ui/working-status-mark';
 import { PopoverActionChip } from './info-chip';

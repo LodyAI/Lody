@@ -1519,7 +1519,7 @@ const themeStyles = stylex.create({
   hint7: { marginTop: 'calc(var(--spacing) * 3)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
   row2: { marginInline: 'auto', marginTop: 'calc(var(--spacing) * 6)', display: 'inline-flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1.5)', borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: 'calc(var(--spacing) * 3)', paddingBlock: 'calc(var(--spacing) * 1)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading },
   column2: { marginInline: 'auto', marginTop: 'calc(var(--spacing) * 6)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'calc(var(--spacing) * 2)' },
-  panel2: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: uiColors.background, padding: 'calc(var(--spacing) * 2)', lineHeight: 1 },
+  panel2: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: '#fff', padding: 'calc(var(--spacing) * 2)', lineHeight: 1 },
   hint8: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
   hint9: { marginTop: 'calc(var(--spacing) * 1)', fontSize: uiText.subheadlineSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
   hint10: { marginBlock: 'calc(var(--spacing) * 6)', borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: 'calc(var(--spacing) * 4)', paddingBlock: 'calc(var(--spacing) * 5)', textAlign: 'start' },

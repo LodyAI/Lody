@@ -149,7 +149,7 @@ export function WebChatLandingScreen({
   );
 
   return (
-    <div className={screenClassName} style={screenStyle.style} {...dropHandlers}>
+    <div ref={dropRef} className={screenClassName} style={screenStyle.style} {...dropHandlers}>
       <WindowDragStrip />
       <ConversationDropOverlay active={dropActive} kind={dropKind} />
       {leftSidebarExpandSlot != null ? (

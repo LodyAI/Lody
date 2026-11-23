@@ -175,9 +175,12 @@ export function CompactRow({
   const Helper = helperBlock ? 'div' : 'p';
   const text = (
     <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
-      <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
-        {label}
-      </p>
+      <div {...stylex.props(rowStyles.labelLine)}>
+        <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
+          {label}
+        </p>
+        {info != null ? <SettingsInfo label={label}>{info}</SettingsInfo> : null}
+      </div>
       {helper ? (
         <Helper id={helperId} {...stylex.props(surface.rowHelper)}>
           {helper}

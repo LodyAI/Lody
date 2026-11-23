@@ -850,7 +850,7 @@ export function DesktopRunConfigMenu({
           </Tooltip.Content>
         </Tooltip.Root>
       )}
-      <Menu.Content align="start" minWidth="calc(var(--spacing) * 60)">
+      <Menu.Content align="start" minWidth="calc(var(--spacing) * 60)" {...menuSideProps(menuSide)}>
         <div {...stylex.props(surface.menuList)}>
           {onRecentRunConfigSelect ? (
             <RecentRunConfigMenuGroup

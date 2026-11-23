@@ -42,7 +42,6 @@ import { useSettingsPane } from './settings-page-header';
 import {
   settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
-  settingsCatalog as catalog,
 } from './surface';
 
 
