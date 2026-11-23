@@ -36,8 +36,9 @@ This does not disable RPC to an already authorized paired machine. Optional
 features must report unsupported instead of substituting ordinary transports.
 
 Tests cover account changes during I/O, original/scope checks, relay projections,
-history pagination, grants and SDK client compatibility. These synthetic boundary
-tests do not establish installed-app, native Keychain/Keystore or device acceptance.
+history pagination, grants and SDK client compatibility. Injected OS-labelled
+custody doubles validate host composition. Native Keychain/Keystore and
+installed-app acceptance require device testing.
 Use test-build for product acceptance; stable publishing is outside this task.
 
 `personalEntry({ run, pins, ports, ledgerRecords })` is the application owner.
@@ -88,3 +89,10 @@ Web recovery uses `personalEntryRecovery` on the existing facade. Its setup comm
 borrows one labelled reader and releases exactly that label; other readers and
 independent workspaces remain usable. Restore reuses the original offer/identity,
 and only a verified committed outcome makes the entry pin ready.
+
+## Transport composition
+
+The facade in [`src/entry.ts`](src/entry.ts) exposes the iroh methods when the
+wrapper supplies the native port. Route selection uses those methods to detect
+iroh support. The [mobile host test](../../apps/mobile-capacitor/tests/e2ee/mobile-host.test.ts)
+exercises the path from the facade to the native plugin boundary.

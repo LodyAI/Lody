@@ -26,8 +26,7 @@
   capability: core verifies policy signatures, pins and generations as on desktop. Its
   IndexedDB store is named per installation under the fixed namespace, its transport is
   the device-authenticated relay, and generations come only from local ledger originals.
-- Tests use synthetic identities and intercepted I/O. Injected OS-labelled custody
-  doubles prove composition, not Keychain/Keystore, product or device acceptance.
+- Tests use synthetic identities and intercepted I/O.
 
 - `personalEntry` is the sole application registry. Keep its Scope, executor
   dependency and complete incomplete-close owners until actual retirement; factory
@@ -70,11 +69,9 @@
   history again on its executor's clock: the workflow is serial, so an unanswered call would
   block every later pairing operation. A timeout is retryable, never access loss.
 
-- The facade in `src/entry.ts` forwards `irohReady`/`irohCall`/`irohPath` only when the wrapper passes `iroh`
-  because its ports compose a native iroh port; route selection keys on those
-  methods, so a host without the port keeps encrypted Streams RPC.
-  `irohPath` must reach the existing portable session without opening an endpoint;
-  `apps/mobile-capacitor/tests/e2ee/mobile-host.test.ts` covers the complete facade-to-plugin path.
+- Forward `irohReady`, `irohCall` and `irohPath` only when the wrapper passes `iroh`.
+  Hosts without the port keep encrypted Streams RPC. `irohPath` must reach the
+  existing portable session without opening an endpoint. See [transport composition](README.md#transport-composition).
 
 - `personalEntryRecovery` borrows the same registry/runtime as content. It exposes
   only setup/restore commands, releases only its own setup reader and marks pins
