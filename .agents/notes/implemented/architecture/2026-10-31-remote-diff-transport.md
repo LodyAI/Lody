@@ -22,9 +22,10 @@ production latency improvements.
 The additive `codeCollabDiffBlobs` v1 capability gates `open-diff-manifest` and
 `read-blob`. Missing support retains the old APIs and their budgets. Both new
 methods do not start watches or mutate evidence. Encrypted manifest/blob calls now
-use same-member read authority without execution claims or write-operation logs.
-The sender and receiver still reject cross-member Guest reads. This classification
-does not change shared-machine execution authority. The plaintext-cache and compatibility decisions are recorded
+are session reads without execution claims or write-operation logs: the owner decided
+(2026-11-23) that a Guest with a current read grant for the Session may view its diffs,
+under the same revocable policy as `session/history-read`. Saves and every write-lane
+diff method stay refused for Guests. This does not change shared-machine execution authority. The plaintext-cache and compatibility decisions are recorded
 for human review in the [draft Spec](../../../../specs/remote-diff-delivery.md).
 
 The manifest enumerates the existing turn/All Changes/single-path set, focus first,
@@ -244,9 +245,9 @@ pages, and rejected one additional byte. No live gateway limit probe was perform
   outside Code Collab's contract.
 - Content hashes in Flock are simpler invalidation but expose a confirmation oracle.
   Random generations preserve compatibility and avoid that disclosure.
-- Same-member manifest/blob reads retain session-bound authorization for Git bases
-  and retained evidence. Classifying them as reads removes write-operation logs,
-  but does not grant cross-member Guest access or shared-machine execution authority. Index/current/All Changes reads retain write
+- Manifest/blob reads are session reads: Git bases and retained evidence stay bound to
+  a current Session read grant, rechecked per page. Classifying them as reads removes
+  write-operation logs, but does not grant shared-machine execution authority. Index/current/All Changes reads retain write
   authority because they can start watches and publish; legacy turn reads retain it
   because their store adapter can initialize writable storage.
 - Encrypted IndexedDB plaintext has no established repository allowance. Memory-only

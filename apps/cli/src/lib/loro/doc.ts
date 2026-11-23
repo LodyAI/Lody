@@ -429,6 +429,7 @@ export interface LoroDocumentManagerOptions {
     | 'signScheduleDeclaration'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
+    | 'requestFeature'
   >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
@@ -518,6 +519,7 @@ export class LoroDocumentManager {
     | 'signScheduleDeclaration'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
+    | 'requestFeature'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -536,6 +538,14 @@ export class LoroDocumentManager {
   ): Promise<boolean> {
     if (!this.encryptedWorkspace) throw new Error('e2ee_access_unavailable');
     return Effect.runPromise(this.encryptedWorkspace.authorizeSessionTarget(target));
+  }
+
+  /** Encrypted workspaces: one feature request signed as this machine; `null` is no reply. */
+  requestEncryptedFeature(
+    request: Parameters<CliE2eeWorkspaceLegacy['requestFeature']>[0]
+  ): ReturnType<CliE2eeWorkspaceLegacy['requestFeature']> {
+    if (!this.encryptedWorkspace) return Promise.reject(new Error('e2ee_rpc_unavailable'));
+    return this.encryptedWorkspace.requestFeature(request);
   }
 
   /** Encrypted workspaces: a one-shot command's machine access, from this process's ledger. */
@@ -619,6 +629,7 @@ export class LoroDocumentManager {
         | 'signScheduleDeclaration'
         | 'authorizeMachineTarget'
         | 'authorizeSessionTarget'
+        | 'requestFeature'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;

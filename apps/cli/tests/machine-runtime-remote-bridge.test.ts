@@ -274,39 +274,24 @@ it('forks for the verified signer, owner or shared member, never a claimed reque
   );
   expect(forks).toHaveLength(1);
 
-  const branchReads: unknown[] = [];
+  const work: unknown[] = [];
   Object.assign(handler, {
-    readEncryptedMachineRequest: async (input: unknown) => {
-      branchReads.push(input);
+    handleEncryptedSessionWork: async (input: unknown, requester: unknown) => {
+      work.push({ input, requester });
       return { ok: true };
     },
   });
-  const branchRequest = {
+  const cancel = {
     workspaceId: 'workspace',
     machineId: 'machine',
-    method: 'local-project/list-branches' as const,
-    params: {
-      localProjectId: 'local-project-1',
-      requestedByUserId: 'member-account',
-      limit: 10,
-    },
+    method: 'session/cancel' as const,
+    params: { sessionId: 'session', turnId: 'assistant-1' },
   };
-  await expect(runtime.handleEncryptedFeatureRpc(branchRequest, context())).rejects.toThrow(
+  await expect(runtime.handleEncryptedFeatureRpc(cancel, context())).rejects.toThrow(
     'e2ee_feature_requester'
   );
-  await expect(
-    runtime.handleEncryptedFeatureRpc(
-      { ...branchRequest, params: { ...branchRequest.params, requestedByUserId: 'owner' } },
-      context(member)
-    )
-  ).rejects.toThrow('e2ee_feature_requester');
-  await runtime.handleEncryptedFeatureRpc(branchRequest, context(member));
-  expect(branchReads).toEqual([
-    {
-      ...branchRequest,
-      params: { ...branchRequest.params, requestedByUserId: 'e2ee-member:aa' },
-    },
-  ]);
+  await runtime.handleEncryptedFeatureRpc(cancel, context(member));
+  expect(work).toEqual([{ input: cancel, requester: member }]);
 });
 
 it('requires live verified authority for encrypted ACP interaction routing', async () => {

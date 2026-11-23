@@ -1100,6 +1100,15 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (response?.ok) return response.result as SessionSteerResponse;
       }
+      if (deps.protectedContent && !deps.requestEncryptedFeature)
+        return {
+          type: 'session/steer_response',
+          sessionId: args.sessionId,
+          userTurnId: args.userTurnId,
+          applied: false,
+          disposition: 'unsupported',
+          error: 'This machine cannot receive an encrypted steer.',
+        };
       return await (
         await getMachineRpcClient(machineId)
       ).requestSessionSteer({

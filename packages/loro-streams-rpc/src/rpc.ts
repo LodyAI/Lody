@@ -17,6 +17,7 @@ import {
 } from '@lody/shared';
 import { getAndroidEmulatorViewerSecretContext } from './rpc-secret';
 import {
+  LocalProjectGitStateRpcResponseSchema,
   LocalProjectListBranchesRpcResponseSchema as LoroLocalProjectListBranchesRpcResponseSchema,
   SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema,
   type LocalProjectListBranchesRpcResponse,
@@ -25,7 +26,11 @@ import {
   SessionWithdrawInputResponseSchema,
   type SessionWithdrawInputResponse,
 } from '@lody/shared/local-machine-rpc';
-import { isE2eeReadQuery, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
+import {
+  isE2eeReadQuery,
+  isE2eeRemoteControlMethod,
+  type E2eeQueryResult,
+} from '@lody/shared/e2ee-rpc';
 import {
   SessionFileRootIdSchema,
   FileDownloadResponseSchema,
@@ -161,7 +166,6 @@ import {
   deriveCodeCollabV2ContentKeyId,
   LocalProjectControlRequestSchema,
   LocalProjectControlResponseSchema,
-  LocalProjectGitStateSchema,
   MachineAcpBinaryInstallResponseSchema,
   MachineAcpBinaryProgressMessageSchema,
   MachineAcpBinaryStatusResponseSchema,
@@ -957,30 +961,7 @@ export {
   type LocalProjectListBranchesRpcResponse,
 };
 
-export const LoroLocalProjectGitStateRpcResponseSchema = z.discriminatedUnion('success', [
-  z
-    .object({
-      type: z.literal('local-project/git-state_response'),
-      machineId: z.string().trim().min(1),
-      workspaceId: z.string().trim().min(1),
-      localProjectId: z.string().trim().min(1),
-      success: z.literal(true),
-      state: LocalProjectGitStateSchema,
-      observedAtMs: z.number().nonnegative(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('local-project/git-state_response'),
-      machineId: z.string().trim().min(1),
-      workspaceId: z.string().trim().min(1),
-      localProjectId: z.string().trim().min(1),
-      success: z.literal(false),
-      error: z.string().trim().min(1),
-      message: z.string().trim().min(1).optional(),
-    })
-    .strict(),
-]);
+export const LoroLocalProjectGitStateRpcResponseSchema = LocalProjectGitStateRpcResponseSchema;
 
 const BaseRpcResponseSchema = z
   .object({
@@ -4506,7 +4487,11 @@ export class LoroStreamsMachineRpcClient {
         }
   ): Promise<LoroMachineRpcResult | null> {
     if (this.stopped) return null;
-    if (this.options.encryptedQuery && !isE2eeReadQuery(args.method, args.params))
+    if (
+      this.options.encryptedQuery &&
+      !isE2eeReadQuery(args.method, args.params) &&
+      !isE2eeRemoteControlMethod(args.method)
+    )
       throw new Error('e2ee_rpc_unavailable');
     await this.start();
     if (this.stopped) return null;

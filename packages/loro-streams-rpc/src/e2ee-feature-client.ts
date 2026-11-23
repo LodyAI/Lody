@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import {
   E2eeFeatureInputSchema,
+  e2eeFeatureTarget,
   isE2eeFeatureMethod,
   isE2eeReadQuery,
   type E2eeFeatureInput,
@@ -273,13 +274,10 @@ export function makeE2eeFeatureRpcClient(options: {
     if (args.request.workspaceId !== options.workspaceId)
       return yield* Effect.fail(new Error('e2ee_feature_scope'));
     const machineId = args.request.machineId;
-    // History reads and forks may target another member's machine; the receiver applies
-    // that machine's sharing policy. Every other feature stays same-member.
-    const sharedExecution =
-      args.request.method === 'session/fork' ||
-      args.request.method === 'local-project/list-branches';
-    const sharedTarget = args.request.method === 'session/history-read' || sharedExecution;
-    const signer = yield* options.targetSigner(machineId, sharedTarget);
+    // Only Session, project and history work may target another member's machine.
+    const target = e2eeFeatureTarget(args.request).kind;
+    const sharedExecution = target === 'session' || target === 'project';
+    const signer = yield* options.targetSigner(machineId, target !== 'machine');
     if (
       sharedExecution &&
       !(yield* (options.authorizeSharedExecution?.(machineId) ?? Effect.succeed(true)).pipe(
@@ -545,7 +543,7 @@ export function makeE2eeFeatureRpcClient(options: {
       !saved ||
       saved.target !== args.request.machineId ||
       saved.signer !==
-        (yield* options.targetSigner(saved.target, args.request.method === 'session/history-read'))
+        (yield* options.targetSigner(saved.target, e2eeFeatureTarget(args.request).kind !== 'machine'))
     )
       return yield* Effect.fail(new Error('e2ee_rpc_original_missing'));
     const original = yield* openFrames(saved.target, unpackFrames(saved.frame));

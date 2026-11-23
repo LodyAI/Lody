@@ -30,7 +30,7 @@
 
 - `personalEntry` is the sole application registry. Keep its Scope, executor
   dependency and complete incomplete-close owners until actual retirement; factory
-  calls remain synchronous and do not acquire resources during React render.
+  calls stay synchronous and acquire nothing during React render.
 - Creation uses a private `creation-<requestId>` routing scope in native custody,
   never the final workspace ID before the server names it. `recordCreated` rewraps
   the same device/epoch material into the real workspace binding, writes the
@@ -62,12 +62,12 @@
   acquiring it and each of its operations pass `project`, and the open and each refresh
   apply the status rule, so exact loss retires that pin. That rule also counts the public
   runtime's exact loss refusal of `status` (via `failureLoss`); any other status failure
-  proves nothing. The approver skips a workspace whose session fails; one broken
-  workspace never fails the list.
+  proves nothing. The approver skips a workspace whose session fails instead of
+  failing the list.
 - Hosts build pairing cloud ports with `makePersonalCloudAccountPairingPorts`, which fences
   each call on a signed-in account and bounds it. `personalEntry` bounds append, list and
-  history again on its executor's clock: the workflow is serial, so an unanswered call would
-  block every later pairing operation. A timeout is retryable, never access loss.
+  history again on its executor's clock, since one unanswered call blocks every later
+  serial pairing operation. A timeout is retryable, never access loss.
 
 - Forward `irohReady`, `irohCall` and `irohPath` only when the wrapper passes `iroh`.
   Hosts without the port keep encrypted Streams RPC. `irohPath` must reach the
@@ -82,14 +82,13 @@
   pin, and the engine retries once with the account offer so the host replaces it.
 - `makeClientRecovery` and `makeRecoveryWorkspaces` bound remote Convex RPCs at 90 s
   (leaving file/passkey ceremonies uncapped) so a dead WebSocket releases `commands`
-  and `active` instead of wedging recovery. `makeRecoveryWorkspaces` unlocks the vault
-  once for the selected workspaces and reports each workspace on its own. Only a
+  and `active`. `makeRecoveryWorkspaces` unlocks the vault once for the selected
+  workspaces and reports each separately. Only a
   committed, verified setup is recoverable. A timed-out 30 s wait is unconfirmed: it
   does not cancel the producer, journal, or submission. The pin database is
   `lody-e2ee:<platform>:v1:entry-pins` from the caller's fixed `web` or `mobile`
   platform, never from preferences or server input. Wrappers inject passkey and
-  commands. Secrets are wiped on the same paths as before; this engine adds no
-  persistence.
+  commands. Secrets keep their existing wipe paths; this engine adds no persistence.
 - `recoveryWorkspacesPort` serves the console's recovery port from that engine. It picks
   the file before any await, wipes it after the command, returns outcomes only, and
   answers once each workspace has a result, `Unconfirmed` included. Restore rows carry
@@ -98,8 +97,8 @@
 
 - Account pairing and recovery history use the same bounded public-history DTO
   projection as ordinary history reads. Strip backend advisory fields at the network boundary
-  before passing pages to the portable host; keep its strict capture, signature,
-  scope and checkpoint verification unchanged.
+  before passing pages to the portable host, whose strict capture, signature,
+  scope and checkpoint verification stay unchanged.
   Ledger append skips genesis prefetch; backend verification and parent-tail CAS remain authoritative.
   Only the backend's `e2ee_self_service_rate_limited` refusal with a non-negative integer
   `retryAt` becomes core's `self-service-rate-limited` ledger reason; every other append

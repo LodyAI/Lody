@@ -17,9 +17,10 @@ an expired source fails explicitly. Raw bytes must verify against the advertised
 content key before decoding or caching, including BOM and newline bytes.
 
 These two handlers do not start watches or mutate evidence. Encrypted manifest/blob
-calls use fresh session-bound read authority within the same member, without
-execution claims or write-operation logs. This does not grant cross-member Guest access to Git bases
-or retained evidence; shared-machine execution authority is a separate contract. Legacy methods that can publish
+calls are session reads, without execution claims or write-operation logs: the
+machine owner, a member who may work on the Session, or a Guest holding a current
+read grant for it ([session access](session-access.md)) may read them, and revoking
+the grant stops later pages. Shared-machine execution authority is a separate contract. Legacy methods that can publish
 or initialize writable storage retain writer authority.
 Shared file indexes carry only opaque per-path invalidation tokens, never content
 hashes that would reveal whether a guessed file body exists. Read-only evidence

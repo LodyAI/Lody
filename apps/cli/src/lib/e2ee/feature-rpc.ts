@@ -1,5 +1,5 @@
 import { Clock, Deferred, Effect } from 'effect';
-import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import { e2eeFeatureTarget, isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type { makeE2eeRpcNative } from '@lody/loro-streams-rpc/e2ee-native';
 import { makeEncryptedStreamsEnvelopeDelivery } from '@lody/loro-streams-rpc/e2ee-streams';
 import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
@@ -77,10 +77,12 @@ export function makeEncryptedFeatureAuthorization(options: {
     ) {
       if (!resolveHistoryTarget)
         return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+      // An unknown, deleted or foreign Session is a denial, never an unanswered request.
       const target = yield* Effect.tryPromise({
         try: () => resolveHistoryTarget(sessionId),
         catch: (cause) => cause,
-      });
+      }).pipe(Effect.orElseSucceed(() => undefined));
+      if (!target) return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
       const editing = yield* authorization.authorizeExecution(
         workspaceId,
         requester,
@@ -116,7 +118,7 @@ export type EncryptedFeatureContext = {
   expiresAt: number;
   signal: AbortSignal;
   authority?: { isCurrent(): boolean; signal: AbortSignal };
-  /** Set for session execution methods (`session/fork`) after their scope authorization. */
+  /** Set for Session and project work (`e2eeFeatureTarget`) after its scope authorization. */
   requester?: EncryptedFeatureRequester;
 };
 export type EncryptedFeatureHandler = (
@@ -153,7 +155,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     requesterDevice: string,
     sessionId: string
   ) => ReturnType<AuthorizeEncryptedExecution>;
-  /** Session execution methods (`session/fork`): owner or shared member, per project. */
+  /** Session work (`e2eeFeatureTarget` kind `session`): owner or shared member, per project. */
   authorizeSessionExecution?: (
     workspaceId: string,
     requesterDevice: string,
@@ -192,38 +194,28 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     const active = read ? reads : writes;
     if (active.has(envelope.id) || active.size >= 32) return true;
     active.add(envelope.id);
-    const historyRequest =
-      opened.input.request.method === 'session/history-read' ? opened.input.request : undefined;
-    const forkRequest =
-      opened.input.request.method === 'session/fork' ? opened.input.request : undefined;
-    const listBranchesRequest =
-      opened.input.request.method === 'local-project/list-branches'
-        ? opened.input.request
-        : undefined;
-    const authorize: AuthorizeEncryptedExecution = historyRequest
-      ? (workspaceId, requesterDevice) =>
-          options.authorizeHistoryRead?.(
-            workspaceId,
-            requesterDevice,
-            historyRequest.params.sessionId
-          ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
-      : forkRequest
+    const target = e2eeFeatureTarget(opened.input.request);
+    const sharedWork = target.kind === 'session' || target.kind === 'project';
+    const refused = Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const });
+    const authorize: AuthorizeEncryptedExecution =
+      target.kind === 'session-read'
         ? (workspaceId, requesterDevice) =>
-            options.authorizeSessionExecution?.(
-              workspaceId,
-              requesterDevice,
-              forkRequest.params.sourceSessionId
-            ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
-        : listBranchesRequest
+            options.authorizeHistoryRead?.(workspaceId, requesterDevice, target.sessionId) ??
+            refused
+        : target.kind === 'session'
           ? (workspaceId, requesterDevice) =>
-              options.authorizeProjectExecution?.(
-                workspaceId,
-                requesterDevice,
-                listBranchesRequest.params.localProjectId
-              ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
-          : read
-            ? options.authorizeRead
-            : options.authorize;
+              options.authorizeSessionExecution?.(workspaceId, requesterDevice, target.sessionId) ??
+              refused
+          : target.kind === 'project'
+            ? (workspaceId, requesterDevice) =>
+                options.authorizeProjectExecution?.(
+                  workspaceId,
+                  requesterDevice,
+                  target.localProjectId
+                ) ?? refused
+            : read
+              ? options.authorizeRead
+              : options.authorize;
     let requester: EncryptedFeatureRequester | undefined;
     const invoke = (authority: { isCurrent(): boolean; signal: AbortSignal } | undefined) =>
       Effect.acquireUseRelease(
@@ -271,7 +263,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       const authority = yield* authorize(options.workspaceId, opened.requesterDevice);
       const authoritySignal = options.authoritySignal?.();
       if (
-        (forkRequest || listBranchesRequest) &&
+        sharedWork &&
         authority._tag === 'Denied' &&
         authority.reason === 'e2ee_machine_not_shared' &&
         options.isOpen() &&
@@ -308,7 +300,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       if (
         authority._tag !== 'Authorized' ||
         ((opened.input.request.method === 'machine/acp-interaction' ||
-          opened.input.request.method === 'session/history-read') &&
+          target.kind === 'session-read') &&
           (!authority.isCurrent ||
             !authoritySignal ||
             authoritySignal.aborted ||
@@ -323,7 +315,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           : undefined;
       const currentAdmission = () =>
         !admittedAuthority || (!admittedAuthority.signal.aborted && admittedAuthority.isCurrent());
-      if (forkRequest || listBranchesRequest) {
+      if (sharedWork) {
         // Execution identity comes from the verified signer, never from the request.
         requester = options.requesterIdentity
           ? yield* options.requesterIdentity(opened.requesterDevice)
@@ -471,9 +463,10 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       for (const frame of frames) {
         // Metadata can change without a ledger/policy revision (for example an
         // assigned owner transfer). Re-resolve actual target access after stream I/O.
-        const latest = historyRequest
-          ? yield* authorize(options.workspaceId, opened.requesterDevice)
-          : current;
+        const latest =
+          target.kind === 'session-read'
+            ? yield* authorize(options.workspaceId, opened.requesterDevice)
+            : current;
         if (
           latest._tag !== 'Authorized' ||
           (latest.isCurrent && !latest.isCurrent()) ||
