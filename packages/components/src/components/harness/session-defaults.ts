@@ -49,13 +49,25 @@ interface ConfigIds {
 export function readSessionDefault(
   defaults: AgentSessionDefaults | undefined,
   key: SessionDefaultKey,
-  ids: ConfigIds
+  ids: ConfigIds,
+  fallbackModelId?: string
 ): string | undefined {
   const values = defaults?.configOptionValues ?? {};
   const read = (id: string) =>
     typeof values[id] === 'string' ? (values[id] as string) : undefined;
-  if (key === 'mainModel') return read(ids.model) ?? defaults?.modelId;
-  if (key === 'effort') return read(ids.effort);
+  const storedModel = read(ids.model) ?? defaults?.modelId;
+  if (key === 'mainModel') return storedModel;
+  if (key === 'effort') {
+    const activeModel = storedModel ?? fallbackModelId;
+    const perModel = activeModel
+      ? defaults?.modelConfigOptionValues?.[activeModel]?.[ids.effort]
+      : undefined;
+    if (typeof perModel === 'string') return perModel;
+    if (!activeModel || !storedModel || activeModel === storedModel) {
+      return read(ids.effort);
+    }
+    return undefined;
+  }
   const mode = read(SORBET_PERMISSION_MODE_CONFIG_ID);
   return mode ? PERMISSION_MODE_AUTONOMY[mode] : undefined;
 }
@@ -64,20 +76,53 @@ export function writeSessionDefault(
   defaults: AgentSessionDefaults | undefined,
   key: SessionDefaultKey,
   value: string,
-  ids: ConfigIds
+  ids: ConfigIds,
+  fallbackModelId?: string
 ): AgentSessionDefaults {
   const configOptionValues = { ...defaults?.configOptionValues };
+  const modelConfigOptionValues = defaults?.modelConfigOptionValues
+    ? { ...defaults.modelConfigOptionValues }
+    : {};
+  const previousModel =
+    (typeof configOptionValues[ids.model] === 'string'
+      ? (configOptionValues[ids.model] as string)
+      : undefined) ?? defaults?.modelId;
   const next: AgentSessionDefaults = { ...defaults, configOptionValues };
   if (key === 'mainModel') {
+    if (
+      previousModel &&
+      typeof configOptionValues[ids.effort] === 'string' &&
+      modelConfigOptionValues[previousModel]?.[ids.effort] === undefined
+    ) {
+      modelConfigOptionValues[previousModel] = {
+        ...modelConfigOptionValues[previousModel],
+        [ids.effort]: configOptionValues[ids.effort],
+      };
+    }
+    delete configOptionValues[ids.effort];
     // Sorbet carries the model as a config option; a legacy id would only
     // switch the model a second time.
     configOptionValues[ids.model] = value;
     delete next.modelId;
   } else if (key === 'effort') {
-    configOptionValues[ids.effort] = value;
+    const targetModel = previousModel ?? fallbackModelId;
+    if (targetModel) {
+      modelConfigOptionValues[targetModel] = {
+        ...modelConfigOptionValues[targetModel],
+        [ids.effort]: value,
+      };
+      delete configOptionValues[ids.effort];
+    } else {
+      configOptionValues[ids.effort] = value;
+    }
   } else {
     configOptionValues[SORBET_PERMISSION_MODE_CONFIG_ID] =
       AUTONOMY_PERMISSION_MODE[value as Autonomy] ?? value;
+  }
+  if (Object.keys(modelConfigOptionValues).length > 0) {
+    next.modelConfigOptionValues = modelConfigOptionValues;
+  } else {
+    delete next.modelConfigOptionValues;
   }
   return next;
 }
@@ -122,6 +167,10 @@ export function useSessionDefaults(scope: Scope): SessionDefaults {
   const permissionOption = capabilities.capability?.configOptions?.find(
     (option) => option.id === SORBET_PERMISSION_MODE_CONFIG_ID && option.type === 'select'
   );
+  const currentDeviceModel =
+    typeof capabilities.modelOption?.currentValue === 'string'
+      ? capabilities.modelOption.currentValue
+      : undefined;
 
   const agentCurrent = (key: SessionDefaultKey): string | undefined => {
     const option =
@@ -136,7 +185,8 @@ export function useSessionDefaults(scope: Scope): SessionDefaults {
   };
   const deviceValue = (machineId: string | undefined, key: SessionDefaultKey) => {
     const config = machineId ? configs.get(machineId as MachineId) : undefined;
-    const stored = readSessionDefault(config?.sessionDefaults, key, ids);
+    const fallbackModel = machineId === device?.id ? currentDeviceModel : undefined;
+    const stored = readSessionDefault(config?.sessionDefaults, key, ids, fallbackModel);
     return stored ?? (machineId === device?.id ? agentCurrent(key) : undefined);
   };
   const profileSet = new Set(state.profileKeys ?? []);
@@ -165,9 +215,17 @@ export function useSessionDefaults(scope: Scope): SessionDefaults {
         await Promise.all(
           targets.map(async (config) => {
             try {
+              const fallbackModel =
+                config.machineId === device?.id ? currentDeviceModel : undefined;
               await updateConfig({
                 ...config,
-                sessionDefaults: writeSessionDefault(config.sessionDefaults, key, value, ids),
+                sessionDefaults: writeSessionDefault(
+                  config.sessionDefaults,
+                  key,
+                  value,
+                  ids,
+                  fallbackModel
+                ),
               });
             } catch {
               failed.push(config.machineId);
@@ -188,7 +246,7 @@ export function useSessionDefaults(scope: Scope): SessionDefaults {
         setSaving((count) => count - 1);
       }
     },
-    [ids, refreshCapabilities, updateConfig]
+    [currentDeviceModel, device?.id, ids, refreshCapabilities, updateConfig]
   );
 
   const set = useCallback(
