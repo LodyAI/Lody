@@ -126,6 +126,10 @@ export class SessionAttachmentTransfer {
     private readonly serverBaseUrl?: string,
     private readonly encrypted?: { token(): Promise<string> }
   ) {}
+  get contentMode(): 'plaintext' | 'protected' {
+    return this.encrypted ? 'protected' : 'plaintext';
+  }
+
   private resolveServerBaseUrl(): string {
     const url = this.serverBaseUrl?.trim();
     if (!url) throw new Error('cloud_attachment_upload_unavailable');
