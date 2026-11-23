@@ -454,6 +454,10 @@ const SessionRunConfigInputShape = {
     .optional()
     .describe('runConfig.reasoningEffortValues choice.'),
   fastMode: z.boolean().optional().describe('Fast on/off; requires runConfig.fastMode support.'),
+  speedTier: z
+    .enum(['normal', 'fast', 'ultrafast'])
+    .optional()
+    .describe('Speed tier choice; requires runConfig.speedTiers support.'),
   planMode: z.boolean().optional().describe('Plan on/off; requires runConfig.planMode support.'),
 };
 
@@ -1574,12 +1578,14 @@ const buildMcpTurnDispatchConfig = (input: {
   modelId?: string;
   reasoningEffort?: string;
   fastMode?: boolean;
+  speedTier?: 'normal' | 'fast' | 'ultrafast';
   planMode?: boolean;
 }): ResolvedTurnDispatchConfig => {
   const runConfig: AgentRunConfigSelection = {
     ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
     ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
     ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
+    ...(input.speedTier !== undefined ? { speedTier: input.speedTier } : {}),
     ...(input.planMode !== undefined ? { planMode: input.planMode } : {}),
   };
   return {
@@ -1600,6 +1606,7 @@ const buildMcpRunConfigCanonicalCommand = (input: {
   modelId?: string;
   reasoningEffort?: string;
   fastMode?: boolean;
+  speedTier?: 'normal' | 'fast' | 'ultrafast';
   planMode?: boolean;
 }): Record<string, string | boolean | Record<string, string | boolean>> => ({
   ...(input.modeId !== undefined ? { modeId: input.modeId } : {}),
@@ -1609,6 +1616,7 @@ const buildMcpRunConfigCanonicalCommand = (input: {
   ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
   ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
   ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
+  ...(input.speedTier !== undefined ? { speedTier: input.speedTier } : {}),
   ...(input.planMode !== undefined ? { planMode: input.planMode } : {}),
 });
 

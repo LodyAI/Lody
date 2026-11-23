@@ -715,4 +715,46 @@ describe('multi-tier speed options', () => {
       resolveAgentRunConfigSelection({ modelId: 'slow-model', fastMode: true }, capability)
     ).toThrow('Model slow-model does not offer fast mode.');
   });
+
+  it('maps normal, fast, and ultrafast speedTier selections and validates per model', () => {
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', speedTier: 'ultrafast' }, capability)
+    ).toEqual({
+      modelId: 'gpt-6.2-sol',
+      configOptionValues: { 'fast-mode': 'ultrafast' },
+      validatedConfigIds: ['fast-mode'],
+    });
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', speedTier: 'normal' }, capability)
+        .configOptionValues
+    ).toEqual({ 'fast-mode': 'off' });
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'gpt-6.2-astra', speedTier: 'ultrafast' },
+        capability
+      )
+    ).toThrow(
+      'Model gpt-6.2-astra does not offer speed tier ultrafast. Allowed values: normal, fast.'
+    );
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'slow-model', speedTier: 'fast' }, capability)
+    ).toThrow('Model slow-model does not offer fast speed tier.');
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'gpt-6.2-sol', fastMode: false, speedTier: 'ultrafast' },
+        capability
+      )
+    ).toThrow(/Conflicting fastMode/);
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', speedTier: 'warp' }, capability)
+    ).toThrow(/Invalid speed tier: warp/);
+
+    const summary = summarizeAgentRunConfigCapabilities(capability);
+    expect(summary.speedTiers).toEqual(['fast', 'ultrafast']);
+    expect(summary.models).toEqual([
+      { id: 'gpt-6.2-sol', name: '6.2 Sol', speedTiers: ['fast', 'ultrafast'] },
+      { id: 'gpt-6.2-astra', name: '6.2 Astra', speedTiers: ['fast'] },
+      { id: 'slow-model', name: 'Slow', speedTiers: [] },
+    ]);
+  });
 });

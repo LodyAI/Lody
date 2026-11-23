@@ -198,6 +198,54 @@ describe('automatic role schema reconciliation', () => {
     });
   });
 
+  it('removes borrowed thought_level once observedModelConfigOptions proves the target model omits it', () => {
+    const antigravityCapability: AcpCapabilityCacheEntry = {
+      cliType: 'custom',
+      agentType: 'antigravity-acp',
+      provenance: 'runtime',
+      fetchedAt: 2,
+      modes: [{ id: 'agent', name: 'Agent' }],
+      models: [
+        { modelId: 'claude-opus-4-6-thinking', name: 'Claude Opus' },
+        { modelId: 'gemini-orchestrator', name: 'Carbon' },
+      ],
+      configOptions: [
+        {
+          id: 'thought_level',
+          category: 'thought_level',
+          name: 'Thinking',
+          type: 'select',
+          currentValue: 'high',
+          options: [{ value: 'high', name: 'High' }],
+        },
+      ],
+      observedModelConfigOptions: {
+        'gemini-orchestrator': [],
+      },
+    };
+    const carbonRole = role({
+      runConfig: {
+        modeId: 'agent',
+        modelId: 'gemini-orchestrator',
+        configOptionValues: { thought_level: 'high' },
+      },
+    });
+    expect(reconcileAgentRoleSchema(carbonRole, antigravityCapability).runConfig).toEqual({
+      modeId: 'agent',
+      modelId: 'gemini-orchestrator',
+      configOptionValues: {},
+    });
+
+    const unrecordedRole = role({
+      runConfig: {
+        modeId: 'agent',
+        modelId: 'unrecorded-model',
+        configOptionValues: { thought_level: 'high' },
+      },
+    });
+    expect(reconcileAgentRoleSchema(unrecordedRole, antigravityCapability)).toBe(unrecordedRole);
+  });
+
   it.each([
     [{ interaction_mode: 'plan' }, true],
     [{ interaction_mode: 'plan', collaboration_mode: 'default' }, false],
@@ -223,6 +271,7 @@ const selectorOptions = (overrides: Partial<AcpSelectorOptions> = {}): AcpSelect
     {
       type: 'select',
       configId: 'thought_level',
+      category: 'thought_level',
       label: 'Reasoning',
       currentValue: 'medium',
       options: [
@@ -307,6 +356,42 @@ describe('building a role from the form', () => {
       modelId: 'retired-model',
       modeId: 'retired-mode',
       configOptionValues: { thought_level: 'medium', 'fast-mode': false },
+    });
+  });
+
+  it('does not inject borrowed thought_level or fast-mode defaults when saving a role on another model', () => {
+    const borrowedCapabilities = selectorOptions({
+      modelConfigOptionsSource: 'borrowed',
+      configOptionSelectors: [
+        ...selectorOptions().configOptionSelectors,
+        {
+          type: 'select',
+          configId: 'permission_mode',
+          category: '_permission',
+          label: 'Permission',
+          currentValue: 'auto',
+          options: [{ value: 'auto', label: 'Auto' }],
+        },
+      ],
+    });
+    const seeded = applyAgentRoleRunConfigDefaults(
+      targetValue({ modelId: 'gemini-orchestrator', modeId: 'default', configOptionValues: {} }),
+      borrowedCapabilities
+    );
+    expect(seeded.configOptionValues).toEqual({ permission_mode: 'auto' });
+
+    const saved = buildAgentRoleFromForm(
+      formValue({
+        modelId: 'gemini-orchestrator',
+        modeId: 'default',
+        configOptionValues: seeded.configOptionValues,
+      }),
+      { ownerUserId: 'user-1', now: 20, createId, selectorOptions: borrowedCapabilities }
+    );
+    expect(saved.runConfig).toEqual({
+      modelId: 'gemini-orchestrator',
+      modeId: 'default',
+      configOptionValues: { permission_mode: 'auto' },
     });
   });
 

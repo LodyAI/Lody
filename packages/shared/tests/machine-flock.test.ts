@@ -25,6 +25,7 @@ import {
   getRateLimitEntryKey,
   parseRateLimitEntryKey,
   getAcpCapabilityCacheKey,
+  withAgentSessionDefaults,
   type AgentConfigId,
   type LocalProjectId,
   type MachineId,
@@ -529,6 +530,11 @@ describe('machine Flock helpers', () => {
       sessionDefaults: {
         modelId: 'anthropic/claude-fable-5',
         configOptionValues: { permission_mode: 'auto', fast: true, broken: { nested: 1 } },
+        modelConfigOptionValues: {
+          'anthropic/claude-fable-5': { thought_level: 'high', 'fast-mode': 'ultrafast' },
+          'openai/gpt-6': { thought_level: 'low', secret_api_key: 'sk-drop' },
+          empty_model: { broken: { nested: 1 } },
+        },
       },
     });
     flock.set(machineFlockKeys.agentConfig('other' as AgentConfigId), {
@@ -544,9 +550,27 @@ describe('machine Flock helpers', () => {
     const configs = getMachineFlockAgentConfigs(
       readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })
     );
-    expect(configs['sorbet' as AgentConfigId]?.sessionDefaults).toEqual({
+    const savedDefaults = configs['sorbet' as AgentConfigId]?.sessionDefaults;
+    expect(savedDefaults).toEqual({
       modelId: 'anthropic/claude-fable-5',
       configOptionValues: { permission_mode: 'auto', fast: true },
+      modelConfigOptionValues: {
+        'anthropic/claude-fable-5': { thought_level: 'high', 'fast-mode': 'ultrafast' },
+        'openai/gpt-6': { thought_level: 'low' },
+      },
+    });
+    expect(withAgentSessionDefaults({ modelId: 'openai/gpt-6' }, savedDefaults)).toEqual({
+      modelId: 'openai/gpt-6',
+      configOptionValues: {
+        permission_mode: 'auto',
+        thought_level: 'low',
+      },
+    });
+    expect(withAgentSessionDefaults({ modelId: 'model-without-effort' }, savedDefaults)).toEqual({
+      modelId: 'model-without-effort',
+      configOptionValues: {
+        permission_mode: 'auto',
+      },
     });
     expect(configs['other' as AgentConfigId]?.name).toBe('Other');
     expect(configs['other' as AgentConfigId]?.sessionDefaults).toBeUndefined();

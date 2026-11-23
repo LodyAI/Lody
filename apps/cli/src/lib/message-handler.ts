@@ -357,7 +357,11 @@ import {
   type ACPUpdateTarget,
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
-import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import {
+  fetchAcpCapabilities,
+  normalizeConfigOptions,
+  type FetchAcpCapabilitiesOptions,
+} from '@/agent/acp-capabilities';
 import { resolveExpectedAcpCapabilitySourceVersion } from '@/agent/setting';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
@@ -1946,6 +1950,35 @@ export class MessageHandler {
     }
   }
 
+  private recordSessionObservedModelConfigOptions(
+    sessionId: SessionId,
+    configOptions: AcpConfigOptionSummary[] | undefined,
+    sessionDocHint?: SessionDocument
+  ): void {
+    if (!configOptions || configOptions.length === 0) return;
+    void (async () => {
+      const sessionDoc =
+        sessionDocHint ?? (await this.workspaceDocument.getOrCreateSessionDoc(sessionId));
+      const agentConfigId = (await sessionDoc.getMetaState())?.agentConfigId;
+      if (!agentConfigId) return;
+      const sourceVersion =
+        this.sessionManager.getSession(sessionId)?.getAcpCapabilitySourceVersion?.() ??
+        (await this.workspaceDocument.getAcpCapabilities(this.machineId, agentConfigId))
+          ?.sourceVersion;
+      if (!sourceVersion) return;
+      await this.workspaceDocument.recordObservedAcpModelConfigOptions(
+        this.machineId,
+        agentConfigId,
+        sourceVersion,
+        configOptions
+      );
+    })().catch((error: unknown) => {
+      this.logger.debug(
+        `[${sessionId}] Failed to record observed model config options: ${formatErrorMessage(error)}`
+      );
+    });
+  }
+
   private async applyAcpModeAndModel(
     session: {
       sessionId: SessionId;
@@ -1965,6 +1998,11 @@ export class MessageHandler {
       logger: this.logger,
       signal: context.signal,
     });
+    this.recordSessionObservedModelConfigOptions(
+      session.sessionId,
+      normalizeConfigOptions(session.agentClient?.getConfigOptions?.()),
+      context.sessionDoc
+    );
 
     if (runtimeConfigPatch && context.basedOnUserTurnId) {
       const basedOnUserTurnId = context.basedOnUserTurnId;
@@ -5595,6 +5633,14 @@ export class MessageHandler {
       this.persistOutOfTurnAvailableCommands(sessionId, update);
       return;
     }
+    if (!target && update.update.sessionUpdate === 'config_option_update') {
+      this.recordSessionObservedModelConfigOptions(
+        sessionId,
+        normalizeConfigOptions(update.update.configOptions)
+      );
+      this.persistOutOfTurnAvailableCommands(sessionId, update);
+      return;
+    }
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -6149,6 +6195,15 @@ export class MessageHandler {
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
+          for (const buffered of group.updates) {
+            if (buffered.notification.update.sessionUpdate === 'config_option_update') {
+              this.recordSessionObservedModelConfigOptions(
+                sessionId,
+                normalizeConfigOptions(buffered.notification.update.configOptions),
+                sessionDoc
+              );
+            }
+          }
           const runtimeConfigPatch = mergeAcpRuntimeConfigUpdates(
             group.updates.map((update) => update.notification)
           );

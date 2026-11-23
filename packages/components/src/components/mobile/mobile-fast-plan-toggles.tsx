@@ -2,9 +2,13 @@ import { useMemo, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ListChecks, Zap, ZapOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { ACP_FAST_MODE_VALUE_ULTRAFAST, isAcpNormalSpeedAlias } from '@lody/shared';
 import { Toggle } from '@lody/ui/toggle';
+import { StackedZapIcon } from '@/components/icons/stacked-zap-icon';
 import { composerSurface } from '@/components/shared/composer-surface';
 import {
+  CONFIG_OPTION_OFF_VALUE,
+  resolveConfigOptionValue,
   resolveOnOffConfigOptionEnabled,
   resolvePlanModeSelectorEnabled,
   toggleOnOffConfigOptionValue,
@@ -44,10 +48,54 @@ export function MobileFastModeToggle({
   disabled,
   className,
 }: SharedTogglesProps) {
-  const { fastModeSelectors } = useMemo(
+  const { fastModeSelectors, speedTierSelectors } = useMemo(
     () => orderAcpConfigOptionSelectors(configOptionSelectors),
     [configOptionSelectors]
   );
+  const speedSelector = speedTierSelectors[0];
+  if (speedSelector) {
+    const currentValue = String(
+      resolveConfigOptionValue(speedSelector, configOptionValues?.[speedSelector.configId])
+    );
+    const active = currentValue !== CONFIG_OPTION_OFF_VALUE && !isAcpNormalSpeedAlias(currentValue);
+    const isUltrafast = currentValue === ACP_FAST_MODE_VALUE_ULTRAFAST;
+    const optionValues = speedSelector.options.map((opt) => opt.value);
+    const currentIndex = optionValues.indexOf(currentValue);
+    const nextValue =
+      optionValues.length > 0 ? optionValues[(currentIndex + 1) % optionValues.length] : undefined;
+    const currentOptionLabel = speedSelector.options.find(
+      (opt) => opt.value === currentValue
+    )?.label;
+    const ariaLabel = currentOptionLabel
+      ? `${speedSelector.label}: ${currentOptionLabel}`
+      : speedSelector.label;
+    return (
+      <ToggleButton
+        ariaLabel={ariaLabel}
+        active={active}
+        disabled={disabled}
+        onToggle={() => {
+          if (nextValue !== undefined) {
+            onConfigOptionChange?.(speedSelector.configId, nextValue);
+          }
+        }}
+        className={className}
+      >
+        {isUltrafast ? (
+          <StackedZapIcon
+            {...stylex.props(composerSurface.glyph16)}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        ) : active ? (
+          <Zap {...stylex.props(composerSurface.glyph16)} strokeWidth={1.8} aria-hidden="true" />
+        ) : (
+          <ZapOff {...stylex.props(composerSurface.glyph16)} strokeWidth={1.8} aria-hidden="true" />
+        )}
+      </ToggleButton>
+    );
+  }
+
   const fastSelector = fastModeSelectors[0];
   const fastValue = fastSelector
     ? resolveOnOffConfigOptionEnabled(fastSelector, configOptionValues?.[fastSelector.configId])

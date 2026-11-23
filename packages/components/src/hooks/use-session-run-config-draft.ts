@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo } from 'react';
+import { useCallback, useLayoutEffect, useMemo, type RefObject } from 'react';
 import { atom, useAtomValue, useStore } from 'jotai';
 import type { AcpConfigOptionValue } from '@lody/shared';
 import {
@@ -10,14 +10,23 @@ import {
   releaseSessionRunConfigDraftLeaseAtom,
   sessionRunConfigDraftAccountAtom,
   sessionRunConfigDraftsAtom,
+  type SessionRunConfigDraftEdit,
   type SessionRunConfigDraftLease,
   type SessionRunConfigDraftScope,
 } from '@/atoms/session-run-config-drafts';
 import type { AcpSessionConfigPreferences } from '@/lib/acp-session-config-selection';
 
+export type SessionRunConfigModelContext = {
+  fallbackModelId: string | null;
+  resolvedModelId: string | null;
+  modelConfigId: string | null;
+  perModelConfigIds: ReadonlySet<string>;
+};
+
 export function useSessionRunConfigDraft(
   scope: SessionRunConfigDraftScope | undefined,
-  enabled: boolean
+  enabled: boolean,
+  modelContextRef?: RefObject<SessionRunConfigModelContext>
 ) {
   const store = useStore();
   const owner = useAtomValue(sessionRunConfigDraftAccountAtom);
@@ -57,7 +66,7 @@ export function useSessionRunConfigDraft(
     };
   }, [enabled, stableScope, store, leaseSlot]);
   const update = useCallback(
-    (edit: Parameters<typeof editSessionRunConfigDraftAtom.write>[2]['edit']) => {
+    (edit: SessionRunConfigDraftEdit) => {
       if (leaseSlot.current)
         store.set(editSessionRunConfigDraftAtom, { lease: leaseSlot.current, edit });
     },
@@ -66,13 +75,28 @@ export function useSessionRunConfigDraft(
   const actions = useMemo(
     () => ({
       selectMode: (value: string | null) => update({ type: 'mode', value }),
-      selectModel: (value: string | null) => update({ type: 'model', value }),
+      selectModel: (value: string | null) =>
+        update({
+          type: 'model',
+          value,
+          fallbackModelId: modelContextRef?.current?.fallbackModelId ?? null,
+          resolvedModelId: modelContextRef?.current?.resolvedModelId ?? null,
+          perModelConfigIds: modelContextRef?.current?.perModelConfigIds,
+        }),
       selectConfigOption: (configId: string, value: AcpConfigOptionValue) =>
-        update({ type: 'config', configId, value }),
+        update({
+          type: 'config',
+          configId,
+          value,
+          fallbackModelId: modelContextRef?.current?.fallbackModelId ?? null,
+          resolvedModelId: modelContextRef?.current?.resolvedModelId ?? null,
+          modelConfigId: modelContextRef?.current?.modelConfigId ?? null,
+          perModelConfigIds: modelContextRef?.current?.perModelConfigIds,
+        }),
       replaceConfigOptions: (values: Record<string, AcpConfigOptionValue>) =>
         update({ type: 'replace-config', values }),
     }),
-    [update]
+    [modelContextRef, update]
   );
   const captureForSend = useCallback(
     (inputConfig: AcpSessionConfigPreferences) =>

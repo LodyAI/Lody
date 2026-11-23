@@ -5,6 +5,7 @@ import {
   ACP_PLAN_PERMISSION_MODE_ID,
   ACP_REASONING_EFFORT_CONFIG_ID,
   isAcpFastModeConfigId,
+  isAcpNormalSpeedAlias,
   isAcpPlanModeConfigOption,
   isAcpThoughtLevelConfigOption,
   isSensitiveAcpConfigOptionId,
@@ -43,7 +44,7 @@ function shouldSkipFableFastModeDisable(args: {
   return (
     args.modelId?.toLowerCase().includes('fable') === true &&
     isAcpFastModeConfigId(args.configId) &&
-    args.value === false
+    (args.value === false || isAcpNormalSpeedAlias(args.value))
   );
 }
 
@@ -91,7 +92,7 @@ function resolveLiveFastModeValue(
     if (value === ACP_CONFIG_OPTION_ON_VALUE || value === ACP_FAST_MODE_VALUE_FAST) {
       return { skip: false, value: true };
     }
-    if (value === ACP_CONFIG_OPTION_OFF_VALUE) {
+    if (isAcpNormalSpeedAlias(value)) {
       return { skip: false, value: false };
     }
     return { skip: true };
@@ -100,6 +101,9 @@ function resolveLiveFastModeValue(
     const allowed = collectLiveSelectOptionValues(liveOption);
     if (typeof value === 'string') {
       if (allowed.has(value)) return { skip: false, value };
+      if (isAcpNormalSpeedAlias(value) && allowed.has(ACP_CONFIG_OPTION_OFF_VALUE)) {
+        return { skip: false, value: ACP_CONFIG_OPTION_OFF_VALUE };
+      }
       if (value === ACP_CONFIG_OPTION_ON_VALUE && allowed.has(ACP_FAST_MODE_VALUE_FAST)) {
         return { skip: false, value: ACP_FAST_MODE_VALUE_FAST };
       }
@@ -139,7 +143,7 @@ export type AcpSessionRunConfig = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
 };
 
-type AcpSessionRunConfigApplyResult = {
+export type AcpSessionRunConfigApplyResult = {
   /** Every selection rejected by the agent, retained for diagnostics. */
   rejectedSelections: string[];
   /** Rejections that should become a user-visible Agent warning. */

@@ -772,6 +772,52 @@ describe('buildAcpSelectorOptions', () => {
     ).toEqual(['high', 'medium', 'low']);
   });
 
+  it('hides the thought-level selector when modelReasoningEfforts explicitly maps the selected model to []', () => {
+    const machine = grokMachineWithLadderProbe({
+      currentModelId: 'grok-4.6',
+      models: [
+        { modelId: 'grok-4.6', name: 'Grok 4.6' },
+        { modelId: 'grok-code-fast-1', name: 'Grok Code Fast 1' },
+        { modelId: 'grok-unlisted', name: 'Grok Unlisted' },
+      ],
+      currentEffort: 'high',
+      effortOptions: [
+        { value: 'high', name: 'High' },
+        { value: 'low', name: 'Low' },
+      ],
+      modelReasoningEfforts: {
+        'grok-4.6': ['high', 'low'],
+        'grok-code-fast-1': [],
+      },
+    });
+
+    const withoutEffort = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'grok',
+      selectedModelId: 'grok-code-fast-1',
+      machine,
+    });
+    expect(
+      withoutEffort.configOptionSelectors.find(
+        (candidate) => candidate.configId === 'reasoning_effort'
+      )
+    ).toBeUndefined();
+
+    const unlisted = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'grok',
+      selectedModelId: 'grok-unlisted',
+      machine,
+    });
+    expect(
+      unlisted.configOptionSelectors
+        .find((candidate) => candidate.configId === 'reasoning_effort')
+        ?.options.map((option) => option.value)
+    ).toEqual(['high', 'low']);
+  });
+
   it('falls back to medium rather than the highest target-model tier', () => {
     /* The probed model's current effort (`max`) is invalid for Grok 4.6,
        whose ladder starts at `xhigh`: the fallback must pick the neutral
@@ -977,12 +1023,16 @@ describe('observed per-model option lists', () => {
           category: 'model',
           type: 'select',
           currentValue: 'mimo',
-          options: ['mimo', 'deepseek-flash', 'qwen'].map((value) => ({ value, name: value })),
+          options: ['mimo', 'deepseek-flash', 'gemini-orchestrator', 'qwen'].map((value) => ({
+            value,
+            name: value,
+          })),
         },
         thoughtLevel(['auto', 'none', 'low', 'medium', 'high']),
       ],
       observedModelConfigOptions: {
         'deepseek-flash': [thoughtLevel(['auto', 'low', 'high', 'max'])],
+        'gemini-orchestrator': [],
       },
       fetchedAt: 1,
     },
@@ -1000,6 +1050,7 @@ describe('observed per-model option lists', () => {
     );
     return {
       values: effort?.type === 'select' ? effort.options.map((option) => option.value) : [],
+      hasEffortSelector: Boolean(effort),
       source: options.modelConfigOptionsSource,
     };
   };
@@ -1007,17 +1058,28 @@ describe('observed per-model option lists', () => {
   it('shows the selected model’s own recorded ladder', () => {
     expect(ladder('deepseek-flash')).toEqual({
       values: ['auto', 'low', 'high', 'max'],
+      hasEffortSelector: true,
       source: 'observed',
     });
     expect(ladder('mimo')).toEqual({
       values: ['auto', 'none', 'low', 'medium', 'high'],
+      hasEffortSelector: true,
       source: 'snapshot',
+    });
+  });
+
+  it('hides thought_level when the selected model was observed without config options', () => {
+    expect(ladder('gemini-orchestrator')).toEqual({
+      values: [],
+      hasEffortSelector: false,
+      source: 'observed',
     });
   });
 
   it('keeps the snapshot for an unrecorded model and says it is borrowed', () => {
     expect(ladder('qwen')).toEqual({
       values: ['auto', 'none', 'low', 'medium', 'high'],
+      hasEffortSelector: true,
       source: 'borrowed',
     });
   });
@@ -1092,17 +1154,21 @@ describe('multi-tier Codex speed selector normalization and legacy boolean compa
     expect(slowOrder.fastModeSelectors).toEqual([]);
   });
 
-  it('coerces legacy boolean values onto a multi-tier speed select and drops ultrafast on Fast-only models', () => {
+  it('coerces legacy boolean and normal/standard speed aliases across multi-tier and Fast-only models', () => {
     const solSpeed = orderAcpConfigOptionSelectors(selectorsFor('gpt-6.2-sol'))
       .speedTierSelectors[0]!;
     expect(resolveConfigOptionValue(solSpeed, true)).toBe('fast');
     expect(resolveConfigOptionValue(solSpeed, false)).toBe('off');
+    expect(resolveConfigOptionValue(solSpeed, 'normal')).toBe('off');
+    expect(resolveConfigOptionValue(solSpeed, 'standard')).toBe('off');
     expect(resolveConfigOptionValue(solSpeed, 'ultrafast')).toBe('ultrafast');
 
     const astraFast = orderAcpConfigOptionSelectors(selectorsFor('gpt-6.2-astra'))
       .fastModeSelectors[0]!;
     expect(resolveConfigOptionValue(astraFast, 'fast')).toBe(true);
     expect(resolveConfigOptionValue(astraFast, 'off')).toBe(false);
+    expect(resolveConfigOptionValue(astraFast, 'normal')).toBe(false);
+    expect(resolveConfigOptionValue(astraFast, 'standard')).toBe(false);
     expect(resolveConfigOptionValue(astraFast, 'ultrafast')).toBe(false);
   });
 });
