@@ -30,18 +30,36 @@ export const resolveAutomationCwd = Effect.fn('Automations.resolveCwd')(function
   });
 });
 
+const PROXY_ENV_KEYS = [
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+  'no_proxy',
+] as const;
+
 /** Host variables a command needs to find tools; credentials stay with their owners. */
 export const automationCommandEnvironment = (
-  searchPath: string | undefined = process.env.PATH
-): NodeJS.ProcessEnv => ({
-  PATH: searchPath,
-  HOME: process.env.HOME,
-  USERPROFILE: process.env.USERPROFILE,
-  SystemRoot: process.env.SystemRoot,
-  TMPDIR: process.env.TMPDIR,
-  TEMP: process.env.TEMP,
-  TMP: process.env.TMP,
-});
+  searchPath: string | undefined = process.env.PATH,
+  sourceEnv: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = {
+    PATH: searchPath,
+    HOME: sourceEnv.HOME,
+    USERPROFILE: sourceEnv.USERPROFILE,
+    SystemRoot: sourceEnv.SystemRoot,
+    TMPDIR: sourceEnv.TMPDIR,
+    TEMP: sourceEnv.TEMP,
+    TMP: sourceEnv.TMP,
+  };
+  for (const key of PROXY_ENV_KEYS) {
+    if (sourceEnv[key] !== undefined) env[key] = sourceEnv[key];
+  }
+  return env;
+};
 
 /** Execute within a caller-resolved Session directory. The environment is explicitly supplied by the owner. */
 export const execAutomationCommand = Effect.fn('Automations.exec')(function* (

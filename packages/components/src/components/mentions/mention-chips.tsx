@@ -1,6 +1,7 @@
-import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import * as React from 'react';
+
 import { ClipboardList, MessagesSquare, UserRoundCog, Quote } from 'lucide-react';
 
 import { MonochromeFileIcon, MonochromeFolderIcon } from '@/components/icons/file-icons';
@@ -13,10 +14,10 @@ import type { Mention, MentionChip, MentionChipResolver } from '@/ui/mention/ind
  * resolver removes that prefix/suffix from presentation only.
  */
 const CHIP_PAD = '\u2007';
-const styles = stylex.create({
+const quoteStyles = stylex.create({
   quote: {
     marginInline: 1,
-    paddingRight: space[1.5],
+    color: colors.accent,
   },
 });
 export const wrapPastedTextChipLabel = (label: string) => `${CHIP_PAD}${label}${CHIP_PAD}`;
@@ -24,7 +25,21 @@ export const wrapPastedTextChipLabel = (label: string) => `${CHIP_PAD}${label}${
 /**
  * Sized in `em` so it tracks the surrounding font size in its own layout box.
  */
-export const MENTION_ICON_CLASS_NAME = 'size-[1.05em] shrink-0';
+const styles = stylex.create({
+  icon: { width: '1.05em', height: '1.05em', flexShrink: 0 },
+  chip: { color: colors.accent },
+  neutralChip: { color: colors.secondaryLabel },
+  emoji: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    fontSize: '0.95em',
+    lineHeight: 1,
+  },
+});
+
+export const MENTION_ICON_CLASS_NAME = stylex.props(styles.icon).className;
 
 /**
  * Colour is the whole signal — a decorated range has no visible background — so
@@ -36,9 +51,8 @@ export const MENTION_ICON_CLASS_NAME = 'size-[1.05em] shrink-0';
  * must not re-derive the colour: two copies of one `color-mix` drift apart the
  * first time either is tuned.
  */
-export const MENTION_CHIP_CLASS_NAME =
-  'text-[color-mix(in_srgb,hsl(var(--primary))_82%,hsl(var(--foreground)))]';
-export const MENTION_NEUTRAL_CHIP_CLASS_NAME = 'text-muted-foreground';
+export const MENTION_CHIP_CLASS_NAME = stylex.props(styles.chip).className;
+export const MENTION_NEUTRAL_CHIP_CLASS_NAME = stylex.props(styles.neutralChip).className;
 
 /**
  * The kinds a mention range can carry, including the kindless fallback a range
@@ -123,7 +137,7 @@ export const getComposerMentionChip: MentionChipResolver = (mention: Mention, te
     return {
       ...pastedTextChip(text),
       icon: getMentionKindIcon(kind),
-      className: `${stylex.props(styles.quote).className} text-markdown-link`,
+      className: stylex.props(quoteStyles.quote).className,
     };
   if (!CHIP_KINDS.has(kind)) return null;
 
@@ -151,10 +165,7 @@ export const getComposerMentionChip: MentionChipResolver = (mention: Mention, te
 export const applyAgentRoleEmojiChip = (chip: MentionChip, emoji: string): MentionChip => ({
   ...chip,
   icon: (
-    <span
-      aria-hidden="true"
-      className={`${MENTION_ICON_CLASS_NAME} inline-flex items-center justify-center overflow-hidden text-[0.95em] leading-none`}
-    >
+    <span aria-hidden="true" {...stylex.props(styles.icon, styles.emoji)}>
       {emoji}
     </span>
   ),

@@ -13,6 +13,109 @@ const turn = (id: string) => ({
   status: 'pending' as const,
 });
 
+it('keeps unchanged display tool output through streaming and refreshes nested, pending and checkout edits', () => {
+  const doc = new LoroDoc();
+  const writer = createHistoryWriter(doc);
+  writer.append({
+    id: 'stream',
+    role: 'assistant',
+    timestamp: 'synthetic',
+    items: [
+      {
+        type: 'tool_call',
+        toolCallId: 'tool',
+        status: 'completed',
+        kind: 'execute',
+        title: 'Synthetic command',
+        content: [{ type: 'content', content: { type: 'text', text: 'output '.repeat(10000) } }],
+      },
+      { type: 'text', text: 'first' },
+    ],
+  });
+  doc.commit();
+  const data = createLoroSessionData({ doc, sessionId, writer });
+  const read = () => {
+    const result = data.history.readTurnForDisplay('stream');
+    if (result.state !== 'ready') throw new Error('Missing streamed turn');
+    return result.turn;
+  };
+  try {
+    const initial = read();
+    const items = (doc.getList('history').get(0) as LoroMap).get('items') as LoroList;
+    const text = (items.get(1) as LoroMap).get('text') as LoroText;
+    text.insert(text.length, ' next');
+    doc.commit();
+    const streamed = read();
+    expect(streamed.items?.[0]).toBe(initial.items?.[0]);
+    expect(streamed.items?.[1]).toEqual({ type: 'text', text: 'first next' });
+    const beforeEdit = doc.frontiers();
+    const tool = items.get(0) as LoroMap;
+    const block = (tool.get('content') as LoroList).get(0) as LoroMap;
+    const body = block.get('content') as LoroMap;
+    body.set('text', 'changed output');
+    doc.commit();
+    const changed = read();
+    expect(changed.items?.[0]).not.toBe(streamed.items?.[0]);
+    expect(changed).toEqual(
+      data.history.readTurn('stream').state === 'ready' ? writer.read('stream') : undefined
+    );
+    doc.checkout(beforeEdit);
+    expect(read().items?.[0]).toEqual(initial.items?.[0]);
+    doc.checkoutToLatest();
+    expect(read().items?.[0]).toEqual(changed.items?.[0]);
+    body.set('text', 'pending output');
+    const pending = doc.getPendingTxnLength();
+    expect(JSON.stringify(read().items?.[0])).toContain('pending output');
+    expect(doc.getPendingTxnLength()).toBe(pending);
+    doc.commit();
+    expect(JSON.stringify(read().items?.[0])).toContain('pending output');
+    // A remote edit must invalidate the same display item, not just local writes.
+    const remote = doc.fork();
+    const remoteItems = (remote.getList('history').get(0) as LoroMap).get('items') as LoroList;
+    (remoteItems.get(0) as LoroMap).set('title', 'remote title');
+    remote.commit();
+    doc.import(remote.export({ mode: 'update', from: doc.oplogVersion() }));
+    expect(JSON.stringify(read().items?.[0])).toContain('remote title');
+    remote.free();
+    const beforeAppend = read();
+    items.insert(items.length, { type: 'text', text: 'first append' });
+    doc.commit();
+    items.insert(items.length, { type: 'text', text: 'second append before reading' });
+    doc.commit();
+    const appended = read();
+    expect(appended).toEqual(writer.read('stream'));
+    expect(appended.items?.[0]).toBe(beforeAppend.items?.[0]);
+    expect(beforeAppend.items).toHaveLength(2);
+    tool.set('title', 'edited during append');
+    items.insert(items.length, { type: 'text', text: 'mixed append' });
+    doc.commit();
+    expect(read()).toEqual(writer.read('stream'));
+    expect(read().items?.[0]).not.toBe(appended.items?.[0]);
+    items.delete(2, 3);
+    doc.commit();
+    expect(read()).toEqual(writer.read('stream'));
+    const beforeInsert = read();
+    items.insert(0, { type: 'text', text: 'inserted before tools' });
+    doc.commit();
+    const inserted = read();
+    expect(inserted).toEqual(writer.read('stream'));
+    expect(inserted.items?.[1]).toBe(beforeInsert.items?.[0]);
+    expect(beforeInsert.items).toHaveLength(2);
+    tool.set('title', 'edited while its position moves');
+    items.insert(0, { type: 'text', text: 'moves edited tool again' });
+    doc.commit();
+    expect(read()).toEqual(writer.read('stream'));
+    expect(read().items?.[2]).not.toBe(beforeInsert.items?.[0]);
+    items.delete(1, 1);
+    doc.commit();
+    expect(read()).toEqual(writer.read('stream'));
+    expect(read().items).toHaveLength(3);
+  } finally {
+    data.dispose();
+    doc.free();
+  }
+});
+
 it.each(['json', 'containers', 'text'] as const)(
   'goal inspection matches complete history for %s storage without changing it',
   (shape) => {

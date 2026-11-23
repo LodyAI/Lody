@@ -1,11 +1,17 @@
 import { Button as BaseButton } from '@base-ui/react/button';
 import * as stylex from '@stylexjs/stylex';
-import { createContext, forwardRef, useContext, type ComponentProps } from 'react';
+import {
+  createContext,
+  forwardRef,
+  useContext,
+  type ComponentProps,
+  type CSSProperties,
+} from 'react';
 import { colors } from '../tokens/colors.stylex';
-import { corner, duration, ease, radius, text } from '../tokens/scales.stylex';
+import { control, corner, duration, ease, radius, text } from '../tokens/scales.stylex';
 import { button } from './button.tokens.stylex';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive' | 'link';
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'solid' | 'destructive' | 'link';
 export type ButtonSize = 'mini' | 'small' | 'medium' | 'large';
 export type ButtonTone = 'neutral' | 'destructive';
 export type ButtonShape = 'default' | 'pill';
@@ -18,6 +24,16 @@ export interface ButtonProps extends Omit<BaseProps, 'className'> {
   tone?: ButtonTone;
   shape?: ButtonShape;
   icon?: boolean;
+  /** Numbers are px; strings are CSS dimension values. Omission keeps size and variant defaults. */
+  width?: string | number;
+  height?: string | number;
+  /** Outer label typography. Font-size numbers are px; line-height and weight stay numeric. */
+  fontSize?: CSSProperties['fontSize'];
+  lineHeight?: CSSProperties['lineHeight'];
+  fontWeight?: CSSProperties['fontWeight'];
+  /** Constant label and currentColor glyph ink, independent of the variant's fills. */
+  labelColor?: CSSProperties['color'];
+  xstyle?: stylex.StyleXStyles;
   className?: string;
 }
 
@@ -54,7 +70,7 @@ const styles = stylex.create({
     // same box-shadow as the variant's own edge. Each variant composes it,
     // because a box-shadow list cannot be added to from a second class.
     outlineStyle: 'none',
-    opacity: { default: 1, ':disabled': 0.45 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     pointerEvents: { default: 'auto', ':disabled': 'none' },
     transitionProperty: 'background-color, color, box-shadow, transform, opacity',
     transitionDuration: duration.fast,
@@ -139,6 +155,16 @@ const styles = stylex.create({
   ghost: {
     backgroundColor: { default: 'transparent', ':hover': button.ghostHover },
     color: { default: button.ghostLabel, ':hover': colors.label },
+    boxShadow: { default: 'none', ':focus-visible': RING },
+  },
+  solid: {
+    backgroundColor: {
+      default: button.primaryBackground,
+      '@media (hover: hover)': {
+        ':hover': `color-mix(in oklab, ${button.primaryBackground} 90%, transparent)`,
+      },
+    },
+    color: button.primaryLabel,
     boxShadow: { default: 'none', ':focus-visible': RING },
   },
   destructive: {
@@ -268,6 +294,11 @@ const sizeStyles = {
   large: styles.large,
 };
 
+const dyn = stylex.create({
+  width: (width: string | number) => ({ width }),
+  height: (height: string | number) => ({ height }),
+});
+
 const segmentStyles = {
   mini: styles.segmentMini,
   small: styles.segmentSmall,
@@ -292,6 +323,13 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     tone = 'neutral',
     shape = 'default',
     icon = false,
+    width,
+    height,
+    fontSize,
+    lineHeight,
+    fontWeight,
+    labelColor,
+    xstyle,
     className,
     children,
     ...rest
@@ -308,9 +346,25 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     styles[variant],
     tone === 'destructive' &&
       variant !== 'primary' &&
+      variant !== 'solid' &&
       variant !== 'destructive' &&
-      styles.destructiveTone
+      styles.destructiveTone,
+    width != null && dyn.width(width),
+    height != null && dyn.height(height),
+    xstyle
   );
+  // CSS-wide keywords, including var() fallbacks, must reach the actual field:
+  // routing them through a custom property changes their inheritance semantics.
+  const labelStyle =
+    fontSize == null && lineHeight == null && labelColor == null && fontWeight == null
+      ? sx.style
+      : {
+          ...sx.style,
+          ...(fontSize != null && { fontSize }),
+          ...(lineHeight != null && { lineHeight }),
+          ...(labelColor != null && { color: labelColor }),
+          ...(fontWeight != null && { fontWeight }),
+        };
   const glyph = stylex.props(styles.glyph);
   return (
     <BaseButton
@@ -320,7 +374,14 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
       {...rest}
       data-ui-button-group-item={segment ? '' : undefined}
       className={className ? `${sx.className} ${className}` : sx.className}
-      style={sx.style}
+      style={
+        xstyle
+          ? (state) => ({
+              ...labelStyle,
+              ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+            })
+          : labelStyle
+      }
     >
       {icon ? (
         <span className={glyph.className} style={glyph.style}>

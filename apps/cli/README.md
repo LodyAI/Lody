@@ -351,6 +351,8 @@ a custom OSS data root. No workspace is created automatically.
 
 This imports full Loro history and referenced local file attachments, keeps existing
 cloud conversations/settings, and disables execution of imported sessions/schedules.
+Encrypted targets require an approved paired CLI machine with the current epoch key;
+all uploaded content and attachments use its encrypted transports.
 Roost and unsupported formats fail before record uploads. Source data is retained;
 rerunning resumes the frozen snapshot. It does not copy code directories or native
 agent credentials. See [migration and recovery](src/lib/oss-migration/README.md).

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Dialog } from '@/ui/dialog';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
 } from '@/components/settings/surface';
 
@@ -25,7 +25,7 @@ export function SettingsEditorDialogFrame({
     <Dialog.Root open>
       <Dialog.Content
         width={SETTINGS_EDITOR_DIALOG_WIDTH}
-        className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        xstyle={settingsEditorDialogStyles.panel}
         style={height ? { height } : undefined}
       >
         <Dialog.Header>

@@ -51,6 +51,7 @@ import {
 } from './block-selection';
 import { MENTION_KEYS, resolveMentionKey } from './mention-keys';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
+import { getInFlightSessionMentionPreviewOffsetX } from '@/lib/session-mention-drag';
 import { projectTodayDrop, type TodayDropRow, type TodayDropTarget } from '../today-dnd';
 import { $readTodayEditorRich, bindLoroText } from './loro-lexical-binding';
 import { isImeKey, resolveOutlineKey, type OutlineIntent } from './outline-keys';
@@ -71,6 +72,11 @@ export type TodayDragGhost = {
 };
 /** Indentation per outline level; matches the rows' padding. */
 export const TODAY_INDENT_PX = 22;
+
+/** What a press on the surface leaves alone: rows and controls handle their own. */
+const SURFACE_CONTENT =
+  '[data-today-node], button, a, input, textarea, [contenteditable="true"], [role="menu"], [role="dialog"]';
+
 /** Distance from a row's start to its bullet's centre (12px fold toggle + half the 16px bullet box). */
 const TODAY_BULLET_CENTER_PX = 20;
 const DRAG_THRESHOLD_PX = 5;
@@ -356,18 +362,25 @@ export class TodayEditorController {
   /**
    * Project a drop and place its line. `depthOrigin` is the x at which the
    * pointer means depth 0: for a node drag it follows the grab point, so a
-   * purely vertical drag keeps the node's depth; otherwise it is the bullet
-   * column. The line starts at the target depth's bullet, where the node lands.
+   * purely vertical drag keeps the node's depth. A sidebar drag whose preview
+   * offset is known aims with the preview's left edge against the rows' left
+   * edges; otherwise the pointer aims against the bullet column. The line
+   * starts at the target depth's bullet, where the node lands.
    */
   private project(
     store: TodayPageStore,
     day: Element,
     point: { x: number; y: number },
     excluded: ReadonlySet<string>,
-    depthOrigin?: number
+    depthOrigin: number | { previewOffsetX: number | null }
   ): TodayDropTarget | null {
     const { rows, contentLeft, right } = this.dayRows(store, day);
-    const origin = depthOrigin ?? contentLeft + TODAY_BULLET_CENTER_PX;
+    const origin =
+      typeof depthOrigin === 'number'
+        ? depthOrigin
+        : depthOrigin.previewOffsetX === null
+          ? contentLeft + TODAY_BULLET_CENTER_PX
+          : contentLeft + depthOrigin.previewOffsetX;
     const target = projectTodayDrop(rows, point, origin, TODAY_INDENT_PX, excluded);
     if (!target) {
       this.dropIndicator = null;
@@ -569,7 +582,10 @@ export class TodayEditorController {
 
   private projectExternal(x: number, y: number) {
     const located = this.dayAt(x, y);
-    const target = located ? this.project(located.store, located.day, { x, y }, new Set()) : null;
+    const previewOffsetX = getInFlightSessionMentionPreviewOffsetX();
+    const target = located
+      ? this.project(located.store, located.day, { x, y }, new Set(), { previewOffsetX })
+      : null;
     return { located, target };
   }
 
@@ -757,7 +773,29 @@ export class TodayEditorController {
 
   /** The scroll surface: owns focus, keys and clipboard while blocks are selected. */
   attachSurface = (element: HTMLElement | null) => {
+    this.surface?.removeEventListener('pointerdown', this.onSurfacePointerDown);
     this.surface = element;
+    element?.addEventListener('pointerdown', this.onSurfacePointerDown);
+  };
+
+  /** Zoomed into a node without children, a press on the surface's empty area starts its first child. */
+  private readonly onSurfacePointerDown = (event: PointerEvent) => {
+    const surface = event.currentTarget as HTMLElement;
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+      return;
+    if (!(event.target instanceof Element) || event.target.closest(SURFACE_CONTENT)) return;
+    // The scroller's own scrollbar.
+    const left = surface.getBoundingClientRect().left;
+    if (
+      event.target === surface &&
+      event.clientX - left >= surface.clientLeft + surface.clientWidth
+    )
+      return;
+    const root = this.focus?.rootId;
+    const store = this.focus && this.days.get(this.focus.date);
+    if (!root || !store?.outline.getNode(root) || store.outline.childIds(root).length) return;
+    event.preventDefault();
+    this.startPage(store, root);
   };
 
   /** Keys on the surface while blocks are selected. Returns true when handled. */
@@ -1149,9 +1187,9 @@ export class TodayEditorController {
     this.activate(store, nodeId, offsetFromPoint(element, x, y));
   }
 
-  /** Empty page placeholder clicked or typed into. */
-  startPage(store: TodayPageStore) {
-    const focus = store.undo.structural(() => store.outline.insertFirst(''));
+  /** Empty page placeholder clicked or typed into; with `parentId`, a zoomed node's "+". */
+  startPage(store: TodayPageStore, parentId?: TodayNodeId) {
+    const focus = store.undo.structural(() => store.outline.insertFirst('', parentId));
     this.apply(store, focus);
   }
 
@@ -1449,6 +1487,7 @@ export class TodayEditorController {
     this.pinned = null;
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.listeners.clear();
+    this.attachSurface(null);
   }
 }
 

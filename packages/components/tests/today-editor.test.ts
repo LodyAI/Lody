@@ -36,6 +36,7 @@ import {
   $writeComposerValue,
 } from '../src/ui/mention/composer-document';
 import { MentionDecoratorNode } from '../src/ui/mention/mention-node';
+import { clearSessionMentionDrag, startSessionMentionDrag } from '../src/lib/session-mention-drag';
 
 describe('Today text diff', () => {
   it('never splits a surrogate pair', () => {
@@ -1382,6 +1383,34 @@ describe('Today focus view', () => {
     ctx.done();
   });
 
+  it('a zoomed node without children starts its first child from the "+" or a press on the empty surface', async () => {
+    const ctx = await zoomed('a\n  b\nc', 'b');
+    expect(ctx.rows()).toEqual(['b']);
+    await act(async () =>
+      ctx.surface.querySelector<HTMLElement>('[data-today-add-child]')!.click()
+    );
+    const [child] = ctx.store.outline.childIds(ctx.id('b'));
+    expect(ctx.rows()).toEqual(['b', '']);
+    expect(ctx.controller.isActive(ctx.store, child!)).toBe(true);
+    expect(ctx.surface.querySelector('[data-today-add-child]')).toBeNull();
+    await act(async () => void ctx.store.undo.undo());
+    expect(ctx.rows()).toEqual(['b']);
+    const press = (target: Element) =>
+      act(
+        async () =>
+          void target.dispatchEvent(
+            new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 })
+          )
+      );
+    await press(ctx.surface.querySelector('[data-today-node]')!);
+    expect(ctx.rows()).toEqual(['b']);
+    await press(ctx.surface.querySelector('section') ?? ctx.surface);
+    const [pressed] = ctx.store.outline.childIds(ctx.id('b'));
+    expect(ctx.rows()).toEqual(['b', '']);
+    expect(ctx.controller.isActive(ctx.store, pressed!)).toBe(true);
+    ctx.done();
+  });
+
   it('shows what was typed in a folded node’s subtree once the caret leaves the line', async () => {
     const folded = await zoomed('a\n  b\n  c', 'a');
     await act(async () => void folded.store.outline.setCollapsed(folded.id('a'), true));
@@ -1595,6 +1624,68 @@ describe('Today block selection on the surface', () => {
     expect(
       ctx.store.getSnapshot().visible.map((node) => node.mentions[0]?.id ?? node.text)
     ).toEqual(['a', 'b', 's1']);
+    ctx.controller.dispose();
+    ctx.surface.remove();
+  });
+
+  it('a sidebar conversation lands at the depth of its dragged card’s left edge, not of the pointer', async () => {
+    const ctx = await setup();
+    const rect = (left: number, top: number, right: number, bottom: number) =>
+      ({
+        left,
+        top,
+        right,
+        bottom,
+        width: right - left,
+        height: bottom - top,
+        x: left,
+        y: top,
+      }) as DOMRect;
+    const day = document.createElement('section');
+    day.dataset.todayDate = '2026-11-20';
+    day.getBoundingClientRect = () => rect(440, 0, 1160, 100);
+    ctx.ids.forEach((id, index) => {
+      const row = document.createElement('div');
+      row.dataset.todayNode = id;
+      row.getBoundingClientRect = () => rect(440, index * 28, 1160, index * 28 + 28);
+      day.append(row);
+    });
+    ctx.surface.append(day);
+    ctx.controller.registerDay('2026-11-20' as never, ctx.store);
+    // The sidebar row was grabbed 60px right of its left edge.
+    const sidebarRow = document.createElement('div');
+    sidebarRow.getBoundingClientRect = () => rect(0, 0, 240, 28);
+    const dragFrom = (sessionId: string) =>
+      startSessionMentionDrag(
+        {
+          dataTransfer: { setData: () => undefined, effectAllowed: 'none' },
+          clientX: 60,
+          currentTarget: sidebarRow,
+        },
+        { sessionId }
+      );
+    const elementsFromPoint = document.elementsFromPoint;
+    document.elementsFromPoint = () => [day];
+    try {
+      // The card's left edge sits at the rows' left edge, under `b`.
+      dragFrom('s1');
+      ctx.controller.dropExternal('s1', 440 + 60 + 5, 50);
+      clearSessionMentionDrag();
+      // One indent further right at the same line, it nests under `b`.
+      dragFrom('s2');
+      ctx.controller.dropExternal('s2', 440 + 60 + 22, 50);
+    } finally {
+      clearSessionMentionDrag();
+      document.elementsFromPoint = elementsFromPoint;
+    }
+    expect(
+      ctx.store.getSnapshot().visible.map((node) => [node.mentions[0]?.id ?? node.text, node.depth])
+    ).toEqual([
+      ['a', 0],
+      ['b', 0],
+      ['s2', 1],
+      ['s1', 0],
+    ]);
     ctx.controller.dispose();
     ctx.surface.remove();
   });

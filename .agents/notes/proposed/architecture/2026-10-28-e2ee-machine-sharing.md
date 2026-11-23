@@ -254,4 +254,4 @@ session-filtered delivery; E2EE members still retain content keys. Personal gran
 use `{sessionId, audience: {userId}, level: 'read'}` alongside team audiences and
 inherit only the same contained root. Only the machine owner manages either list.
 
-Owner scope decision (2026-11-10): ordinary Roost history supports team and individual read sharing. E2EE workspaces currently do not support Roost and offer no Roost sharing; the storage-unavailable gate remains. Roost is expected to become the default history backend. Future E2EE Roost support must reuse the same session-read authorization and revocable permits, without separate sharing semantics. This scoped admission is not an implementation or acceptance claim for encrypted Roost storage.
+Ordinary Roost history supports team and individual read sharing. Encrypted Roost uses the same exact-session read authorization and revocable permits. The client requires the owning machine to advertise `e2eeRoostHistory` version 1 or later.

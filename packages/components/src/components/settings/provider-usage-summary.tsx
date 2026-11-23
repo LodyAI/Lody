@@ -1,9 +1,9 @@
+import { radius as sharedRadius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { CodexResetForecastDialogHost } from '@/components/codex-reset/codex-reset-forecast-entry';
 import {
   formatAgentRateLimitWindowLabel,
@@ -73,7 +73,7 @@ const styles = stylex.create({
     width: '32px',
     height: '4px',
     overflow: 'hidden',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: colors.gray5,
   },
   fill: { display: 'block', height: '100%', backgroundColor: colors.gray },

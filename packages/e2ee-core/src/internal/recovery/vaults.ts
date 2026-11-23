@@ -41,7 +41,11 @@ export class RecoveryVaults extends Context.Service<
     createWithPassword(
       input: WithoutStores<typeof createRecoveryVaultWithPassword>
     ): ReturnType<typeof createRecoveryVaultWithPassword>;
-    /** Unlock a vault from its recovery file; the session lives in the caller's Scope. */
+    /**
+     * Unlock a vault from its recovery file; the session lives in the caller's Scope.
+     * A file naming another service than the caller's `locator` fails as `locator-mismatch`
+     * before any store read.
+     */
     open(input: WithoutStores<typeof openRecoveryVault>): ReturnType<typeof openRecoveryVault>;
     /** Unlock a vault with a verified passkey PRF; the session lives in the caller's Scope. */
     openWithPasskey(

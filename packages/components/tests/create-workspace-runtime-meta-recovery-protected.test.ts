@@ -5,7 +5,8 @@ import {
   getSessionRoomId,
   type MachineId,
   type SessionId,
-  type WorkspaceId} from '@lody/shared';
+  type WorkspaceId,
+} from '@lody/shared';
 import type { LoroRepo, TransportAdapter, TransportSubscription } from 'loro-repo';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { createE2eeContent } from '../src/providers/desktop-e2ee-content';
@@ -1813,9 +1814,10 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       },
       snapshotUpload: { canUpload: () => false },
     };
+    let bucketId: string | null = 'synthetic-encrypted-content';
     const runtime = await createWorkspaceRuntime({
       content,
-      e2ee: { bucketId: () => 'synthetic-encrypted-content', createTokenProvider: provider },
+      e2ee: { bucketId: () => bucketId, createTokenProvider: provider },
       accountId: 'synthetic-account',
       e2eeLocalIdentity: {
         accountId: 'synthetic-account',
@@ -1830,6 +1832,24 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
     try {
       expect(runtime.contentMode).toBe('e2ee');
+      expect(runtime.streamsContent).toBe(content);
+      expect(runtime.localDataScope).toMatchObject({
+        accountId: 'synthetic-account',
+        workspaceId: 'workspace-1',
+      });
+      expect(runtime.shortcutRole?.get()).toBe('read');
+      await expect(runtime.getWorkspaceStreamsGrant?.({ write: true })).rejects.toThrow(
+        'read_only'
+      );
+      await expect(runtime.getWorkspaceStreamsGrant?.()).resolves.toMatchObject({
+        token: 'streams-token',
+        bucketId: 'synthetic-encrypted-content',
+      });
+      bucketId = 'lody';
+      await expect(runtime.getWorkspaceStreamsGrant?.()).rejects.toThrow('bucket_unavailable');
+      bucketId = null;
+      await expect(runtime.getWorkspaceStreamsGrant?.()).rejects.toThrow('bucket_unavailable');
+      bucketId = 'synthetic-encrypted-content';
       await expect(runtime.ensureDocStream('encrypted-session')).resolves.toBeUndefined();
       await expect(
         runtime.requestFilePreview('machine-1' as MachineId, {} as never)

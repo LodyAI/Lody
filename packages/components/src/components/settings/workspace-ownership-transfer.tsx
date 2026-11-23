@@ -1,5 +1,5 @@
+import { workspaceTransferErrorKey } from './workspace-transfer-errors';
 import { useId, useMemo, useRef, useState } from 'react';
-import { ConvexError } from 'convex/values';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -17,16 +17,6 @@ const styles = stylex.create({
   field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
   error: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.destructive },
 });
-
-const errorKeys: Record<string, string> = {
-  workspace_transfer_not_owner: 'workspace.transfer.errors.notOwner',
-  workspace_transfer_invalid_member: 'workspace.transfer.errors.invalidMember',
-  workspace_transfer_deleting: 'workspace.transfer.errors.deleting',
-  workspace_transfer_billing_owner_mismatch: 'workspace.transfer.errors.support',
-  workspace_transfer_contact_support: 'workspace.transfer.errors.support',
-  workspace_transfer_billing_busy: 'workspace.transfer.errors.billingBusy',
-  workspace_transfer_free_limit: 'workspace.transfer.errors.freeLimit',
-};
 
 export function WorkspaceOwnershipTransfer({
   workspaceName,
@@ -81,15 +71,7 @@ export function WorkspaceOwnershipTransfer({
       await onTransfer(target.id);
       setOpen(false);
     } catch (cause) {
-      const code =
-        cause instanceof ConvexError && typeof cause.data === 'object' && cause.data !== null
-          ? cause.data.code
-          : null;
-      setError(
-        typeof code === 'string'
-          ? (errorKeys[code] ?? 'workspace.transfer.errors.failed')
-          : 'workspace.transfer.errors.failed'
-      );
+      setError(workspaceTransferErrorKey(cause) ?? 'workspace.transfer.errors.failed');
     } finally {
       inFlight.current = false;
       setBusy(false);

@@ -4,6 +4,41 @@ import type { LodyResolvedVSCodeTheme } from '../src/lib/vscode-theme/vscode-the
 import { getBundledVSCodeThemeByIdSync } from '../src/lib/vscode-theme/bundled/bundled-vscode-themes';
 import { hexColorToHslChannel } from '../src/lib/vscode-theme/vscode-theme-color';
 
+const CHART_VARIABLES = ['--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5'];
+
+// The `H S% L%` channel form the theme writes, back to RGB for distance checks.
+const hslChannelToRgb = (channel: string): { r: number; g: number; b: number } => {
+  const [h, s, l] = channel.split(' ').map((part) => Number.parseFloat(part));
+  const lightness = l / 100;
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * (s / 100);
+  const segment = (((h % 360) + 360) % 360) / 60;
+  const x = chroma * (1 - Math.abs((segment % 2) - 1));
+  const [r1, g1, b1] =
+    segment < 1
+      ? [chroma, x, 0]
+      : segment < 2
+        ? [x, chroma, 0]
+        : segment < 3
+          ? [0, chroma, x]
+          : segment < 4
+            ? [0, x, chroma]
+            : segment < 5
+              ? [x, 0, chroma]
+              : [chroma, 0, x];
+  const m = lightness - chroma / 2;
+  return {
+    r: Math.round((r1 + m) * 255),
+    g: Math.round((g1 + m) * 255),
+    b: Math.round((b1 + m) * 255),
+  };
+};
+
+const rgbDistance = (a: string, b: string): number => {
+  const x = hslChannelToRgb(a);
+  const y = hslChannelToRgb(b);
+  return Math.sqrt((x.r - y.r) ** 2 + (x.g - y.g) ** 2 + (x.b - y.b) ** 2);
+};
+
 describe('vscode-theme-css', () => {
   const hslChannelLuminance = (channel: string): number => {
     const [h, s, l] = channel.split(' ').map((part) => Number.parseFloat(part));
@@ -148,6 +183,46 @@ describe('vscode-theme-css', () => {
         colors: { ...themeFixture.colors, 'editor.background': '#000000', foreground: '#FFFFFF' },
       });
       expect(highContrast['--reading-foreground']).toBeUndefined();
+    });
+
+    it('derives five distinct, canvas-visible chart rungs from the active theme', () => {
+      // A minimal theme reusing one accent can't satisfy rungs by lookup; derivation must keep five series distinct and off the canvas.
+      const minimal: LodyResolvedVSCodeTheme = {
+        ...themeFixture,
+        colors: {
+          'editor.background': '#101010',
+          'textLink.foreground': '#FFC799',
+          'editorWarning.foreground': '#FFC799',
+          'editorError.foreground': '#FF8080',
+        },
+      };
+      const variables = createLodyThemeCssVariables(minimal);
+      const rungs = CHART_VARIABLES.map((name) => variables[name]);
+      expect(rungs.every((rung) => typeof rung === 'string')).toBe(true);
+
+      const background = variables['--background']!;
+      for (let i = 0; i < rungs.length; i += 1) {
+        for (let j = i + 1; j < rungs.length; j += 1) {
+          expect(
+            rgbDistance(rungs[i]!, rungs[j]!),
+            `rungs ${i + 1} and ${j + 1} collapse onto each other`
+          ).toBeGreaterThanOrEqual(30);
+        }
+        expect(
+          rgbDistance(rungs[i]!, background),
+          `rung ${i + 1} blends into the canvas`
+        ).toBeGreaterThanOrEqual(40);
+      }
+    });
+
+    it('tracks the active VS Code theme instead of the stylesheet fallback', () => {
+      for (const themeId of ['lody-light', 'vesper'] as const) {
+        const theme = getBundledVSCodeThemeByIdSync(themeId);
+        const variables = createLodyThemeCssVariables(theme!);
+        for (const name of CHART_VARIABLES) {
+          expect(variables[name], `${themeId} ${name}`).toBeDefined();
+        }
+      }
     });
   });
 });

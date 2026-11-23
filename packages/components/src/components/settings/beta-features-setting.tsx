@@ -93,7 +93,7 @@ export function BetaFeaturesSection() {
         label={t('settings.experimental.roostHistory', 'Roost history')}
         info={t(
           'settings.experimental.roostHistoryHelper',
-          'Use Roost for new conversations. Existing conversations keep their current history backend.'
+          'Use Roost for new conversations. Encrypted workspaces require a machine with encrypted Roost support.'
         )}
       >
         <Switch

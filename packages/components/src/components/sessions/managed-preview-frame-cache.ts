@@ -17,6 +17,14 @@ const MAX_MANAGED_PREVIEW_FRAMES = 5;
 const PRELOAD_FRAME_TTL_MS = 2 * 60 * 1000;
 
 const styles = stylex.create({
+  frame: {
+    display: 'block',
+    height: '100%',
+    width: '100%',
+    borderStyle: 'solid',
+    borderWidth: '0px',
+    backgroundColor: 'var(--color-white)',
+  },
   preload: {
     position: 'fixed',
     left: -10000,
@@ -136,7 +144,7 @@ const createEntry = (
     viewerUrl,
     loaded: false,
   };
-  iframe.className = 'block h-full w-full border-0 bg-white';
+  iframe.className = stylex.props(styles.frame).className ?? '';
   iframe.title = title;
   iframe.setAttribute('data-lody-managed-preview-frame', 'true');
   if (documentHtml !== undefined) {

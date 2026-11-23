@@ -167,12 +167,25 @@ describe('SessionHeaderMenu', () => {
     );
     await openMenu();
     const menuText = document.querySelector('[role="menu"]')?.textContent ?? '';
-    for (const hidden of ['acme/widgets', 'feat/menu', 'build-box', 'Team can edit', 'new window']) {
+    for (const hidden of [
+      'acme/widgets',
+      'feat/menu',
+      'build-box',
+      'Team can edit',
+      'new window',
+    ]) {
       expect(menuText).not.toContain(hidden);
     }
 
     const dialog = await openInfoDialog(true);
-    for (const shown of ['acme/widgets', 'feat/menu', 'main', '#42', 'build-box', '/work/widgets']) {
+    for (const shown of [
+      'acme/widgets',
+      'feat/menu',
+      'main',
+      '#42',
+      'build-box',
+      '/work/widgets',
+    ]) {
       expect(dialog.textContent).toContain(shown);
     }
     expect(dialog.textContent).toContain('Team can edit');

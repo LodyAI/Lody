@@ -366,7 +366,11 @@ export const KIMI_CODE_MIN_NODE_VERSION = resolveMinimumNodeVersion(
   `>=${kimiRuntimeManifestJson.minNodeVersion}`
 );
 
-export const BUILTIN_CODEX_CAPABILITY_SOURCE_VERSION = `builtin-codex-acp:${CODEX_ACP_ADAPTER_VERSION}+codex:${CODEX_RUNTIME_VERSION}`;
+export const CODEX_CAPABILITY_SCHEMA_VERSION = 'speed-tiers:1';
+export const formatBuiltinCodexCapabilitySourceVersion = (runtimeVersion: string): string =>
+  `builtin-codex-acp:${CODEX_ACP_ADAPTER_VERSION}+codex:${runtimeVersion}+${CODEX_CAPABILITY_SCHEMA_VERSION}`;
+export const BUILTIN_CODEX_CAPABILITY_SOURCE_VERSION =
+  formatBuiltinCodexCapabilitySourceVersion(CODEX_RUNTIME_VERSION);
 export const BUILTIN_CLAUDE_CAPABILITY_SOURCE_VERSION = `builtin-claude-acp:${CLAUDE_ACP_ADAPTER_VERSION}+agent-sdk:${CLAUDE_AGENT_SDK_VERSION}+claude-code:${CLAUDE_CODE_RUNTIME_VERSION}`;
 export const BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION = `builtin-kimi:${KIMI_CODE_VERSION}`;
 export const BUILTIN_GROK_CAPABILITY_SOURCE_VERSION = `builtin-grok-acp:${GROK_ACP_ADAPTER_VERSION}+official-grok:${GROK_BUILD_RUNTIME_VERSION}`;

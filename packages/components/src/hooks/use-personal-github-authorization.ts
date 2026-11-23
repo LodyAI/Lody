@@ -1,6 +1,5 @@
 import { restoreGitHubInstallationRecovery } from '@/lib/github-installation-recovery';
-import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
-import { useLegacyWorkspaceAction } from '@/hooks/use-legacy-workspace-query';
+import { useGithubWorkspaceStatus, useGithubWorkspaceAction } from './use-github-workspace';
 import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -16,10 +15,10 @@ export function usePersonalGitHubAuthorization(
   workspaceId: string | null,
   workspaceSlug: string | null | undefined
 ) {
-  const begin = useLegacyWorkspaceAction(cloudOperations.github.beginPersonalAuthorization);
-  const complete = useLegacyWorkspaceAction(cloudOperations.github.completePersonalAuthorization);
+  const begin = useGithubWorkspaceAction(cloudOperations.github.beginPersonalAuthorization);
+  const complete = useGithubWorkspaceAction(cloudOperations.github.completePersonalAuthorization);
   const { t } = useTranslation();
-  const legacyStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyStatus = useGithubWorkspaceStatus(workspaceId);
   useEffect(() => {
     if (!workspaceId || legacyStatus !== 'allowed') return;
     let active = true;

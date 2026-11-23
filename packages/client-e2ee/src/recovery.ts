@@ -15,6 +15,7 @@ import {
   removeVaultPasswordGuarded,
   setVaultPasswordVerified,
 } from '@lody/e2ee-client/recovery-password';
+import { recoveryServiceLocator } from '@lody/e2ee-client/recovery-locator';
 import { clientRecoveryJournal } from './recovery-journal';
 import { MAX_VAULT_PASSWORD_GENERATIONS, passwordWrapEntryId } from '@lody/e2ee-core/protocol';
 
@@ -34,6 +35,14 @@ export type ClientRecoveryOptions = {
   readonly enabled: () => boolean;
   readonly client: PersonalCloudConnection['client'];
   readonly passkey?: E2eePasskeyPort;
+  /**
+   * Product site URL or origin of the signed-in service; recovery files carry its canonical
+   * origin (`recoveryServiceLocator`). Omitted, it is the page's own HTTP(S) origin, which is
+   * the site origin for the hosted and self-hosted Web client. A host without an HTTP(S)
+   * page origin, such as the Capacitor shell, must pass it; otherwise every command
+   * refuses as `disabled`.
+   */
+  readonly serviceLocator?: string;
 };
 export type ClientRecoveryUnlock =
   | { readonly file: Uint8Array }
@@ -103,17 +112,34 @@ function failure(error: unknown): Error {
     errorCodes.has(error.code)
   )
     return new Error(`e2ee_recovery_${error.code}`);
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'locator-mismatch'
+  )
+    return new Error('e2ee_recovery_authentication');
   return new Error('e2ee_recovery_failed');
 }
+/** The page's origin; non-HTTP(S) shells such as `capacitor://localhost` yield no locator. */
+const pageOrigin = (): string | undefined =>
+  typeof globalThis.location?.origin === 'string' ? globalThis.location.origin : undefined;
 
 /** One login owns commands until actual native/IDB/network settlement. Only non-secret summaries escape the Scope. */
 export function makeClientRecovery(options: ClientRecoveryOptions) {
   const accountId = options.accountId,
-    sessionId = options.sessionId;
+    sessionId = options.sessionId,
+    serviceLocator = recoveryServiceLocator(options.serviceLocator ?? pageOrigin());
   let retired = false;
   const commands = Semaphore.makeUnsafe(1);
+  /** The signed-in service's canonical locator; without one recovery is unavailable. */
+  const locator = () => {
+    if (serviceLocator === null) throw new Error('e2ee_recovery_disabled');
+    return serviceLocator;
+  };
   const check = () => {
     if (!options.enabled()) throw new Error('e2ee_recovery_disabled');
+    locator();
     const current = options.currentSession();
     if (
       retired ||
@@ -341,7 +367,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
                 ? yield* unlockVaultWithPasskey({
                     port: passkey(),
                     open: ({ vaultId, credential }) =>
-                      vaults.openWithPasskey({ vaultId, locator: accountId, credential }),
+                      vaults.openWithPasskey({ vaultId, locator: locator(), credential }),
                   })
                 : 'password' in unlock
                   ? yield* Effect.gen(function* () {
@@ -351,7 +377,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
                       if (!state.current) return yield* Effect.fail({ code: 'missing' });
                       return yield* vaults.openWithPassword({
                         vaultId: state.current,
-                        locator: accountId,
+                        locator: locator(),
                         password: unlock.password,
                       });
                     })
@@ -361,7 +387,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
                           throw new Error('e2ee_recovery_invalid-input');
                         return unlock.file.slice();
                       }),
-                      (file) => vaults.open({ recoveryFile: file }),
+                      (file) => vaults.open({ recoveryFile: file, locator: locator() }),
                       (file) => Effect.sync(() => file.fill(0))
                     );
             if (write) {
@@ -432,13 +458,13 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
               let saved: Uint8Array | undefined;
               yield* Effect.addFinalizer(() => Effect.sync(() => saved?.fill(0)));
               const created = yield* vaults.create({
-                locator: accountId,
+                locator: locator(),
                 persistFile: confirmFile(saveAndRead, (file) => {
                   saved = file;
                 }),
               });
               created.recoveryFile.fill(0);
-              const reopened = yield* vaults.open({ recoveryFile: saved! });
+              const reopened = yield* vaults.open({ recoveryFile: saved!, locator: locator() });
               yield* Effect.ignore(rememberMethods(reopened));
               const result = yield* summary(reopened);
               if (result.workspaces !== 0) return yield* Effect.fail({ code: 'authentication' });
@@ -457,7 +483,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
           const created = yield* createVaultWithPasskey({
             port: passkey(),
             label: normalized,
-            create: (input) => vaults.createWithPasskey({ ...input, locator: accountId }),
+            create: (input) => vaults.createWithPasskey({ ...input, locator: locator() }),
           });
           return created.vault;
         })
@@ -465,10 +491,10 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
     createWithPassword: (password: string) =>
       createWith((vaults) =>
         Effect.gen(function* () {
-          const created = yield* vaults.createWithPassword({ locator: accountId, password });
+          const created = yield* vaults.createWithPassword({ locator: locator(), password });
           const reopened = yield* vaults.openWithPassword({
             vaultId: created.vault.vaultId,
-            locator: accountId,
+            locator: locator(),
             password,
           });
           if (reopened.vaultId !== created.vault.vaultId)
@@ -491,7 +517,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
           });
           created.recoveryFile.fill(0);
           const vaults = yield* RecoveryVaults;
-          const reopened = yield* vaults.open({ recoveryFile: saved! });
+          const reopened = yield* vaults.open({ recoveryFile: saved!, locator: locator() });
           if (reopened.vaultId !== vault.vaultId)
             return yield* Effect.fail({ code: 'authentication' });
           return { vaultId: vault.vaultId };

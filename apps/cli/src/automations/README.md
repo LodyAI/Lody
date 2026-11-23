@@ -22,8 +22,10 @@ Automations run in plaintext and encrypted workspaces. In an encrypted workspace
 [Session adapter](actions/session-actions-legacy.ts) signs each queued continuation as this
 machine, and encrypted admission refuses an automation input without that signature, as it
 does for scheduled runs. The ledger stays machine-local, and continuation text enters the
-Session through its encrypted history. The PR poller is not registered there, so `github.*`
-reads stay `unknown`. Remote control rides workspace Machine RPC, which encrypted
+Session through its encrypted history. The local PR poller uses the account’s repository-scoped GitHub credentials and feeds
+PR/CI observations into the local automation ledger. PR state stays in protected Loro metadata;
+hosted PR association and content caches remain disabled. Device-only machine composition
+keeps its existing lack of account GitHub credentials. Remote control rides workspace Machine RPC, which encrypted
 workspaces withhold. Fleet therefore installs the remote verifier, and the renderer offers
 remote controls, only where the shared content policy supports `rpc`.
 
@@ -92,7 +94,7 @@ Programs cannot select another Session or directly access Node or the daemon env
 [event composition](examples/wait-for-event.js); an event example requires an
 installed source that publishes that fact.
 
-`ctx.exec({ command, args?, cwd? })` runs a local executable without shell interpolation in the Session workdir; `cwd` is relative to that directory. It returns `exitCode`, `signal`, `stdout` and `stderr`, including nonzero exits. Commands run with the local OS user's authority and can access files and the network. The Host supplies a limited environment. Use only checks that are safe to repeat: interruption and Host restart may cause another execution, and a Host crash can leave a process running.
+`ctx.exec({ command, args?, cwd? })` runs a local executable without shell interpolation in the Session workdir; `cwd` is relative to that directory. It returns `exitCode`, `signal`, `stdout` and `stderr`, including nonzero exits. Commands run with the local OS user's authority and can access files and the network. The Host supplies a limited environment (`PATH`, home/temp directories, and host proxy variables `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, which may carry proxy URL credentials, while excluding unrelated host or Agent credentials). Use only checks that are safe to repeat: interruption and Host restart may cause another execution, and a Host crash can leave a process running.
 
 Each check has a 30-second deadline, at most 32 read, fetch or exec calls, four concurrent calls
 and a 128-KiB bound per operation. Cancellation interrupts the interpreter and
@@ -117,7 +119,7 @@ It is a wait without a program, so it shares `list`, `show`, `cancel`, the
 Session group's unsettled state and the continuation path above. The
 [run owner](runtime/managed-runs.ts) starts the process on the first check, in the
 Session workdir or a `cwd` inside it, with no shell and an explicit environment:
-the login-shell and daemon `PATH`, home and temp variables, plus the caller's `env`.
+the login-shell and daemon `PATH`, home/temp variables, host proxy variables (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, which may carry proxy URL credentials), plus the caller's `env`.
 Output goes to `<data dir>/automations/runs/<workspace>/<wait>.log`, capped at
 16 MiB; logs older than seven days are removed when another run starts.
 
@@ -208,7 +210,13 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   so a crash repeats nothing. The policy turns the event into the existing Create PR,
   Fix CI, Resolve Conflicts or a merge request, admitted only while the Session group
   is settled and while the PR head still matches. Progress is written to
-  `SessionMeta.autoDelivery` at transitions only. The daemon never mutates GitHub;
+  `SessionMeta.autoDelivery` at transitions only, under a `Semaphore` that `configure`
+  also holds, so a pass never republishes a status the user cleared. Only an open or
+  draft current PR binds an enablement; a head with no reported check waits out
+  `DELIVERY_CI_REPORT_GRACE_MS` before it counts as having no CI, and uncommitted or
+  unpushed work stops with `workspace_unpushed`. Turning it off cancels a request that
+  has not reached the Session queue, since a disabled rule's receipt would stay
+  `blocked` and keep the group from settling. The daemon never mutates GitHub;
   the agent merges with `gh`. Encrypted workspaces refuse it because no PR poller runs
   there.
 - **Idle compact:** context occupancy must reach the configured threshold. The same

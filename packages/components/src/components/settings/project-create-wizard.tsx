@@ -38,7 +38,15 @@ import { Spinner } from '@lody/ui/spinner';
 import { Tabs } from '@lody/ui/tabs';
 import { Textarea } from '@lody/ui/textarea';
 import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  radius,
+  space,
+  text,
+} from '@lody/ui/tokens/scales.stylex';
 import { settingsRecordsCard } from './compact-layout';
 import { FormMessage, Section } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
@@ -137,7 +145,7 @@ const styles = stylex.create({
     fontFamily: 'inherit',
     textAlign: 'start',
     cursor: { default: 'pointer', ':disabled': 'default' },
-    opacity: { default: 1, ':disabled': 0.5 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     outlineStyle: 'none',
     transitionProperty: 'background-color, box-shadow, transform',
     transitionDuration: duration.fast,

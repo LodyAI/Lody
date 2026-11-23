@@ -1,5 +1,6 @@
 import { daemonLossProbeEnabled } from './e2ee/client-loss-observer';
-import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import { e2eeFeatureTarget, isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import { ENCRYPTED_ORDINARY_HANDLER_WRITES } from '@lody/loro-streams-rpc';
 import type { EncryptedFeatureContext } from './e2ee/feature-rpc';
 import {
   isLocalOnlyMemoryProvider,
@@ -24,6 +25,9 @@ import { traceAsync } from '@/utils/trace-span';
 import { CliResourceMonitor } from '@/monitor/cli-resource-monitor';
 import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sampler';
 import { readLoroWasmHeapBytes } from '@/lib/loro/wasm-runtime-health';
+
+const isEncryptedOrdinaryHandlerWrite = (method: string) =>
+  (ENCRYPTED_ORDINARY_HANDLER_WRITES as readonly string[]).includes(method);
 
 export interface MachineRuntimeOptions {
   sessionManagerFactory: () => SessionManager;
@@ -70,26 +74,32 @@ export class MachineRuntime {
         requester.executionUserId
       );
     }
-    if (request.method === 'local-project/list-branches') {
-      const requester = context?.requester;
-      if (!requester || request.params.requestedByUserId !== requester.accountId)
-        throw new Error('e2ee_feature_requester');
-      return this.requireHandler().readEncryptedMachineRequest(
-        {
-          ...request,
-          params: {
-            ...request.params,
-            requestedByUserId: requester.executionUserId,
-          },
-        },
-        context
-      );
+    if (request.method === 'session/history-write') {
+      if (!context?.authority || !context.requester) throw new Error('e2ee_feature_requester');
+      return this.requireHandler().handleLocalMachineRpc(request, context.signal, context);
+    }
+    const target = e2eeFeatureTarget(request).kind;
+    if (target === 'session' || target === 'project') {
+      if (!context?.requester) throw new Error('e2ee_feature_requester');
+      return this.requireHandler().handleEncryptedSessionWork(request, context.requester);
     }
     if ('requestedByUserId' in request.params && request.params.requestedByUserId !== config.userId)
       throw new Error('e2ee_feature_requester');
     if (isE2eeReadQuery(request.method, request.params)) {
       if (!context) throw new Error('e2ee_rpc_unavailable');
       return this.requireHandler().readEncryptedMachineRequest(request, context);
+    }
+    if (isEncryptedOrdinaryHandlerWrite(request.method)) {
+      if (!context) throw new Error('e2ee_rpc_unavailable');
+      return this.requireHandler().readEncryptedMachineRequest(request, context);
+    }
+    if (
+      request.method === 'ios-simulator/control' ||
+      request.method === 'android-emulator/control'
+    ) {
+      if (!context?.authority || context.authority.signal.aborted || !context.authority.isCurrent())
+        throw new Error('e2ee_feature_unavailable');
+      return this.requireHandler().handleEncryptedDevicePreview(request, context);
     }
     if (request.method === 'machine/acp-interaction') {
       if (!context?.authority || context.authority.signal.aborted || !context.authority.isCurrent())
@@ -436,10 +446,7 @@ export class MachineRuntime {
     message: LocalMachineRpcRequestValidated,
     signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
-    if (
-      this.options.handlerConfig.encryptedWorkspace &&
-      (message.method === 'session/dispatch-turn' || message.method.startsWith('ios-simulator/'))
-    )
+    if (this.options.handlerConfig.encryptedWorkspace && message.method === 'session/dispatch-turn')
       throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();
     return await handler.handleLocalMachineRpc(message, signal);

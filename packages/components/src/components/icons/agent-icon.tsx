@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Bot, SquareTerminal } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
@@ -17,6 +19,7 @@ import { MinimaxIcon } from './minimax-icon';
 import { OpenAIIcon } from './openai-icon';
 import { InlineSvg } from './inline-svg';
 import { REGISTRY_AGENT_ICON_SVGS } from './registry-agent-icons';
+import { ICON_GLYPH_BOX_CLASS, iconSurface } from './surface';
 import bubSvg from '@/assets/bub.svg?raw';
 import dimcodeSvg from '@/assets/dimcode.svg?raw';
 import lodySvg from '@/assets/lody.svg?raw';
@@ -84,7 +87,10 @@ export function AgentIcon({
   env?: Record<string, string>;
   className?: string;
 }) {
-  const cls = className ?? 'h-4 w-4';
+  const cls = className ?? ICON_GLYPH_BOX_CLASS;
+  const fill = stylex.props(iconSurface.glyphFill);
+  /** The wrapper the raw registry markup is painted into. */
+  const inlineGlyphClass = clsx(fill.className, cls);
   if (cliType === 'custom') {
     return <SquareTerminal className={cls} />;
   }
@@ -103,22 +109,18 @@ export function AgentIcon({
     if (agentType === 'bub' || agentType === 'dimcode' || agentType === 'sorbet') {
       return (
         <InlineSvg
+          fillParent
           raw={
             agentType === 'sorbet' ? lodyAgentSvg : agentType === 'dimcode' ? dimcodeSvg : bubSvg
           }
-          className={`${cls} inline-flex items-center justify-center [&_svg]:h-full [&_svg]:w-full`}
+          className={inlineGlyphClass}
         />
       );
     }
     if (agentType === 'grok') {
       const grokRaw = REGISTRY_AGENT_ICON_SVGS['grok-build'];
       if (grokRaw) {
-        return (
-          <InlineSvg
-            raw={grokRaw}
-            className={`${cls} inline-flex items-center justify-center [&_svg]:h-full [&_svg]:w-full`}
-          />
-        );
+        return <InlineSvg fillParent raw={grokRaw} className={inlineGlyphClass} />;
       }
     }
   }
@@ -134,12 +136,7 @@ export function AgentIcon({
           : agentType
     ];
   if (raw) {
-    return (
-      <InlineSvg
-        raw={raw}
-        className={`${cls} inline-flex items-center justify-center [&_svg]:h-full [&_svg]:w-full`}
-      />
-    );
+    return <InlineSvg fillParent raw={raw} className={inlineGlyphClass} />;
   }
   return fallback !== undefined ? fallback : <Bot className={cls} />;
 }

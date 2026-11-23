@@ -7725,6 +7725,14 @@ export class SessionExecutionService {
               );
               runtime.disconnectedTransport = false;
               const restoredSession = yield* restoreRetiredSession();
+              self.deps.setSessionActivePresencePhase(sessionId, 'thinking');
+              yield* self.tryPromise(() => sessionDoc.setStatus(SessionStatusFactory.running()));
+              self.captureStatusChanged(sessionId, 'running', undefined, 'stale_acp_recovery');
+              self.scheduleLiveActivitySummarySync(userId, {
+                sessionId,
+                triggerReason: 'stale_acp_recovery',
+                status: 'running',
+              });
               yield* applyPromptConfig(restoredSession, 'stale_acp_recovery');
               yield* maybeRecordHistoryReplayNotice();
               yield* validatePromptCredentials(restoredSession, 'stale_acp_recovery');

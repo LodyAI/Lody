@@ -1,6 +1,5 @@
 import { createHistoryWriter } from '@lody/shared/history-writer';
 // @vitest-environment jsdom
-;
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -380,10 +379,10 @@ it('strips markdown boundaries from quote excerpts and truncates at word boundar
   expect(formatMessageQuoteExcerpt('Selecting text and scrolling')).toBe(
     'Selecting text and scrolling'
   );
-  expect(
-    formatMessageQuoteExcerpt('Keep the reading position stable while selecting text.')
-  ).toBe('Keep the reading position...');
-  expect(
-    formatMessageQuoteExcerpt('supercalifragilisticexpialidociouslongunbreakabletoken')
-  ).toBe('supercalifragilisticexpialido...');
+  expect(formatMessageQuoteExcerpt('Keep the reading position stable while selecting text.')).toBe(
+    'Keep the reading position...'
+  );
+  expect(formatMessageQuoteExcerpt('supercalifragilisticexpialidociouslongunbreakabletoken')).toBe(
+    'supercalifragilisticexpialido...'
+  );
 });

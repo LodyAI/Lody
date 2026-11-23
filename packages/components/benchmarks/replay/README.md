@@ -40,3 +40,31 @@ Assertions verify membership, every acquired window's IDs, absence of unsolicite
 After an optimization: rerun the unchanged replay with identical fixture, options and Node version; compare both modes; run existing uncommitted insert/delete/reorder/ID-change correctness regressions too. Improving this loop alone does not prove concurrent-write compatibility. No product behavior is modified by these tools.
 
 Outline lazy-loading changes the workload: `idleTail` replaces the old full-summary phase. Do not compare these baseline files with the old runner as if they measured identical work. The initial directory and retained tail remain; preview bodies are requested by hover/window leases. Business fact derivations are not mounted in this Node replay.
+
+## Large-turn foreground catch-up
+
+`resume.ts` prepares the same deterministic snapshot and thirty small remote text
+updates, warms the production view, and replays the updates into its retained turn.
+The default turn has 1,200 completed tools with 8 KiB of synthetic output each.
+Each checkout uses its own installed Loro instance. The measured range is acquired
+after the initial directory is ready.
+It reports import time, display-body read time, time to the updated view, and delay
+until another Node task can run. The fixture hash must match between comparisons.
+
+Run the unchanged runner against two checkouts with installed dependencies:
+
+```sh
+node --import ./apps/cli/node_modules/tsx/dist/loader.mjs packages/components/benchmarks/replay/resume.ts /absolute/path/to/baseline > /tmp/resume-before.json
+node --import ./apps/cli/node_modules/tsx/dist/loader.mjs packages/components/benchmarks/replay/resume.ts . > /tmp/resume-after.json
+```
+
+Run timing samples sequentially, without other tests/profilers. `RESUME_TOOLS`
+changes the fixture size; use the same value for both checkouts. `RESUME_UPDATE_KIND=append`
+appends separate text items instead of growing the last text, exercising list invalidation.
+Compare the same update kind on both checkouts. Results also fingerprint the runner,
+source files and lockfile. Setup, first body
+hydration and file IO are outside the measurement. Each run checks that every remote
+text update reaches the view. These Node measurements exclude React, DOM/layout,
+browser frame scheduling and real network; next-task latency is not INP or proof
+of a smooth application return. Device acceptance must still exercise returning to
+a conversation while typing and scrolling during actual catch-up.

@@ -111,9 +111,7 @@ export function OpenSourceAttributionsDialog({
       </Dialog.Trigger>
       <Dialog.Content width={PANEL_WIDTH}>
         <Suspense
-          fallback={
-            <div {...stylex.props(styles.pending)}>{t('common.loading', 'Loading…')}</div>
-          }
+          fallback={<div {...stylex.props(styles.pending)}>{t('common.loading', 'Loading…')}</div>}
         >
           <OpenSourceAttributionsContent />
         </Suspense>

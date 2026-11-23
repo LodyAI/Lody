@@ -138,11 +138,9 @@ function SessionIosSimulatorPanelController({
   const isLocalMachine = localMachineId === session.machineId;
   const availability =
     platform === 'android'
-      ? runtime?.contentMode === 'e2ee' && !isLocalMachine
-        ? 'hidden'
-        : machineSupportsAndroidEmulatorProtocol(machine)
-          ? 'available'
-          : 'upgrade-required'
+      ? machineSupportsAndroidEmulatorProtocol(machine)
+        ? 'available'
+        : 'upgrade-required'
       : getIosSimulatorPanelAvailability(machine, runtime?.contentMode);
   // Same-machine Electron talks to the local daemon directly, so cloud presence
   // going offline does not cut it off.
@@ -184,7 +182,9 @@ function SessionIosSimulatorPanelController({
     () => initialSnapshot?.catalog ?? { phase: 'loading' }
   );
   const [refreshing, setRefreshing] = useState(false);
-  const [status, setStatus] = useState<IosSimulatorPanelStatus>(() => initialSnapshot?.status ?? IDLE);
+  const [status, setStatus] = useState<IosSimulatorPanelStatus>(
+    () => initialSnapshot?.status ?? IDLE
+  );
   const statusRef = useRef(status);
   statusRef.current = status;
   const [viewerState, setViewerState] = useState<IosSimulatorViewerState | null>(
@@ -724,7 +724,10 @@ function SessionIosSimulatorPanelController({
                 appearance: true,
                 'open-url': false,
               }
-            : getIosSimulatorControlAvailability(hardware, !!statusDevice && machineSupportsIosSimulatorControls(machine, 2)),
+            : getIosSimulatorControlAvailability(
+                hardware,
+                !!statusDevice && machineSupportsIosSimulatorControls(machine, 2)
+              ),
         pendingControl,
         capturing,
         canAttach: Boolean(onAttachScreenshot),

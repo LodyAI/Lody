@@ -67,8 +67,8 @@ export const toggle = stylex.defineVars({
   barGap: space[2],
   ring: colors.accent,
   ringWidth: focus.ringWidth,
-  // The family's one disabled value; the rules give the whole control 45%.
-  disabledOpacity: '0.45',
+  // Preserve the family token while sharing the control scale's disabled state.
+  disabledOpacity: control.disabledOpacity,
 });
 
 /**

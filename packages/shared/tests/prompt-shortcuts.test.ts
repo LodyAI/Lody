@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
+import { createCipheriv, createDecipheriv } from 'node:crypto';
+import { PromptShortcutSync } from '../src/prompt-shortcuts/sync';
+import {
+  encryptedWorkspaceResolver,
+  type WorkspaceStreamsContent,
+} from '../src/workspace-streams-content';
+import {
+  encodeStreamsRoomAdditionalData,
+  type StreamsRoomIdentity,
+} from 'loro-repo/transport/streams';
 import {
   getShortcutBodyStreamId,
   getShortcutIndexStreamId,
@@ -320,4 +330,322 @@ describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
       await h.cleanup();
     }
   });
+});
+
+describe('encrypted Prompt Shortcuts', () => {
+  const resource = { kind: 'workspace-body', workspaceId: 'ws-1', bodyDocId: 'sc-1' } as const;
+  const grant = {
+    token: 'synthetic',
+    expiresIn: 300,
+    gatewayBaseUrl: 'https://gateway.test',
+    bucketId: 'encrypted-content',
+    streamId: getShortcutResourceStreamId(resource),
+  };
+  const protectedContent: WorkspaceStreamsContent = {
+    mode: 'protected',
+    namespace: 'synthetic-namespace',
+    snapshotUpload: { canUpload: () => false },
+    resolve: () => {
+      throw new Error('Unexpected protection acquisition');
+    },
+  };
+
+  it('refuses legacy resources, missing/plaintext buckets, unprotected rooms and guest write acquisitions before opening storage', async () => {
+    const repo = await LoroRepo.create({});
+    try {
+      for (const bucketId of [undefined, 'lody', 'encrypted-content']) {
+        const sync = new PromptShortcutSync({
+          content: { ...protectedContent, resolve: () => ({ mode: 'plaintext' }) },
+          repo,
+          now: () => 0,
+          canWrite: () => true,
+          grant: async () => ({ ...grant, bucketId }),
+        });
+        await expect(sync.acquire(resource, false)).rejects.toThrow();
+        await expect(sync.acquire({ kind: 'body', bodyDocId: 'legacy' }, false)).rejects.toThrow(
+          'workspace resources'
+        );
+        await expect(
+          sync.acquire(
+            {
+              kind: 'index',
+              domain: { workspaceId: 'ws-1', ownerUserId: 'user-1', visibility: 'workspace' },
+            },
+            false
+          )
+        ).rejects.toThrow('workspace resources');
+        await sync.dispose();
+      }
+      const guest = new PromptShortcutSync({
+        content: protectedContent,
+        repo,
+        now: () => 0,
+        grant: async () => {
+          throw new Error('Guest must not request write tokens');
+        },
+      });
+      await expect(guest.acquire(resource, true)).rejects.toThrow('read-only');
+      await guest.dispose();
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('keeps guest reads live and rejects creation, editing and deletion before local mutations', async () => {
+    const repo = await LoroRepo.create({});
+    const store = await LocalShortcutStore.open({ repo, workspaceId: 'ws-1', userId: 'user-1' });
+    const original = await store.save({ value: makeShortcut(), base: null });
+    await store.acknowledge((await store.preparePublication(original.entry.id))!);
+    const accesses: boolean[] = [];
+    const runtime = new PromptShortcutRuntime(store, {
+      canWrite: () => false,
+      acquire: async (_, write) => {
+        accesses.push(write);
+        if (write) throw new Error('Guest requested write access');
+        return { sync: async () => {}, join: async () => {}, release: async () => {} };
+      },
+      dispose: async () => {},
+    });
+    try {
+      await runtime.start();
+      expect(accesses.length).toBeGreaterThan(0);
+      expect(accesses.every((write) => !write)).toBe(true);
+      await expect(
+        runtime.save({ value: makeShortcut({ id: 'new' }), base: null })
+      ).rejects.toThrow('read-only');
+      await expect(
+        runtime.save({ value: makeShortcut({ revision: 'edit' }), base: original.entry })
+      ).rejects.toThrow('read-only');
+      expect(() => runtime.remove(original.entry)).toThrow('read-only');
+      await runtime.flush();
+      expect(store.list()).toHaveLength(1);
+      expect(store.get(original.entry.id)?.entry.revision).toBe('rev-1');
+      expect(store.get(original.entry.id)?.operation).toBeNull();
+    } finally {
+      await runtime.dispose();
+      await repo.destroy();
+    }
+  });
+
+  it.each(['flock', 'doc'] as const)(
+    'round trips the real %s replica through encrypted Streams with room-bound AAD',
+    async (kind) => {
+      const writerRepo = await LoroRepo.create({});
+      const readerRepo = await LoroRepo.create({});
+      const selected =
+        kind === 'flock' ? ({ kind: 'workspace-index', workspaceId: 'ws-1' } as const) : resource;
+      const streamId = getShortcutResourceStreamId(selected);
+      const room: StreamsRoomIdentity =
+        kind === 'flock' ? { kind, flockDocId: streamId } : { kind, docId: streamId };
+      const namespace = 'synthetic-namespace';
+      const prefix = encodeStreamsRoomAdditionalData(namespace, room, new Uint8Array());
+      const key = Buffer.alloc(32, 7);
+      let sequence = 0,
+        seals = 0,
+        opens = 0;
+      const content: WorkspaceStreamsContent = {
+        mode: 'protected',
+        namespace,
+        snapshotUpload: { canUpload: () => false },
+        resolve: encryptedWorkspaceResolver('ws-1', () => ({
+          maxSealOverheadBytes: 128,
+          seal(input) {
+            const header = Buffer.alloc(12);
+            header.writeUInt32BE(++sequence);
+            const aad = input.additionalData(header);
+            expect(aad).toEqual(
+              encodeStreamsRoomAdditionalData(namespace, room, aad.slice(prefix.length))
+            );
+            const cipher = createCipheriv('aes-256-gcm', key, header);
+            cipher.setAAD(aad);
+            seals++;
+            return {
+              header,
+              sealed: Buffer.concat([
+                cipher.update(input.plaintext),
+                cipher.final(),
+                cipher.getAuthTag(),
+              ]),
+            };
+          },
+          open(input) {
+            expect(input.additionalData).toEqual(
+              encodeStreamsRoomAdditionalData(
+                namespace,
+                room,
+                input.additionalData.slice(prefix.length)
+              )
+            );
+            const cipher = createDecipheriv('aes-256-gcm', key, input.header);
+            cipher.setAAD(input.additionalData);
+            cipher.setAuthTag(input.sealed.slice(-16));
+            opens++;
+            return Buffer.concat([cipher.update(input.sealed.slice(0, -16)), cipher.final()]);
+          },
+        })),
+      };
+      const batches: Uint8Array[] = [];
+      const paths: string[] = [];
+      const tail = () =>
+        String(batches.reduce((sum, batch) => sum + batch.length, 0)).padStart(20, '0');
+      vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : input);
+        paths.push(url.pathname);
+        const method = init?.method ?? 'GET';
+        if (method === 'POST') {
+          batches.push(new Uint8Array(await new Response(init?.body).arrayBuffer()));
+          return new Response(null, {
+            headers: {
+              'Stream-Next-Offset': tail(),
+              'Stream-Up-To-Date': 'true',
+              'Producer-Epoch': new Headers(init?.headers).get('Producer-Epoch') ?? '0',
+              'Producer-Seq': new Headers(init?.headers).get('Producer-Seq') ?? '0',
+            },
+          });
+        }
+        if (method === 'PUT')
+          return new Response(null, { status: 201, headers: { 'Stream-Next-Offset': tail() } });
+        if (url.pathname.endsWith('/bootstrap'))
+          return new Response(
+            '--bytes\r\nContent-Type: application/octet-stream\r\n\r\n\r\n--bytes--\r\n',
+            {
+              headers: {
+                'Content-Type': 'multipart/mixed; boundary=bytes',
+                'Stream-Snapshot-Offset': '-1',
+                'Stream-Next-Offset': '-1',
+                'Stream-Up-To-Date': String(!batches.length),
+              },
+            }
+          );
+        return new Response(
+          Buffer.concat(url.searchParams.get('offset') === tail() ? [] : batches),
+          {
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'Stream-Next-Offset': tail(),
+              'Stream-Up-To-Date': 'true',
+            },
+          }
+        );
+      });
+      let bucketId = 'encrypted-content';
+      let now = 0;
+      const writer = new PromptShortcutSync({
+        content,
+        repo: writerRepo,
+        now: () => now,
+        canWrite: () => true,
+        grant: async () => ({ ...grant, streamId, bucketId }),
+      });
+      const reader = new PromptShortcutSync({
+        content,
+        repo: readerRepo,
+        now: () => 0,
+        grant: async () => ({ ...grant, streamId }),
+      });
+      try {
+        const replica =
+          kind === 'flock'
+            ? await writerRepo.acquireFlockDoc(streamId)
+            : await writerRepo.acquireDoc(streamId);
+        if ('flock' in replica) replica.flock.put(['prompt'], 'private-prompt-sentinel');
+        else {
+          replica.doc.getText('prompt').insert(0, 'private-prompt-sentinel');
+          replica.doc.commit();
+        }
+        const writing = await writer.acquire(selected, true);
+        await writing.sync();
+        const reading = await reader.acquire(selected, false);
+        await reading.sync();
+        const received =
+          kind === 'flock'
+            ? await readerRepo.acquireFlockDoc(streamId)
+            : await readerRepo.acquireDoc(streamId);
+        expect(
+          'flock' in received
+            ? received.flock.get(['prompt'])
+            : received.doc.getText('prompt').toString()
+        ).toBe('private-prompt-sentinel');
+        expect(seals).toBeGreaterThan(0);
+        expect(opens).toBeGreaterThan(0);
+        expect(paths.every((path) => path.includes('/encrypted-content/'))).toBe(true);
+        expect(Buffer.concat(batches).includes(Buffer.from('private-prompt-sentinel'))).toBe(false);
+        if (kind === 'doc') {
+          const replayRepo = await LoroRepo.create({});
+          const replayResource = { ...resource, bodyDocId: 'sc-2' };
+          const replay = new PromptShortcutSync({
+            content,
+            repo: replayRepo,
+            now: () => 0,
+            grant: async () => ({
+              ...grant,
+              streamId: getShortcutResourceStreamId(replayResource),
+            }),
+          });
+          try {
+            const replayLease = await replay.acquire(replayResource, false);
+            await expect(replayLease.sync()).rejects.toThrow();
+            const replayDoc = await replayRepo.acquireDoc(
+              getShortcutResourceStreamId(replayResource)
+            );
+            expect(replayDoc.doc.getText('prompt').toString()).toBe('');
+            await replayDoc.release();
+            await replayLease.release();
+          } finally {
+            await replay.dispose();
+            await replayRepo.destroy();
+          }
+
+          batches.length = 0;
+          const ordinaryRepo = await LoroRepo.create({});
+          const protectedRepo = await LoroRepo.create({});
+          const ordinary = new PromptShortcutSync({
+            content: { mode: 'plaintext' },
+            repo: ordinaryRepo,
+            now: () => 0,
+            grant: async () => ({ ...grant, bucketId: undefined }),
+          });
+          const protectedReader = new PromptShortcutSync({
+            content,
+            repo: protectedRepo,
+            now: () => 0,
+            grant: async () => grant,
+          });
+          try {
+            const source = await ordinaryRepo.acquireDoc(streamId);
+            source.doc.getText('prompt').insert(0, 'unprotected-shortcut');
+            source.doc.commit();
+            const plainLease = await ordinary.acquire(resource, true);
+            await plainLease.sync();
+            const protectedLease = await protectedReader.acquire(resource, false);
+            await expect(protectedLease.sync()).rejects.toThrow();
+            const target = await protectedRepo.acquireDoc(streamId);
+            expect(target.doc.getText('prompt').toString()).toBe('');
+            await target.release();
+            await source.release();
+            await plainLease.release();
+            await protectedLease.release();
+          } finally {
+            await ordinary.dispose();
+            await protectedReader.dispose();
+            await ordinaryRepo.destroy();
+            await protectedRepo.destroy();
+          }
+        }
+        bucketId = 'lody';
+        now = 300_000;
+        await expect(writing.sync()).rejects.toThrow();
+        await received.release();
+        await replica.release();
+        await reading.release();
+        await writing.release();
+      } finally {
+        await writer.dispose();
+        await reader.dispose();
+        await writerRepo.destroy();
+        await readerRepo.destroy();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
 });

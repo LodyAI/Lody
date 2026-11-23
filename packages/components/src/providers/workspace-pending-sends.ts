@@ -1,7 +1,14 @@
 import { isElectronRenderer } from '../lib/electron';
 import { resolveAttachmentRoute } from '../lib/session-attachment-routing';
 import { assertProtectedAttachmentReferences } from '../lib/encrypted-session-attachment';
-import { normalizeSessionInputBlocks, type MachineId, type SessionId } from '@lody/shared';
+import { requireEncryptedRoostOwner } from '../lib/encrypted-roost-history';
+import {
+  getMachineRoomId,
+  normalizeSessionInputBlocks,
+  type MachineMeta,
+  type MachineId,
+  type SessionId,
+} from '@lody/shared';
 import { prepareDraftAttachments } from '../lib/session-attachment-preparation';
 import { createPendingSessionSends, type PendingSessionSend } from '../lib/session-pending-sends';
 import { createWorkspaceAcceptedInputs } from '../lib/workspace-accepted-inputs';
@@ -45,9 +52,17 @@ export function createWorkspacePendingSends(args: {
   const barriers = new Map<string, Promise<readonly string[]>>();
   const admissionOrder = new Map<string, number>();
   let nextAdmission = 0;
+  const checkRoostOwner = async (send: PendingSessionSend) => {
+    if (runtime.contentMode !== 'e2ee' || send.historyBackend !== 'roost') return;
+    const machine = send.targetMachineId
+      ? await runtime.repo.getDocMeta(getMachineRoomId(send.targetMachineId))
+      : undefined;
+    requireEncryptedRoostOwner(machine?.meta as MachineMeta | undefined);
+  };
   const held = createPendingSessionSends({
-    prepare: (send, signal, update) =>
-      prepareDraftAttachments({
+    prepare: async (send, signal, update) => {
+      await checkRoostOwner(send);
+      return prepareDraftAttachments({
         content,
         record: send,
         signal,
@@ -56,7 +71,8 @@ export function createWorkspacePendingSends(args: {
         attachmentToken: runtime.attachmentToken,
         localMachineId: args.localMachineId,
         update,
-      }),
+      });
+    },
     write: (send, signal) =>
       runtime.sendResources.run(async (owned) => {
         if (runtime.contentMode === 'e2ee')
@@ -77,9 +93,10 @@ export function createWorkspacePendingSends(args: {
             async () => {}
           );
         }
-        return inputOwner.afterInputs(send.sessionId, predecessors, owned, () =>
-          writeUserTurn(runtime, send, owned)
-        );
+        return inputOwner.afterInputs(send.sessionId, predecessors, owned, async () => {
+          await checkRoostOwner(send);
+          await writeUserTurn(runtime, send, owned);
+        });
       }, signal),
     deliver: (send) =>
       send.historyBackend === 'roost' && !send.queue
@@ -135,7 +152,6 @@ export function createWorkspacePendingSends(args: {
     enqueue(send: Parameters<typeof held.enqueue>[0]) {
       if (send.workspaceId !== args.workspaceId) throw new Error('attachment_workspace_mismatch');
       if (runtime.contentMode === 'e2ee') {
-        if (send.historyBackend === 'roost') throw new Error('e2ee_feature_unavailable');
         assertProtectedAttachmentReferences([
           ...normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, ''),
           ...send.attachments.flatMap((item) => (item.ready ? [item.ready] : [])),

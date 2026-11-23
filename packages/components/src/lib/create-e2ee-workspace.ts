@@ -211,7 +211,7 @@ export class E2eeCreationDeleteError extends Error {
  * The server may hold a reservation (and therefore a workspace) even when this
  * device never saw the result, so the same request is first reconciled with its
  * original identity. A refusal proving nothing was reserved removes it locally;
- * a created workspace goes through the ordinary workspace deletion. Any unknown
+ * a created workspace goes through encrypted workspace deletion. Any unknown
  * outcome keeps the request saved (and archived, if it was) and throws.
  */
 export async function deleteSavedE2eeCreation(input: {

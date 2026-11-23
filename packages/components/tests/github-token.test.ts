@@ -387,3 +387,25 @@ describe('imperative cloud token admission', () => {
     }
   );
 });
+
+it('checks verified membership on cached tokens and isolates a replacement account', async () => {
+  uninstallGitHubTokenPort?.();
+  let scope = 'account:member';
+  uninstallGitHubTokenPort = installGitHubTokenPort({
+    assertAccess: () => {
+      if (scope === 'guest') throw new Error('guest_denied');
+      return scope;
+    },
+    getRepoToken: async () => ({
+      success: true,
+      token: scope,
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    }),
+    getOperationToken: async () => ({ success: true, token: scope, tokenSource: 'app' }),
+  });
+  expect(await getGitHubRepoToken('scope-workspace', 'owner/repo')).toBe('account:member');
+  scope = 'guest';
+  await expect(getGitHubRepoToken('scope-workspace', 'owner/repo')).rejects.toThrow('guest_denied');
+  scope = 'replacement:member';
+  expect(await getGitHubRepoToken('scope-workspace', 'owner/repo')).toBe('replacement:member');
+});

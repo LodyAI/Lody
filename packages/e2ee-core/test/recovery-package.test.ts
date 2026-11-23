@@ -513,6 +513,7 @@ describe('independently encoded recovery vault', () => {
           const byFile = yield* openRecoveryVault({
             ...(yield* populated(entry(v.index))),
             recoveryFile: bytes(v.recoveryFile),
+            locator: v.locator,
           });
           const index = yield* byFile.readIndex();
           expect(index.value).toEqual(v.expectedIndex);
@@ -529,6 +530,35 @@ describe('independently encoded recovery vault', () => {
             credential: prf,
           });
           expect((yield* byPasskey.readIndex()).value).toEqual(v.expectedIndex);
+        })
+      )
+    ));
+
+  it('refuses a recovery file naming another service before any vault read', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const stores = yield* populated(entry(v.index));
+          const reads: string[] = [];
+          const store: RecoveryVaultStore = {
+            ...stores.store,
+            readEntry: (vaultId, entryId) => {
+              reads.push(entryId);
+              return stores.store.readEntry(vaultId, entryId);
+            },
+            readIndex: (vaultId) => {
+              reads.push('index');
+              return stores.store.readIndex(vaultId);
+            },
+          };
+          const open = (locator: string) =>
+            failureCode(
+              openRecoveryVault({ ...stores, store, recoveryFile: bytes(v.recoveryFile), locator })
+            );
+          for (const locator of ['https://lody.ai', `${v.locator}/`, 'legacy-account-id'])
+            expect(yield* open(locator)).toBe('locator-mismatch');
+          expect(yield* open('')).toBe('invalid-input');
+          expect(reads).toEqual([]);
         })
       )
     ));
@@ -563,6 +593,7 @@ describe('independently encoded recovery vault', () => {
           const vault = yield* openRecoveryVault({
             ...(yield* populated(entry(vector.entry))),
             recoveryFile: bytes(v.recoveryFile),
+            locator: v.locator,
           });
           expect(yield* failureCode(vault.readIndex())).toBe(vector.code);
         })

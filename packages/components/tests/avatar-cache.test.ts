@@ -146,12 +146,20 @@ describe('avatar cache', () => {
           onabort: null as (() => void) | null,
           objectStore: () => ({
             get: (key: string) => {
-              const req = { result: idbRecords.get(key), onsuccess: null as (() => void) | null, onerror: null };
+              const req = {
+                result: idbRecords.get(key),
+                onsuccess: null as (() => void) | null,
+                onerror: null,
+              };
               queueMicrotask(() => req.onsuccess?.());
               return req;
             },
             getAll: () => {
-              const req = { result: [...idbRecords.values()], onsuccess: null as (() => void) | null, onerror: null };
+              const req = {
+                result: [...idbRecords.values()],
+                onsuccess: null as (() => void) | null,
+                onerror: null,
+              };
               queueMicrotask(() => req.onsuccess?.());
               return req;
             },

@@ -89,12 +89,10 @@ function MobileFieldSheet({
         style={{
           maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
-        className={`h-auto! rounded-t-2xl border-border/60 ${keyboard.contentClassName}`}
+        xstyle={[styles.sheet, keyboard.contentXstyle]}
       >
-        <DrawerTitle {...stylex.props(styles.heading)}>{heading}</DrawerTitle>
-        <DrawerDescription
-          {...stylex.props(styles.description, !description && styles.visuallyHidden)}
-        >
+        <DrawerTitle xstyle={styles.heading}>{heading}</DrawerTitle>
+        <DrawerDescription xstyle={styles.description} visuallyHidden={!description}>
           {description || heading}
         </DrawerDescription>
         <div ref={keyboard.scrollRef} style={keyboard.scrollStyle} {...stylex.props(styles.body)}>
@@ -246,6 +244,12 @@ export function MobileSectionNameSheet({
 }
 
 const styles = stylex.create({
+  sheet: {
+    height: 'auto',
+    borderTopLeftRadius: 'var(--radius-2xl)',
+    borderTopRightRadius: 'var(--radius-2xl)',
+    borderColor: 'hsl(var(--border) / 0.6)',
+  },
   heading: {
     margin: 0,
     paddingInline: space[4],

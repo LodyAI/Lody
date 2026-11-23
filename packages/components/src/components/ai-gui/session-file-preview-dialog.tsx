@@ -7,6 +7,7 @@ import { Spinner } from '@lody/ui/spinner';
 import type { SessionFilePayload } from '@lody/shared';
 import { Dialog } from '@/ui/dialog';
 import { Drawer } from '@lody/ui/drawer';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { control, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -20,6 +21,13 @@ import {
   isVideoSessionFile,
 } from '@/lib/session-file-presentation';
 import { MarkdownRenderer } from './markdown-renderer';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
 const isMarkdownFile = (fileName: string): boolean => {
@@ -123,7 +131,7 @@ export function SessionFilePreviewPanel({
         <Tabs.Root
           value={showRaw ? 'raw' : 'rendered'}
           onValueChange={(value) => setShowRaw(value === 'raw')}
-          className="mr-1"
+          xstyle={styles.tabs}
         >
           <Tabs.List size="small">
             <Tabs.Tab value="rendered">{t('sessions.filePreviewRendered', 'Rendered')}</Tabs.Tab>
@@ -132,18 +140,23 @@ export function SessionFilePreviewPanel({
         </Tabs.Root>
       ) : null}
       {!video ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="small"
-          icon
-          onClick={handleCopy}
-          disabled={status.kind !== 'loaded'}
-          aria-label={t('common.copy', 'Copy')}
-        >
-          {copied ? <Check className="size-4 text-emerald-500" /> : <Copy className="size-4" />}
-        </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="small"
+        icon
+        onClick={handleCopy}
+        disabled={status.kind !== 'loaded'}
+        aria-label={t('common.copy', 'Copy')}
+      >
+        {copied ? (
+          <Check {...stylex.props(styles.glyph, styles.glyphSuccess)} />
+        ) : (
+          <Copy {...stylex.props(styles.glyph)} />
+        )}
+      </Button>
       ) : null}
+
       {onDownload && (
         <Button
           type="button"
@@ -154,7 +167,7 @@ export function SessionFilePreviewPanel({
           disabled={isDownloading}
           aria-label={t('sessions.fileDownload', 'Download')}
         >
-          {isDownloading ? <Spinner className="size-4" /> : <Download className="size-4" />}
+          {isDownloading ? <Spinner size="small" /> : <Download {...stylex.props(styles.glyph)} />}
         </Button>
       )}
     </>
@@ -162,15 +175,9 @@ export function SessionFilePreviewPanel({
 
   const truncatedNotice =
     status.kind === 'loaded' && status.truncated ? (
-      <div
-        className={
-          pane
-            ? stylex.props(styles.paneNotice).className
-            : 'mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'
-        }
-      >
-        <span className="flex items-center gap-2">
-          <FileWarning className="size-4 shrink-0" aria-hidden="true" />
+      <div {...stylex.props(pane ? styles.paneNotice : styles.notice)}>
+        <span {...stylex.props(styles.noticeText)}>
+          <FileWarning {...stylex.props(styles.glyph, styles.shrink)} aria-hidden="true" />
           {t(
             'sessions.filePreviewTruncated',
             'Preview shows only the start of this file. Download the full file to see everything.'
@@ -181,7 +188,7 @@ export function SessionFilePreviewPanel({
             type="button"
             variant="secondary"
             size="small"
-            className="shrink-0"
+            xstyle={styles.shrink}
             onClick={() => onDownload?.(file)}
             disabled={isDownloading}
           >
@@ -207,15 +214,16 @@ export function SessionFilePreviewPanel({
   let content: React.ReactNode;
   if (status.kind === 'loading') {
     content = (
-      <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-        <Spinner className="size-4" />
+      <div {...stylex.props(styles.loading)}>
+        <Spinner size="small" />
         {loadingMessage}
       </div>
     );
   } else if (status.kind === 'error') {
     content = (
-      <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted-foreground">
-        <FileWarning className="size-6 text-muted-foreground/60" aria-hidden="true" />
+      <div {...stylex.props(styles.error)}>
+        <FileWarning {...stylex.props(styles.glyphLarge, styles.glyphFaint)} aria-hidden="true" />
+
         <span>{status.message}</span>
         {onDownload && (
           <Button type="button" variant="secondary" size="small" onClick={() => onDownload?.(file)}>
@@ -265,9 +273,10 @@ export function SessionFilePreviewPanel({
     content = <pre {...stylex.props(styles.paneRaw)}>{status.text}</pre>;
   } else {
     content = (
-      <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-3 font-mono text-[13px] leading-relaxed text-foreground">
+      <pre {...stylex.props(styles.raw)}>
         {status.text}
       </pre>
+
     );
   }
 
@@ -296,19 +305,19 @@ export function SessionFilePreviewPanel({
     // panel past the dialog's `width` cap and bleed out of the modal. Capping
     // the min width forces content to wrap/scroll within the modal width.
     <div {...stylex.props(styles.panel, mobileSheet && styles.sheetPanel)}>
-      <div className="flex items-center justify-between gap-3 border-b border-border/50 pb-3">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <Title className="truncate text-sm font-semibold leading-tight">{file.fileName}</Title>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {formatFileSize(file.sizeBytes)}
-          </span>
+      <div {...stylex.props(styles.header)}>
+        <div {...stylex.props(styles.headerText)}>
+          <Title fontWeight="var(--font-weight-semibold)" xstyle={styles.titleText}>
+            {file.fileName}
+          </Title>
+          <span {...stylex.props(styles.fileMeta)}>{formatFileSize(file.sizeBytes)}</span>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div {...stylex.props(styles.actions)}>
           {actions}
           {/* Divider separates content actions (copy/download) from the window
               action (close), and the close sits inline in the same row instead
               of floating in the corner over the buttons. */}
-          <span className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
+          <span {...stylex.props(styles.divider)} aria-hidden="true" />
           <Close
             render={
               <Button
@@ -320,7 +329,7 @@ export function SessionFilePreviewPanel({
               />
             }
           >
-            <X className="size-4" />
+            <X {...stylex.props(styles.glyph)} />
           </Close>
         </div>
       </div>
@@ -377,6 +386,9 @@ export function SessionFilePreviewDialog({
   );
 }
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
   panel: { display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 },
   sheetPanel: {
@@ -386,8 +398,124 @@ const styles = stylex.create({
   sheetBody: { flex: 1, minHeight: 0, maxHeight: 'none', overscrollBehavior: 'contain' },
   fillHtmlPreview: { flexGrow: 1, width: '100%', height: '100%' },
   htmlPreview: { display: 'flex', height: '55vh', minWidth: 0, overflow: 'hidden' },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border) / 0.5)',
+    paddingBottom: themeSpace[3],
+  },
+  headerText: {
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: themeSpace[0.5],
+  },
+  /** The title's own size and weight stay with the primitive that owns them. */
+  titleText: {
+    lineHeight: 1.25,
+    [dialog.titleSize]: 'var(--text-sm)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  fileMeta: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  actions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+  tabs: { marginRight: themeSpace[1] },
+  glyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+  glyphLarge: {
+    width: themeSpace[6],
+    height: themeSpace[6],
+  },
+  glyphSuccess: { color: 'var(--color-emerald-500)' },
+  glyphFaint: { color: 'hsl(var(--muted-foreground) / 0.6)' },
+  shrink: { flexShrink: 0 },
+  divider: {
+    marginInline: themeSpace[0.5],
+    height: themeSpace[4],
+    width: '1px',
+    backgroundColor: themeColors.border,
+  },
+  notice: {
+    marginTop: themeSpace[3],
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, var(--color-amber-500) 25%, transparent)',
+    backgroundColor: 'color-mix(in oklab, var(--color-amber-500) 10%, transparent)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: {
+      default: 'var(--color-amber-700)',
+      [DARK_SCOPE]: 'var(--color-amber-300)',
+    },
+  },
+  noticeText: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    paddingBlock: themeSpace[12],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  error: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingBlock: themeSpace[12],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  markdown: {
+    paddingInline: themeSpace[0.5],
+    paddingBottom: themeSpace[1],
+  },
+  raw: {
+    overflowX: 'auto',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    borderRadius: themeRadius.lg,
+    backgroundColor: 'hsl(var(--muted) / 0.4)',
+    padding: themeSpace[3],
+    fontFamily:
+      'JetBrains Mono, SF Mono, Monaco, Inconsolata, Fira Code, Droid Sans Mono, Source Code Pro, monospace',
+    fontSize: '13px',
+    lineHeight: '1.625',
+    color: themeColors.foreground,
+  },
   videoPreview: { display: 'flex', height: '55vh', minWidth: 0, overflow: 'hidden' },
-  markdown: { paddingInline: '2px', paddingBottom: space[1] },
+
   pane: {
     display: 'flex',
     flexDirection: 'column',

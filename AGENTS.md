@@ -17,6 +17,8 @@ directories and is not the rule source. Archives are history, not current author
   [bootstrap guide](.agents/docs/e2ee-workspace-bootstrap.md). Personal-device
   hosts also read [e2ee-client](packages/e2ee-client/AGENTS.md). Machine-service
   policy also reads [e2ee-machine-sharing](packages/e2ee-machine-sharing/AGENTS.md).
+- Adding or changing Loro Streams stream IDs, buckets, or token scopes: read
+  [Loro Streams UserSpace](.agents/docs/loro-streams-user-space.md).
 - Session history, quotes, steer, queued input, delegation, or MCP/Role catalogs
   and their UI: read [shared contracts](packages/shared/AGENTS.md). MCP tool
   acceptance and replies also read [CLI MCP](apps/cli/src/mcp/AGENTS.md).

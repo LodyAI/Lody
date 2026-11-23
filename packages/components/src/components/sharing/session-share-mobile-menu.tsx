@@ -4,6 +4,7 @@ import { SessionAccessControl } from '@/components/session-sharing';
 import { useState } from 'react';
 import { Share2, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { useAppCapability } from '@/lib/app-platform';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
 import {
@@ -11,6 +12,13 @@ import {
   type MobileSessionMenuSheetProps,
 } from '@/components/mobile/mobile-session-menu-sheet';
 import { SessionShareDialog } from './session-share-dialog';
+
+const styles = stylex.create({
+  shareGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+  },
+});
 
 /** Mobile hides SessionHeaderMenu, so its native menu owns a separate entry. */
 export function SessionShareMobileMenu({
@@ -43,7 +51,7 @@ export function SessionShareMobileMenu({
                 },
                 {
                   id: 'public-share',
-                  icon: <Share2 className="h-3.5 w-3.5" />,
+                  icon: <Share2 {...stylex.props(styles.shareGlyph)} />,
                   label: t('sharing.manager.title', 'Share'),
                   onClick: () => setSharing(true),
                 },

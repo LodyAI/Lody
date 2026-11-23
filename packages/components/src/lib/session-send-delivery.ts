@@ -192,7 +192,7 @@ async function awaitQueuedOriginal(
 }
 
 /** An input with no signed intent cannot start, so an unsigned input is not sent at all. */
-async function prepareSignedIntent(
+export async function prepareSignedIntent(
   runtime: SessionSendRuntime,
   sessionId: SessionId,
   input: Pick<SessionHistory, 'id' | 'userId' | 'timestamp' | 'inputConfig'> & {
@@ -514,7 +514,9 @@ export async function steerUserTurn(
   }
   if (
     !response?.recoveryOwned &&
-    (response?.disposition === 'no-active-turn' || response?.disposition === 'promotion-failed')
+    (response?.disposition === 'no-active-turn' ||
+      response?.disposition === 'promotion-failed' ||
+      response?.disposition === 'unsupported')
   ) {
     await promoteGuideToFollowUp(runtime, sessionId, userTurnId, { inputConfig, machineId });
     log('steer became an ordinary follow-up for %s/%s', sessionId, userTurnId);

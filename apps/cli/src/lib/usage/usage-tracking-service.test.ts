@@ -189,6 +189,13 @@ describe('usage delivery', () => {
 
   it('projects provider fields without losing token buckets, known costs or unknown costs', async () => {
     const report = input(100);
+    Object.assign(report, {
+      title: 'PRIVATE TITLE',
+      prompt: 'PRIVATE PROMPT',
+      path: '/private/project',
+    });
+    Object.assign(report.update, { prompt: 'PRIVATE PROMPT' });
+    Object.assign(report.update.usage, { title: 'PRIVATE TITLE' });
     report.update.usage.webSearchRequests = 2;
     report.update.usage.contextWindow = 128000;
     report.update.usage.costUSD = 0.25;
@@ -199,6 +206,7 @@ describe('usage delivery', () => {
     service.recordSessionUsageUpdate(report);
     await service.flushSessionUsage('s');
     expect(persisted).toHaveLength(1);
+    expect(JSON.stringify(persisted)).not.toMatch(/PRIVATE|private\/project/);
     expect(persisted[0]?.usage).toEqual({
       ...input(100).update.usage,
       contextWindow: 128000,

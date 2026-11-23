@@ -1,3 +1,4 @@
+import { requireEncryptedRoostOwner } from './encrypted-roost-history';
 import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
 import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
 import { requireWorkspaceFeature } from './workspace-feature';
@@ -94,15 +95,15 @@ export async function acceptSessionUserTurn(
         })
       : { entry, queue };
   const roostBackend = meta?.historyBackend === 'roost';
-  if (runtime.contentMode === 'e2ee' && roostBackend)
-    throw new Error('e2ee_history_backend_unavailable');
   if (pending && (unprepared || pending.hasSession(sessionId) || roostBackend)) {
     const targetMachineId = meta?.machineId;
-    if (roostBackend && delivery.kind === 'dispatch') {
+    if (roostBackend && (delivery.kind === 'dispatch' || runtime.contentMode === 'e2ee')) {
       const machine = targetMachineId
         ? await runtime.repo.getDocMeta(getMachineRoomId(targetMachineId))
         : undefined;
-      if (!machineSupportsSessionInputDispatch(machine?.meta as MachineMeta | undefined))
+      const owner = machine?.meta as MachineMeta | undefined;
+      if (runtime.contentMode === 'e2ee') requireEncryptedRoostOwner(owner);
+      if (delivery.kind === 'dispatch' && !machineSupportsSessionInputDispatch(owner))
         throw new SessionInputNotSentError(i18next.t('sessions.inputOwnerNeedsUpdate'));
     }
     // Publish routing before a row can acquire its backend, after capability

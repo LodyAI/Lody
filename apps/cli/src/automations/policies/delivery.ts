@@ -28,6 +28,7 @@ export const DELIVERY_EVENT_SOURCE = 'lody/auto-delivery';
 export const DELIVERY_ATTEMPT_LIMIT = 3;
 /** How long after a settled Create PR request a missing PR stops delivery. */
 export const DELIVERY_PR_CREATION_GRACE_MS = 10 * 60_000;
+export const DELIVERY_CI_REPORT_GRACE_MS = 5 * 60_000;
 
 export type DeliveryStep = 'create_pr' | 'fix_ci' | 'resolve_conflicts' | 'merge';
 
@@ -39,6 +40,7 @@ export type DeliveryProgress = {
   fixHeads: string[];
   conflictHeads: string[];
   mergeHeads: string[];
+  unreportedCi?: { head: string; since: number };
   lastStep?: {
     eventId: string;
     step: DeliveryStep;
@@ -74,6 +76,7 @@ export type DeliveryDecision = {
   step?: { step: DeliveryStep; attempt?: number; pr?: PullRequestSnapshot };
   /** The pull request was merged: delivery has ended and the setting turns off. */
   finished?: boolean;
+  observed?: PullRequestSnapshot;
 };
 
 const stepState = (step: DeliveryStep): DeliveryStatus['state'] =>
@@ -138,7 +141,7 @@ export function decideDelivery(input: {
   if (pr.status === 'draft') return stalled('pr_draft');
   // The last request's effect is unknown until a poll taken after it ended.
   if (!pr.headSha || (settledAt !== undefined && pr.observedAt <= settledAt)) return status('ci');
-  if (input.workspacePending) return status('ci');
+  if (input.workspacePending) return stalled('workspace_unpushed');
   const head = pr.headSha;
 
   if (pr.mergeState === 'd') {
@@ -154,6 +157,12 @@ export function decideDelivery(input: {
     if (progress.fixHeads.length >= DELIVERY_ATTEMPT_LIMIT) return stalled('ci_limit');
     progress.fixHeads = [...progress.fixHeads, head];
     return request('fix_ci', pr, progress.fixHeads.length);
+  }
+  if (pr.ciState === null) {
+    if (progress.unreportedCi?.head !== head)
+      progress.unreportedCi = { head, since: pr.observedAt };
+    if (pr.observedAt - progress.unreportedCi.since < DELIVERY_CI_REPORT_GRACE_MS)
+      return status('ci');
   }
   // Pending checks, or GitHub still computing mergeability.
   if (pr.ciState === 'p' || pr.ciState === 'x' || pr.mergeState === null) return status('ci');
@@ -255,8 +264,16 @@ const receiptOutcome = (receipt: AutomationReceipt): StepOutcome => {
   }
 };
 
-const deliveryCandidates = (meta: SessionMeta) =>
-  getCurrentPullRequestsByRepository(resolveSessionPullRequests(meta)).map((pr) => pr.url);
+const unfinished = (status: string | undefined) =>
+  status === undefined || status === 'open' || status === 'draft';
+const deliveryCandidates = (ledger: AutomationLedger, meta: SessionMeta) =>
+  getCurrentPullRequestsByRepository(resolveSessionPullRequests(meta))
+    .filter(
+      (pr) =>
+        unfinished(pr.status) &&
+        unfinished(readPullRequestSnapshot(ledger, meta.id, pr.url)?.status)
+    )
+    .map((pr) => pr.url);
 
 /**
  * One pass for an enabled Session: decide, publish the next request's event, then
@@ -271,13 +288,14 @@ export function advanceDelivery(input: {
 }): DeliveryDecision {
   const { ledger, meta, options, now } = input;
   const progress = readDeliveryProgress(ledger, meta.id) ?? emptyDeliveryProgress(now);
-  const candidates = deliveryCandidates(meta);
+  const candidates = deliveryCandidates(ledger, meta);
   const prUrl = progress.prUrl ?? (candidates.length === 1 ? candidates[0] : undefined);
+  const observed = prUrl ? readPullRequestSnapshot(ledger, meta.id, prUrl) : undefined;
   const decision = decideDelivery({
     options,
     progress,
     candidates,
-    ...(prUrl ? { pr: readPullRequestSnapshot(ledger, meta.id, prUrl) } : {}),
+    ...(observed ? { pr: observed } : {}),
     workspacePending: meta.workspaceDirty === true || meta.workspaceUnpushed === true,
     ...(progress.lastStep ? { lastStep: stepOutcome(ledger, progress.lastStep.eventId) } : {}),
     now,
@@ -308,7 +326,7 @@ export function advanceDelivery(input: {
     !readDeliveryProgress(ledger, meta.id)
   )
     writeDeliveryProgress(ledger, meta.id, decision.progress, now);
-  return decision;
+  return observed ? { ...decision, observed } : decision;
 }
 
 function deliveryEvent(

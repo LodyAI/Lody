@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./remote-machine": "./src/remote-machine.ts",
     "./pairing": "./src/pairing.ts",
     "./account-pairing": "./src/account-pairing.ts",
     "./account-pairing/browser": "./src/account-pairing-browser.ts",
@@ -16,6 +17,7 @@
     "./maintenance": "./src/maintenance.ts",
     "./recovery-restore": "./src/recovery-restore.ts",
     "./recovery-password": "./src/recovery-password.ts",
+    "./recovery-locator": "./src/recovery-locator.ts",
     "./vault-replacement": "./src/vault-replacement.ts",
     "./passkey-unlock": "./src/passkey-unlock.ts",
     "./passkey-browser": "./src/passkey-browser.ts"

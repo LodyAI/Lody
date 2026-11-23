@@ -542,6 +542,125 @@ void test('a different account retains its KeyPackage, joins as Member, exchange
   )
 })
 
+for (const completion of ['invitation', 'promoted', 'crash-before-invitation']) {
+  void test(`a Member pairs a third personal device after ${completion} and restart`, async (t) => {
+    const directory = await fixture(t)
+    const memberDirectory = join(directory, 'member')
+    let records, personalOffer, genesisHash, membershipId
+    const history = () => page(records, genesisHash, 0)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        const prepared = yield* bind(owner)
+        yield* owner.host.open(workspaceId)
+        const member = yield* memberWithHost(memberDirectory)
+        const offer = yield* owner.host.memberOffer(workspaceId, 'email', 9_000_000_000_000)
+        const request = yield* member.bootstrap.prepareMemberJoin(offer)
+        yield* owner.host.inspectMemberAdmission(workspaceId, request.keyPackageHex)
+        const admission = yield* owner.host.prepareMemberAdmission(
+          workspaceId,
+          request.keyPackageHex
+        )
+        genesisHash = offer.genesisHash
+        records = [
+          Buffer.from(prepared.genesisRecordHex, 'hex'),
+          Buffer.from(admission.recordHex, 'hex')
+        ]
+        yield* member.bootstrap.acceptMemberJoin(workspaceId, [history()])
+        const status = yield* member.host.open(workspaceId)
+        assert.equal(status.memberRole, 'member')
+        membershipId = status.membershipId
+        personalOffer = yield* member.host.personalPairingOffer(workspaceId)
+        const second = yield* memberWithHost(join(directory, 'device-2'))
+        const personalRequest = yield* second.bootstrap.preparePersonalJoin(personalOffer)
+        const personalAdmission = yield* member.host.preparePersonalAdmission(
+          workspaceId,
+          personalRequest.requestHex
+        )
+        records.push(Buffer.from(personalAdmission.recordHex, 'hex'))
+        yield* member.host.ingestLedgerRecords(workspaceId, history())
+        yield* second.bootstrap.acceptPersonalHistory(workspaceId, [history()])
+        assert.equal((yield* second.host.open(workspaceId)).length, 3)
+        if (completion !== 'crash-before-invitation') {
+          assert.equal(
+            yield* member.host.personalInvitation(workspaceId, personalOffer.pairingSessionId),
+            null
+          )
+          if (completion === 'invitation') {
+            const next = yield* member.host.personalPairingOffer(workspaceId)
+            assert.notEqual(next.pairingSessionId, personalOffer.pairingSessionId)
+          }
+        }
+      })
+    )
+    if (completion === 'crash-before-invitation') {
+      historyDb(memberDirectory, (db) =>
+        db.exec('ALTER TABLE personal_pairing DROP COLUMN completed')
+      )
+    }
+    await execute(
+      Effect.gen(function* () {
+        const member = yield* memberWithHost(memberDirectory)
+        yield* member.host.open(workspaceId)
+        if (completion === 'promoted') {
+          const owner = yield* ownerWithHost(directory)
+          yield* owner.host.open(workspaceId)
+          yield* owner.host.ingestLedgerRecords(workspaceId, history())
+          const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(genesisHash, 'hex')))
+          const view = Result.getOrThrow(
+            verifyLedger({
+              anchor: genesis,
+              records,
+              checkpoint: { length: records.length, head: hashRecordBytes(records.at(-1)) }
+            })
+          )
+          const signer = yield* owner.custody.openDevice(genesis)
+          const proposal = yield* Effect.fromResult(
+            prepareLedgerCommand(view, signer.publicKey, {
+              _tag: 'SetRole',
+              membershipId: Result.getOrThrow(Bytes.membershipId(Buffer.from(membershipId, 'hex'))),
+              role: 'admin'
+            })
+          )
+          records.push(yield* signLedgerRecord(proposal, signer))
+          yield* member.host.ingestLedgerRecords(workspaceId, history())
+          assert.equal((yield* member.host.status(workspaceId)).memberRole, 'admin')
+        }
+        const next = yield* member.host.personalPairingOffer(workspaceId)
+        assert.notEqual(next.pairingSessionId, personalOffer.pairingSessionId)
+        assert.deepEqual(yield* member.host.personalPairingOffer(workspaceId), next)
+        for (const operation of ['cancelPersonalPairing', 'retirePersonalPairing']) {
+          const result = yield* Effect.result(
+            member.host[operation](workspaceId, personalOffer.pairingSessionId)
+          )
+          assert.equal(result._tag, 'Failure')
+          assert.equal(result.failure.code, 'conflict')
+        }
+        const third = yield* memberWithHost(join(directory, 'device-3'))
+        const request = yield* third.bootstrap.preparePersonalJoin(next)
+        const admission = yield* member.host.preparePersonalAdmission(
+          workspaceId,
+          request.requestHex
+        )
+        records.push(Buffer.from(admission.recordHex, 'hex'))
+        yield* member.host.ingestLedgerRecords(workspaceId, history())
+        yield* third.bootstrap.acceptPersonalHistory(workspaceId, [history()])
+        assert.equal((yield* third.host.open(workspaceId)).length, records.length)
+      })
+    )
+    await execute(
+      Effect.gen(function* () {
+        const member = yield* memberWithHost(memberDirectory)
+        yield* member.host.open(workspaceId)
+        assert.notEqual(
+          (yield* member.host.personalPairingOffer(workspaceId)).pairingSessionId,
+          personalOffer.pairingSessionId
+        )
+      })
+    )
+  })
+}
+
 for (const installation of ['member', 'personal-history', 'personal-snapshot']) {
   void test(`removed member rejoins with a new invitation and isolated device via ${installation}`, async (t) => {
     const directory = await fixture(t)

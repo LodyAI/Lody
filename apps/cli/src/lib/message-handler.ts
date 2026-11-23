@@ -5,6 +5,7 @@ import type { SessionDirectoryListRequest } from '@lody/shared';
 import {
   sessionHistoryWriteIntentDigest,
   SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   SESSION_HISTORY_SUBSCRIPTION_LEASE_MS,
   type SessionHistoryPublication,
   type SessionHistorySubscription,
@@ -179,6 +180,8 @@ import {
   type LocalProjectControlResponse,
   E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
   E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+  E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
+  E2EE_ROOST_HISTORY_PROTOCOL_VERSION,
   E2EE_SESSION_FORK_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
@@ -356,7 +359,11 @@ import {
   type ACPUpdateTarget,
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
-import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import {
+  fetchAcpCapabilities,
+  normalizeConfigOptions,
+  type FetchAcpCapabilitiesOptions,
+} from '@/agent/acp-capabilities';
 import { resolveExpectedAcpCapabilitySourceVersion } from '@/agent/setting';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
@@ -987,17 +994,6 @@ export class MessageHandler {
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
   private encryptedQueryServer: LoroStreamsMachineRpcServer | null = null;
 
-  async readEncryptedQuery(
-    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
-    expiresAt: number,
-    signal: AbortSignal
-  ) {
-    // Scoped history and branch queries require the feature receiver's authorization.
-    if (input.method === 'session/history-read' || input.method === 'local-project/list-branches')
-      throw new Error('e2ee_query_method');
-    if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
-    return this.encryptedQueryServer.readQuery(input, expiresAt, signal);
-  }
   async readEncryptedMachineRequest(
     request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
     context: {
@@ -1380,6 +1376,8 @@ export class MessageHandler {
         this.logger.debug(`[${sessionId}] Skipping usage update: missing userId`);
         return;
       }
+
+      if (this.encryptedAttachments && userId !== this.cloudPort.identity.userId) return;
 
       this.usageTrackingService?.recordSessionUsageUpdate({
         workspaceId: this.workspaceId,
@@ -1956,6 +1954,35 @@ export class MessageHandler {
     }
   }
 
+  private recordSessionObservedModelConfigOptions(
+    sessionId: SessionId,
+    configOptions: AcpConfigOptionSummary[] | undefined,
+    sessionDocHint?: SessionDocument
+  ): void {
+    if (!configOptions || configOptions.length === 0) return;
+    void (async () => {
+      const sessionDoc =
+        sessionDocHint ?? (await this.workspaceDocument.getOrCreateSessionDoc(sessionId));
+      const agentConfigId = (await sessionDoc.getMetaState())?.agentConfigId;
+      if (!agentConfigId) return;
+      const sourceVersion =
+        this.sessionManager.getSession(sessionId)?.getAcpCapabilitySourceVersion?.() ??
+        (await this.workspaceDocument.getAcpCapabilities(this.machineId, agentConfigId))
+          ?.sourceVersion;
+      if (!sourceVersion) return;
+      await this.workspaceDocument.recordObservedAcpModelConfigOptions(
+        this.machineId,
+        agentConfigId,
+        sourceVersion,
+        configOptions
+      );
+    })().catch((error: unknown) => {
+      this.logger.debug(
+        `[${sessionId}] Failed to record observed model config options: ${formatErrorMessage(error)}`
+      );
+    });
+  }
+
   private async applyAcpModeAndModel(
     session: {
       sessionId: SessionId;
@@ -1975,6 +2002,11 @@ export class MessageHandler {
       logger: this.logger,
       signal: context.signal,
     });
+    this.recordSessionObservedModelConfigOptions(
+      session.sessionId,
+      normalizeConfigOptions(session.agentClient?.getConfigOptions?.()),
+      context.sessionDoc
+    );
 
     if (runtimeConfigPatch && context.basedOnUserTurnId) {
       const basedOnUserTurnId = context.basedOnUserTurnId;
@@ -2939,12 +2971,14 @@ export class MessageHandler {
 
   private async probeProjectLocalMember(localProjectId: LocalProjectId) {
     try {
-      const rootPath = await resolveWorkspaceLocalProjectRootPath(
-        this.workspaceDocument.repo,
-        this.workspaceId,
-        this.machineId,
-        localProjectId
-      );
+      const rootPath = this.encryptedQueryServer
+        ? await this.resolveLocalProjectRootForRpc(localProjectId, 'project-member-probe')
+        : await resolveWorkspaceLocalProjectRootPath(
+            this.workspaceDocument.repo,
+            this.workspaceId,
+            this.machineId,
+            localProjectId
+          );
       if (!rootPath) throw new Error('Project group member is unavailable');
       return {
         type: 'project/probe-local-member' as const,
@@ -2955,10 +2989,39 @@ export class MessageHandler {
     }
   }
 
-  private async getLocalProjectGitStateForRpc(args: {
-    localProjectId: LocalProjectId;
-    requestedByUserId: string;
-  }): Promise<LocalProjectGitStateRpcResponse> {
+  /** Encrypted roots must hash to the requested ID, so a tampered row cannot redirect Git. */
+  private async resolveLocalProjectRootForRpc(
+    localProjectId: LocalProjectId,
+    reason: string
+  ): Promise<string | null> {
+    if (!this.encryptedQueryServer)
+      return await resolveWorkspaceLocalProjectRootPathWithRetry(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        localProjectId,
+        {
+          requestSync: () =>
+            this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
+              reason,
+              timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
+            }),
+        }
+      );
+    const peeked = this.workspaceDocument.peekLocalProjectRootPath(this.machineId, localProjectId);
+    if (peeked === null) return null;
+    try {
+      return localProjectsLegacy.createLocalProjectId(peeked) === localProjectId ? peeked : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async getLocalProjectGitStateForRpc(
+    signed: { localProjectId: LocalProjectId; requestedByUserId: string },
+    executionRequesterUserId = signed.requestedByUserId
+  ): Promise<LocalProjectGitStateRpcResponse> {
+    const args = { ...signed, requestedByUserId: executionRequesterUserId };
     const failure = (error: string, message: string): LocalProjectGitStateRpcResponse => ({
       type: 'local-project/git-state_response',
       machineId: this.machineId,
@@ -2985,18 +3048,9 @@ export class MessageHandler {
       return failure('access_denied', access.reason);
     }
 
-    const rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId,
+    const rootPath = await this.resolveLocalProjectRootForRpc(
       args.localProjectId,
-      {
-        requestSync: () =>
-          this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
-            reason: 'local-project-git-state-resolve',
-            timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
-          }),
-      }
+      'local-project-git-state-resolve'
     );
     if (!rootPath) {
       return failure('local_project_not_found', `Local project not found: ${args.localProjectId}`);
@@ -3004,21 +3058,22 @@ export class MessageHandler {
 
     try {
       const state = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
-      void updateMachineLocalProjectGitSummaryFields(
-        this.workspaceDocument.repo,
-        this.workspaceId,
-        this.machineId,
-        args.localProjectId,
-        state.git
-          ? {
-              git: true,
-              defaultBranch: state.defaultBranch,
-              currentBranch: state.currentBranch,
-              githubRepoFullName: state.githubRepoFullName,
-            }
-          : { git: false },
-        this.workspaceDocument
-      ).catch(() => undefined);
+      if (!this.encryptedQueryServer)
+        void updateMachineLocalProjectGitSummaryFields(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          args.localProjectId,
+          state.git
+            ? {
+                git: true,
+                defaultBranch: state.defaultBranch,
+                currentBranch: state.currentBranch,
+                githubRepoFullName: state.githubRepoFullName,
+              }
+            : { git: false },
+          this.workspaceDocument
+        ).catch(() => undefined);
       return {
         type: 'local-project/git-state_response',
         machineId: this.machineId,
@@ -3033,13 +3088,17 @@ export class MessageHandler {
     }
   }
 
-  private async listLocalProjectBranchesForRpc(args: {
-    localProjectId: LocalProjectId;
-    requestedByUserId: string;
-    query?: string;
-    limit?: number;
-    cursor?: string;
-  }): Promise<LocalProjectListBranchesRpcResponse> {
+  private async listLocalProjectBranchesForRpc(
+    signed: {
+      localProjectId: LocalProjectId;
+      requestedByUserId: string;
+      query?: string;
+      limit?: number;
+      cursor?: string;
+    },
+    executionRequesterUserId = signed.requestedByUserId
+  ): Promise<LocalProjectListBranchesRpcResponse> {
+    const args = { ...signed, requestedByUserId: executionRequesterUserId };
     const failure = (error: string, message: string): LocalProjectListBranchesRpcResponse => ({
       type: 'local-project/list-branches_response',
       machineId: this.machineId,
@@ -3067,37 +3126,10 @@ export class MessageHandler {
     }
 
     const isEncrypted = Boolean(this.encryptedQueryServer);
-    let rootPath: string | null = null;
-    if (isEncrypted) {
-      const peeked = this.workspaceDocument.peekLocalProjectRootPath(
-        this.machineId,
-        args.localProjectId
-      );
-      if (peeked !== null) {
-        try {
-          rootPath =
-            localProjectsLegacy.createLocalProjectId(peeked) === args.localProjectId
-              ? peeked
-              : null;
-        } catch {
-          rootPath = null;
-        }
-      }
-    } else {
-      rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
-        this.workspaceDocument.repo,
-        this.workspaceId,
-        this.machineId,
-        args.localProjectId,
-        {
-          requestSync: () =>
-            this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
-              reason: 'local-project-list-branches-resolve',
-              timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
-            }),
-        }
-      );
-    }
+    const rootPath = await this.resolveLocalProjectRootForRpc(
+      args.localProjectId,
+      'local-project-list-branches-resolve'
+    );
     if (!rootPath) {
       return failure('local_project_not_found', `Local project not found: ${args.localProjectId}`);
     }
@@ -3282,8 +3314,10 @@ export class MessageHandler {
   }
 
   private async steerSessionWithAccessCheck(
-    args: Parameters<SessionExecutionService['steerSession']>[0]
+    signed: Parameters<SessionExecutionService['steerSession']>[0],
+    executionRequesterUserId = signed.userId
   ): ReturnType<SessionExecutionService['steerSession']> {
+    const args = { ...signed, userId: executionRequesterUserId };
     const access = await this.verifySessionMachineAccess(args.sessionId, args.userId);
     if (access.outcome !== 'allowed') {
       return {
@@ -3298,12 +3332,16 @@ export class MessageHandler {
     return await this.executionService.steerSession(args);
   }
 
-  private async controlSessionGoalWithAccessCheck(args: {
-    sessionId: SessionId;
-    action: SessionGoalAction;
-    objective?: string;
-    userId: string;
-  }): Promise<SessionGoalResponse> {
+  private async controlSessionGoalWithAccessCheck(
+    signed: {
+      sessionId: SessionId;
+      action: SessionGoalAction;
+      objective?: string;
+      userId: string;
+    },
+    executionRequesterUserId = signed.userId
+  ): Promise<SessionGoalResponse> {
+    const args = { ...signed, userId: executionRequesterUserId };
     const access = await this.verifySessionMachineAccess(args.sessionId, args.userId);
     if (access.outcome !== 'allowed') {
       return {
@@ -4200,18 +4238,8 @@ export class MessageHandler {
         },
         getSessionLiveStatus: async ({ sessionId, includeActivity }) =>
           await this.readSessionLiveStatus(sessionId, includeActivity === true),
-        withdrawSessionInput: async ({ userId, ...args }) => {
-          const access = await this.verifySessionMachineAccess(args.sessionId, userId);
-          if (access.outcome !== 'allowed')
-            return {
-              type: 'session/withdraw-input_response' as const,
-              sessionId: args.sessionId,
-              userTurnId: args.userTurnId,
-              outcome: 'error' as const,
-              error: `Withdraw access verification ${access.outcome}`,
-            };
-          return await this.withdrawQueuedInput(args);
-        },
+        withdrawSessionInput: async ({ userId, ...args }) =>
+          await this.withdrawSessionInputWithAccessCheck(args, userId),
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -4246,7 +4274,12 @@ export class MessageHandler {
         },
         resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
         authorizeSessionHistoryRead: async ({ sessionId, readProof }) => {
-          if (!readProof || !this.cloudPort.access.verifySessionHistoryRead) return false;
+          if (
+            this.encryptedAttachments ||
+            !readProof ||
+            !this.cloudPort.access.verifySessionHistoryRead
+          )
+            return false;
           const target = await this.resolveSessionHistoryAccessTarget(sessionId);
           return await this.cloudPort.access.verifySessionHistoryRead({
             workspaceId: this.workspaceId,
@@ -4263,7 +4296,12 @@ export class MessageHandler {
           operation,
           payload,
         }) => {
-          if (!writeProof || !this.cloudPort.access.verifySessionHistoryWrite) return null;
+          if (
+            this.encryptedAttachments ||
+            !writeProof ||
+            !this.cloudPort.access.verifySessionHistoryWrite
+          )
+            return null;
           const target = await this.resolveSessionHistoryAccessTarget(sessionId);
           return await this.cloudPort.access.verifySessionHistoryWrite({
             workspaceId: this.workspaceId,
@@ -4284,25 +4322,20 @@ export class MessageHandler {
           ? this.resolveEncryptedCodeCollabOwnerSessionId
           : this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await fileReader.previewFile(request),
-        // Ordinary workspaces only; an encrypted reader has no folder listing yet, so the
-        // server answers `unsupported_protocol` there.
-        ...(this.encryptedFileReader
-          ? {}
-          : {
-              listSessionDirectory: async (request: SessionDirectoryListRequest) =>
-                await listSessionDirectory(
-                  {
-                    resolveWorkspace: this.resolveFilePreviewWorkspace,
-                    listDirectory: async (rootPath, relativePath, limit) =>
-                      await this.localProjectControlService.listProjectDirectory(
-                        rootPath,
-                        relativePath,
-                        { limit }
-                      ),
-                  },
-                  request
-                ),
-            }),
+        listSessionDirectory: async (request: SessionDirectoryListRequest) =>
+          await listSessionDirectory(
+            {
+              resolveWorkspace: config.encryptedWorkspace
+                ? (sessionId, rootId) =>
+                    this.resolveEncryptedCodeCollabV2Workspace(sessionId, { rootId })
+                : this.resolveFilePreviewWorkspace,
+              listDirectory: async (rootPath, relativePath, limit) =>
+                await this.localProjectControlService.listProjectDirectory(rootPath, relativePath, {
+                  limit,
+                }),
+            },
+            request
+          ),
         downloadFileChunk: async (request) => {
           if (
             request.attachment?.machineId !== undefined &&
@@ -4615,6 +4648,8 @@ export class MessageHandler {
                 e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
                 e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
                 e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+                e2eeRemoteControl: E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
+                e2eeRoostHistory: E2EE_ROOST_HISTORY_PROTOCOL_VERSION,
               }
             : {}),
           ...(this.sorbetCredentials
@@ -5613,6 +5648,14 @@ export class MessageHandler {
       this.persistOutOfTurnAvailableCommands(sessionId, update);
       return;
     }
+    if (!target && update.update.sessionUpdate === 'config_option_update') {
+      this.recordSessionObservedModelConfigOptions(
+        sessionId,
+        normalizeConfigOptions(update.update.configOptions)
+      );
+      this.persistOutOfTurnAvailableCommands(sessionId, update);
+      return;
+    }
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -6167,6 +6210,15 @@ export class MessageHandler {
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
+          for (const buffered of group.updates) {
+            if (buffered.notification.update.sessionUpdate === 'config_option_update') {
+              this.recordSessionObservedModelConfigOptions(
+                sessionId,
+                normalizeConfigOptions(buffered.notification.update.configOptions),
+                sessionDoc
+              );
+            }
+          }
           const runtimeConfigPatch = mergeAcpRuntimeConfigUpdates(
             group.updates.map((update) => update.notification)
           );
@@ -7110,6 +7162,8 @@ export class MessageHandler {
                 e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
                 e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
                 e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+                e2eeRemoteControl: E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
+                e2eeRoostHistory: E2EE_ROOST_HISTORY_PROTOCOL_VERSION,
               }
             : {}),
           ...(this.sorbetCredentials
@@ -8052,11 +8106,38 @@ export class MessageHandler {
     return downloadLocalAttachment(request, this.machineId);
   }
 
+  async handleEncryptedDevicePreview(
+    request: Extract<
+      LocalMachineRpcRequestValidated,
+      { method: 'ios-simulator/control' | 'android-emulator/control' }
+    >,
+    context: import('./e2ee/feature-rpc').EncryptedFeatureContext
+  ): Promise<LocalMachineRpcResponse> {
+    const isCurrent = () =>
+      !!context.authority &&
+      !context.signal.aborted &&
+      !context.authority.signal.aborted &&
+      context.authority.isCurrent();
+    const authorize = async () => {
+      if (!isCurrent()) throw new Error('e2ee_feature_authority_withdrawn');
+    };
+    await authorize();
+    const result =
+      request.method === 'ios-simulator/control'
+        ? await this.iosSimulatorService.control(request.params, true, authorize, isCurrent)
+        : await this.androidEmulatorService.control(request.params, true, authorize, isCurrent);
+    await authorize();
+    return { ok: true, result };
+  }
+
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    context?: import('./e2ee/feature-rpc').EncryptedFeatureContext
   ): Promise<LocalMachineRpcResponse> {
     try {
+      if (request.method === 'session/history-write' && context)
+        return await this.handleEncryptedHistoryWrite(request, context);
       const result = await this.dispatchLocalMachineRpc(request, signal);
       return { ok: true, result };
     } catch (error) {
@@ -8146,6 +8227,8 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'session/history-write':
+        throw new Error('e2ee_verified_request_required');
       case 'session/history-read':
         return SessionHistoryReadResponseSchema.parse(
           await this.readSessionHistoryForRpc(
@@ -8564,6 +8647,19 @@ export class MessageHandler {
         return await this.executionService.listMachinePiExtensions(
           request.params.configId as AgentConfigId | undefined
         );
+      case 'local-project/git-state':
+        if (request.ownerSessionId) throw new Error('Local project Git state scope mismatch');
+        return await this.getLocalProjectGitStateForRpc({
+          localProjectId: request.params.localProjectId as LocalProjectId,
+          requestedByUserId: request.params.requestedByUserId,
+        });
+      // Encrypted ingress serves these through `readEncryptedMachineRequest`.
+      case 'file/list-dir':
+      case 'session/withdraw-input':
+      case 'local-project/control':
+      case 'machine/acp-binary-install':
+      case 'machine/provider-rate-limits-refresh':
+        throw new Error('e2ee_feature_unavailable');
       case 'session/fork':
         return await this.forkSessionWithAccessCheck(request.params);
       case 'session/edit-and-resend': {
@@ -8797,6 +8893,117 @@ export class MessageHandler {
    * Verified encrypted fork. `executionRequesterUserId` is the signer's execution identity
    * (owner account or `e2ee-member:`); `spec.requestedByUserId` stays the display account.
    */
+  private async withdrawSessionInputWithAccessCheck(
+    args: { sessionId: SessionId; userTurnId: string; requesterSessionId: SessionId },
+    requesterUserId: string
+  ): Promise<SessionWithdrawInputResponse> {
+    const access = await this.verifySessionMachineAccess(args.sessionId, requesterUserId);
+    if (access.outcome !== 'allowed')
+      return {
+        type: 'session/withdraw-input_response',
+        sessionId: args.sessionId,
+        userTurnId: args.userTurnId,
+        outcome: 'error',
+        error: `Withdraw access verification ${access.outcome}`,
+      };
+    return await this.withdrawQueuedInput(args);
+  }
+
+  private async handleEncryptedHistoryWrite(
+    request: Extract<LocalMachineRpcRequestValidated, { method: 'session/history-write' }>,
+    context: import('./e2ee/feature-rpc').EncryptedFeatureContext
+  ): Promise<LocalMachineRpcResponse> {
+    const { sessionId, operation, payload } = request.params;
+    const entry = parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as SessionHistoryInput;
+    if (!context.requester || entry.userId !== context.requester.accountId)
+      throw new Error('e2ee_feature_requester');
+    await this.workspaceDocument.verifyRoostInput(sessionId, entry, context.requesterDevice);
+    const assertCurrent = () => {
+      if (
+        !context.authority ||
+        context.authority.signal.aborted ||
+        context.signal.aborted ||
+        !context.authority.isCurrent()
+      )
+        throw new Error('e2ee_authority_changed');
+    };
+    assertCurrent();
+    return {
+      ok: true,
+      result: SessionHistoryWriteResponseSchema.parse(
+        await this.writeSessionHistoryForRpc(sessionId, operation, { entry }, assertCurrent)
+      ),
+    };
+  }
+
+  /** Session and project work the encrypted receiver admitted for a verified signer. It
+   * runs as the signer's execution identity, passed beside the signed request. */
+  async handleEncryptedSessionWork(
+    request: LocalMachineRpcRequestValidated,
+    requester: { accountId: string; executionUserId: string }
+  ): Promise<LocalMachineRpcResponse> {
+    const params: object = request.params;
+    const named =
+      'userId' in params
+        ? params.userId
+        : 'requestedByUserId' in params
+          ? params.requestedByUserId
+          : requester.accountId;
+    if (named !== requester.accountId) throw new Error('e2ee_feature_requester');
+    const as = requester.executionUserId;
+    const run = async (): Promise<LocalMachineRpcResult> => {
+      switch (request.method) {
+        case 'session/cancel':
+        case 'session/terminate':
+          return await this.dispatchLocalMachineRpc(request);
+        case 'session/steer':
+          return await this.steerSessionWithAccessCheck(
+            { ...request.params, sessionId: request.params.sessionId as SessionId },
+            as
+          );
+        case 'session/goal':
+          return await this.controlSessionGoalWithAccessCheck(request.params, as);
+        case 'session/withdraw-input':
+          return await this.withdrawSessionInputWithAccessCheck(
+            {
+              sessionId: request.params.sessionId as SessionId,
+              userTurnId: request.params.userTurnId,
+              requesterSessionId: request.params.requesterSessionId as SessionId,
+            },
+            as
+          );
+        case 'local-project/list-branches':
+          return await this.listLocalProjectBranchesForRpc(
+            { ...request.params, localProjectId: request.params.localProjectId as LocalProjectId },
+            as
+          );
+        case 'local-project/git-state':
+          return await this.getLocalProjectGitStateForRpc(
+            { ...request.params, localProjectId: request.params.localProjectId as LocalProjectId },
+            as
+          );
+        case 'project/probe-local-member': {
+          const localProjectId = request.params.localProjectId as LocalProjectId;
+          const access = await this.verifyRequesterMachineAccess({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            requesterUserId: as,
+            localProjectId,
+          });
+          if (!access.allowed) throw new Error('Project group member access denied');
+          return await this.probeProjectLocalMember(localProjectId);
+        }
+        default:
+          throw new Error('e2ee_feature_method');
+      }
+    };
+    try {
+      return { ok: true, result: await run() };
+    } catch (error) {
+      return { ok: false, error: formatErrorMessage(error) };
+    }
+  }
+
   async handleEncryptedSessionFork(
     spec: SessionForkSpec,
     executionRequesterUserId: string
@@ -8827,7 +9034,7 @@ export class MessageHandler {
   async resolveSessionHistoryAccessTarget(sessionId: SessionId) {
     await this.resolveSessionHistoryOwnerSessionId(sessionId);
     const entry = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
-    if (!entry || entry.meta.machineId !== this.machineId)
+    if (!entry || entry.deleted || entry.meta.machineId !== this.machineId)
       throw new Error('session_history_read_denied');
     const child = { ...(entry.meta as SessionMeta), id: sessionId };
     const parentId = typeof child.parentSessionId === 'string' ? child.parentSessionId : undefined;
@@ -9141,7 +9348,8 @@ export class MessageHandler {
   private async writeSessionHistoryForRpc(
     sessionId: SessionId,
     operation: SessionHistoryWriteOperation,
-    rawPayload: Record<string, unknown>
+    rawPayload: Record<string, unknown>,
+    assertCurrent?: () => void
   ): Promise<SessionHistoryWriteResponse> {
     try {
       await this.resolveSessionHistoryOwnerSessionId(sessionId);
@@ -9151,6 +9359,9 @@ export class MessageHandler {
       if (backend.kind !== 'roost') {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
+      if (this.encryptedAttachments && !assertCurrent)
+        throw new Error('e2ee_verified_request_required');
+      assertCurrent?.();
       const payload = rawPayload;
       let result: unknown;
       switch (operation) {
@@ -9158,7 +9369,8 @@ export class MessageHandler {
           if (!backend.inputAcceptance?.acceptAndDispatch)
             throw new Error('Input dispatch is unavailable');
           const receipt = await backend.inputAcceptance.acceptAndDispatch(
-            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never
+            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never,
+            assertCurrent
           );
           result = receipt;
           if (receipt.status === 'accepted' && receipt.active && !this.cleanedUp)
@@ -9168,7 +9380,8 @@ export class MessageHandler {
         case 'accept_input':
           if (!backend.inputAcceptance) throw new Error('Input acceptance is unavailable');
           result = await backend.inputAcceptance.accept(
-            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never
+            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never,
+            assertCurrent
           );
           break;
         case 'append':
@@ -9270,12 +9483,15 @@ export class MessageHandler {
     message: SessionHistoryReadRequest,
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
-    if (message.workspaceId !== this.workspaceId) {
+    if (
+      message.workspaceId !== this.workspaceId ||
+      (this.encryptedAttachments && dispatchContext.source !== 'local')
+    ) {
       dispatchContext.send({
         type: 'session/history-read_response',
         sessionId: message.sessionId,
         success: false,
-        error: `Workspace mismatch for session ${message.sessionId}`,
+        error: 'Session history read access was refused.',
       });
       return;
     }
@@ -11969,12 +12185,15 @@ export class MessageHandler {
       };
     }
 
-    const rootPath = await resolveWorkspaceLocalProjectRootPath(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId,
-      args.localProjectId
-    );
+    // Encrypted control acts only on a root that hashes to the requested project ID.
+    const rootPath = this.encryptedQueryServer
+      ? await this.resolveLocalProjectRootForRpc(args.localProjectId, 'local-project-control')
+      : await resolveWorkspaceLocalProjectRootPath(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          args.localProjectId
+        );
     if (!rootPath) {
       return {
         ok: false,
