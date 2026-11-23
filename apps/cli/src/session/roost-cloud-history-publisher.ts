@@ -202,8 +202,11 @@ export class RoostCloudHistoryPublisher {
       }
       const result = await sync.upload({ maxSend: MAX_SEND }, { signal });
       signal.throwIfAborted();
-      if (result.transportError || result.waitingLocal.length || result.waitingParents.length)
+      if (result.transportError) throw new Error('Roost cloud history upload failed');
+      if (result.waitingLocal.length || result.waitingParents.length) {
+        if (result.confirmed.length) return false;
         throw new Error('Roost cloud history has unconfirmed writes');
+      }
       if (BigInt(result.sent.length) >= MAX_SEND || result.sent.length !== result.confirmed.length)
         return false;
       await history.resolve();
