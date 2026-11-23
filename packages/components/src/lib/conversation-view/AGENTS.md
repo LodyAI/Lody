@@ -80,6 +80,10 @@
   release HOLDS the background scan and keeps the facts: deriving one needs the
   turn's body, so discarding them re-materialized the conversation on the next
   open. The table is collected with its view.
+- Retained hidden chat surfaces release optional fact/directory leases. Reacquisition
+  preserves unchanged facts and yields before history backfill; held edits invalidate
+  stale facts without deriving bodies. Body batches yield by elapsed work as well as
+  item/turn counts, retaining asynchronous read concurrency and epoch fencing.
 - `lastUpdateAt` stamps backend change notifications only, never opening,
   hydration or paging. It stays in memory and never bumps `version`. Liveness UI
   must not persist it or move `endedAt` while a turn streams, and must count it

@@ -14,6 +14,7 @@ import {
 } from '@/lib/codex-plan-decision';
 import type { ConversationView, DeriveTurnFact, TurnIndexRow } from '@/lib/conversation-view';
 import { jsonValueEqual } from '@/lib/json-value-equal';
+import { useDocumentVisible } from '@/hooks/use-document-visible';
 
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
 
@@ -148,10 +149,17 @@ const EMPTY_ORDERED: readonly SessionTurnFacts[] = [];
  * tail outward while the background pass runs.
  */
 export function useSessionTurnFacts(
-  view: ConversationView | null | undefined
+  view: ConversationView | null | undefined,
+  enabled = true
 ): SessionTurnFactsResult {
-  const rows = useConversationIndexRows(view, { includeSummary: false });
-  const { facts, complete, version } = useConversationDerivation(view, deriveSessionTurnFacts);
+  const documentVisible = useDocumentVisible();
+  const active = enabled && documentVisible;
+  const rows = useConversationIndexRows(view, { includeSummary: false, enabled: active });
+  const { facts, complete, version } = useConversationDerivation(
+    view,
+    deriveSessionTurnFacts,
+    active
+  );
   const previousOrderedRef = useRef<readonly SessionTurnFacts[]>(EMPTY_ORDERED);
   const ordered = useMemo(() => {
     if (facts.size === 0) {

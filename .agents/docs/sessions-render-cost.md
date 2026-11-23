@@ -22,6 +22,20 @@ this page is the full text of the rules summarised there.
   their shared close or leaving the root session. The root controller also owns
   the toolbar; a pending fork target can mount before selection to report readiness.
   URL selection remains synchronous and is never mirrored in an Effect.
+- Retained chat surfaces release optional history-fact and complete-directory leases
+  when hidden, including document visibility changes. Reopening reuses unchanged facts;
+  deferred backfill yields before its first hydration batch. Hidden edits invalidate
+  facts without deriving bodies. Disabled directory hooks retain their snapshot without
+  scanning on incidental renders. Independent visible consumers retain their own leases.
+- Loro display projections reuse unchanged item arrays and item values through weak,
+  bounded caches. Content events refresh reported item positions. Append-only deltas
+  extend cached membership; other list edits rebuild membership while reusing unchanged
+  item values. Changed container ancestry invalidates values even when items move.
+  Pending local operations invalidate the cached projection. Complete stored
+  reads and writes never use these display caches.
+- Hydration and live replacement yield between body reads after an elapsed work budget
+  of 4 ms, in addition to turn/item limits. Asynchronous reads still launch concurrently;
+  a single synchronous Loro import or body conversion remains indivisible.
 - Each mounted chat surface keeps a stable imperative ref. Event wrappers for
   browser, simulator, fork, annotation submission, comments, PR/changes and session
   navigation read the latest committed handlers. Toolbar objects and slots retain
@@ -110,8 +124,9 @@ but share workspace cache rows. A twenty-second task deadline reports failure an
 synchronous WASM work, and the parent withdraws its local peer. Local targets use
 the existing local readiness plane; remote targets use the same configured Streams
 endpoint as the mounted foreground transport. This isolates background
-materialization from UI execution, but does not remove foreground full-history
-import/Mirror cost or daemon-side document loading.
+materialization from UI execution, but does not remove foreground document import,
+history projection cost or daemon-side document loading. The control-plane Mirror
+excludes history.
 
 Intent: [background prefetch](../../specs/session-background-prefetch.zh.md).
 
