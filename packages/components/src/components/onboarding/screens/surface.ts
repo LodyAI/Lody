@@ -1,6 +1,15 @@
 import * as stylex from '@stylexjs/stylex';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+  text,
+} from '@lody/ui/tokens/scales.stylex';
 
 /**
  * The materials every onboarding setup screen shares, in `@lody/ui`'s own
@@ -111,7 +120,7 @@ export const onboardingSurface = stylex.create({
     cornerShape: corner.round,
   },
   /** Disabled is 45% on the whole control, not a colour. */
-  tileDisabled: { opacity: 0.45, cursor: 'not-allowed' },
+  tileDisabled: { opacity: control.disabledOpacity, cursor: 'not-allowed' },
   /** A tile laid out as a column, centred: the language and look choices. */
   tileColumn: { flexDirection: 'column', justifyContent: 'center', textAlign: 'center' },
 

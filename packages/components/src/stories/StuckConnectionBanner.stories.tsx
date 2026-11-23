@@ -1,7 +1,22 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
+import { useLayoutEffect, useState, type CSSProperties } from 'react';
 
 import { StuckConnectionBanner } from '@/components/stuck-connection-banner';
+const storyLayout = stylex.create({
+  frame: {
+    position: 'relative',
+    height: 'calc(var(--spacing) * 64)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame2: {
+    position: 'relative',
+    height: 'calc(var(--spacing) * 64)',
+    width: '360px',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const labels = {
   title: 'Still connecting…',
@@ -26,13 +41,13 @@ const meta = {
     onDismiss: fn(),
   },
   parameters: {
-    // The banner positions itself fixed at the viewport top.
+    // The production banner owns its fixed placement above the mobile dock.
     layout: 'fullscreen',
   },
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="relative h-64 bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),
@@ -53,9 +68,74 @@ export const Chinese: Story = {
 export const NarrowMobileViewport: Story = {
   decorators: [
     (Story) => (
-      <div className="relative h-64 w-[360px] bg-background">
+      <div {...stylex.props(storyLayout.frame2)}>
         <Story />
       </div>
     ),
   ],
 };
+
+function ObservedBanner({ scope }: { scope?: 'root' | 'subtree' }) {
+  const [result, setResult] = useState('No action requested');
+  const [ready, setReady] = useState(false);
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const previous = root.style.getPropertyValue('--muted-foreground');
+    if (scope === 'root') root.style.setProperty('--muted-foreground', '285 65% 42%');
+    setReady(true);
+    return () => {
+      if (scope !== 'root') return;
+      if (previous) root.style.setProperty('--muted-foreground', previous);
+      else root.style.removeProperty('--muted-foreground');
+    };
+  }, [scope]);
+  return (
+    <div
+      data-stuck-banner-observed=""
+      data-stuck-banner-ready={ready}
+      style={
+        scope === 'subtree' ? ({ '--muted-foreground': '285 65% 42%' } as CSSProperties) : undefined
+      }
+    >
+      <StuckConnectionBanner
+        labels={
+          scope
+            ? {
+                ...labels,
+                title:
+                  'Still connecting to the synthetic development workspace with a longer title…',
+                description:
+                  'The synthetic workspace is waiting for its initial connection. Existing rows and local preferences remain available while recovery options are reviewed.',
+              }
+            : labels
+        }
+        onRecover={() => setResult('Recovery callback requested')}
+        onDismiss={() => setResult('Dismiss callback requested')}
+      />
+      <output data-stuck-banner-result="">{result}</output>
+    </div>
+  );
+}
+
+export const ObservedActions: Story = { render: () => <ObservedBanner /> };
+export const RootInk: Story = { render: () => <ObservedBanner scope="root" /> };
+export const SubtreeInk: Story = { render: () => <ObservedBanner scope="subtree" /> };
+
+function SpacedObservedBanner({ scope }: { scope: 'root' | 'subtree' }) {
+  useLayoutEffect(() => {
+    const target = scope === 'root' ? document.documentElement : document.body;
+    const previous = target.style.getPropertyValue('--spacing');
+    target.style.setProperty('--spacing', '5px');
+    return () => {
+      if (previous) target.style.setProperty('--spacing', previous);
+      else target.style.removeProperty('--spacing');
+    };
+  }, [scope]);
+  return (
+    <div data-spacing-scope={scope}>
+      <ObservedBanner />
+    </div>
+  );
+}
+export const RootSpacing: Story = { render: () => <SpacedObservedBanner scope="root" /> };
+export const SubtreeSpacing: Story = { render: () => <SpacedObservedBanner scope="subtree" /> };

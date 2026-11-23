@@ -1,7 +1,15 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { ElectronCliState } from '@lody/shared';
 import { CliDaemonSetting } from '@/components/settings/cli-daemon-setting';
 import { CompactSection } from '@/components/settings/compact-layout';
+const storyLayout = stylex.create({
+  frame: {
+    width: '640px',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 function installElectronIpcMock(state: ElectronCliState): void {
   if (typeof window === 'undefined') return;
@@ -24,7 +32,7 @@ function installElectronIpcMock(state: ElectronCliState): void {
 function Harness({ cliState }: { cliState: ElectronCliState }) {
   installElectronIpcMock(cliState);
   return (
-    <div className="w-[640px] bg-background p-4">
+    <div {...stylex.props(storyLayout.frame)}>
       <CompactSection title="Startup">
         <CliDaemonSetting />
       </CompactSection>

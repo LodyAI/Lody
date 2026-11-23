@@ -1,13 +1,28 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { OnboardingBackdrop, OnboardingLoadingView } from '@/components/onboarding';
+const storyLayout = stylex.create({
+  frame: {
+    position: 'relative',
+    'min-height': '640px',
+    width: '100%',
+  },
+  row: {
+    position: 'relative',
+    'z-index': '10',
+    display: 'flex',
+    'min-height': '640px',
+    'align-items': 'center',
+    'justify-content': 'center',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 function LoadingPreviewWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-[640px] w-full">
+    <div {...stylex.props(storyLayout.frame)}>
       <OnboardingBackdrop />
-      <div className="relative z-10 flex min-h-[640px] items-center justify-center p-8">
-        {children}
-      </div>
+      <div {...stylex.props(storyLayout.row)}>{children}</div>
     </div>
   );
 }

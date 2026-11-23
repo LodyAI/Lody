@@ -295,10 +295,7 @@ async function attach(method: 'paste' | 'drop' | 'select', files: globalThis.Fil
           items: files.map((file) => ({ kind: 'file', type: file.type, getAsFile: () => file })),
         },
       });
-      (method === 'paste'
-        ? container.querySelector('[data-composer-editor], textarea')!
-        : container.querySelector('.group.relative')!
-      ).dispatchEvent(event);
+      container.querySelector('[data-composer-editor], textarea')!.dispatchEvent(event);
     }
   });
 }

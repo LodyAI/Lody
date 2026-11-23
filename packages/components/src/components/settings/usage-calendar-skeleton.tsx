@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Skeleton } from '@lody/ui/skeleton';
+import { feedback as feedbackTokens } from '@lody/ui/feedback/feedback.tokens.stylex';
 import type { SettingsUsageRange } from './settings-data-cache';
 import {
   CELL_GAP_PX,
@@ -14,6 +15,16 @@ import {
 const COLOR_MIX = '@supports (color: color-mix(in lab, red, red))';
 
 const styles = stylex.create({
+  linePillAlignment: { verticalAlign: 'middle' },
+  ringInk: {
+    [feedbackTokens.skeleton]: {
+      default: 'hsl(var(--primary))',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    },
+  },
+  compositionBar: { marginTop: 'calc(var(--spacing) * 1.5)' },
+  legendTrailingValue: { marginLeft: 'auto' },
+  calendarCellShape: { aspectRatio: '1 / 1' },
   screenReaderOnly: {
     position: 'absolute',
     width: '1px',
@@ -304,7 +315,7 @@ function LinePill({
     variant === 'value' ? styles.lineValue : variant === 'ring' ? styles.lineRing : null;
   return (
     <div aria-hidden="true" {...stylex.props(styles.line, lineStyle, variantStyle)}>
-      <Skeleton height="0.75em" width={width} className="inline-block align-middle" />
+      <Skeleton height="0.75em" width={width} inline {...stylex.props(styles.linePillAlignment)} />
     </div>
   );
 }
@@ -329,7 +340,12 @@ function CompositionSkeleton() {
       {columns.map((label) => (
         <div key={label} {...stylex.props(styles.compositionColumn)}>
           <p {...stylex.props(styles.compositionTitle)}>{label}</p>
-          <Skeleton shape="circle" height={6} width="100%" className="mt-1.5" />
+          <Skeleton
+            shape="circle"
+            height={6}
+            width="100%"
+            {...stylex.props(styles.compositionBar)}
+          />
           {/* The real legend wraps to two `text-[10px]` rows at this width. */}
           <div {...stylex.props(styles.compositionLegend)}>
             {[
@@ -413,14 +429,7 @@ function RingSkeleton() {
       <div {...stylex.props(styles.ringBox)}>
         {/* Ring, not a filled disc: border carries the pulse so the centre stays
            open like the real donut (RING_VIEWBOX 168 / RING_STROKE 26). */}
-        {/* The primitive has no prop for this pre-existing ring appearance.
-            Keep the original override as a documented holdout until its API can
-            represent the same border and transparent fill. */}
-        <Skeleton
-          shape="circle"
-          width="100%"
-          className="aspect-square border-[26px] border-primary/10 bg-transparent"
-        />
+        <Skeleton shape="ring" width="100%" strokeWidth={26} {...stylex.props(styles.ringInk)} />
         <div {...stylex.props(styles.ringOverlay)}>
           <Skeleton width={48} height={16} />
           <Skeleton width={36} height={8} />
@@ -433,7 +442,7 @@ function RingSkeleton() {
           <div key={index} {...stylex.props(styles.ringLegendItem)}>
             <Skeleton shape="circle" width={6} height={6} />
             <Skeleton height="0.75em" width={48} />
-            <Skeleton className="ml-auto" height="0.75em" width={20} />
+            <Skeleton {...stylex.props(styles.legendTrailingValue)} height="0.75em" width={20} />
           </div>
         ))}
       </div>
@@ -459,7 +468,7 @@ function DayBarsSkeleton() {
       <div {...stylex.props(styles.hourColumns)}>
         {DAY_BAR_HEIGHTS.map((height, hour) => (
           <div key={hour} {...stylex.props(styles.dayTrack(DAY_BAR_TRACK_PX))}>
-            <Skeleton width="100%" height={`${height}%`} className="rounded-t-[3px]" />
+            <Skeleton shape="bar" width="100%" height={`${height}%`} />
           </div>
         ))}
       </div>
@@ -545,9 +554,9 @@ function YearSkeleton() {
               {Array.from({ length: USAGE_CALENDAR_CELLS }, (_, index) => (
                 <Skeleton
                   key={index}
-                  shape="block"
+                  shape="tile"
                   width="100%"
-                  className="aspect-square rounded-[20%]"
+                  {...stylex.props(styles.calendarCellShape)}
                 />
               ))}
             </div>

@@ -1,3 +1,8 @@
+import { corner as uiCorner, duration as uiMotion, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
+import { sidebarSectionHeaderMarker } from './sidebar-section-markers.stylex';
+import { themeSpace as appSpace } from '../style/theme-scale.stylex';
+import * as stylex from '@stylexjs/stylex';
 import {
   Fragment,
   memo,
@@ -31,7 +36,6 @@ import {
 } from '@dnd-kit/sortable';
 import { dndPointerPoint } from '@/lib/dnd-pointer';
 import { useLatestRef } from '@/hooks/use-latest-ref';
-import { cn } from '@/lib/utils';
 import { CSS as DndCss } from '@dnd-kit/utilities';
 import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff, FolderPlus, MoreHorizontal, Pencil, SquarePen, Trash2 } from 'lucide-react';
@@ -407,7 +411,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         from: { left: lifted.left, top: lifted.top, width: lifted.width, height: lifted.height },
         ghost: activeGhost,
         fromBackground: liftedBackground(),
-        fromShadow: PINNED_ROW_LIFT_SHADOW,
+        fromShadow: uiShadow.popover,
       };
       if (target.sectionId === FOCUS_SECTION_DND_KEY) {
         beginPinnedDropSettle(settle);
@@ -548,7 +552,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                 className={
                   // Padding, not margin: the space between sections stays part of a
                   // drop target, so a drag crossing it never shows "no drop".
-                  index < visibleSections.length - 1 ? (collapsed ? 'pb-1' : 'pb-4') : undefined
+                  stylex.props(index < visibleSections.length - 1 && (collapsed ? pinStyles.foldedGap : pinStyles.sectionGap)).className
                 }
                 items={items}
                 grouping="manual"
@@ -582,10 +586,10 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                             )}
                             // The row grid: px-2 padding + the 14px leading
                             // slot + gap-2 puts this line on the title edge.
-                            className="flex cursor-default select-none items-center gap-2 px-2 pb-0.5 pt-1 text-xs text-sidebar-foreground-muted/70"
+                            {...stylex.props(sectionStyles.hiddenRowsHint)}
                           >
-                            <span className="w-3.5 shrink-0" aria-hidden="true" />
-                            <span className="truncate">
+                            <span {...stylex.props(sectionStyles.leadingSpacer)} aria-hidden="true" />
+                            <span {...stylex.props(sectionStyles.truncatedLabel)}>
                               {t('sidebar.pinSections.hiddenByScope', '{{count}} sessions hidden', {
                                 count: hiddenCount,
                               })}
@@ -666,7 +670,6 @@ function usePendingUntil<T>(
   }, [pending]);
   return [pending, setPending];
 }
-const PINNED_ROW_LIFT_SHADOW = '0 6px 16px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.12)';
 
 /** Sections meet sections; rows aim by pointer position (`pinnedPointerTargetAt`). */
 const pinnedCollisionDetection: CollisionDetection = (args) =>
@@ -726,8 +729,8 @@ function PinnedRowGhost({ source }: { source: HTMLElement | null }) {
     <div
       ref={bodyRef}
       data-pin-drag-overlay=""
-      className="overflow-hidden rounded-md border border-sidebar-border bg-sidebar"
-      style={{ boxShadow: PINNED_ROW_LIFT_SHADOW, cursor: 'grabbing' }}
+      {...stylex.props(sectionStyles.dragSurface)}
+      style={{ boxShadow: uiShadow.popover, cursor: 'grabbing' }}
     />
   );
 }
@@ -865,21 +868,17 @@ function PinSectionHeaderMenu({
   return (
     <Menu.Root>
       <span
-        className={cn(
-          'inline-flex',
-          revealOnHover &&
-            'pointer-events-none opacity-0 transition-opacity duration-100 group-hover/section-header:pointer-events-auto group-hover/section-header:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 has-[[data-popup-open]]:pointer-events-auto has-[[data-popup-open]]:opacity-100'
-        )}
+        {...stylex.props(pinStyles.menuHost, revealOnHover && pinStyles.menuReveal)}
       >
         <Menu.Trigger
           render={
             <Button type="button" variant="ghost" size="mini" icon aria-label={label}>
-              <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.5} />
+              <MoreHorizontal {...stylex.props(sectionStyles.menuGlyph)} strokeWidth={1.5} />
             </Button>
           }
         />
       </span>
-      <Menu.Content align="end" className="min-w-[160px]">
+      <Menu.Content align="end" xstyle={sectionStyles.sectionMenu}>
         {onNewChat ? (
           <>
             <Menu.Item icon={SquarePen} onClick={onNewChat}>
@@ -915,7 +914,7 @@ function PinSectionHeaderMenu({
               <Menu.SubmenuTrigger icon={Eye}>
                 {t('sidebar.pinSections.visibleSections', 'Visible Sections')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="min-w-[200px]">
+              <Menu.Content xstyle={sectionStyles.visibilityMenu}>
                 {entries.map((entry) => (
                   <Menu.CheckboxItem
                     key={entry.key}
@@ -990,15 +989,15 @@ function PinSectionNameDialog({
         if (!open && !saving) onClose();
       }}
     >
-      <Dialog.Content className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
-        <Dialog.Header className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
-          <Dialog.Title className="text-base">
+      <Dialog.Content xstyle={sectionStyles.nameDialog}>
+        <Dialog.Header xstyle={sectionStyles.nameDialogHeader}>
+          <Dialog.Title>
             {target?.kind === 'rename'
               ? t('sidebar.pinSections.renameTitle', 'Rename Section')
               : t('sidebar.pinSections.createTitle', 'New Section')}
           </Dialog.Title>
         </Dialog.Header>
-        <div className="px-4 py-4 sm:px-5">
+        <div {...stylex.props(sectionStyles.nameDialogBody)}>
           <Input
             autoFocus
             value={draft}
@@ -1015,7 +1014,7 @@ function PinSectionNameDialog({
             }}
           />
         </div>
-        <Dialog.Footer className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
+        <Dialog.Footer xstyle={sectionStyles.nameDialogFooter}>
           <Button variant="secondary" size="small" onClick={onClose} disabled={saving}>
             {t('common.cancel', 'Cancel')}
           </Button>
@@ -1027,3 +1026,29 @@ function PinSectionNameDialog({
     </Dialog.Root>
   );
 }
+
+const sectionStyles = stylex.create({
+  hiddenRowsHint: { display: 'flex', cursor: 'default', userSelect: 'none', alignItems: 'center', gap: appSpace[2], paddingInline: appSpace[2], paddingBottom: appSpace[0.5], paddingTop: appSpace[1], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  leadingSpacer: { width: appSpace[3.5], flexShrink: 0 },
+  truncatedLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  dragSurface: { overflow: 'hidden', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground },
+  menuGlyph: { height: appSpace[3.5], width: appSpace[3.5] },
+  sectionMenu: { minWidth: '160px' },
+  visibilityMenu: { minWidth: '200px' },
+  nameDialog: { maxWidth: '24rem', gap: 0, overflow: 'hidden', padding: { 'default': 0, '@media (min-width: 640px)': 0 } },
+  nameDialogHeader: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4], paddingRight: { 'default': appSpace[12], '@media (min-width: 640px)': appSpace[12] }, textAlign: 'start' },
+  nameDialogTitle: { fontSize: uiText.bodySize, lineHeight: uiText.bodyLeading },
+  nameDialogBody: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4] },
+  nameDialogFooter: { backgroundColor: uiColors.secondaryBackground, paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[3] },
+});
+
+const pinStyles = stylex.create({
+  menuHost: { display: 'inline-flex' },
+  menuReveal: {
+    opacity: { default: 0, [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 1, ':has(:focus-visible, [data-popup-open])': 1 },
+    pointerEvents: { default: 'none', [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 'auto', ':has(:focus-visible, [data-popup-open])': 'auto' },
+    transitionProperty: 'opacity', transitionDuration: uiMotion.fast,
+  },
+  foldedGap: { paddingBottom: appSpace[1] },
+  sectionGap: { paddingBottom: appSpace[4] },
+});

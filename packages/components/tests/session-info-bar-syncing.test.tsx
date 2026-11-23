@@ -110,7 +110,7 @@ describe('SessionInfoBar ambient information', () => {
         withTestI18n(<SessionInfoBar {...CONTEXT_LESS_PROPS} syncStatus="updating" />, testI18n)
       );
     });
-    expect(container.querySelector('.ml-auto')?.textContent).toContain('Syncing');
+    expect(container.querySelector('[data-sync-indicator]')?.textContent).toContain('Syncing');
 
     // An explicit null status wins over the legacy flag: nothing to announce.
     act(() => {
@@ -169,7 +169,6 @@ describe('SessionInfoBar ambient information', () => {
     expect(container.textContent).toBe(MACHINE.name);
     const surface = container.querySelector('[data-info-bar-surface]');
     expect(surface).not.toBeNull();
-    expect(surface!.className).toContain('rounded-lg');
     expect(container.querySelector('img')).toBeNull();
     expect(document.body.textContent).not.toContain('Maya Chen');
     act(() => container.querySelector<HTMLButtonElement>('button')!.click());

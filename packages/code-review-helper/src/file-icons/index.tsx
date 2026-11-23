@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { useMemo } from 'react';
 
 import { compoundExtensionMap, defaultFileIcon, extensionMap, fileNameMap } from './mappings';
@@ -55,15 +57,17 @@ function iconUrl(name: string): string {
 
 export function FileIcon({
   filePath,
-  className = 'size-4',
+  className,
 }: {
   readonly filePath: string;
   readonly className?: string;
 }) {
   const src = useMemo(() => iconUrl(getFileIconName(filePath)), [filePath]);
-  return <img src={src} alt="" aria-hidden className={cn('shrink-0', className)} />;
+  const sx = stylex.props(iconStyles.base, className === undefined && iconStyles.defaultSize);
+  return <img src={src} alt="" aria-hidden {...sx} className={clsx(sx.className, className)} />;
 }
 
-function cn(...classes: (string | undefined)[]): string {
-  return classes.filter(Boolean).join(' ');
-}
+const iconStyles = stylex.create({
+  base: { flexShrink: 0 },
+  defaultSize: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+});

@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { Check, ChevronRight, MoreHorizontal } from 'lucide-react';
+import { Check, ChevronRight, MoreHorizontal, Plus } from 'lucide-react';
 import {
   Fragment,
   memo,
@@ -26,7 +26,7 @@ import { TodayMention } from './today-session-mention';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
 import { formatTodayHeading } from './today-stream';
-import { TodayMoreAtEndContext, todayOutline } from './outline.stylex';
+import { TodayMoreAtEndContext, todayOutline, todaySurfaceMarker } from './outline.stylex';
 
 const styles = stylex.create({
   section: { display: 'flex', flexDirection: 'column', gap: space[1], paddingBlock: space[3] },
@@ -176,6 +176,26 @@ const styles = stylex.create({
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
     transitionProperty: 'background-color',
     transitionDuration: '100ms',
+  },
+  // Where the first child's fold toggle would sit (see `fold`).
+  foldSpace: { width: 12, marginInlineEnd: `calc(-1 * ${space[1]})`, flexShrink: 0 },
+  addChild: {
+    width: '100%',
+    background: 'none',
+    borderWidth: 0,
+    padding: 0,
+    font: 'inherit',
+    textAlign: 'start',
+    cursor: 'text',
+  },
+  addChildPlus: {
+    color: { default: colors.tertiaryLabel, ':hover': colors.secondaryLabel },
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover', todaySurfaceMarker)]: 1,
+      '@media (hover: none)': 1,
+    },
+    transitionProperty: 'opacity, background-color',
   },
   dot: { width: 6, height: 6, borderRadius: radius.full, backgroundColor: colors.secondaryLabel },
   dotFolded: { boxShadow: `0 0 0 4px ${colors.selectedFill}` },
@@ -393,7 +413,9 @@ function TodayZoomedOutline(props: { store: TodayPageStore; root: TodayNodeId })
         active={!!controller?.isActive(store, root)}
         selected={rootSelected}
       />
-      {subtree.visible.length >= TODAY_VIRTUALIZE_FROM ? (
+      {subtree.visible.length === 0 ? (
+        <TodayAddChild store={store} parentId={root} />
+      ) : subtree.visible.length >= TODAY_VIRTUALIZE_FROM ? (
         <TodayVirtualOutline store={store} zoomRoot={root} />
       ) : (
         subtree.visible.map((row, index) => (
@@ -405,6 +427,33 @@ function TodayZoomedOutline(props: { store: TodayPageStore; root: TodayNodeId })
         ))
       )}
     </div>
+  );
+}
+
+/**
+ * A zoomed node without children: a "+" where its first child's bullet would be,
+ * shown while the surface is hovered. A click starts that child with the caret in it.
+ */
+function TodayAddChild(props: { store: TodayPageStore; parentId: TodayNodeId }) {
+  const { t } = useTranslation();
+  const controller = useTodayEditor();
+  return (
+    <button
+      type="button"
+      {...stylex.props(styles.row, styles.addChild)}
+      aria-label={t('today.addChild', 'Add a child')}
+      tabIndex={-1}
+      data-today-add-child
+      onPointerDown={(event) => event.preventDefault()}
+      onClick={() => controller?.startPage(props.store, props.parentId)}
+    >
+      <span {...stylex.props(styles.foldSpace)} />
+      <span {...stylex.props(styles.bullet)}>
+        <span {...stylex.props(styles.halo, styles.addChildPlus)}>
+          <Plus size={12} strokeWidth={2.5} />
+        </span>
+      </span>
+    </button>
   );
 }
 

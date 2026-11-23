@@ -8,7 +8,8 @@ import {
   encodeE2eeIntentRecord,
   manualScheduleRunKey,
   scheduleDefinitionFingerprint,
-  turnExecutionDigest} from '@lody/shared';
+  turnExecutionDigest,
+} from '@lody/shared';
 import { getScheduleRoomId, type WorkspaceId } from '@lody/shared';
 import { LoroRepo } from 'loro-repo';
 import { LoroDocumentManager } from '../src/lib/loro/doc';
@@ -35,7 +36,8 @@ import { fileURLToPath } from 'node:url';
 import {
   LoroStreamsTokenPorts,
   makeLoroStreamsTokenProvider,
-  makeLoroStreamsTokenWebPorts} from '@lody/shared';
+  makeLoroStreamsTokenWebPorts,
+} from '@lody/shared';
 import { encodeEpochStagedGroup } from '@lody/e2ee-core/host';
 import { startProcessLegacy } from '@lody/shared/node/process';
 import { describe, expect, it, vi } from 'vitest';

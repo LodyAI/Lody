@@ -1,5 +1,8 @@
-import { CONTROL_PLANE_IGNORED_ROOT_KEYS, createControlPlaneDoc, sessionControlPlaneSchema } from '@lody/shared/session-control-plane';
-;
+import {
+  CONTROL_PLANE_IGNORED_ROOT_KEYS,
+  createControlPlaneDoc,
+  sessionControlPlaneSchema,
+} from '@lody/shared/session-control-plane';
 import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
 

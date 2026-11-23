@@ -1318,6 +1318,8 @@ describe('MessageHandler ACP batching', () => {
           source: 'active_turn',
         });
         expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(true);
+        expect(h.host.sessionActivePresence.getStatus(h.sessionId)).toEqual({ type: 'running' });
+        expect((await h.doc.getMetaState())?.status).toEqual({ type: 'running' });
         h.emitText('replacement ');
         h.emitText('output');
         await h.host.flushACPUpdatesNow(h.sessionId);

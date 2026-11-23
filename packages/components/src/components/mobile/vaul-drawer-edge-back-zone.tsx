@@ -1,7 +1,19 @@
 import type { ReactNode } from 'react';
 
+import * as stylex from '@stylexjs/stylex';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { EDGE_ZONE_PX } from './mobile-edge-back-swipe';
+
+const styles = stylex.create({
+  zone: {
+    position: 'absolute',
+    left: 0,
+    zIndex: 30,
+  },
+  body: {
+    display: 'contents',
+  },
+});
 
 export type VaulDrawerEdgeBackZoneProps = {
   /** Native app only. On web we leave back to the browser / route history, so
@@ -44,7 +56,7 @@ export function VaulDrawerEdgeBackZone({ isNativeApp, topInset }: VaulDrawerEdge
   return (
     <div
       aria-hidden="true"
-      className="absolute left-0 z-30"
+      {...stylex.props(styles.zone)}
       style={{
         top: topInset,
         bottom: 0,
@@ -72,7 +84,7 @@ export function VaulDrawerBody({ topInset, children }: { topInset: string; child
   return (
     <>
       <VaulDrawerEdgeBackZone isNativeApp={isNativeAppShell()} topInset={topInset} />
-      <div data-vaul-no-drag className="contents">
+      <div data-vaul-no-drag {...stylex.props(styles.body)}>
         {children}
       </div>
     </>

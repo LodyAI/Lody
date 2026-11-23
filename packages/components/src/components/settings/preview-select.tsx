@@ -1,3 +1,4 @@
+import type * as stylex from '@stylexjs/stylex';
 import { useRef, type ReactNode } from 'react';
 import { Select } from '@lody/ui/select';
 
@@ -15,6 +16,7 @@ interface PreviewSelectProps<T extends string> {
   /** Restore the original value when the list closes without a pick. */
   onCancel?: () => void;
   triggerClassName?: string;
+  triggerXstyle?: stylex.StyleXStyles;
   'aria-label'?: string;
 }
 
@@ -35,6 +37,7 @@ export function PreviewSelect<T extends string>({
   onCommit,
   onCancel,
   triggerClassName,
+  triggerXstyle,
   'aria-label': ariaLabel,
 }: PreviewSelectProps<T>) {
   const committedRef = useRef(false);
@@ -53,7 +56,7 @@ export function PreviewSelect<T extends string>({
         onCommit(next as T);
       }}
     >
-      <Select.Trigger className={triggerClassName} aria-label={ariaLabel}>
+      <Select.Trigger xstyle={triggerXstyle} className={triggerClassName} aria-label={ariaLabel}>
         <Select.Value />
       </Select.Trigger>
       <Select.Content>

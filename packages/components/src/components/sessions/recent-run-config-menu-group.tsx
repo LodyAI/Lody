@@ -1,9 +1,72 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { ListChecks, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentConfigMeta } from '@lody/shared';
 
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { Menu } from '@/ui/menu';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  recentItem: { maxWidth: 'calc(var(--spacing) * 80)' },
+  recentHeading: {
+    fontWeight: 'var(--font-weight-normal)',
+    [textScale.captionSize]: 'var(--text-xs)',
+    [textScale.captionLeading]: 'var(--text-xs--line-height)',
+    [uiColors.secondaryLabel]: 'hsl(var(--muted-foreground) / 1)',
+  },
+  rowDot: {
+    flexShrink: 0,
+    userSelect: 'none',
+    color: 'hsl(var(--muted-foreground) / 0.6)',
+  },
+  roleEmoji: {
+    width: themeSpace[4],
+    flexShrink: 0,
+    textAlign: 'center',
+    fontSize: themeFontSize.sm,
+    lineHeight: '1',
+  },
+  agentIcon: { height: themeSpace[4], width: themeSpace[4], flexShrink: 0 },
+  name: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  valueColumn: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    paddingLeft: themeSpace[2],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  modelName: {
+    minWidth: 0,
+    maxWidth: '8rem',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  reasoningName: { flexShrink: 0 },
+  glyphColumn: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    paddingLeft: themeSpace[2],
+  },
+  glyph: { height: themeSpace[3.5], width: themeSpace[3.5], color: themeColors.primary },
+});
 
 /**
  * "Recently used" run configurations, rendered at the top of
@@ -41,7 +104,7 @@ export type RecentRunConfigItem = {
 
 function RowDot() {
   return (
-    <span aria-hidden="true" className="shrink-0 select-none text-muted-foreground/60">
+    <span aria-hidden="true" {...stylex.props(styles.rowDot)}>
       ·
     </span>
   );
@@ -75,7 +138,7 @@ export function RecentRunConfigMenuGroup({
 
   return (
     <>
-      <Menu.GroupLabel className="text-xs font-normal text-muted-foreground">
+      <Menu.GroupLabel xstyle={styles.recentHeading}>
         {t('chat.runConfig.recentLabel', 'Recently used')}
       </Menu.GroupLabel>
       {items.map((item) => (
@@ -90,10 +153,10 @@ export function RecentRunConfigMenuGroup({
           // would otherwise stretch the whole dropdown and drag the Agent /
           // Model / Reasoning values out to the far edge. Past this cap the
           // row truncates instead of growing.
-          className="max-w-80"
+          xstyle={styles.recentItem}
         >
           {item.role ? (
-            <span className="w-4 shrink-0 text-center text-sm leading-none" aria-hidden="true">
+            <span {...stylex.props(styles.roleEmoji)} aria-hidden="true">
               {item.role.emoji}
             </span>
           ) : (
@@ -102,7 +165,7 @@ export function RecentRunConfigMenuGroup({
               agentType={item.agent.agentType}
               brandId={item.agent.brandId}
               env={item.agent.env}
-              className="h-4 w-4 shrink-0"
+              className={stylex.props(styles.agentIcon).className}
             />
           )}
           {/* Agent holds the left edge; model and reasoning are pushed to a
@@ -110,30 +173,28 @@ export function RecentRunConfigMenuGroup({
               Agent / Model / Reasoning rows below this group do. The name takes
               the row's slack and truncates first, because the right column is
               the part a returning user is comparing between rows. */}
-          <span className="min-w-0 flex-1 truncate">{item.role?.name ?? item.agent.name}</span>
+          <span {...stylex.props(styles.name)}>{item.role?.name ?? item.agent.name}</span>
           {/* No dot between name and model: the separator only reads as one
               phrase while the parts are adjacent, and they no longer are. The
               model keeps its own cap so a long name cannot push it off the cap
               set on the row. */}
-          <span className="flex shrink-0 items-center gap-1.5 pl-2 text-xs text-muted-foreground">
+          <span {...stylex.props(styles.valueColumn)}>
             {item.modelLabel ? (
-              <span className="min-w-0 max-w-32 truncate">{item.modelLabel}</span>
+              <span {...stylex.props(styles.modelName)}>{item.modelLabel}</span>
             ) : null}
             {item.modelLabel && item.reasoningLabel ? <RowDot /> : null}
-            {item.reasoningLabel ? <span className="shrink-0">{item.reasoningLabel}</span> : null}
+            {item.reasoningLabel ? (
+              <span {...stylex.props(styles.reasoningName)}>{item.reasoningLabel}</span>
+            ) : null}
           </span>
           {/* Glyphs park in a right-hand column so plan/fast can be scanned
               down the list instead of hunted at the end of each phrase. */}
-          <span className="flex shrink-0 items-center gap-1 pl-2">
+          <span {...stylex.props(styles.glyphColumn)}>
             {item.planOn ? (
-              <ListChecks
-                className="h-3.5 w-3.5 text-primary"
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
+              <ListChecks {...stylex.props(styles.glyph)} strokeWidth={1.8} aria-hidden="true" />
             ) : null}
             {item.fastOn ? (
-              <Zap className="h-3.5 w-3.5 text-primary" strokeWidth={1.8} aria-hidden="true" />
+              <Zap {...stylex.props(styles.glyph)} strokeWidth={1.8} aria-hidden="true" />
             ) : null}
           </span>
         </Menu.Item>

@@ -1,3 +1,6 @@
+import { text } from '@lody/ui/tokens/scales.stylex';
+import { sidebarSectionHeaderMarker, sidebarSectionMenuMarker } from './sidebar-section-markers.stylex';
+import { sidebar } from './sidebar.tokens.stylex';
 import {
   useId,
   useState,
@@ -40,10 +43,8 @@ import {
 import type { SessionSendState } from '@/lib/session-send-status';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import { Tooltip } from '@lody/ui/tooltip';
 import * as stylex from '@stylexjs/stylex';
-import { text } from '@lody/ui/tokens/scales.stylex';
 import { Badge } from '@lody/ui/badge';
 import { mergeableBadgeTheme } from './sidebar-mergeable-badge.stylex';
 import { ContextMenu } from '@lody/ui/context-menu';
@@ -58,6 +59,379 @@ import { useStableNow } from '@/hooks/use-stable-now';
 import { formatCompactRelativeTime, type RelativeTimeValue } from '@/lib/format-relative-time';
 import { SidebarShortcutPill, useSidebarRowShortcut } from './sidebar-shortcut-pill';
 import { sidebarSurface } from './sidebar-surface';
+import { clsx } from 'clsx';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import { themeDuration, themeEasing, themeRadius, themeSpace } from '../style/theme-scale.stylex';
+
+
+const sendSpin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
+
+const GROUP_HOVER = ':is(:where(.group):hover *)';
+const GROUP_OPEN = ':is(:where(.group)[data-menu-open] *)';
+
+const rowParts = stylex.create({
+  sectionEnd: { display: 'flex', flexShrink: 0, alignItems: 'center', marginRight: themeSpace[2] },
+  sectionEndAction: { gap: themeSpace[1] },
+  sectionEndMark: { marginRight: '9px' },
+  sectionMenu: { position: 'relative', display: 'flex', height: themeSpace[5], width: themeSpace[5], flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  sectionMenuWide: { width: themeSpace[6] },
+  sectionActivity: { display: 'inline-flex', alignItems: 'center', transitionProperty: 'opacity', transitionDuration: themeDuration[100] },
+  sectionActivityHide: {
+    opacity: { default: 1, [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 0, [stylex.when.ancestor(':has(:focus-visible, [data-popup-open])', sidebarSectionMenuMarker)]: 0 },
+    pointerEvents: { default: 'auto', [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 'none', [stylex.when.ancestor(':has(:focus-visible, [data-popup-open])', sidebarSectionMenuMarker)]: 'none' },
+  },
+  sectionMenuOverlay: { position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+
+  menuButton: {
+    display: 'flex',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    opacity: 0,
+    pointerEvents: 'none',
+    outline: { default: null, ':focus-visible': 'none' },
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+      ':hover': 'hsl(var(--sidebar-foreground))',
+      [GROUP_OPEN]: 'hsl(var(--sidebar-foreground))',
+      ':is(:where(.group\\/row)[data-menu-open] *)': 'hsl(var(--sidebar-foreground))',
+    },
+    boxShadow: {
+      default: null,
+      ':hover': 'inset 0 0 0 20px hsl(var(--sidebar-foreground) / 0.15)',
+      [GROUP_OPEN]: 'inset 0 0 0 20px hsl(var(--sidebar-foreground) / 0.15)',
+      ':is(:where(.group\\/row)[data-menu-open] *)':
+        'inset 0 0 0 20px hsl(var(--sidebar-foreground) / 0.15)',
+    },
+    transitionProperty: 'opacity,color,box-shadow',
+    transitionDuration: themeDuration[100],
+  },
+  actionButton: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 20,
+    display: 'inline-flex',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+      ':hover': 'hsl(var(--sidebar-foreground))',
+    },
+    opacity: 0,
+    pointerEvents: 'none',
+    transitionProperty: 'opacity,color,background-color',
+    transitionDuration: themeDuration[100],
+    outline: { default: null, ':focus-visible': 'none' },
+    boxShadow: { default: null, ':focus-visible': '0 0 0 2px hsl(var(--sidebar-ring) / 0.4)' },
+  },
+  menuSlot: {
+    position: 'absolute',
+    top: 0,
+    zIndex: 20,
+    display: 'flex',
+    height: themeSpace[5],
+    alignItems: 'center',
+  },
+  menuBeforeArchive: { right: themeSpace[5] },
+  menuAtEnd: { right: 0 },
+  prAnchor: {
+    display: 'inline-flex',
+    width: '20px',
+    height: '20px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unsentTitle: { color: sidebar.mutedText },
+  groupLabelInk: {
+    color: sidebar.mutedText,
+  },
+  compactPr: { filter: 'saturate(0.55)' },
+  prOpen: { color: themeColors.githubOpen },
+  prClosed: { color: themeColors.githubClosed },
+  prDraft: { color: themeColors.githubDraft },
+  prMerged: { color: themeColors.githubMerged },
+  reveal: {
+    opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 1 }, [GROUP_OPEN]: 1 },
+    pointerEvents: {
+      default: null,
+      [GROUP_HOVER]: { '@media (hover: hover)': 'auto' },
+      [GROUP_OPEN]: 'auto',
+    },
+  },
+  fade: {
+    opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 0 }, [GROUP_OPEN]: 0 },
+  },
+  chevronReveal: { opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 1 } } },
+  menuPressed: {
+    backgroundColor: {
+      default: null,
+      [GROUP_OPEN]: 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    },
+    color: { default: null, [GROUP_OPEN]: 'hsl(var(--foreground) / 1)' },
+  },
+  sectionHover: {
+    color: {
+      default: null,
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-foreground) / 1)' },
+    },
+  },
+  treeFocus: {
+    boxShadow: {
+      default: null,
+      ':has([role="button"]:focus-visible)': 'inset 0 0 0 1px hsl(var(--primary) / 0.5)',
+    },
+  },
+  hoverAction: {
+    display: 'inline-flex',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    color: { default: 'hsl(var(--muted-foreground) / 0.7)', ':hover': themeColors.foreground },
+    backgroundColor: { default: null, ':hover': 'hsl(var(--muted) / 0.3)' },
+    transitionProperty: 'opacity,background-color,color',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+    opacity: {
+      default: 0,
+      [GROUP_HOVER]: { '@media (hover: hover)': 1 },
+      [GROUP_OPEN]: 1,
+    },
+    pointerEvents: {
+      default: 'none',
+      [GROUP_HOVER]: { '@media (hover: hover)': 'auto' },
+      [GROUP_OPEN]: 'auto',
+    },
+  },
+  hoverActionFocus: { boxShadow: { default: null, ':focus-visible': 'none' } },
+  verdictSuccess: { color: themeColors.statusSuccess },
+  verdictFailure: { color: themeColors.destructive },
+  verdictWarning: { color: themeColors.statusWarning },
+  primary: { color: themeColors.primary },
+  smallPr: { height: themeSpace[3], width: themeSpace[3] },
+  fullPr: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  mergedPr: { translate: '1px' },
+  shrink: { flexShrink: 0 },
+  sendSpinning: {
+    animationName: { default: sendSpin, '@media (prefers-reduced-motion: reduce)': 'none' },
+    animationDuration: '1.2s',
+    animationTimingFunction: 'linear',
+    animationIterationCount: 'infinite',
+  },
+  sendShimmer: { display: { default: null, '@media (prefers-reduced-motion: reduce)': 'none' } },
+  menuChevron: {
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  expanded: { rotate: '0deg' },
+  collapsed: { rotate: '-90deg' },
+  rowList: { display: 'flex', flexDirection: 'column', gap: '1px' },
+  archive: {
+    position: 'absolute',
+    zIndex: 20,
+    right: 0,
+    top: 0,
+    opacity: 0,
+    pointerEvents: 'none',
+  },
+  endSlot: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    pointerEvents: 'none',
+  },
+  endReserve: { minWidth: themeSpace[5] },
+  endReserveMultiple: { minWidth: themeSpace[10] },
+  emptySlot: { width: 0 },
+  rest: { display: 'flex' },
+  restStatus: { width: themeSpace[5], justifyContent: 'center' },
+  restFade: {
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  groupActivity: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  groupActivityWidth: { width: themeSpace[5] },
+  sectionButton: {
+    position: 'relative',
+    display: 'flex',
+    height: '26px',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    textAlign: 'left',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  clickable: { cursor: 'pointer' },
+  inert: { cursor: 'default' },
+  sectionChevron: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    color: 'currentColor',
+    opacity: 0,
+    transitionProperty: 'opacity, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing.out,
+  },
+  visibleChevron: { opacity: 1 },
+  spacer: { flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  skeletonHeaderRow: { display: 'flex', height: themeSpace[7], alignItems: 'center' },
+  /** The verdict mark of a pull request: a fixed 16px box. */
+  prIcon: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0 },
+  /** The send ring's own box. */
+  sendRing: {
+    display: 'flex',
+    height: themeSpace[3],
+    width: themeSpace[3],
+    color: themeColors.primary,
+  },
+  /** The ring's canvas. */
+  sendCanvas: { width: '100%', height: '100%' },
+  /** The filled arc of the send ring. */
+  sendArc: {
+    transitionProperty: 'stroke-dashoffset',
+    transitionDuration: themeDuration[300],
+    transitionTimingFunction: themeEasing.out,
+  },
+  /** Under reduced motion the arc does not sweep. */
+  sendArcStill: {
+    transitionProperty: {
+      default: 'stroke-dashoffset',
+      '@media (prefers-reduced-motion: reduce)': 'none',
+    },
+  },
+  /** A row's status mark: a fixed box the glyph sits in. */
+  statusMark: {
+    display: 'flex',
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  destructiveGlyph: { width: themeSpace[3], height: themeSpace[3], color: themeColors.destructive },
+  primaryGlyph: { width: themeSpace[3], height: themeSpace[3], color: themeColors.primary },
+  warningGlyph: { width: themeSpace[3], height: themeSpace[3], color: themeColors.statusWarning },
+  smallGlyph: { width: themeSpace[3], height: themeSpace[3], flexShrink: 0 },
+  /** A row's trailing meta: a quiet line that never wraps. */
+  trailingMeta: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    color: sidebar.faintText,
+  },
+  /** A clipped label. */
+  clipped: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The owner's avatar in a row's meta line. */
+  ownerAvatar: { borderRadius: themeRadius.sm, objectFit: 'cover' },
+  /** The branch segment of a row's meta line. */
+  branchRow: { display: 'flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1] },
+  /** A number that never changes width. */
+  tabular: { flexShrink: 0, userSelect: 'none', fontVariantNumeric: 'tabular-nums' },
+  /** The tree row's own box. */
+  treeRow: {
+    display: 'flex',
+    height: '26px',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+  },
+  /** The tree row's trailing slot. */
+  treeAction: { marginRight: themeSpace[2], flexShrink: 0 },
+  listStack: { display: 'flex', flexDirection: 'column' },
+  listSpacing: { marginBottom: { default: themeSpace[2.5], ':last-child': 0 } },
+  /** The tree trunk's own pixel: it owns the list's 1px gap. */
+  treeTrunk: {
+    position: 'relative',
+    minWidth: 0,
+    paddingBottom: '1px',
+    marginBottom: '-1px',
+  },
+  /** A row's meta line. */
+  metaLine: { display: 'flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1.5] },
+  /** The skeleton: the section's own shape, empty. */
+  skeletonSection: { display: 'flex', flexDirection: 'column', gap: themeSpace[0.5] },
+  skeletonHeader: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[7],
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+  },
+  skeletonIconBox: {
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  skeletonIcon: { width: themeSpace[3.5], height: themeSpace[3.5], borderRadius: themeRadius.sm },
+  skeletonTitle: { height: themeSpace[3], width: '6rem' },
+  skeletonRows: { display: 'flex', flexDirection: 'column', gap: '1px' },
+  skeletonRow: {
+    display: 'flex',
+    height: themeSpace[7],
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+  },
+  skeletonAvatar: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    borderRadius: themeRadius.full,
+  },
+  skeletonLine: { height: themeSpace[3], minWidth: 0 },
+  skeletonTail: { marginLeft: 'auto', height: themeSpace[3], width: themeSpace[8], flexShrink: 0 },
+});
 
 /**
  * Shared building blocks for the single-line sidebar session rows. All three
@@ -110,19 +484,20 @@ function MaskedPrCiIcon({
 }) {
   const maskId = `pr-ci-${verdict}-${useId().replaceAll(':', '')}`;
   const isRunning = verdict === 'pending';
-  const verdictToneClassName =
+  const verdictToneClassName = stylex.props(
     verdict === 'success'
-      ? 'text-status-success'
+      ? rowParts.verdictSuccess
       : verdict === 'failure'
-        ? 'text-destructive'
-        : 'text-status-warning';
+        ? rowParts.verdictFailure
+        : rowParts.verdictWarning
+  ).className;
 
   return (
     <svg
       viewBox="0 0 16 16"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className={cn('h-4 w-4 shrink-0', className)}
+      className={clsx(stylex.props(rowParts.prIcon).className, className)}
       data-pr-ci-verdict={verdict}
       aria-hidden="true"
     >
@@ -167,9 +542,11 @@ const SEND_RING_SHIMMER_LENGTH = 5;
 export function SessionSendProgressRing({
   progress,
   className,
+  xstyle,
 }: {
   progress?: number;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }) {
   const known = typeof progress === 'number';
   const filled = known ? Math.min(100, Math.max(4, progress)) : 25;
@@ -186,14 +563,16 @@ export function SessionSendProgressRing({
   };
   return (
     <span
-      className={cn(
-        'flex h-3 w-3 text-primary',
-        !known && 'animate-spin [animation-duration:1.2s] motion-reduce:animate-none',
-        className
-      )}
+{...withClassName(stylex.props(rowParts.sendRing, !known && rowParts.sendSpinning, xstyle), className)}
+
       data-session-send-ring={known ? 'determinate' : 'indeterminate'}
     >
-      <svg viewBox="0 0 12 12" className="h-full w-full" fill="none" aria-hidden="true">
+      <svg
+        viewBox="0 0 12 12"
+        {...stylex.props(rowParts.sendCanvas)}
+        fill="none"
+        aria-hidden="true"
+      >
         <circle
           cx="6"
           cy="6"
@@ -205,7 +584,7 @@ export function SessionSendProgressRing({
         <circle
           {...arc}
           stroke="currentColor"
-          className="transition-[stroke-dashoffset] duration-300 ease-out motion-reduce:transition-none"
+          {...stylex.props(rowParts.sendArc, rowParts.sendArcStill)}
         />
         {known ? (
           <>
@@ -223,7 +602,7 @@ export function SessionSendProgressRing({
               strokeDasharray={`${SEND_RING_SHIMMER_LENGTH} ${SEND_RING_CIRCUMFERENCE}`}
               transform="rotate(-90 6 6)"
               mask={`url(#${maskId})`}
-              className="motion-reduce:hidden"
+              {...stylex.props(rowParts.sendShimmer)}
               data-session-send-shimmer=""
             >
               <animate
@@ -285,20 +664,20 @@ export function SessionRowStatusIndicator({
   let label: string | undefined;
 
   if (sendState === 'failed') {
-    icon = <CircleAlert className="h-3 w-3 text-destructive" strokeWidth={2.25} />;
+    icon = <CircleAlert {...stylex.props(rowParts.destructiveGlyph)} strokeWidth={2.25} />;
     label = sendLabel;
   } else if (prMergePhase === 'failed') {
-    icon = <CircleAlert className="h-3 w-3 text-destructive" strokeWidth={2.25} />;
+    icon = <CircleAlert {...stylex.props(rowParts.destructiveGlyph)} strokeWidth={2.25} />;
     label = prMergeLabel;
   } else if (isWaitingPermission === true) {
-    icon = <Hand className="h-3 w-3 text-primary" />;
+    icon = <Hand {...stylex.props(rowParts.primaryGlyph)} />;
   } else if (needsAttention === true && isWorking !== true) {
-    icon = <CircleAlert className="h-3 w-3 text-status-warning" strokeWidth={2.25} />;
+    icon = <CircleAlert {...stylex.props(rowParts.warningGlyph)} strokeWidth={2.25} />;
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
   } else if (isWorking !== true && prMergePhase === 'merging') {
-    icon = <SessionSendProgressRing className="text-pr-merged" />;
+    icon = <SessionSendProgressRing xstyle={rowParts.prMerged} />;
     label = prMergeLabel;
   } else if (isWorking === true || hasUnreadMessages === true) {
     // Working grid, the working → unread "done" transition, and the unread dot
@@ -307,7 +686,7 @@ export function SessionRowStatusIndicator({
       <WorkingStatusMark
         working={isWorking === true}
         unread={hasUnreadMessages === true}
-        className="text-primary"
+        {...stylex.props(rowParts.primary)}
       />
     );
   }
@@ -321,8 +700,9 @@ export function SessionRowStatusIndicator({
       data-session-pr-merge-phase={prMergePhase ?? undefined}
       role={label ? 'img' : undefined}
       aria-label={label}
-      title={label}
-      className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+title={label}
+      {...stylex.props(rowParts.statusMark)}
+
     >
       {icon}
     </div>
@@ -395,7 +775,7 @@ export function useSessionUnsentNewConversation(sessionId: string | undefined): 
 }
 
 /** Title colour for a row whose conversation has not been sent yet. */
-export const SIDEBAR_UNSENT_TITLE_CLASS = 'text-sidebar-foreground-muted';
+export const SIDEBAR_UNSENT_TITLE_CLASS = stylex.props(rowParts.unsentTitle).className ?? '';
 
 /** A row title span that mutes itself while its conversation is unsent. */
 export function SidebarSessionTitleText({
@@ -411,7 +791,7 @@ export function SidebarSessionTitleText({
 }) {
   const isUnsent = useSessionUnsentNewConversation(sessionId);
   return (
-    <span className={cn(className, isUnsent && !selected && SIDEBAR_UNSENT_TITLE_CLASS)}>
+    <span className={clsx(className, isUnsent && !selected && SIDEBAR_UNSENT_TITLE_CLASS)}>
       {children}
     </span>
   );
@@ -428,7 +808,7 @@ export function SidebarSessionTitleText({
  * CI verdict badge read identically on both platforms.
  */
 /** A filter, not opacity: the mark keeps its full lightness, only its hue is muted. */
-const SIDEBAR_PR_ICON_COMPACT_CLASS = 'saturate-[0.55]';
+const SIDEBAR_PR_ICON_COMPACT_CLASS = stylex.props(rowParts.compactPr).className;
 
 export function SessionPrIcon({
   prStatus,
@@ -447,6 +827,16 @@ export function SessionPrIcon({
 }) {
   const meta = PR_STATUS_META[prStatus] ?? PR_STATUS_META.open;
   const BaseIcon = meta.icon;
+  const toneClassName =
+    stylex.props(
+      prStatus === 'merged'
+        ? rowParts.prMerged
+        : prStatus === 'closed'
+          ? rowParts.prClosed
+          : prStatus === 'draft'
+            ? rowParts.prDraft
+            : rowParts.prOpen
+    ).className ?? '';
   const verdict: PrCiVerdict | null =
     prCiState === 's'
       ? 'success'
@@ -471,21 +861,21 @@ export function SessionPrIcon({
       <MaskedPrCiIcon
         BaseIcon={BaseIcon}
         VerdictIcon={VerdictIcon}
-        baseToneClassName={meta.iconColorClassName}
+        baseToneClassName={toneClassName}
         verdict={verdict}
-        className={cn(
+        className={clsx(
           compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
-          compact && 'h-3.5 w-3.5',
-          prStatus === 'merged' && 'translate-x-px',
+          compact && stylex.props(rowParts.fullPr).className,
+          prStatus === 'merged' && stylex.props(rowParts.mergedPr).className,
           className
         )}
       />
     ) : (
       <BaseIcon
-        className={cn(
-          compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
-          'shrink-0',
-          meta.iconColorClassName,
+        className={clsx(
+          stylex.props(compact ? rowParts.smallPr : rowParts.fullPr, rowParts.shrink).className,
+          compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
+          toneClassName,
           className
         )}
         strokeWidth={2.25}
@@ -500,10 +890,7 @@ export function SessionPrIcon({
   // pill grows to the left and the mark stays put.
   if (!compact) return mark;
   return (
-    <span
-      data-session-pr-icon-anchor=""
-      className="inline-flex h-5 w-5 shrink-0 items-center justify-center"
-    >
+    <span data-session-pr-icon-anchor="" {...stylex.props(rowParts.prAnchor)}>
       {mark}
     </span>
   );
@@ -547,7 +934,7 @@ export function SessionRowAuthorAvatar({
   author?: { name?: string | null; image?: string | null } | null;
 }) {
   if (!author) return null;
-  return <UserAvatar user={author} size="small" className="shrink-0" />;
+  return <UserAvatar user={author} size="small" {...stylex.props(rowParts.shrink)} />;
 }
 
 /**
@@ -573,8 +960,8 @@ export function SessionRowWorktreeIndicator({ isWorktree }: { isWorktree?: boole
     <Tooltip.Root>
       <Tooltip.Trigger
         render={
-          <span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
-            <WorktreeIcon className="h-3 w-3" aria-label={label} />
+          <span {...stylex.props(rowParts.trailingMeta)}>
+            <WorktreeIcon {...stylex.props(rowParts.smallGlyph)} aria-label={label} />
           </span>
         }
       />
@@ -613,7 +1000,10 @@ export function SessionRowOpenedByMenuItems({
         <ContextMenu.Item
           icon={
             <ChevronDown
-              className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
+              {...stylex.props(
+                rowParts.menuChevron,
+                opener.expanded ? rowParts.expanded : rowParts.collapsed
+              )}
             />
           }
           onClick={opener.onToggle}
@@ -634,28 +1024,23 @@ export function SessionRowOpenedByMenuItems({
  * box (focus rings are `ring-inset`), because the property also applies paint
  * containment. The rule lives in `tailwind/index.css` (`sidebar-row-list`).
  */
-export const SIDEBAR_ROW_LIST_CLASS = 'flex flex-col gap-px sidebar-row-list';
+export const SIDEBAR_ROW_LIST_CLASS = `${stylex.props(rowParts.rowList).className} sidebar-row-list`;
 
 /**
  * A project-like row's hover controls (⋯, new chat, drag handle): hidden until
  * the row is hovered or its menu is open. Shared by local projects and
  * Project groups so the two rows behave alike.
  */
-export const SIDEBAR_HOVER_ACTION_CLASS = cn(
-  'inline-flex h-5 w-5 items-center justify-center rounded-sm',
-  'text-muted-foreground/70 transition-[opacity,background-color,color] duration-100',
-  'opacity-0 pointer-events-none',
-  'group-hover:opacity-100 group-hover:pointer-events-auto',
-  'group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
-  'hover:text-foreground hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
-);
+export const SIDEBAR_HOVER_ACTION_CLASS = stylex.props(
+  rowParts.hoverAction,
+  rowParts.hoverActionFocus
+).className;
 
 /**
  * The trigger itself stays pressed-looking while its menu is open, not just the
  * row around it. Only the ⋯ opens a menu — the compose button beside it does not.
  */
-export const SIDEBAR_MENU_TRIGGER_OPEN_CLASS =
-  'group-data-[menu-open]:bg-muted/30 group-data-[menu-open]:text-foreground';
+export const SIDEBAR_MENU_TRIGGER_OPEN_CLASS = stylex.props(rowParts.menuPressed).className;
 
 /**
  * Marks one flat-list row with opened-by tree depth. `gutter={false}` leaves
@@ -679,7 +1064,7 @@ export function SessionOpenedByTreeRow({
       // at every row. The wrapper owns that pixel as its own padding and gives it
       // back with a negative margin, so the pitch is unchanged and the trunk's last
       // pixel lands inside the box that clips it.
-      className="relative min-w-0 pb-px -mb-px"
+      {...stylex.props(rowParts.treeTrunk)}
       data-session-tree-depth={depth}
       data-session-tree-indent={depth === 1 ? 'child' : undefined}
     >
@@ -698,7 +1083,7 @@ export function SessionOpenedByTreeRow({
 export function SessionRowMenuButton({
   label,
   /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+  revealClassName = stylex.props(rowParts.reveal).className,
 }: {
   label: string;
   revealClassName?: string;
@@ -721,19 +1106,9 @@ export function SessionRowMenuButton({
           })
         );
       }}
-      className={cn(
-        'flex h-5 w-5 items-center justify-center rounded-sm opacity-0 pointer-events-none',
-        'text-sidebar-foreground-muted/80 transition-[opacity,color,box-shadow] duration-100',
-        'hover:text-sidebar-foreground hover:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
-        'focus-visible:outline-hidden',
-        // The trigger itself stays pressed-looking while its menu is open,
-        // not just the row around it.
-        'group-data-[menu-open]:text-sidebar-foreground group-data-[menu-open]:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
-        'group-data-[menu-open]/row:text-sidebar-foreground group-data-[menu-open]/row:shadow-[inset_0_0_0_20px_hsl(var(--sidebar-foreground)/0.15)]',
-        revealClassName
-      )}
+      className={clsx(stylex.props(rowParts.menuButton).className, revealClassName)}
     >
-      <MoreHorizontal className="h-3.5 w-3.5" />
+      <MoreHorizontal {...stylex.props(rowParts.fullPr)} />
     </button>
   );
 }
@@ -751,7 +1126,7 @@ export function SidebarRowArchiveButton({
   confirmLabel,
   onConfirm,
   /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+  revealClassName,
 }: {
   label: string;
   confirmLabel: string;
@@ -766,10 +1141,9 @@ export function SidebarRowArchiveButton({
           <SidebarConfirmArchiveButton
             label={label}
             confirmLabel={confirmLabel}
-            className={cn(
-              'absolute right-0 top-0 z-20 opacity-0 pointer-events-none',
-              revealClassName
-            )}
+            // Override the shared button's confirming-state relative positioning.
+            xstyle={rowParts.archive}
+            className={revealClassName ?? stylex.props(rowParts.reveal).className}
             onConfirm={onConfirm}
           />
         }
@@ -790,7 +1164,7 @@ export function SidebarRowActionButton({
   icon,
   onConfirm,
   /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
+  revealClassName = stylex.props(rowParts.reveal).className,
 }: {
   label: string;
   icon: ReactNode;
@@ -810,13 +1184,7 @@ export function SidebarRowActionButton({
               event.stopPropagation();
               onConfirm();
             }}
-            className={cn(
-              'absolute right-0 top-0 z-20 inline-flex h-5 w-5 items-center justify-center rounded-sm',
-              'text-sidebar-foreground-muted/80 opacity-0 pointer-events-none transition-[opacity,color,background-color] duration-100',
-              'hover:text-sidebar-foreground',
-              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40',
-              revealClassName
-            )}
+            className={clsx(stylex.props(rowParts.actionButton).className, revealClassName)}
           >
             {icon}
           </button>
@@ -855,7 +1223,7 @@ export function SidebarRowEndSlot({
   menu,
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
-  fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
+  fadeClassName = stylex.props(rowParts.fade).className,
 }: {
   /**
    * Reads this session's local send status here, in the leaf, so upload
@@ -922,27 +1290,32 @@ export function SidebarRowEndSlot({
   // one column would leave the ⋯ absolutely positioned over the title's tail.
   const actionColumns = showActions ? (menu ? 1 : 0) + (archive ? 1 : 0) : 0;
   const reserve = hasRest || showActions;
+  const endSlotStyle = stylex.props(
+    rowParts.endSlot,
+    reserve
+      ? actionColumns > 1
+        ? rowParts.endReserveMultiple
+        : rowParts.endReserve
+      : rowParts.emptySlot
+  );
   return (
     // pointer-events-none so the resting PR icon area still passes clicks through to
     // the row's navigation; the hover action buttons re-enable pointer events on hover.
     // justify-end keeps a narrower resting mark's right edge exactly where the
     // revealed action lands, so the row's rightmost mark never shifts on hover.
-    <div
-      data-session-row-end-slot=""
-      className={cn(
-        'relative flex h-5 shrink-0 items-center justify-end pointer-events-none',
-        reserve ? (actionColumns > 1 ? 'min-w-10' : 'min-w-5') : 'w-0'
-      )}
-    >
+    <div data-session-row-end-slot="" {...endSlotStyle}>
       {hasRest ? (
         // A status mark centres in one 20px column, the same column the revealed
         // actions and a folded group's mark centre their 14px icons in, so it
         // lines up with both instead of sitting 3px right of them.
         <span
-          className={cn(
-            'flex',
-            showStatus && 'w-5 justify-center',
-            showActions && cn('transition-opacity duration-100', fadeClassName)
+          className={clsx(
+            stylex.props(
+              rowParts.rest,
+              showStatus && rowParts.restStatus,
+              showActions && rowParts.restFade
+            ).className,
+            showActions && fadeClassName
           )}
         >
           {restContent}
@@ -953,9 +1326,9 @@ export function SidebarRowEndSlot({
         // column to its left when both reveal — the pair stays flush at the right edge.
         <span
           data-session-row-menu=""
-          className={cn(
-            'absolute top-0 z-20 flex h-5 items-center',
-            archive ? 'right-5' : 'right-0'
+          {...stylex.props(
+            rowParts.menuSlot,
+            archive ? rowParts.menuBeforeArchive : rowParts.menuAtEnd
           )}
         >
           {menu}
@@ -1115,9 +1488,9 @@ export function SidebarGroupActivityMark({
       data-sidebar-group-activity=""
       role={hasStatus && description ? 'img' : undefined}
       aria-label={hasStatus && description ? description : undefined}
-      className={cn(
-        'relative flex h-5 shrink-0 items-center justify-center',
-        hasStatus ? 'w-5' : 'w-0'
+      {...stylex.props(
+        rowParts.groupActivity,
+        hasStatus ? rowParts.groupActivityWidth : rowParts.emptySlot
       )}
     >
       {hasStatus ? (
@@ -1170,7 +1543,7 @@ export function GitHubOwnerIcon({
       src={getGitHubOwnerAvatarUrl(ownerHandle)}
       alt=""
       aria-hidden="true"
-      className={cn('rounded-sm object-cover', className)}
+      className={clsx(stylex.props(rowParts.ownerAvatar).className, className)}
       style={style}
       crossOrigin={crossOrigin}
       onLoad={onImageLoad}
@@ -1196,7 +1569,7 @@ export function GitHubOwnerIcon({
  * matched the icons and details beside it and stopped reading as a heading over
  * the rows, while the earlier 70% (1.9:1) read as disabled.
  */
-export const SIDEBAR_GROUP_LABEL_COLOR_CLASS = 'text-sidebar-foreground-muted/80';
+export const SIDEBAR_GROUP_LABEL_COLOR_CLASS = stylex.props(rowParts.groupLabelInk).className ?? '';
 const sidebarTypography = stylex.create({
   group: { fontSize: text.footnoteSize, lineHeight: text.footnoteLeading },
   row: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading },
@@ -1215,7 +1588,7 @@ export const SIDEBAR_ROW_TEXT_CLASS = stylex.props(sidebarTypography.row).classN
 export const SIDEBAR_CAPTION_TEXT_CLASS = stylex.props(sidebarTypography.caption).className;
 export const SIDEBAR_HELPER_TEXT_CLASS = stylex.props(sidebarTypography.group).className;
 export const SIDEBAR_CONTROL_TEXT_CLASS = stylex.props(sidebarTypography.control).className;
-export const SIDEBAR_GROUP_LABEL_CLASS = cn(
+export const SIDEBAR_GROUP_LABEL_CLASS = clsx(
   stylex.props(sidebarTypography.groupLabel).className,
   SIDEBAR_GROUP_LABEL_COLOR_CLASS
 );
@@ -1230,9 +1603,9 @@ export function SidebarBranchSegment({ branchName }: { branchName?: string | nul
   const branch = typeof branchName === 'string' ? branchName.trim() : '';
   if (!branch) return null;
   return (
-    <span className="flex min-w-0 items-center gap-1">
-      <GitBranch className="h-3 w-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-      <span className="min-w-0 truncate">{branch}</span>
+    <span {...stylex.props(rowParts.branchRow)}>
+      <GitBranch {...stylex.props(rowParts.smallGlyph)} strokeWidth={1.75} aria-hidden="true" />
+      <span {...stylex.props(rowParts.clipped)}>{branch}</span>
     </span>
   );
 }
@@ -1257,32 +1630,17 @@ export function SidebarSessionMetaLine({
   return (
     <div
       data-sidebar-session-meta=""
-      className={cn(
-        'flex min-w-0 items-center gap-1.5',
+      className={clsx(
+        stylex.props(rowParts.metaLine).className,
         SIDEBAR_CAPTION_TEXT_CLASS,
         stylex.props(sidebarSurface.meta).className
       )}
     >
       <SidebarBranchSegment branchName={branchName} />
-      <span className="shrink-0 select-none tabular-nums">{relativeTime}</span>
+      <span {...stylex.props(rowParts.tabular)}>{relativeTime}</span>
     </div>
   );
 }
-
-const SECTION_HEADER_BUTTON_CLASS = cn(
-  'relative flex h-[26px] min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
-  'border border-transparent bg-transparent',
-  SIDEBAR_GROUP_LABEL_CLASS,
-  'transition-colors',
-  // The outer row paints the focus ring; suppress the global :focus-visible
-  // box-shadow here so the ring wraps the whole row (label + action).
-  'focus-visible:shadow-none'
-);
-
-const SECTION_HEADER_CHEVRON_CLASS = cn(
-  'h-3.5 w-3.5 shrink-0 text-current opacity-0',
-  'transition-[opacity,translate,scale,rotate] duration-150 ease-out'
-);
 
 /**
  * The ONE section header shared by every sidebar organize mode, so section labels
@@ -1352,64 +1710,54 @@ export function SidebarSectionHeader({
             }
           : undefined
       }
-      className={cn(
-        SECTION_HEADER_BUTTON_CLASS,
-        canToggle
-          ? cn('cursor-pointer', !isMobile && 'hover:text-sidebar-foreground')
-          : 'cursor-default'
+      className={clsx(
+        stylex.props(rowParts.sectionButton, canToggle ? rowParts.clickable : rowParts.inert)
+          .className,
+        SIDEBAR_GROUP_LABEL_CLASS,
+        canToggle && !isMobile && stylex.props(rowParts.sectionHover).className
       )}
     >
       {icon}
-      <span className="min-w-0 truncate">{label}</span>
+      <span {...stylex.props(rowParts.clipped)}>{label}</span>
       {canToggle ? (
         <ChevronDown
-          className={cn(
-            SECTION_HEADER_CHEVRON_CLASS,
+          className={clsx(
+            stylex.props(
+              rowParts.sectionChevron,
+              (collapsed || isMobile) && rowParts.visibleChevron,
+              collapsed ? rowParts.collapsed : rowParts.expanded
+            ).className,
             // This shared header is reserved for top-level sections (Chats,
             // machine names, GitHub Worktrees), whose folded affordance stays visible.
-            collapsed || isMobile ? 'opacity-100' : 'group-hover:opacity-100',
-            // Collapsed points right (the platform-wide convention).
-            collapsed ? '-rotate-90' : 'rotate-0'
+            !collapsed && !isMobile && stylex.props(rowParts.chevronReveal).className
           )}
           aria-hidden="true"
         />
       ) : null}
-      <span className="flex-1" aria-hidden="true" />
+      <span {...stylex.props(rowParts.spacer)} aria-hidden="true" />
       {toggleActivityMark}
     </div>
   );
   return (
-    <div className="group group/section-header flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
+    <div data-sidebar-section-header="" {...withClassName(stylex.props(rowParts.treeRow, rowParts.treeFocus, sidebarSectionHeaderMarker), 'group')}>
       {wrapToggle ? wrapToggle(toggle) : toggle}
       {menu || trailingActivityMark || action ? (
         <div
-          className={cn(
-            'flex shrink-0 items-center',
-            action ? 'mr-2 gap-1' : overlayMenuOnHover || trailingActivityMark ? 'mr-[9px]' : 'mr-2'
-          )}
+          {...stylex.props(rowParts.sectionEnd, Boolean(action) && rowParts.sectionEndAction, !action && (overlayMenuOnHover || trailingActivityMark) && rowParts.sectionEndMark)}
         >
           {overlayMenuOnHover ? (
             <span
-              className={cn(
-                'group/section-menu relative flex h-5 shrink-0 items-center justify-center',
-                action ? 'w-6' : 'w-5'
-              )}
+              data-sidebar-section-menu="" {...stylex.props(rowParts.sectionMenu, Boolean(action) && rowParts.sectionMenuWide, sidebarSectionMenuMarker)}
             >
               {trailingActivityMark ? (
                 <span
                   onClick={canToggle ? handleToggle : undefined}
-                  className={cn(
-                    'inline-flex items-center transition-opacity duration-100',
-                    canToggle && 'cursor-pointer',
-                    'group-hover/section-header:pointer-events-none group-hover/section-header:opacity-0',
-                    'group-has-[:focus-visible]/section-menu:pointer-events-none group-has-[:focus-visible]/section-menu:opacity-0',
-                    'group-has-[[data-popup-open]]/section-menu:pointer-events-none group-has-[[data-popup-open]]/section-menu:opacity-0'
-                  )}
+                  {...stylex.props(rowParts.sectionActivity, canToggle && rowParts.clickable, rowParts.sectionActivityHide)}
                 >
                   {trailingActivityMark}
                 </span>
               ) : null}
-              <span className="absolute inset-0 z-10 flex items-center justify-center">{menu}</span>
+              <span {...stylex.props(rowParts.sectionMenuOverlay)}>{menu}</span>
             </span>
           ) : (
             <>
@@ -1417,7 +1765,7 @@ export function SidebarSectionHeader({
               {trailingActivityMark ? (
                 <span
                   onClick={canToggle ? handleToggle : undefined}
-                  className={cn('inline-flex items-center', canToggle && 'cursor-pointer')}
+                  {...stylex.props(rowParts.sectionActivity, canToggle && rowParts.clickable)}
                 >
                   {trailingActivityMark}
                 </span>
@@ -1427,17 +1775,12 @@ export function SidebarSectionHeader({
           {action}
         </div>
       ) : null}
+
     </div>
   );
 }
 
-const SIDEBAR_SKELETON_ROW_WIDTHS = [
-  'w-[68%]',
-  'w-[56%]',
-  'w-[74%]',
-  'w-[62%]',
-  'w-[70%]',
-] as const;
+const SIDEBAR_SKELETON_ROW_WIDTHS = ['68%', '56%', '74%', '62%', '70%'] as const;
 
 /**
  * Loading state for the sidebar lists. Keep this anatomy in sync with the
@@ -1446,32 +1789,38 @@ const SIDEBAR_SKELETON_ROW_WIDTHS = [
  */
 export function SidebarListSkeleton({
   className,
+  xstyle,
   showHeaderIcon = true,
-  sectionClassName = 'mb-2.5 last:mb-0',
+  sectionClassName = stylex.props(rowParts.listSpacing).className,
 }: {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   showHeaderIcon?: boolean;
   sectionClassName?: string;
 }) {
   return (
-    <div className={cn('flex flex-col', className)} data-sidebar-loading-skeleton="">
-      <div className={cn('flex flex-col gap-0.5', sectionClassName)}>
-        <div className="group flex h-7 items-center">
-          <div className="relative flex h-7 min-w-0 flex-1 items-center gap-1 rounded-md px-2">
+    <div
+      className={clsx(stylex.props(rowParts.listStack, xstyle).className, className)}
+      style={stylex.props(rowParts.listStack, xstyle).style}
+      data-sidebar-loading-skeleton=""
+    >
+      <div className={clsx(stylex.props(rowParts.skeletonSection).className, sectionClassName)}>
+        <div className={clsx('group', stylex.props(rowParts.skeletonHeaderRow).className)}>
+          <div {...stylex.props(rowParts.skeletonHeader)}>
             {showHeaderIcon ? (
-              <span className="flex h-5 w-5 shrink-0 items-center">
-                <Skeleton className="h-3.5 w-3.5 rounded-sm" />
+              <span {...stylex.props(rowParts.skeletonIconBox)}>
+                <Skeleton {...stylex.props(rowParts.skeletonIcon)} />
               </span>
             ) : null}
-            <Skeleton className="h-3 w-24" />
+            <Skeleton {...stylex.props(rowParts.skeletonTitle)} />
           </div>
         </div>
-        <div className="flex flex-col gap-px">
+        <div {...stylex.props(rowParts.skeletonRows)}>
           {SIDEBAR_SKELETON_ROW_WIDTHS.map((width, index) => (
-            <div key={index} className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2">
-              <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-full" />
-              <Skeleton className={cn('h-3 min-w-0', width)} />
-              <Skeleton className="ml-auto h-3 w-8 shrink-0" />
+            <div key={index} {...stylex.props(rowParts.skeletonRow)}>
+              <Skeleton {...stylex.props(rowParts.skeletonAvatar)} />
+              <Skeleton className={stylex.props(rowParts.skeletonLine).className} width={width} />
+              <Skeleton {...stylex.props(rowParts.skeletonTail)} />
             </div>
           ))}
         </div>

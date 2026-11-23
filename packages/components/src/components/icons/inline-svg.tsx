@@ -11,16 +11,40 @@
  */
 const innerHtmlByMarkup = new Map<string, { __html: string }>();
 
-function internInnerHtml(raw: string): { __html: string } {
-  const existing = innerHtmlByMarkup.get(raw);
+function internInnerHtml(raw: string, fillParent: boolean): { __html: string } {
+  const key = JSON.stringify([raw, fillParent]);
+  const existing = innerHtmlByMarkup.get(key);
   if (existing) return existing;
-  const created = { __html: raw };
-  innerHtmlByMarkup.set(raw, created);
+  const markup = fillParent
+    ? raw.replace(/<svg\b([^>]*)>/, (_, attributes: string) => {
+        const style = /\sstyle=("|')([\s\S]*?)\1/.exec(attributes);
+        const dimensions = 'width:100%;height:100%;';
+        const filled = style
+          ? attributes.replace(style[0], ` style=${style[1]}${dimensions}${style[2]}${style[1]}`)
+          : `${attributes} style="${dimensions}"`;
+        return `<svg${filled}>`;
+      })
+    : raw;
+  const created = { __html: markup };
+  innerHtmlByMarkup.set(key, created);
   return created;
 }
 
-export function InlineSvg({ raw, className }: { raw: string; className?: string }) {
+export function InlineSvg({
+  raw,
+  className,
+  fillParent = false,
+}: {
+  raw: string;
+  className?: string;
+  /** Fill the wrapper while preserving explicit styles authored in the SVG. */
+  fillParent?: boolean;
+}) {
   return (
-    <span className={className} aria-hidden="true" dangerouslySetInnerHTML={internInnerHtml(raw)} />
+    <span
+      className={className}
+      aria-hidden="true"
+      dangerouslySetInnerHTML={internInnerHtml(raw, fillParent)}
+    />
   );
 }

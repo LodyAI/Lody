@@ -1,6 +1,19 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 import { MessageRowView } from '@/components/ai-gui/view';
+const storyLayout = stylex.create({
+  canvas: {
+    'margin-inline': 'auto',
+    'max-width': '42rem',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const sessionId = 'session-storybook' as SessionId;
 
@@ -47,7 +60,7 @@ function worktreeScript(partial: Partial<MessageContent> = {}): MessageContent {
 }
 
 const Frame = ({ children }: { children: React.ReactNode }) => (
-  <div className="mx-auto max-w-2xl p-6">{children}</div>
+  <div {...stylex.props(storyLayout.canvas)}>{children}</div>
 );
 
 const meta = {
@@ -124,7 +137,7 @@ export const CleanupFailed: Story = {
 export const Stacked: Story = {
   render: () => (
     <Frame>
-      <div className="flex flex-col gap-4">
+      <div {...stylex.props(storyLayout.stack)}>
         <MessageRowView
           message={systemMessage('m1', [worktreeScript({ phase: 'setup', status: 'completed' })])}
           sessionId={sessionId}

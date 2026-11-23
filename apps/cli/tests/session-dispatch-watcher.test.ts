@@ -305,15 +305,24 @@ describe('SessionDispatchWatcher', () => {
       sessionId: 'paused-promotion' as SessionId,
       queue: [{ ...createQueueItem('B'), paused: true }],
       history: [createPendingUserTurn('B', 'queued B')],
-      meta: { queuePromotionLedger: { 'queue:B': createQueueReceipt('B', 'activation_published') }, latestUserMsgId: 'B' },
+      meta: {
+        queuePromotionLedger: { 'queue:B': createQueueReceipt('B', 'activation_published') },
+        latestUserMsgId: 'B',
+      },
     });
     try {
       await f.recover(f.doc, f.meta());
-      expect(await f.doc.getMessageQueue()).toEqual([expect.objectContaining({ userTurnId: 'B', paused: true })]);
-      expect((await f.doc.sessionData.history.readAll()).find((entry) => entry.id === 'B')?.status).toBe('canceled');
+      expect(await f.doc.getMessageQueue()).toEqual([
+        expect.objectContaining({ userTurnId: 'B', paused: true }),
+      ]);
+      expect(
+        (await f.doc.sessionData.history.readAll()).find((entry) => entry.id === 'B')?.status
+      ).toBe('canceled');
       expect(f.meta().queuePromotionLedger?.['queue:B']?.state).toBe('queue_consumed');
       expect(await f.promote()).toBeNull();
-    } finally { f.dispose(); }
+    } finally {
+      f.dispose();
+    }
   });
 
   it('processes pending user turns for an idle owned session', async () => {
