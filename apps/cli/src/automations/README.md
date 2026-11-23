@@ -208,7 +208,13 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   so a crash repeats nothing. The policy turns the event into the existing Create PR,
   Fix CI, Resolve Conflicts or a merge request, admitted only while the Session group
   is settled and while the PR head still matches. Progress is written to
-  `SessionMeta.autoDelivery` at transitions only. The daemon never mutates GitHub;
+  `SessionMeta.autoDelivery` at transitions only, under a `Semaphore` that `configure`
+  also holds, so a pass never republishes a status the user cleared. Only an open or
+  draft current PR binds an enablement; a head with no reported check waits out
+  `DELIVERY_CI_REPORT_GRACE_MS` before it counts as having no CI, and uncommitted or
+  unpushed work stops with `workspace_unpushed`. Turning it off cancels a request that
+  has not reached the Session queue, since a disabled rule's receipt would stay
+  `blocked` and keep the group from settling. The daemon never mutates GitHub;
   the agent merges with `gh`. Encrypted workspaces refuse it because no PR poller runs
   there.
 - **Idle compact:** context occupancy must reach the configured threshold. The same

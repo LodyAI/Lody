@@ -43,6 +43,11 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   follow-up. CLI senders of an encrypted workspace use only its signed channel and never
   the plaintext Machine RPC token.
 
+Encrypted Roost owners advertise `e2eeRoostHistory: 1`. Use signed feature requests for
+`session/history-read` and `session/history-write`. Writes admit `accept_input` and
+`accept_input_and_dispatch` with `{sessionId, operation, payload: {entry}}`; the user
+entry carries its signed `e2eeIntent`. Read grants cannot authorize either write.
+
 ## Code Collab
 
 - `codeCollabDiffBlobs` v1 gates the additive manifest/blob methods and opaque
@@ -84,6 +89,7 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   [memory contract](../../../specs/agent-role-memory.md).
 - Keep `author`, human `userId`, and recipient execution config separate.
   [Contract](../../../specs/message-author-identity.md).
+
 ## Message schemas (message-schemas.ts)
 
 - Wire schemas are strict: unknown fields fail validation, never pass through.

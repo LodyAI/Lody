@@ -129,6 +129,7 @@ export type EncryptedFeatureHandler = (
 type PendingFeatureWrite = { permit: RealtimeStartPermit; frames: Uint8Array[] };
 // Both transports borrow the same workspace journal. A live claim is not crash
 // evidence; keep its completion signal and sealed retry frames across receivers.
+const featureAdmission = new WeakMap<object, { reads: number; writes: number }>();
 const featureWrites = new WeakMap<
   RealtimeJournal,
   {
@@ -177,6 +178,8 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
 }) {
   const scope = yield* Effect.scope;
   const delivery = options.client ? makeEncryptedStreamsEnvelopeDelivery(options.client) : null;
+  const admission = featureAdmission.get(options.native) ?? { reads: 0, writes: 0 };
+  featureAdmission.set(options.native, admission);
   const reads = new Set<string>(),
     writes = new Set<string>();
   const receive = Effect.fnUntraced(function* (
@@ -192,7 +195,9 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       return yield* Effect.fail(new Error('e2ee_rpc_request_binding'));
     const read = isE2eeReadQuery(opened.input.request.method, opened.input.request.params);
     const active = read ? reads : writes;
-    if (active.has(envelope.id) || active.size >= 32) return true;
+    const lane = read ? 'reads' : 'writes';
+    if (active.has(envelope.id) || admission[lane] >= 32) return true;
+    admission[lane]++;
     active.add(envelope.id);
     const target = e2eeFeatureTarget(opened.input.request);
     const sharedWork = target.kind === 'session' || target.kind === 'project';
@@ -300,6 +305,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       if (
         authority._tag !== 'Authorized' ||
         ((opened.input.request.method === 'machine/acp-interaction' ||
+          opened.input.request.method === 'session/history-write' ||
           target.kind === 'session-read') &&
           (!authority.isCurrent ||
             !authoritySignal ||
@@ -502,7 +508,10 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     }).pipe(
       Effect.catch(() => Effect.void),
       Effect.ensuring(
-        Effect.sync(() => active.delete(envelope.id)).pipe(
+        Effect.sync(() => {
+          active.delete(envelope.id);
+          admission[lane]--;
+        }).pipe(
           Effect.andThen(
             sink ? Effect.promise(() => sink.end().catch(() => undefined)) : Effect.void
           )

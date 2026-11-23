@@ -6,6 +6,10 @@ import {
   LORO_STREAMS_BUCKET_ID,
   getServerNow,
   sessionHistoryWriteIntentDigest,
+  type SessionHistoryReadResponse,
+  SessionHistoryReadQuerySchema,
+  SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   getMachineRoomId,
   getSessionRoomId,
   isContainedSession,
@@ -464,6 +468,65 @@ export function createCommandSessionHistoryFactory(
         localProjectId: child.project?.kind === 'local' ? child.project.localProjectId : undefined,
       };
     };
+    if (manager.isEncryptedWorkspace()) {
+      if (
+        !machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.e2eeRoostHistory)
+      )
+        throw new Error('Update the owner machine to access encrypted Roost history.');
+      const send = async (request: Parameters<typeof manager.requestEncryptedFeature>[0]) => {
+        const requester = getSessionHistoryRequester();
+        const checkRequester = async () => {
+          if (!requester || requester.userId === auth.userId) return;
+          if (
+            request.method !== 'session/history-read' ||
+            requester.machineId !== auth.machineId ||
+            !(await manager.authorizeEncryptedSessionRead({
+              ...(await historyTarget()),
+              machineId: meta.machineId,
+              requesterUserId: requester.userId,
+            }))
+          )
+            throw new Error('e2ee_feature_requester');
+        };
+        await checkRequester();
+        const response = await manager.requestEncryptedFeature(request);
+        if (!response?.ok) throw new Error(response?.error ?? 'Encrypted owner history timed out');
+        await checkRequester();
+        return response.result;
+      };
+      const owner = { workspaceId, machineId: meta.machineId };
+      return createRoostRpcSessionServices(doc, {
+        coherentInspection: machineSupportsSessionHistoryInspection(machine),
+        encryptedInputOwner: meta.machineId,
+        read: async (query) => {
+          const response = SessionHistoryReadResponseSchema.parse(
+            await send({
+              ...owner,
+              method: 'session/history-read',
+              params: {
+                sessionId: doc.sessionId,
+                query: SessionHistoryReadQuerySchema.parse(query),
+              },
+            })
+          );
+          return response as SessionHistoryReadResponse;
+        },
+        write: async (operation, payload) => {
+          if (operation !== 'accept_input' && operation !== 'accept_input_and_dispatch')
+            throw new Error('Encrypted owner history operation unavailable');
+          const entry = payload.entry;
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+            throw new Error('Invalid encrypted history input');
+          return SessionHistoryWriteResponseSchema.parse(
+            await send({
+              ...owner,
+              method: 'session/history-write',
+              params: { sessionId: doc.sessionId, operation, payload: { entry: { ...entry } } },
+            })
+          );
+        },
+      });
+    }
     const mintReadProof = async () => {
       return await mintCliSessionHistoryReadProof({
         ...(await historyTarget()),

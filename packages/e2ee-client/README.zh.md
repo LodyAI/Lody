@@ -182,6 +182,16 @@ KeyReceiver 仍验证每个预览信封并实际安装密钥。能力缺失、�
 
 身份保护方式由各宿主的平台决定（`PersonalHostPlatform.protection`）。
 
+## 恢复服务定位符
+
+`recoveryServiceLocator`（`./recovery-locator`）把产品站点 URL 规范化为各宿主写入恢复文件、并传给
+core 打开流程的 `serviceLocator`：即它的规范 origin，Lody Cloud 为 `https://lody.ai`，自托管为
+`SITE_URL` 的 origin。必须是 HTTPS，仅环回主机允许 HTTP。缺失或不可用的 URL 返回 `null`，宿主以
+`disabled` 拒绝恢复；后端部署 URL 或账号 ID 永远不是定位符。桌面端读取 `VITE_SITE_URL`，移动端读取
+`VITE_SITE_URL` 并默认 Lody Cloud，Web 传入自身站点 origin，因此同一份文件三端都能打开。core 以
+`locator-mismatch` 拒绝写着其他定位符的文件，宿主将其报告为 `e2ee_recovery_authentication`（文件不对的提示）。
+[Spec](../../specs/e2ee/recovery-vault.zh.md#恢复材料与密文)。
+
 ## 验证与限制
 
 `pnpm --filter @lody/e2ee-client test` 检查固定证明和 credential 边界。

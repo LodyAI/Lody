@@ -57,7 +57,7 @@ import { isSessionDocRoomId, type SessionId, type LoroStreamsTokenAuth } from '@
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
-import { link, mkdir, open, readFile, rename, unlink, rm } from 'node:fs/promises';
+import { link, lstat, mkdir, open, readFile, rename, unlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Effect, Exit, Scope, Result, Fiber, Schedule } from 'effect';
 import { z } from 'zod';
@@ -122,6 +122,42 @@ async function readRemoval(directory: string) {
   }
 }
 const RevokedDevice = Removed.omit({ membershipId: true });
+async function readRevokedDevice(directory: string) {
+  try {
+    return RevokedDevice.parse(
+      JSON.parse(await readFile(join(directory, 'revoked-device.json'), 'utf8'))
+    );
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw cause;
+  }
+}
+
+async function roostDirectoryExists(path: string) {
+  try {
+    await lstat(path);
+    return true;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw cause;
+  }
+}
+
+async function wipeRevokedRoost(directory: string, receipt: z.infer<typeof RevokedDevice>) {
+  const path = join(
+    repositoryDirectory(directory, receipt.genesisHash, receipt.signingPublicKey),
+    'roost'
+  );
+  if (!(await roostDirectoryExists(path))) return;
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* leaseE2eeIdentity(directory, true);
+        yield* Effect.tryPromise(() => rm(path, { recursive: true, force: true }));
+      })
+    )
+  );
+}
 const machineDevicePath = (directory: string, genesisHash: string) =>
   join(directory, 'custody', `${genesisHash}.machine.device`);
 /**
@@ -132,26 +168,22 @@ const machineDevicePath = (directory: string, genesisHash: string) =>
  * is unknown and keeps the identity. The original is archived for historical
  * evidence, never deleted or reused; other workspaces and membership are untouched.
  */
-async function retireRevokedMachineIdentity(options: {
-  accountId: string;
-  workspaceId: string;
-  genesisHash: string;
-  keyring?: MachineKeyring;
-  cloud?: Pick<CloudE2eePort, 'getContentToken'>;
-}) {
+const roostWipeRequiresExclusiveLease = Symbol();
+async function retireRevokedMachineIdentity(
+  options: {
+    accountId: string;
+    workspaceId: string;
+    genesisHash: string;
+    keyring?: MachineKeyring;
+    cloud?: Pick<CloudE2eePort, 'getContentToken'>;
+  },
+  exclusive: boolean
+) {
   const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   const device = machineDevicePath(directory, options.genesisHash);
   if (!existsSync(device)) return;
   const cloud = options.cloud;
-  const receipt = await (async () => {
-    try {
-      return RevokedDevice.parse(
-        JSON.parse(await readFile(join(directory, 'revoked-device.json'), 'utf8'))
-      );
-    } catch {
-      return null;
-    }
-  })();
+  const receipt = await readRevokedDevice(directory);
   const matchingReceipt = receipt?.genesisHash === options.genesisHash ? receipt : null;
   // Offline local-agent preparation needs no second OS-keyring subprocess when no
   // revocation receipt exists for this workspace.
@@ -185,10 +217,16 @@ async function retireRevokedMachineIdentity(options: {
     ).pipe(Effect.catch(() => Effect.succeed(undefined)))
   );
   if (!revoked) return;
+  const roost = join(repositoryDirectory(directory, options.genesisHash, revoked), 'roost');
+  if (await roostDirectoryExists(roost)) {
+    if (!exclusive) return roostWipeRequiresExclusiveLease;
+    await rm(roost, { recursive: true, force: true });
+  }
   await rename(
     device,
     join(directory, 'custody', `${options.genesisHash}-${revoked}.machine-revoked.device`)
   );
+  return undefined;
 }
 
 /** Only after the caller's workspace owners drain. The pairing mutex excludes a
@@ -380,20 +418,33 @@ export async function prepareCliE2eeMachineLegacy(
         join(cliE2eeIdentityDirectory(options.accountId, options.workspaceId), 'removed.json')
       );
   }
-  return Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
-        return yield* Effect.tryPromise({
-          try: async () => {
-            await retireRevokedMachineIdentity(options);
-            return prepareMachine(options);
-          },
-          catch: (error) => error,
-        });
-      })
-    )
-  );
+  const prepare = (exclusive: boolean) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* leaseE2eeIdentity(
+            cliE2eeIdentityDirectory(options.accountId, options.workspaceId),
+            exclusive
+          );
+          return yield* Effect.tryPromise({
+            try: async () => {
+              if (
+                (await retireRevokedMachineIdentity(options, exclusive)) ===
+                roostWipeRequiresExclusiveLease
+              )
+                return roostWipeRequiresExclusiveLease;
+              return prepareMachine(options);
+            },
+            catch: (error) => error,
+          });
+        })
+      )
+    );
+  const result = await prepare(false);
+  if (typeof result !== 'symbol') return result;
+  const retried = await prepare(true);
+  if (typeof retried === 'symbol') throw new Error('e2ee_identity_busy');
+  return retried;
 }
 
 /** Build the retained machine identity, possession proof and fixed credential
@@ -673,13 +724,12 @@ async function openWorkspace(
   localLedger?: LocalLedgerHandoff
 ) {
   if (await eraseRemovedWorkspace(options)) throw new Error('e2ee_member_removed');
+  const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
+  const revoked = await readRevokedDevice(directory);
+  if (revoked) await wipeRevokedRoost(directory, revoked);
   const scope = Effect.runSync(Scope.make());
   try {
-    await Effect.runPromise(
-      leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId)).pipe(
-        Scope.provide(scope)
-      )
-    );
+    await Effect.runPromise(leaseE2eeIdentity(directory).pipe(Scope.provide(scope)));
     return await openWorkspaceOwned(scope, options, requireActivation, pairing, localLedger);
   } catch (error) {
     await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -783,6 +833,12 @@ async function openWorkspaceOwned(
       const device = yield* custody.openDevice(genesis);
       if (activation && activation.signingPublicKey !== hex(device.publicKey.toBytes()))
         throw new Error('e2ee_binding_conflict');
+      const revoked = yield* Effect.tryPromise(() => readRevokedDevice(directory));
+      if (
+        revoked?.genesisHash === binding.genesisHash &&
+        revoked.signingPublicKey === hex(device.publicKey.toBytes())
+      )
+        throw new Error('e2ee_device_revoked');
       const credential = yield* custody.deviceCredential(genesis, device.publicKey);
       const readEpochGroup = options.cloud.readEpochGroup?.bind(options.cloud);
       const runtime = yield* makeCliE2eeRuntime({
@@ -1370,6 +1426,11 @@ async function openWorkspaceOwned(
       }
       if (failures.length === 1) throw failures[0];
       if (failures.length > 1) throw new AggregateError(failures, 'e2ee_removal_failed');
+      if (deviceRevoked && recorded)
+        await wipeRevokedRoost(directory, {
+          genesisHash: options.genesisHash,
+          signingPublicKey: opened.signingPublicKey,
+        });
       if (memberRemoved)
         await eraseRemovedWorkspace({
           ...options,
