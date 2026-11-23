@@ -3304,3 +3304,135 @@ it.each(
     }
   }
 );
+
+it.each(
+  (['ios-simulator', 'android-emulator'] as const).flatMap((platform) =>
+    (['allowed', 'denied', 'revoked', 'foreign-user', 'withdrawn-during-control'] as const).map(
+      (access) => ({
+        platform,
+        access,
+      })
+    )
+  )
+)('uses signed remote $platform preview authority ($access)', async ({ platform, access }) => {
+  const { encryptedRpcFixture } =
+    await import('../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture');
+  const { makeEncryptedFeatureReceiver } = await import('../src/lib/e2ee/feature-rpc');
+  const { RealtimeJournal } = await import('../src/lib/e2ee/realtime-journal');
+  const { MessageHandler } = await import('../src/lib/message-handler');
+  const { MachineRuntime } = await import('../src/lib/machine-runtime');
+  const f = encryptedRpcFixture();
+  const authority = new AbortController();
+  let current = true;
+  const modes: boolean[] = [];
+  const frames: string[] = [];
+  const complete = Promise.withResolvers<void>();
+  const control = async (_params: unknown, remote: boolean, authorize: () => Promise<unknown>) => {
+    await authorize();
+    modes.push(remote);
+    if (access === 'withdrawn-during-control') current = false;
+    return {
+      type: `${platform}/control_response`,
+      sessionId: f.input.sessionId,
+      success: true,
+      preview: {
+        operationId: 'operation',
+        ...(platform === 'ios-simulator'
+          ? { udid: '00000000-0000-4000-8000-000000000001' }
+          : { id: 'Pixel_A' }),
+        phase: 'ready',
+        transport: 'remote',
+        viewerUrl: 'https://preview.example.test/viewer#synthetic',
+      },
+    };
+  };
+  const handler = Object.create(MessageHandler.prototype) as InstanceType<typeof MessageHandler>;
+  Object.assign(handler, { iosSimulatorService: { control }, androidEmulatorService: { control } });
+  const machine = Object.create(MachineRuntime.prototype) as InstanceType<typeof MachineRuntime>;
+  Object.assign(machine, {
+    handler,
+    options: {
+      handlerConfig: {
+        encryptedWorkspace: true,
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        userId: 'owner',
+      },
+    },
+  });
+  const input = {
+    requestId: 'c'.repeat(32),
+    request: {
+      workspaceId: f.workspaceId,
+      machineId: f.machineId,
+      method: `${platform}/control`,
+      params: {
+        sessionId: f.input.sessionId,
+        requestedByUserId: access === 'foreign-user' ? 'other-account' : 'owner',
+        command: { action: 'status' },
+      },
+    },
+  };
+  const { E2eeFeatureInputSchema } = await import('@lody/shared/e2ee-rpc');
+  const parsed = E2eeFeatureInputSchema.parse(input);
+  const journal = RealtimeJournal.create(join(f.directory, 'preview-execution.sqlite'), Date.now);
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const prepared = yield* f.sender.prepareFeature(parsed);
+          if (access === 'revoked') authority.abort();
+          const feature = yield* makeEncryptedFeatureReceiver({
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+            native: f.receiver,
+            journal: () => journal,
+            authorize: () =>
+              Effect.succeed(
+                access === 'denied'
+                  ? { _tag: 'Denied' as const, reason: 'not-authorized' as const }
+                  : { _tag: 'Authorized' as const, isCurrent: () => current }
+              ),
+            authorizeRead: () =>
+              Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const }),
+            authoritySignal: () => authority.signal,
+            isOpen: () => true,
+            handle: (request, context) => machine.handleEncryptedFeatureRpc(request, context),
+          });
+          yield* feature(
+            { id: prepared.requestId, frame: prepared.frameHex },
+            {
+              deliver: async (_id, frame) => {
+                frames.push(Buffer.from(frame).toString('hex'));
+              },
+              end: async () => {
+                complete.resolve();
+              },
+            }
+          );
+          yield* Effect.promise(() => complete.promise);
+          if (access === 'allowed') {
+            expect(modes).toEqual([true]);
+            expect(frames).toHaveLength(1);
+            expect(yield* f.sender.acceptFeatureResponse(parsed, frames[0]!)).toMatchObject({
+              ok: true,
+              result: {
+                preview: {
+                  transport: 'remote',
+                  viewerUrl: 'https://preview.example.test/viewer#synthetic',
+                },
+              },
+            });
+          } else {
+            expect(frames).toEqual([]);
+            expect(modes).toEqual(access === 'withdrawn-during-control' ? [true] : []);
+          }
+        })
+      )
+    );
+  } finally {
+    journal.retryCleanup();
+    f.close();
+  }
+});

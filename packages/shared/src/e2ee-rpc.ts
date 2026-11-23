@@ -35,9 +35,7 @@ import { LocalMachineRpcRequestSchema, type LocalMachineRpcRequest } from './loc
  * its own signed channel. */
 type E2eeLocalOnlyMethod =
   | 'ios-simulator/agent-control'
-  | 'ios-simulator/control'
   | 'android-emulator/agent-control'
-  | 'android-emulator/control'
   | 'mcp/list-tools'
   | 'mcp/authentication'
   | 'session/call-tool'
@@ -87,6 +85,8 @@ export const E2EE_RPC_POLICIES = {
   'session/goal': sessionControl,
   'session/withdraw-input': sessionControl,
   'session/edit-and-resend': machineWrite,
+  'ios-simulator/control': { ...machineWrite, remoteControl: true },
+  'android-emulator/control': { ...machineWrite, remoteControl: true },
   'session/preview-create': machineWrite,
   'session/preview-revoke': machineWrite,
   'session/preview-status': machineWrite,

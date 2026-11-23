@@ -2107,3 +2107,79 @@ describe('encrypted remote files from a browser or mobile device', () => {
     });
   });
 });
+
+it.each(['ios-simulator', 'android-emulator'] as const)(
+  'routes encrypted remote %s previews without ordinary RPC or preview proof',
+  async (platform) => {
+    const requests: unknown[] = [];
+    let access: 'write' | 'read' = 'write';
+    let outcome: unknown = {
+      type: `${platform}/control_response`,
+      sessionId,
+      success: true,
+      preview: {
+        operationId: 'operation',
+        ...(platform === 'ios-simulator'
+          ? { udid: '00000000-0000-4000-8000-000000000001' }
+          : { id: 'Pixel_A' }),
+        phase: 'ready',
+        transport: 'remote',
+        viewerUrl: 'https://preview.example.test/viewer#synthetic',
+      },
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      protectedCodeCollabRole: () => access,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('ordinary RPC must stay closed');
+      },
+      requestEncryptedFeature: async (request) => {
+        requests.push(request);
+        return { ok: true, result: outcome } as never;
+      },
+    });
+    const control =
+      platform === 'ios-simulator'
+        ? facade.requestIosSimulatorControl
+        : facade.requestAndroidEmulatorControl;
+    const args = {
+      machineId: remoteMachineId,
+      sessionId,
+      requestedByUserId: 'owner',
+      command: { action: 'status' as const },
+    };
+    expect(await control(args)).toMatchObject({
+      success: true,
+      preview: { transport: 'remote', viewerUrl: 'https://preview.example.test/viewer#synthetic' },
+    });
+    expect(requests).toEqual([
+      {
+        workspaceId,
+        machineId: remoteMachineId,
+        method: `${platform}/control`,
+        params: { sessionId, requestedByUserId: 'owner', command: args.command },
+        timeoutMs: 15000,
+      },
+    ]);
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+    access = 'read';
+    expect(await control(args)).toMatchObject({ success: false });
+    expect(requests).toHaveLength(1);
+    access = 'write';
+    outcome = { type: `${platform}/control_response`, sessionId: 'other-session', success: true };
+    expect(await control(args)).toMatchObject({ success: false });
+    outcome = {
+      type: `${platform}/control_response`,
+      sessionId,
+      success: true,
+      preview: { viewerUrl: 'invalid' },
+    };
+    expect(await control(args)).toMatchObject({ success: false });
+  }
+);

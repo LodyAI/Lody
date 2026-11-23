@@ -2,6 +2,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { hex, unhex, equalJson } from './e2ee-client-bytes';
 import { Clock, Effect, Semaphore, type Scope } from 'effect';
 import { z } from 'zod';
+import { IosSimulatorResponseSchema, AndroidEmulatorResponseSchema } from '@lody/shared';
 import type { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import {
   E2eeFeatureInputSchema,
@@ -58,6 +59,24 @@ const key = (input: E2eeFeatureInput) => `feature:${input.requestId}`;
 const canonical = (input: unknown) =>
   E2eeFeatureInputSchema.parse(JSON.parse(JSON.stringify(input)));
 export { E2EE_FEATURE_MAX_RESULT_BYTES } from './e2ee-feature-parts';
+
+const parseFeatureOutcome = (input: E2eeFeatureInput, value: unknown): LocalMachineRpcResponse => {
+  const outcome = LocalMachineRpcResponseSchema.parse(value);
+  const request = input.request;
+  if (
+    outcome.ok &&
+    (request.method === 'ios-simulator/control' || request.method === 'android-emulator/control')
+  ) {
+    const result =
+      request.method === 'ios-simulator/control'
+        ? IosSimulatorResponseSchema.parse(outcome.result)
+        : AndroidEmulatorResponseSchema.parse(outcome.result);
+    if (result.sessionId !== request.params.sessionId)
+      throw new Error('e2ee_feature_session_binding');
+    return { ok: true, result };
+  }
+  return outcome;
+};
 
 /** Existing RPC wire/key domain, with a fixed product-method allowlist. No arbitrary signing. */
 export function makeE2eeFeatureRpcClient(options: {
@@ -437,7 +456,8 @@ export function makeE2eeFeatureRpcClient(options: {
         }
         if (offset !== bytes.length) return yield* Effect.fail(new Error('e2ee_feature_page'));
         const outcome = yield* attempt(() =>
-          LocalMachineRpcResponseSchema.parse(
+          parseFeatureOutcome(
+            request.input,
             JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
           )
         );
@@ -486,7 +506,7 @@ export function makeE2eeFeatureRpcClient(options: {
                 }
               }
               if (pending.size >= 32) return yield* Effect.fail(new Error('e2ee_feature_busy'));
-              let outcome = yield* attempt(() => LocalMachineRpcResponseSchema.parse(result));
+              let outcome = yield* attempt(() => parseFeatureOutcome(request.input, result));
               let bytes = yield* attempt(() => new TextEncoder().encode(JSON.stringify(outcome)));
               if (bytes.length > E2EE_FEATURE_MAX_RESULT_BYTES) {
                 const totalBytes = bytes.length;
@@ -543,7 +563,10 @@ export function makeE2eeFeatureRpcClient(options: {
       !saved ||
       saved.target !== args.request.machineId ||
       saved.signer !==
-        (yield* options.targetSigner(saved.target, e2eeFeatureTarget(args.request).kind !== 'machine'))
+        (yield* options.targetSigner(
+          saved.target,
+          e2eeFeatureTarget(args.request).kind !== 'machine'
+        ))
     )
       return yield* Effect.fail(new Error('e2ee_rpc_original_missing'));
     const original = yield* openFrames(saved.target, unpackFrames(saved.frame));

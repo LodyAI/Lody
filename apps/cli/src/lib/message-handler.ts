@@ -8035,6 +8035,30 @@ export class MessageHandler {
     return downloadLocalAttachment(request, this.machineId);
   }
 
+  async handleEncryptedDevicePreview(
+    request: Extract<
+      LocalMachineRpcRequestValidated,
+      { method: 'ios-simulator/control' | 'android-emulator/control' }
+    >,
+    context: import('./e2ee/feature-rpc').EncryptedFeatureContext
+  ): Promise<LocalMachineRpcResponse> {
+    const isCurrent = () =>
+      !!context.authority &&
+      !context.signal.aborted &&
+      !context.authority.signal.aborted &&
+      context.authority.isCurrent();
+    const authorize = async () => {
+      if (!isCurrent()) throw new Error('e2ee_feature_authority_withdrawn');
+    };
+    await authorize();
+    const result =
+      request.method === 'ios-simulator/control'
+        ? await this.iosSimulatorService.control(request.params, true, authorize, isCurrent)
+        : await this.androidEmulatorService.control(request.params, true, authorize, isCurrent);
+    await authorize();
+    return { ok: true, result };
+  }
+
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
     signal?: AbortSignal
