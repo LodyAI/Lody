@@ -175,8 +175,9 @@ it('downloads a remote local attachment only after clicking its card', async () 
   const finish = Promise.withResolvers<import('@lody/shared').FileDownloadResponse>();
   let requested = false;
   let saved: Uint8Array | undefined;
-  const save = vi.spyOn(fileSaver, 'downloadBytesAsFile').mockImplementation((_name, bytes) => {
+  const save = vi.spyOn(fileSaver, 'saveBytesAsFile').mockImplementation(async (_name, bytes) => {
     saved = bytes;
+    return { saved: true };
   });
   store.set(runtimeAtom, {
     requestFileDownloadChunk: async () => {

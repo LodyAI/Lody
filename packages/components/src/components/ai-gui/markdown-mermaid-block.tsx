@@ -1,10 +1,8 @@
 import { memo, useEffect, useRef, useState, type RefObject } from 'react';
 import { Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { isNativeAppShell } from '@/lib/native-platform';
-import { shareFileBytesNatively } from '@/lib/session-file-native-save';
 import { toast } from '@/lib/toast';
-import { downloadBytesAsFile } from '@/lib/download-file';
+import { saveBytesAsFile } from '@/lib/download-file';
 import { Menu } from '@/ui/armed-overlays';
 import { CodeBlockCopyButton } from './markdown-code-block';
 import {
@@ -86,10 +84,6 @@ function MermaidDownloadMenu({
   hostRef: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
-  const save = async (fileName: string, bytes: Uint8Array) => {
-    if (isNativeAppShell()) await shareFileBytesNatively(fileName, bytes);
-    else downloadBytesAsFile(fileName, bytes);
-  };
   const reportExportFailure = () =>
     toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
   const label = t('sessions.diagram.download', 'Download diagram');
@@ -107,7 +101,8 @@ function MermaidDownloadMenu({
           disabled={!svg}
           onClick={() => {
             const file = exportSvg();
-            if (file) void save('diagram.svg', encodeText(file)).catch(reportExportFailure);
+            if (file)
+              void saveBytesAsFile('diagram.svg', encodeText(file)).catch(reportExportFailure);
           }}
         >
           {t('sessions.diagram.downloadSvg', 'SVG')}
@@ -118,7 +113,7 @@ function MermaidDownloadMenu({
             const file = exportSvg();
             if (!file) return;
             void svgToPngBytes(file)
-              .then((bytes) => save('diagram.png', bytes))
+              .then((bytes) => saveBytesAsFile('diagram.png', bytes))
               .catch(reportExportFailure);
           }}
         >
@@ -126,7 +121,7 @@ function MermaidDownloadMenu({
         </Menu.Item>
         <Menu.Item
           onClick={() => {
-            void save('diagram.mmd', encodeText(code)).catch(reportExportFailure);
+            void saveBytesAsFile('diagram.mmd', encodeText(code)).catch(reportExportFailure);
           }}
         >
           {t('sessions.diagram.downloadSource', 'Mermaid source')}

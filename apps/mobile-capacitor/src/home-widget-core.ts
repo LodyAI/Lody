@@ -87,7 +87,7 @@ export function resolveHomeWidgetIdentity({
     !hasAuthToken ||
     !slug ||
     !runtime?.workspaceId ||
-    runtime.contentMode === 'e2ee' ||
+    runtime.contentMode !== 'plaintext' ||
     runtime.accountId !== userId ||
     runtime.workspaceSlug !== slug
   )

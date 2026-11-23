@@ -3,7 +3,6 @@ import test from 'node:test';
 import {
   createHomeWidgetSync,
   resolveHomeWidgetScope,
-  resolveHomeWidgetIdentity,
   toHomeWidgetConversations,
 } from './home-widget-core.ts';
 import {
@@ -35,6 +34,7 @@ void test('only matching authenticated, ready workspace metadata can be publishe
     workspaceId: 'workspace-a',
     workspaceSlug: 'example',
     accountId: 'user-a',
+    contentMode: 'plaintext',
   };
   const metadata = { ...runtime, runtime, ready: true };
   const input = { userId: 'user-a', hasAuthToken: true, slug: 'example', runtime, metadata };
@@ -59,7 +59,12 @@ void test('only matching authenticated, ready workspace metadata can be publishe
 
 void test('ready metadata cannot publish under a different or missing runtime account', () => {
   for (const accountId of ['user-b', null, undefined]) {
-    const runtime = { workspaceId: 'workspace-a', workspaceSlug: 'example', accountId };
+    const runtime = {
+      workspaceId: 'workspace-a',
+      workspaceSlug: 'example',
+      accountId,
+      contentMode: 'plaintext',
+    };
     assert.equal(
       resolveHomeWidgetScope({
         userId: 'user-a',
@@ -963,15 +968,6 @@ void test('encrypted workspace identity clears conversation and provider quota s
   await f.change(() => {
     const runtime = { ...f.store.get(f.runtime.runtimeAtom), contentMode: 'e2ee' };
     f.store.set(f.runtime.runtimeAtom, runtime);
-    assert.equal(
-      resolveHomeWidgetIdentity({
-        userId: runtime.accountId,
-        hasAuthToken: true,
-        slug: runtime.workspaceSlug,
-        runtime,
-      }),
-      null
-    );
   });
   await f.flush();
   assert.equal(f.store.get(f.scopeAtom), null);

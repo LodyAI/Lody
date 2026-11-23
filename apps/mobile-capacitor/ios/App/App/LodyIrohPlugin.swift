@@ -21,7 +21,7 @@ public final class LodyIrohPlugin: CAPPlugin, CAPBridgedPlugin {
 
     deinit {
         let registry = registry
-        Task { await registry.shutdown() }
+        Task.detached { await registry.shutdown() }
     }
 
     private static func reject(_ call: CAPPluginCall, _ error: Error) {
@@ -134,7 +134,11 @@ actor LodyIrohRegistry {
         endpoints.removeAll()
         calls.values.forEach { $0.cancel() }
         calls.removeAll()
-        for endpoint in closing { await endpoint.shutdown() }
+        await withTaskGroup(of: Void.self) { group in
+            for endpoint in closing {
+                group.addTask { await endpoint.shutdown() }
+            }
+        }
     }
 
     func add(endpoint: MobileIrohEndpoint) async throws -> String {

@@ -23,9 +23,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { machineOnlineStatusAtomFamily } from '@/atoms/presence';
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { isNativeAppShell } from '@/lib/native-platform';
-import { shareFileBytesNatively } from '@/lib/session-file-native-save';
-import { downloadBytesAsFile } from '@/lib/download-file';
+import { saveBytesAsFile } from '@/lib/download-file';
 import {
   getIosSimulatorScreenshotFileName,
   type IosSimulatorCaptureError,
@@ -184,9 +182,7 @@ function SessionIosSimulatorPanelController({
     () => initialSnapshot?.catalog ?? { phase: 'loading' }
   );
   const [refreshing, setRefreshing] = useState(false);
-  const [status, setStatus] = useState<IosSimulatorPanelStatus>(
-    () => initialSnapshot?.status ?? IDLE
-  );
+  const [status, setStatus] = useState<IosSimulatorPanelStatus>(() => initialSnapshot?.status ?? IDLE);
   const statusRef = useRef(status);
   statusRef.current = status;
   const [viewerState, setViewerState] = useState<IosSimulatorViewerState | null>(
@@ -668,9 +664,7 @@ function SessionIosSimulatorPanelController({
           new Date()
         );
         if (target === 'save') {
-          const bytes = new Uint8Array(result.bytes);
-          if (isNativeAppShell()) await shareFileBytesNatively(fileName, bytes);
-          else downloadBytesAsFile(fileName, bytes);
+          await saveBytesAsFile(fileName, new Uint8Array(result.bytes));
           return;
         }
         const file = new File([result.bytes], fileName, { type: 'image/png' });
@@ -692,6 +686,8 @@ function SessionIosSimulatorPanelController({
             )
           );
         }
+      } catch {
+        toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
       } finally {
         setCapturing(false);
       }
@@ -726,10 +722,7 @@ function SessionIosSimulatorPanelController({
                 appearance: true,
                 'open-url': false,
               }
-            : getIosSimulatorControlAvailability(
-                hardware,
-                !!statusDevice && machineSupportsIosSimulatorControls(machine, 2)
-              ),
+            : getIosSimulatorControlAvailability(hardware, !!statusDevice && machineSupportsIosSimulatorControls(machine, 2)),
         pendingControl,
         capturing,
         canAttach: Boolean(onAttachScreenshot),

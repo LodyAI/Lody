@@ -212,7 +212,9 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
     activityTarget !== null &&
     nativeIOSAppShell &&
     liveActivitiesEnabled &&
-    runtime?.contentMode !== 'e2ee';
+    runtime !== null &&
+    runtime.workspaceId === activityTarget.workspaceId &&
+    runtime.contentMode === 'plaintext';
 
   /**
    * One pass over the presence snapshot instead of one `findFreshSessionPresenceState`

@@ -97,6 +97,8 @@ live WebView. Contract and device checks: [native-reset.md](native-reset.md).
 
 ## E2EE custody
 
+`CAPPlugin` follows the `CAPBridge` lifetime; a WebView soft reload does not trigger plugin `deinit`.
+
 `LodyKek`: scoped KEK operations only; never export KEKs or enable bridge logs.
 Keep calls owned until actual settlement. [iOS](e2ee-custody.md) / [Android](e2ee-android-custody.md).
 The [native custody adapter](e2ee-native-adapter.md) retains wrapping originals;
@@ -116,8 +118,8 @@ Read those invariants before editing their Swift or image assets.
 
 ## Home Screen widgets
 
-Encrypted workspaces disable Live Activity summaries and widget publication and
-clear existing native snapshots; decrypted workspace content never enters ActivityKit
+Live Activity summaries and widget publication require a matching, explicitly plaintext
+runtime; other states clear existing native snapshots; decrypted workspace content never enters ActivityKit
 or App Group storage.
 
 Require matched auth/runtime/workspace; latch logout per page. Token queries use

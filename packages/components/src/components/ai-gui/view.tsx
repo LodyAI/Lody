@@ -1,8 +1,6 @@
 import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
-import { downloadBytesAsFile } from '@/lib/download-file';
-import { shareFileBytesNatively } from '@/lib/session-file-native-save';
-import { isNativeAppShell } from '@/lib/native-platform';
+import { saveBytesAsFile } from '@/lib/download-file';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import type { SessionLocalAttachment } from '@lody/shared';
@@ -7332,8 +7330,7 @@ export const LocalAttachmentCard = ({
             .then(async (bytes) => {
               if (currentBinding.current !== binding) return;
               if (!bytes) throw new Error('Attachment download unavailable');
-              if (isNativeAppShell()) await shareFileBytesNatively(attachment.fileName, bytes);
-              else downloadBytesAsFile(attachment.fileName, bytes);
+              await saveBytesAsFile(attachment.fileName, bytes);
             })
             .catch(() => {
               if (currentBinding.current === binding)

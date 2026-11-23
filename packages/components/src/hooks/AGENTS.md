@@ -140,7 +140,7 @@ visibility; skipping a catalog grants no machine or execution authority.
 - Keep the bridge debounce at 250ms.
 - Pending permissions from the UNTHROTTLED list flush the window. Summaries stay
   silent and refresh all rows; ordinary Push owns alerts.
-- Encrypted workspaces disable Live Activity publication and end existing activities.
+- Only a matching runtime with explicit plaintext mode permits Live Activity publication; other states end existing activities.
 - Compute nothing when disabled: both `iosLiveActivitiesEnabledAtom` and the native
   iOS shell are required, not equivalent. Derive activity id separately so disable
   and unmount can end an activity the payload no longer describes.

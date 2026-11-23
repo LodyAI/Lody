@@ -7,7 +7,6 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -29,9 +28,7 @@ import uniffi.lody_iroh_uniffi.openMobileEndpoint
 @CapacitorPlugin(name = "LodyIroh")
 class LodyIrohPlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var destroyed = false
-    private val endpoints = ConcurrentHashMap<String, MobileIrohEndpoint>()
-    private val calls = ConcurrentHashMap<String, MobileIrohCall>()
+    private val registry = IrohRegistry()
 
     private class Invalid : Exception()
 
@@ -58,7 +55,7 @@ class LodyIrohPlugin : Plugin() {
         call.getString(name)?.takeIf { it.isNotEmpty() && it.length <= 128 } ?: throw Invalid()
     private fun millis(call: PluginCall, name: String): UInt =
         call.getInt(name)?.takeIf { it in 1..120_000 }?.toUInt() ?: throw Invalid()
-    private fun endpoint(call: PluginCall) = endpoints[string(call, "handle")] ?: throw IrohException.Failed("iroh_closed")
+    private fun endpoint(call: PluginCall) = registry.endpoint(string(call, "handle"))
     private fun result(vararg pairs: Pair<String, Any?>) = JSObject().apply { pairs.forEach { (k, v) -> put(k, v) } }
 
     @PluginMethod
@@ -71,15 +68,7 @@ class LodyIrohPlugin : Plugin() {
             // Mobile is dial-only with port mapping off. A proxy comes only from a
             // test build's VITE_IROH_PROXY_URL; release builds never set it.
             val opened = openMobileEndpoint(seed, relays, call.getString("relayToken"), call.getString("proxyUrl"))
-            val id = UUID.randomUUID().toString()
-            val retained = synchronized(endpoints) {
-                if (destroyed) false else { endpoints[id] = opened; true }
-            }
-            if (!retained) {
-                withContext(NonCancellable) { opened.shutdown() }
-                throw IrohException.Failed("iroh_closed")
-            }
-            result("handle" to id)
+            result("handle" to registry.addEndpoint(opened))
         } finally {
             seed.fill(0)
         }
@@ -108,24 +97,16 @@ class LodyIrohPlugin : Plugin() {
             decode(call, "request", MAX_FRAME),
             millis(call, "connectTimeoutMs"),
         )
-        val id = UUID.randomUUID().toString()
-        synchronized(endpoints) {
-            if (destroyed) {
-                started.cancel()
-                throw IrohException.Failed("iroh_closed")
-            }
-            calls[id] = started
-        }
-        result("call" to id)
+        result("call" to registry.addCall(started))
     }
 
     @PluginMethod
     fun nextReply(call: PluginCall) = run(call) {
         val id = string(call, "call")
-        val active = calls[id] ?: throw IrohException.Failed("iroh_closed")
+        val active = registry.call(id)
         val reply = active.nextReply()
         if (reply == null) {
-            calls.remove(id)
+            registry.removeCall(id)
             result("reply" to JSONObject.NULL)
         } else result("reply" to Base64.encodeToString(reply, Base64.NO_WRAP))
     }
@@ -133,26 +114,22 @@ class LodyIrohPlugin : Plugin() {
     @PluginMethod
     fun cancel(call: PluginCall) = run(call) {
         // Lock-free in Rust: a pending nextReply returns null promptly.
-        calls.remove(string(call, "call"))?.cancel()
+        registry.removeCall(string(call, "call"))?.cancel()
         JSObject()
     }
 
     @PluginMethod
     fun close(call: PluginCall) = run(call) {
-        withContext(NonCancellable) { endpoints.remove(string(call, "handle"))?.shutdown() }
+        withContext(NonCancellable) { registry.removeEndpoint(string(call, "handle"))?.shutdown() }
         JSObject()
     }
 
     override fun handleOnDestroy() {
-        val closing = synchronized(endpoints) {
-            destroyed = true
-            calls.values.forEach { it.cancel() }
-            calls.clear()
-            endpoints.values.toList().also { endpoints.clear() }
-        }
+        val closing = registry.destroy()
         scope.cancel()
-        CoroutineScope(Dispatchers.IO).launch {
-            closing.forEach { endpoint ->
+        val cleanup = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        closing.forEach { endpoint ->
+            cleanup.launch {
                 runCatching { endpoint.shutdown() }
             }
         }
@@ -161,5 +138,57 @@ class LodyIrohPlugin : Plugin() {
 
     private companion object {
         const val MAX_FRAME = 2 * 1024 * 1024 + 4096
+    }
+}
+
+private class IrohRegistry {
+    private val lock = Any()
+    private var destroyed = false
+    private val endpoints = mutableMapOf<String, MobileIrohEndpoint>()
+    private val calls = mutableMapOf<String, MobileIrohCall>()
+
+    suspend fun addEndpoint(endpoint: MobileIrohEndpoint): String {
+        val id = UUID.randomUUID().toString()
+        val retained = synchronized(lock) {
+            if (destroyed) false else { endpoints[id] = endpoint; true }
+        }
+        if (!retained) {
+            withContext(NonCancellable) { endpoint.shutdown() }
+            throw IrohException.Failed("iroh_closed")
+        }
+        return id
+    }
+
+    fun addCall(call: MobileIrohCall): String {
+        val id = UUID.randomUUID().toString()
+        val retained = synchronized(lock) {
+            if (destroyed) false else { calls[id] = call; true }
+        }
+        if (!retained) {
+            call.cancel()
+            throw IrohException.Failed("iroh_closed")
+        }
+        return id
+    }
+
+    fun endpoint(id: String): MobileIrohEndpoint = synchronized(lock) {
+        endpoints[id] ?: throw IrohException.Failed("iroh_closed")
+    }
+    fun call(id: String): MobileIrohCall = synchronized(lock) {
+        calls[id] ?: throw IrohException.Failed("iroh_closed")
+    }
+    fun removeCall(id: String): MobileIrohCall? = synchronized(lock) { calls.remove(id) }
+    fun removeEndpoint(id: String): MobileIrohEndpoint? = synchronized(lock) { endpoints.remove(id) }
+
+    fun destroy(): List<MobileIrohEndpoint> {
+        val (closingEndpoints, closingCalls) = synchronized(lock) {
+            destroyed = true
+            Pair(endpoints.values.toList(), calls.values.toList()).also {
+                endpoints.clear()
+                calls.clear()
+            }
+        }
+        closingCalls.forEach { it.cancel() }
+        return closingEndpoints
     }
 }
