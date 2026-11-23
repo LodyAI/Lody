@@ -8,6 +8,8 @@ import {
   type AttachmentSnapshot,
   type AttachmentSourceDescriptor,
   type CreateSessionRequest,
+  type InteractionOption,
+  type InteractionOutcome,
   type LodyQueryDescriptor,
   type MachineHostEventMap,
   type MachineHostEventType,
@@ -20,6 +22,7 @@ import {
   type RawDocumentSnapshot,
   type RawSnapshotTarget,
   type ReadonlyJsonPrimitive,
+  type RespondInteractionRequest,
   type ScopeTarget,
   type SendSessionMessageReceipt,
   type SendSessionMessageRequest,
@@ -35,6 +38,8 @@ export {
   MAX_PLUGIN_RPC_REQUEST_BYTES,
   lodyQueries,
   type CreateSessionRequest,
+  type InteractionOption,
+  type InteractionOutcome,
   type LodyQueryDescriptor,
   type MachineHostEventMap,
   type MachineHostEventType,
@@ -44,6 +49,7 @@ export {
   type RawDocumentSnapshot,
   type RawSnapshotTarget,
   type ReadonlyJsonPrimitive,
+  type RespondInteractionRequest,
   type SendSessionMessageReceipt,
   type SendSessionMessageRequest,
   type SessionDetail,
@@ -60,9 +66,10 @@ export interface MachineHostPort {
   readSnapshot(target: RawSnapshotTarget): Promise<RawDocumentSnapshot>;
   readonly sessions: {
     /**
-     * In E2EE workspaces, `create` and `send` succeed from `ToolExecutionContext` and from
-     * `MachineEventContext` rooted in a verified `userTurnId` or human-signed workflow activation
-     * on this machine; un-rooted `MachineContext` queries/mutations reject with `forbidden`.
+     * Symmetric with `LodyClient.sessions`. In E2EE workspaces, `create`, `send`, and
+     * `respondInteraction` succeed from `ToolExecutionContext` and from `MachineEventContext` /
+     * `MachineStartupContext` rooted in a verified `userTurnId` or human-signed workflow
+     * activation on this machine; un-rooted `MachineContext` queries/mutations reject with `forbidden`.
      */
     create(
       target: MachineRef | ProjectRef,
@@ -72,6 +79,10 @@ export interface MachineHostPort {
       session: SessionRef,
       request: SendSessionMessageRequest,
     ): Promise<SendSessionMessageReceipt>;
+    respondInteraction(
+      session: SessionRef,
+      request: RespondInteractionRequest,
+    ): Promise<void>;
     requestStop(session: SessionRef): Promise<void>;
     requestArchive(session: SessionRef): Promise<void>;
   };

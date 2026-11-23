@@ -45,8 +45,8 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
   });
 
   machine.query(sessionMonitorQuery, async (ctx) => {
-    // @ts-expect-error Machine daemon port never exposes client-only `respondInteraction` (requires physical user gesture).
-    void ctx.lody.sessions.respondInteraction;
+    // @ts-expect-error Bespoke `answerQuestion` stays removed on machine port too; use 1:1 `respondInteraction`.
+    void ctx.lody.sessions.answerQuestion;
     const detail = await ctx.lody.read(ctx.target, lodyQueries.sessionDetail, {
       recentTurnLimit: 3,
     });
@@ -87,5 +87,9 @@ export const machineWorkflowEventChecks = defineMachinePlugin((machine) => {
     });
     // @ts-expect-error Machine raw document snapshots are deeply readonly.
     raw.doc.tampered = "nope";
+    await ctx.lody.sessions.respondInteraction(event.session, {
+      requestId: "req_1",
+      outcome: { outcome: "selected", optionId: "allow_once" },
+    });
   });
 });

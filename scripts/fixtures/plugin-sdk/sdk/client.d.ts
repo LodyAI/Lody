@@ -467,8 +467,7 @@ export interface LodyClient {
       request: SendSessionMessageRequest,
     ): Promise<SendSessionMessageReceipt>;
     /**
-     * Resolves a pending ACP permission or elicitation interaction via `WorkspaceWriter.respondSessionPermission`.
-     * Client-only and gated on active physical user gesture (`userActivation.isActive`).
+     * Resolves a pending ACP permission or elicitation interaction via `respondPermission`.
      */
     respondInteraction(
       session: SessionRef,
