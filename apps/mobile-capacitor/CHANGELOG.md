@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.115.1](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.115.0...lody-mobile-v0.115.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **mobile:** document the public StyleX export required by stable builds ([#3256](https://github.com/LodyAI/Lody/issues/3256)) ([831ffd3](https://github.com/LodyAI/Lody/commit/831ffd3de044824fa457fadb9970ae69cadbcaad))
+* **mobile:** keep StyleX theme scale resolvable in Stable builds ([ca3aa58](https://github.com/LodyAI/Lody/commit/ca3aa58f380d1c53fe929a8cf25634364f9ac725))
+
+
+### Documentation
+
+* **mobile:** add Stable 0.115.1 changelog entry ([5b890ee](https://github.com/LodyAI/Lody/commit/5b890eef217ffb1bcd254d442501241f3d744039))
+
 ## [0.115.0](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.114.1...lody-mobile-v0.115.0) (2026-11-23)
 
 
