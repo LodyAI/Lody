@@ -615,4 +615,50 @@ describe('live agent status', () => {
     expect(value('Cost estimate')?.getAttribute('title')).toContain('not an invoice');
     expect(document.body.textContent).not.toContain('No configuration recorded');
   });
+
+  it('keeps a live-expanded thought group open when the turn completes, without snapping the outer group shut on inner collapse', async () => {
+    const turnId = 'assistant-turn-live-thought';
+    const thought = { type: 'thought' as const, text: 'Investigating scroll anchor state.' };
+    const work = [thought, toolCall('t-live')];
+
+    await render(liveTurn(work, { id: turnId, finished: false }), { label: 'Thinking' });
+    const disclosureButtons = () => [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        'button[data-conversation-disclosure="group"]'
+      ),
+    ];
+    const groupButton = () =>
+      disclosureButtons().find((btn) => btn.textContent?.includes('Ran 1 command'))!;
+    expect(groupButton().getAttribute('aria-expanded')).toBe('false');
+
+    // Expand the thought group while the turn is still running.
+    await act(async () => groupButton().click());
+    expect(groupButton().getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Investigating scroll anchor state.');
+
+    // Turn finishes with a final answer: outer WorkedGroup stays open so the expanded thought remains visible.
+    await render(
+      liveTurn([...work, { type: 'text' as const, text: 'All fixed.' }], {
+        id: turnId,
+        finished: true,
+      }),
+      { label: 'Done' }
+    );
+    const workedButton = () =>
+      disclosureButtons().find((btn) => btn.textContent?.includes('Finished working'))!;
+    expect(workedButton().getAttribute('aria-expanded')).toBe('true');
+    expect(groupButton().getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Investigating scroll anchor state.');
+    expect(container.textContent).toContain('All fixed.');
+
+    // Collapsing the inner thought group later keeps the outer WorkedGroup open.
+    await act(async () => groupButton().click());
+    expect(workedButton().getAttribute('aria-expanded')).toBe('true');
+    expect(groupButton().getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('Investigating scroll anchor state.');
+
+    // Explicitly collapsing the outer WorkedGroup still works.
+    await act(async () => workedButton().click());
+    expect(workedButton().getAttribute('aria-expanded')).toBe('false');
+  });
 });

@@ -1006,3 +1006,60 @@ it('a hidden tab reports no offset, so a view feeding it back cannot loop; shown
     unmount(ctx);
   }
 });
+
+it('persists disclosure reply room across unmount and remount, and shrinks it once content grows', async () => {
+  const sessionId = 'engine-disclosure-remount' as SessionId;
+  const keys = rowKeys(30);
+  const first = mount(sessionId, keys, undefined, {
+    disclosure: { key: 'r29', headerOffset: 0, headerHeight: 20 },
+  });
+  let headerTop = 0;
+  try {
+    await first.settle();
+    act(() => first.handle.current?.anchorToRow(28));
+    await first.settle();
+    const button = first
+      .viewport()
+      .querySelector<HTMLButtonElement>('[data-conversation-disclosure]')!;
+    headerTop = button.getBoundingClientRect().top;
+    act(() => button.click());
+    await first.settle();
+    expect(button.getBoundingClientRect().top).toBe(headerTop);
+    expect(first.state.current?.isSticky).toBe(false);
+  } finally {
+    unmount(first);
+  }
+
+  // Remount while the turn is still short: reply room keeps r29 at the same screenY
+  // instead of clamping back into earlier rows.
+  const second = mount(sessionId, keys, undefined, {
+    disclosure: { key: 'r29', headerOffset: 0, headerHeight: 20 },
+  });
+  try {
+    await second.settle();
+    expect(screenTopOf(second, 'r29')).toBe(headerTop);
+    expect(
+      parseFloat(
+        second.viewport().querySelector<HTMLElement>('[data-conversation-reply-room]')?.style
+          .height ?? '0'
+      )
+    ).toBeGreaterThan(0);
+  } finally {
+    unmount(second);
+  }
+
+  // Remount after more rows streamed below r29: screenY is preserved and reply room shrinks to 0.
+  const grownKeys = [...keys, 'r30', 'r31', 'r32', 'r33', 'r34', 'r35', 'r36', 'r37'];
+  const third = mount(sessionId, grownKeys, undefined, {
+    disclosure: { key: 'r29', headerOffset: 0, headerHeight: 20 },
+  });
+  try {
+    await third.settle();
+    expect(screenTopOf(third, 'r29')).toBe(headerTop);
+    expect(
+      third.viewport().querySelector<HTMLElement>('[data-conversation-reply-room]')?.style.height
+    ).toBe('0px');
+  } finally {
+    unmount(third);
+  }
+});

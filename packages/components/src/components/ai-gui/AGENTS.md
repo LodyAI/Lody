@@ -55,6 +55,10 @@ Ownership: [README.md](README.md).
   steps. Execute calls are not cards. Disclosure labels lead, chevrons trail
   (desktop: hover-only, body type, no fill). Every provider shows thoughts:
   adjacent thoughts and tools share one default-closed group; explicit toggles win.
+  Expanding an inner activity group pins its segment's `WorkedGroup` open unless
+  already explicitly closed, so live-opened thoughts/tools survive turn completion
+  and collapsing the inner group later does not fold the outer region out from under
+  the clicked header.
   Thought prose uses answer typography, secondary ink and shared work folding. Footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
