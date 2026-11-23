@@ -1,10 +1,12 @@
-import type { ComponentType, ReactNode } from "react";
-import type { z } from "zod";
-import type { PluginThemeSeedColors, PluginThemeTokens } from "./manifest";
+import type { ComponentType, ReactNode } from 'react';
+import type { z } from 'zod';
+import type { PluginThemeSeedColors, PluginThemeTokens } from './manifest';
 import {
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
+  lodyCommands,
+  lodyCommands,
   lodyQueries,
   type AcpToolKind,
   type AgentProviderSummary,
@@ -19,6 +21,8 @@ import {
   type InstalledPluginSummary,
   type InteractionOption,
   type InteractionOutcome,
+  type LodyCommandDescriptor,
+  type LodyCommandDescriptor,
   type LodyQueryDescriptor,
   type MachineHostEventMap,
   type MachineHostEventType,
@@ -63,12 +67,13 @@ import {
   type WorkspaceMemberSummary,
   type WorkspaceRef,
   type WorktreeEntry,
-} from "./shared";
+} from './shared';
 
 export {
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
+  lodyCommands,
   lodyQueries,
   type AcpToolKind,
   type AgentProviderSummary,
@@ -80,6 +85,7 @@ export {
   type InstalledPluginSummary,
   type InteractionOption,
   type InteractionOutcome,
+  type LodyCommandDescriptor,
   type LodyQueryDescriptor,
   type MachineHostEventMap,
   type MachineHostEventType,
@@ -124,18 +130,18 @@ export {
   type WorktreeEntry,
 };
 
-export type AvailabilityReason = "machine_offline" | "unknown" | "forbidden";
+export type AvailabilityReason = 'machine_offline' | 'unknown' | 'forbidden';
 
 export type QueryResult<T> =
-  | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly data: T; readonly refresh: () => void }
+  | { readonly status: 'loading' }
+  | { readonly status: 'ready'; readonly data: T; readonly refresh: () => void }
   | {
-      readonly status: "unavailable";
+      readonly status: 'unavailable';
       readonly reason: AvailabilityReason;
       readonly refresh: () => void;
     }
   | {
-      readonly status: "error";
+      readonly status: 'error';
       readonly message: string;
       readonly refresh: () => void;
     };
@@ -146,8 +152,8 @@ export interface MutationHandle<TInput, TOutput> {
 }
 
 export interface HostCapabilities {
-  readonly platform: "desktop" | "web" | "mobile";
-  readonly formFactor: "wide" | "compact";
+  readonly platform: 'desktop' | 'web' | 'mobile';
+  readonly formFactor: 'wide' | 'compact';
   /**
    * Structural shell containers mounted by the current client host, named 1:1 after their
    * `ClientPluginRegistry` namespaces. Inline session/composer contributions (`tools`,
@@ -163,8 +169,8 @@ export interface HostCapabilities {
 }
 
 export type DraftItem =
-  | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "attachment"; readonly snapshot: AttachmentSnapshot };
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'attachment'; readonly snapshot: AttachmentSnapshot };
 
 export type ToolRenderProps<TInput, TOutput> = {
   readonly toolCallId: string;
@@ -174,11 +180,11 @@ export type ToolRenderProps<TInput, TOutput> = {
   readonly appendToDraft: (item: DraftItem) => void;
 } & (
   | {
-      readonly status: "running";
+      readonly status: 'running';
       readonly output?: undefined;
     }
   | {
-      readonly status: "completed";
+      readonly status: 'completed';
       readonly output: TOutput;
     }
 );
@@ -307,14 +313,14 @@ export interface ClientPluginRegistry {
   readonly events: {
     on<K extends ClientHostEventType>(
       type: K,
-      handler: (event: ClientHostEventMap[K]) => void | Promise<void>,
+      handler: (event: ClientHostEventMap[K]) => void | Promise<void>
     ): () => void;
   };
   readonly config: {
     get<
-      TConfig extends Readonly<
+      TConfig extends Readonly<Record<string, ReadonlyJsonPrimitive>> = Readonly<
         Record<string, ReadonlyJsonPrimitive>
-      > = Readonly<Record<string, ReadonlyJsonPrimitive>>,
+      >,
     >(): TConfig;
   };
   readonly assets: {
@@ -323,9 +329,7 @@ export interface ClientPluginRegistry {
   readonly tools: {
     render<TInput extends z.ZodType, TOutput extends z.ZodType>(
       tool: ToolDescriptor<TInput, TOutput>,
-      Component: ComponentType<
-        ToolRenderProps<z.infer<TInput>, z.infer<TOutput>>
-      >,
+      Component: ComponentType<ToolRenderProps<z.infer<TInput>, z.infer<TOutput>>>
     ): void;
     /**
      * Universal tool renderer matching built-in, ACP, or MCP tool calls.
@@ -336,7 +340,7 @@ export interface ClientPluginRegistry {
       readonly id: string;
       readonly match: ToolCallMatcher;
       readonly priority?: number;
-      readonly mode?: "replace" | "enhance";
+      readonly mode?: 'replace' | 'enhance';
       readonly Component: ComponentType<MatchedToolRenderProps>;
     }): void;
   };
@@ -357,7 +361,7 @@ export interface ClientPluginRegistry {
     readonly attachments: {
       add<TMeta extends z.ZodType>(
         source: AttachmentSourceDescriptor<TMeta>,
-        options?: { readonly renderItem?: (item: AttachmentItem) => ReactNode },
+        options?: { readonly renderItem?: (item: AttachmentItem) => ReactNode }
       ): void;
     };
     readonly actions: {
@@ -402,16 +406,10 @@ export interface ClientPluginRegistry {
       }): void;
     };
     readonly headerItems: {
-      add(spec: {
-        readonly id: string;
-        readonly Component: ComponentType<SidebarItemProps>;
-      }): void;
+      add(spec: { readonly id: string; readonly Component: ComponentType<SidebarItemProps> }): void;
     };
     readonly footerItems: {
-      add(spec: {
-        readonly id: string;
-        readonly Component: ComponentType<SidebarItemProps>;
-      }): void;
+      add(spec: { readonly id: string; readonly Component: ComponentType<SidebarItemProps> }): void;
     };
     readonly views: {
       add(spec: {
@@ -428,15 +426,15 @@ export interface ClientPluginRegistry {
           | {
               readonly id: string;
               readonly title: string;
-              readonly binding: "project";
+              readonly binding: 'project';
               readonly Component: ComponentType<ProjectPageProps>;
             }
           | {
               readonly id: string;
               readonly title: string;
-              readonly binding: "installation";
+              readonly binding: 'installation';
               readonly Component: ComponentType<InstallationSettingsProps>;
-            },
+            }
       ): void;
     };
   };
@@ -444,7 +442,7 @@ export interface ClientPluginRegistry {
     add(spec: {
       readonly id: string;
       readonly label: string;
-      readonly appearance: "dark" | "light";
+      readonly appearance: 'dark' | 'light';
       readonly seed: PluginThemeSeedColors;
       readonly tokens?: PluginThemeTokens;
     }): void;
@@ -461,6 +459,15 @@ export interface LodyClient {
     ...[input]: [void] extends [TInput] ? [input?: TInput] : [input: TInput]
   ): Promise<TOutput>;
   /**
+   * Executes a typed command from Lody's shared `lodyCommands` registry with the exact same
+   * authorization, StatusView planning, and E2EE signing rules as first-party UI actions.
+   */
+  execute<S extends PluginScope, TInput, TOutput>(
+    target: ScopeTarget<S>,
+    command: LodyCommandDescriptor<S, TInput, TOutput>,
+    ...[input]: [void] extends [TInput] ? [input?: TInput] : [input: TInput]
+  ): Promise<TOutput>;
+  /**
    * Reads a detached, deeply frozen raw document/state-tree snapshot for power panels needing
    * upstream workspace or transcript fields beyond fixed `lodyQueries` summaries.
    */
@@ -470,21 +477,15 @@ export interface LodyClient {
   };
   readonly sessions: {
     open(session: SessionRef): void;
-    create(
-      target: MachineRef | ProjectRef,
-      request: CreateSessionRequest,
-    ): Promise<SessionRef>;
+    create(target: MachineRef | ProjectRef, request: CreateSessionRequest): Promise<SessionRef>;
     send(
       session: SessionRef,
-      request: SendSessionMessageRequest,
+      request: SendSessionMessageRequest
     ): Promise<SendSessionMessageReceipt>;
     /**
      * Resolves a pending ACP permission or elicitation interaction via `respondPermission`.
      */
-    respondInteraction(
-      session: SessionRef,
-      request: RespondInteractionRequest,
-    ): Promise<void>;
+    respondInteraction(session: SessionRef, request: RespondInteractionRequest): Promise<void>;
     requestStop(session: SessionRef): Promise<void>;
     requestArchive(session: SessionRef): Promise<void>;
   };
@@ -497,7 +498,7 @@ export interface LodyClient {
         readonly providerId?: string;
         readonly skillIds?: readonly string[];
         readonly attachments?: readonly AttachmentSnapshot[];
-      },
+      }
     ): void;
     append(session: SessionRef, item: DraftItem): void;
   };
@@ -505,21 +506,21 @@ export interface LodyClient {
     openSession(
       session: SessionRef,
       panelId: string,
-      params?: Readonly<Record<string, string>>,
+      params?: Readonly<Record<string, string>>
     ): void;
   };
   readonly screens: {
     open(
       workspace: WorkspaceRef,
       screenId: string,
-      params?: Readonly<Record<string, string>>,
+      params?: Readonly<Record<string, string>>
     ): void;
   };
   readonly pages: {
     openProject(
       project: ProjectRef,
       pageId: string,
-      params?: Readonly<Record<string, string>>,
+      params?: Readonly<Record<string, string>>
     ): void;
   };
   readonly themes: {
@@ -533,6 +534,11 @@ export declare function useLodyQuery<S extends PluginScope, TInput, TOutput>(
   ...[input]: [void] extends [TInput] ? [input?: TInput] : [input: TInput]
 ): QueryResult<TOutput>;
 
+export declare function useLodyCommand<S extends PluginScope, TInput, TOutput>(
+  target: ScopeTarget<S>,
+  command: LodyCommandDescriptor<S, TInput, TOutput>
+): MutationHandle<TInput, TOutput>;
+
 /**
  * Reactive subscription to a detached, read-only raw document/state-tree snapshot with optional
  * selector projection so custom Workspace / Agent dashboards re-render only on relevant changes.
@@ -540,7 +546,7 @@ export declare function useLodyQuery<S extends PluginScope, TInput, TOutput>(
 export declare function useLodySnapshot<TSelected = RawDocumentSnapshot>(
   target: RawSnapshotTarget,
   selector?: (snapshot: RawDocumentSnapshot) => TSelected,
-  isEqual?: (prev: TSelected, next: TSelected) => boolean,
+  isEqual?: (prev: TSelected, next: TSelected) => boolean
 ): QueryResult<TSelected>;
 
 export declare function usePluginConfig<
@@ -558,7 +564,7 @@ export declare function useQuery<
 >(
   target: ScopeTarget<S>,
   query: QueryDescriptor<S, TInput, TOutput>,
-  input: z.input<TInput>,
+  input: z.input<TInput>
 ): QueryResult<z.infer<TOutput>>;
 
 export declare function useMutation<
@@ -567,7 +573,7 @@ export declare function useMutation<
   TOutput extends z.ZodType,
 >(
   target: ScopeTarget<S>,
-  mutation: MutationDescriptor<S, TInput, TOutput>,
+  mutation: MutationDescriptor<S, TInput, TOutput>
 ): MutationHandle<z.input<TInput>, z.infer<TOutput>>;
 
 export declare function useLody(): LodyClient;
@@ -575,10 +581,10 @@ export declare function useLody(): LodyClient;
 export type ClientPluginCleanup = () => void | Promise<void>;
 
 export interface ClientPluginDefinition {
-  readonly kind: "client-plugin";
+  readonly kind: 'client-plugin';
   readonly register: (lody: ClientPluginRegistry) => void | ClientPluginCleanup;
 }
 
 export declare function defineClientPlugin(
-  register: (lody: ClientPluginRegistry) => void | ClientPluginCleanup,
+  register: (lody: ClientPluginRegistry) => void | ClientPluginCleanup
 ): ClientPluginDefinition;

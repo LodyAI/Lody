@@ -268,8 +268,11 @@ To guarantee custom Workspace / multi-Agent control planes are never bottlenecke
 3. **Detachment, Deep Immutability & Selector Memoization:** Every materialized `RawDocumentSnapshot` (`{ schemaVersion, revision, doc }`) MUST be detached from live CRDT handles and deeply frozen (`Object.freeze` in development/strict mode) while `HistoryWriter` and Kernel commands remain the sole write path ([`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)). `useLodySnapshot(target, selector, isEqual)` re-renders ONLY when `selector(snapshot)` changes under `isEqual` (default `Object.is`).
 4. **Redaction & Authorization:** Snapshots apply the exact same workspace/E2EE visibility gates as `lodyQueries` and strip keychain secrets, auth tokens, E2EE KEKs/signing keys, and other plugins' `businessKey` values prior to freezing.
 
-### 7.3 Session Orchestration, Idempotency & Symmetric `respondInteraction`
+### 7.3 Shared Host Command Registry (`lodyCommands`), Session Idempotency & Symmetric `respondInteraction`
 
+0. **Unified Typed Host Command Registry (`lodyCommands` + `lody.execute` / `useLodyCommand` / `ctx.lody.execute`):**
+   - Rather than inventing a second plugin-only command system or trapping first-party mutations inside React hooks, Lody exposes its canonical domain commands as typed `LodyCommandDescriptor<S, TInput, TOutput>` entries in `lodyCommands` (covering Session execution `sessionCreate` / `sessionSend` / `sessionRespondInteraction` / `sessionStop` / `sessionArchive` / `sessionRestore` / `sessionFork`, Status/Focus triage `sessionSetPinned` / `sessionSnooze` / `sessionSettle` / `sessionMoveToFocus` / `sessionMoveOrder` / `sessionUpdateTitle` / `sessionMarkRead` / `sessionMarkUnread` backed by `planStatusViewCommand` in [`status-view/command.ts`](../packages/shared/src/status-view/command.ts) and [`use-session-actions.ts`](../packages/components/src/hooks/use-session-actions.ts), workspace pin sections `pinSection*`, and schedule controls `scheduleSetEnabled` / `scheduleRunNow`).
+   - First-party UI and third-party plugins invoke the **exact same authorized command handlers** via `lody.execute(target, command, input)` / `useLodyCommand` on clients and `ctx.lody.execute(target, command, input)` on machines (with `sessions.{create, send, respondInteraction, requestStop, requestArchive}` retained as thin typed convenience aliases over `lodyCommands.session*`).
 1. **Atomic `(requestId, businessKey)` `sessions.create` Receipt:**
    - Keyed by `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` in durable storage.
    - Replaying the identical normalized payload returns the original `SessionRef` even after Session archive; replaying `requestId` with a modified payload rejects with `idempotency_conflict`.
@@ -310,7 +313,9 @@ Source-linked `--dev` plugins compile inside `DevPluginCompiler`, which exits au
 
 ### 8.5 Client Plugin Instance Lifecycle & `clientDigest` Idempotency
 
-`ClientPluginHost` keys instances by `(workspace_id, source_key, plugin_id)`:
+`ClientPluginHost` strictly separates **Installation Identity** (`(workspace_id, source_key, plugin_id)`, where `source_key` is `"machine:<machine_id>"` for machine-installed plugins or `"local"` for local client-only installations) from **Bundle Version Identity** (`(plugin_id, clientDigest)`):
+
+- **Installation Identity (`(workspace_id, source_key, plugin_id)`):** Governs who owns the instance, its bound `machine_id` / configuration / `query_cache`, and where machine RPCs route. Two machines in the same workspace running the exact same plugin version and `clientDigest` maintain distinct `ClientPluginInstance` records without colliding, while bundle storage/compilation deduplicates by `(plugin_id, clientDigest)`.
 
 - If `clientDigest` is unchanged and state is `Active`, reconciliation MUST be a no-op (preserving subscriptions, event listeners, and `query_cache`).
 - On `clientDigest` change or `disable`, `ClientPluginHost` MUST abort `abort_controller` (detaching all `events.on` listeners and in-flight queries), run `cleanup_fn`, unregister all UI/matcher/theme contributions, remove `<style>` tags, and clear `query_cache` before mounting any replacement.
@@ -324,7 +329,7 @@ Source-linked `--dev` plugins compile inside `DevPluginCompiler`, which exits au
 `PluginHost` and the `machine` subprocess communicate over `stdio: ['ignore', 'pipe', 'pipe', 'ipc']`:
 
 - **Host -> Child:** `init` (`pluginId`, `instanceId`, `dataDir`, `config`), `start` (dispatched once after `ready` to invoke `machine.onStart`), `invoke` (`callId`, `kind`, `descriptorId`, `scope`, `target`, `input`), `event` (`eventId`, `eventType`, `payload`, `rootUserTurnId?`), `cancel` (`callId`), `host_result` (`hostCallId`, `ok`, `data`/`error`), `shutdown` (`graceMs`).
-- **Child -> Host:** `ready` (`handlers`, `subscribedEvents`), `result` (`callId`, `ok`, `data`/`error`), `invalidate` (`descriptorId`, `scope`, `target?`), `host_call` (`hostCallId`, `op`: `"lody.read" | "lody.readSnapshot" | "sessions.create" | "sessions.send" | "sessions.respondInteraction" | "sessions.requestStop" | "sessions.requestArchive"`, `payload`).
+- **Child -> Host:** `ready` (`handlers`, `subscribedEvents`), `result` (`callId`, `ok`, `data`/`error`), `invalidate` (`descriptorId`, `scope`, `target?`), `host_call` (`hostCallId`, `op`: `"lody.read" | "lody.readSnapshot" | "lody.execute" | "sessions.create" | "sessions.send" | "sessions.respondInteraction" | "sessions.requestStop" | "sessions.requestArchive"`, `payload`).
 - `stdout` and `stderr` are strictly diagnostic pipes captured into `logs_ring`; malformed IPC frames kill the child and transition to `Faulted`.
 
 ### 9.2 Core Remote `MachineRpc` & Bundle Streaming

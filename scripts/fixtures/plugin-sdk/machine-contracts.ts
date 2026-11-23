@@ -1,22 +1,22 @@
-import { defineMutation, defineQuery, lodyQueries } from "@lody/plugin-sdk";
-import { defineMachinePlugin } from "@lody/plugin-sdk/machine";
-import { z } from "zod";
-import { runSuiteTool } from "./examples/test-report/shared";
+import { defineMutation, defineQuery, lodyQueries } from '@lody/plugin-sdk';
+import { defineMachinePlugin, lodyCommands } from '@lody/plugin-sdk/machine';
+import { z } from 'zod';
+import { runSuiteTool } from './examples/test-report/shared';
 
 // @ts-expect-error Machine plugins cannot import browser client hooks or registries.
-import("@lody/plugin-sdk/client");
+import('@lody/plugin-sdk/client');
 
-const machineDigestQuery = defineQuery("machine", "daemon.digest", {
+const machineDigestQuery = defineQuery('machine', 'daemon.digest', {
   input: z.object({ limit: z.number().int().default(10) }),
   output: z.object({ count: z.number().int() }),
 });
 
-const sessionMonitorQuery = defineQuery("session", "monitor.state", {
+const sessionMonitorQuery = defineQuery('session', 'monitor.state', {
   input: z.object({}),
   output: z.object({ activeStep: z.string().nullable() }),
 });
 
-const recoverReviewMutation = defineMutation("project", "review.ensure", {
+const recoverReviewMutation = defineMutation('project', 'review.ensure', {
   input: z.object({
     requestId: z.string().uuid(),
     prNumber: z.number().int(),
@@ -61,7 +61,7 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
     const created = await ctx.lody.sessions.create(ctx.target, {
       requestId: input.requestId,
       businessKey: key,
-      roleId: "role_reviewer",
+      roleId: 'role_reviewer',
       pullRequestUrl: `https://github.com/lodyai/lody/pull/${input.prNumber}`,
       prompt: `Review PR #${input.prNumber} at ${input.headSha}.`,
     });
@@ -78,19 +78,20 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
 });
 
 export const machineWorkflowEventChecks = defineMachinePlugin((machine) => {
-  machine.events.on("session.tool.completed", async (ctx, event) => {
+  machine.events.on('session.tool.completed', async (ctx, event) => {
     const completedTool: string = event.toolCall.toolName;
     void completedTool;
     const raw = await ctx.lody.readSnapshot({
-      kind: "session-meta",
+      kind: 'session-meta',
       session: event.session,
     });
     // @ts-expect-error Machine raw document snapshots are deeply readonly.
-    raw.doc.tampered = "nope";
+    raw.doc.tampered = 'nope';
+    await ctx.lody.execute(event.session, lodyCommands.sessionSettle);
     await ctx.lody.sessions.respondInteraction(event.session, {
-      requestId: "req_1",
-      outcome: { outcome: "selected", optionId: "allow_once" },
-      originTurn: { session: event.session, userTurnId: "user_turn_1" },
+      requestId: 'req_1',
+      outcome: { outcome: 'selected', optionId: 'allow_once' },
+      originTurn: { session: event.session, userTurnId: 'user_turn_1' },
     });
   });
 });

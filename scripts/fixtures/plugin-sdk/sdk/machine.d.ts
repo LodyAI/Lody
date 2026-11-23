@@ -1,8 +1,10 @@
-import type { z } from "zod";
+import type { z } from 'zod';
 import {
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
+  lodyCommands,
+  lodyCommands,
   lodyQueries,
   type AttachmentItem,
   type AttachmentSnapshot,
@@ -10,6 +12,8 @@ import {
   type CreateSessionRequest,
   type InteractionOption,
   type InteractionOutcome,
+  type LodyCommandDescriptor,
+  type LodyCommandDescriptor,
   type LodyQueryDescriptor,
   type MachineHostEventMap,
   type MachineHostEventType,
@@ -32,16 +36,18 @@ import {
   type ToolDescriptor,
   type TurnStopReason,
   type WorkspaceRef,
-} from "./shared";
+} from './shared';
 
 export {
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
+  lodyCommands,
   lodyQueries,
   type CreateSessionRequest,
   type InteractionOption,
   type InteractionOutcome,
+  type LodyCommandDescriptor,
   type LodyQueryDescriptor,
   type MachineHostEventMap,
   type MachineHostEventType,
@@ -67,6 +73,11 @@ export interface MachineHostPort {
     query: LodyQueryDescriptor<S, TInput, TOutput>,
     ...[input]: [void] extends [TInput] ? [input?: TInput] : [input: TInput]
   ): Promise<TOutput>;
+  execute<S extends PluginScope, TInput, TOutput>(
+    target: ScopeTarget<S>,
+    command: LodyCommandDescriptor<S, TInput, TOutput>,
+    ...[input]: [void] extends [TInput] ? [input?: TInput] : [input: TInput]
+  ): Promise<TOutput>;
   readSnapshot(target: RawSnapshotTarget): Promise<RawDocumentSnapshot>;
   readonly sessions: {
     /**
@@ -76,18 +87,12 @@ export interface MachineHostPort {
      * `machine.onStart` recovery) against the stored human-signed user Turn in local `sessionData`
      * (or a machine-owner signed workflow activation); un-rooted calls reject with `forbidden`.
      */
-    create(
-      target: MachineRef | ProjectRef,
-      request: CreateSessionRequest,
-    ): Promise<SessionRef>;
+    create(target: MachineRef | ProjectRef, request: CreateSessionRequest): Promise<SessionRef>;
     send(
       session: SessionRef,
-      request: SendSessionMessageRequest,
+      request: SendSessionMessageRequest
     ): Promise<SendSessionMessageReceipt>;
-    respondInteraction(
-      session: SessionRef,
-      request: RespondInteractionRequest,
-    ): Promise<void>;
+    respondInteraction(session: SessionRef, request: RespondInteractionRequest): Promise<void>;
     requestStop(session: SessionRef): Promise<void>;
     requestArchive(session: SessionRef): Promise<void>;
   };
@@ -102,7 +107,7 @@ export interface MachineBaseContext {
   readonly lody: MachineHostPort;
   invalidate<QS extends MachinePluginScope>(
     descriptor: QueryDescriptor<QS, z.ZodType, z.ZodType>,
-    target?: ScopeTarget<QS>,
+    target?: ScopeTarget<QS>
   ): void;
 }
 
@@ -144,49 +149,39 @@ export interface MachinePluginRegistry {
    * allowing workflow plugins to recover durable task state from `ctx.dataDir` without polling.
    */
   onStart(handler: (ctx: MachineStartupContext) => void | Promise<void>): void;
-  query<
-    S extends MachinePluginScope,
-    TInput extends z.ZodType,
-    TOutput extends z.ZodType,
-  >(
+  query<S extends MachinePluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: QueryDescriptor<S, TInput, TOutput>,
     handler: (
       ctx: MachineContext<S>,
-      input: z.output<TInput>,
-    ) => Promise<z.input<TOutput>> | z.input<TOutput>,
+      input: z.output<TInput>
+    ) => Promise<z.input<TOutput>> | z.input<TOutput>
   ): void;
-  mutation<
-    S extends MachinePluginScope,
-    TInput extends z.ZodType,
-    TOutput extends z.ZodType,
-  >(
+  mutation<S extends MachinePluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: MutationDescriptor<S, TInput, TOutput>,
     handler: (
       ctx: MachineContext<S>,
-      input: z.output<TInput>,
-    ) => Promise<z.input<TOutput>> | z.input<TOutput>,
+      input: z.output<TInput>
+    ) => Promise<z.input<TOutput>> | z.input<TOutput>
   ): void;
   tool<TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: ToolDescriptor<TInput, TOutput>,
     handler: (
       ctx: ToolExecutionContext,
-      input: z.output<TInput>,
-    ) => Promise<z.input<TOutput>> | z.input<TOutput>,
+      input: z.output<TInput>
+    ) => Promise<z.input<TOutput>> | z.input<TOutput>
   ): void;
   attachmentSource<TMeta extends z.ZodType>(
     descriptor: AttachmentSourceDescriptor<TMeta>,
     handlers: {
       search(
         ctx: AttachmentContext,
-        query: string,
+        query: string
       ): Promise<readonly AttachmentItem[]> | readonly AttachmentItem[];
       resolve(
         ctx: AttachmentContext,
-        itemId: string,
-      ):
-        | Promise<AttachmentSnapshot<z.input<TMeta>>>
-        | AttachmentSnapshot<z.input<TMeta>>;
-    },
+        itemId: string
+      ): Promise<AttachmentSnapshot<z.input<TMeta>>> | AttachmentSnapshot<z.input<TMeta>>;
+    }
   ): void;
   /**
    * Subscribes to daemon-side Session/Turn/Tool lifecycle events so workflow plugins (e.g. Sorbet
@@ -195,10 +190,7 @@ export interface MachinePluginRegistry {
   readonly events: {
     on<K extends MachineHostEventType>(
       type: K,
-      handler: (
-        ctx: MachineEventContext<K>,
-        event: MachineHostEventMap[K],
-      ) => void | Promise<void>,
+      handler: (ctx: MachineEventContext<K>, event: MachineHostEventMap[K]) => void | Promise<void>
     ): void;
   };
 }
@@ -206,12 +198,10 @@ export interface MachinePluginRegistry {
 export type MachinePluginCleanup = () => void | Promise<void>;
 
 export interface MachinePluginDefinition {
-  readonly kind: "machine-plugin";
-  readonly register: (
-    machine: MachinePluginRegistry,
-  ) => void | MachinePluginCleanup;
+  readonly kind: 'machine-plugin';
+  readonly register: (machine: MachinePluginRegistry) => void | MachinePluginCleanup;
 }
 
 export declare function defineMachinePlugin(
-  register: (machine: MachinePluginRegistry) => void | MachinePluginCleanup,
+  register: (machine: MachinePluginRegistry) => void | MachinePluginCleanup
 ): MachinePluginDefinition;

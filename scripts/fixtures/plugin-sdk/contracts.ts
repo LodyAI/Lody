@@ -4,6 +4,7 @@ import {
   MAX_PLUGIN_RPC_REQUEST_BYTES,
   defineMutation,
   defineQuery,
+  lodyCommands,
   lodyQueries,
   type CreateSessionRequest,
   type MachineRef,
@@ -11,10 +12,11 @@ import {
   type ProjectRef,
   type SessionRef,
   type WorkspaceRef,
-} from "@lody/plugin-sdk";
+} from '@lody/plugin-sdk';
 import {
   defineClientPlugin,
   useLody,
+  useLodyCommand,
   useLodyQuery,
   useMutation,
   useQuery,
@@ -22,122 +24,121 @@ import {
   type ProjectPageProps,
   type SignedTurnOrigin,
   type ToolRenderProps,
-} from "@lody/plugin-sdk/client";
-import type { PluginManifest } from "@lody/plugin-sdk/manifest";
-import { z } from "zod";
+} from '@lody/plugin-sdk/client';
+import type { PluginManifest } from '@lody/plugin-sdk/manifest';
+import { z } from 'zod';
 
 // @ts-expect-error Browser client bundles cannot import machine-only SDK modules.
-import("@lody/plugin-sdk/machine");
+import('@lody/plugin-sdk/machine');
 
 // @ts-expect-error Browser client bundles cannot import Node built-in modules.
-import("node:fs");
+import('node:fs');
 
-export const machineDigestQuery = defineQuery("machine", "daemon.digest", {
+export const machineDigestQuery = defineQuery('machine', 'daemon.digest', {
   input: z.object({ limit: z.number().int().default(10) }),
   output: z.object({ count: z.number().int() }),
 });
 
-export const sessionMonitorQuery = defineQuery("session", "monitor.state", {
+export const sessionMonitorQuery = defineQuery('session', 'monitor.state', {
   input: z.object({}),
   output: z.object({ activeStep: z.string().nullable() }),
 });
 
-export const projectPinMutation = defineMutation("project", "item.pin", {
+export const projectPinMutation = defineMutation('project', 'item.pin', {
   input: z.object({ itemId: z.string() }),
   output: z.object({ pinned: z.boolean() }),
 });
 
 // @ts-expect-error Plugin-defined machine queries cannot use cross-machine 'workspace' scope.
-defineQuery("workspace", "invalid.workspaceQuery", {
+defineQuery('workspace', 'invalid.workspaceQuery', {
   input: z.object({}),
   output: z.object({}),
 });
 
 export const inlineBudgetCheck: 16384 = MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES;
 export const rpcRequestBudgetCheck: 262144 = MAX_PLUGIN_RPC_REQUEST_BYTES;
-export const packedClientBundleBudgetCheck: 4194304 =
-  MAX_PACKED_CLIENT_BUNDLE_BYTES;
+export const packedClientBundleBudgetCheck: 4194304 = MAX_PACKED_CLIENT_BUNDLE_BYTES;
 
 export const validManifest: PluginManifest = {
-  id: "test-report",
-  version: "0.1.0",
-  sdk: "^1.0.0",
-  title: "Test Report",
-  client: "./dist/client.js",
-  machine: "./dist/machine.js",
-  skills: ["test-triage"],
+  id: 'test-report',
+  version: '0.1.0',
+  sdk: '^1.0.0',
+  title: 'Test Report',
+  client: './dist/client.js',
+  machine: './dist/machine.js',
+  skills: ['test-triage'],
   themes: [
     {
-      id: "cyber-war-room",
-      label: "Cyber War Room",
-      appearance: "dark",
-      path: "./assets/cyber-war-room.json",
-      tokens: { density: "compact", radius: "4px" },
+      id: 'cyber-war-room',
+      label: 'Cyber War Room',
+      appearance: 'dark',
+      path: './assets/cyber-war-room.json',
+      tokens: { density: 'compact', radius: '4px' },
     },
     {
-      id: "amber-ember",
-      label: "Amber Ember",
-      appearance: "dark",
+      id: 'amber-ember',
+      label: 'Amber Ember',
+      appearance: 'dark',
       seed: {
-        bg: "#11100e",
-        fg: "#f5efe6",
-        accent: "#f59e0b",
-        surface: "#1b1916",
+        bg: '#11100e',
+        fg: '#f5efe6',
+        accent: '#f59e0b',
+        surface: '#1b1916',
       },
-      tokens: { fontMono: "JetBrains Mono", density: "comfortable" },
+      tokens: { fontMono: 'JetBrains Mono', density: 'comfortable' },
     },
   ],
-  styles: ["./assets/war-room-snippet.css"],
+  styles: ['./assets/war-room-snippet.css'],
   config: {
     TRACKER_API_KEY: {
-      type: "secret",
-      scope: "machine",
-      label: "Tracker API Key",
-      description: "API token for issue lookup on the daemon.",
+      type: 'secret',
+      scope: 'machine',
+      label: 'Tracker API Key',
+      description: 'API token for issue lookup on the daemon.',
     },
   },
 };
 
 export const headlessOnlyManifest: PluginManifest = {
-  id: "ci-sentinel",
-  version: "0.1.0",
-  sdk: "^1.0.0",
-  title: "CI Sentinel",
-  machine: "./dist/machine.js",
-  skills: ["ci-triage"],
+  id: 'ci-sentinel',
+  version: '0.1.0',
+  sdk: '^1.0.0',
+  title: 'CI Sentinel',
+  machine: './dist/machine.js',
+  skills: ['ci-triage'],
 };
 
 export const clientOnlyManifest: PluginManifest = {
-  id: "focus-sidebar",
-  version: "0.1.0",
-  sdk: "^1.0.0",
-  title: "Focus Sidebar",
-  client: "./dist/client.js",
+  id: 'focus-sidebar',
+  version: '0.1.0',
+  sdk: '^1.0.0',
+  title: 'Focus Sidebar',
+  client: './dist/client.js',
 };
 
 export const invalidSdkRangeManifest: PluginManifest = {
-  id: "bad-sdk",
-  version: "0.1.0",
+  id: 'bad-sdk',
+  version: '0.1.0',
   // @ts-expect-error Manifest must target a supported SDK major range.
-  sdk: "^2.0.0",
-  title: "Invalid SDK",
+  sdk: '^2.0.0',
+  title: 'Invalid SDK',
 };
 
-export const retriableOfflineCode: PluginCallErrorCode = "machine_offline";
-export const unknownOutcomeCode: PluginCallErrorCode = "outcome_unknown";
-export const quarantinedPluginCode: PluginCallErrorCode = "plugin_faulted";
+export const retriableOfflineCode: PluginCallErrorCode = 'machine_offline';
+export const unknownOutcomeCode: PluginCallErrorCode = 'outcome_unknown';
+export const quarantinedPluginCode: PluginCallErrorCode = 'plugin_faulted';
 
 // @ts-expect-error Whole-package revision_mismatch was removed in favor of clientDigest + runtime instanceId.
-export const removedRevisionCode: PluginCallErrorCode = "revision_mismatch";
+export const removedRevisionCode: PluginCallErrorCode = 'revision_mismatch';
 
 export const legacyEnvManifest: PluginManifest = {
-  id: "legacy-env",
-  version: "0.1.0",
-  sdk: "^1.0.0",
-  title: "Legacy Env",
-  client: "./dist/client.js",
+  id: 'legacy-env',
+  version: '0.1.0',
+  sdk: '^1.0.0',
+  title: 'Legacy Env',
+  client: './dist/client.js',
   // @ts-expect-error Legacy `manifest.env` was unified into `manifest.config` (`type: "secret"`, `scope: "machine"`).
-  env: { TRACKER_API_KEY: { description: "legacy", secret: true } },
+  env: { TRACKER_API_KEY: { description: 'legacy', secret: true } },
 };
 
 export const minimalShellPlugin = defineClientPlugin((lody) => {
@@ -154,45 +155,40 @@ export const minimalShellPlugin = defineClientPlugin((lody) => {
   void lody.audio;
 
   lody.themes.add({
-    id: "live-ocean",
-    label: "Live Ocean",
-    appearance: "dark",
-    seed: { bg: "#0b1220", fg: "#e2e8f0", accent: "#38bdf8" },
-    tokens: { density: "compact", radius: "6px" },
+    id: 'live-ocean',
+    label: 'Live Ocean',
+    appearance: 'dark',
+    seed: { bg: '#0b1220', fg: '#e2e8f0', accent: '#38bdf8' },
+    tokens: { density: 'compact', radius: '6px' },
   });
 
   lody.styles.add({
-    id: "custom-backdrop",
-    css: ":root { --composer-backdrop-blur: 12px; }",
+    id: 'custom-backdrop',
+    css: ':root { --composer-backdrop-blur: 12px; }',
   });
 
   lody.settings.pages.add({
-    id: "tracker-installation-settings",
-    title: "Tracker Connection",
-    binding: "installation",
+    id: 'tracker-installation-settings',
+    title: 'Tracker Connection',
+    binding: 'installation',
     Component: () => null,
   });
 
   return async () => {};
 });
 
-export function verifyBlockRenderStableIdentity(
-  props: MessageBlockRenderProps,
-): string {
+export function verifyBlockRenderStableIdentity(props: MessageBlockRenderProps): string {
   const turnId: string = props.turnId;
   const blockId: string = props.blockId;
-  return `${turnId}/${blockId}:${props.streaming ? "live" : "done"}`;
+  return `${turnId}/${blockId}:${props.streaming ? 'live' : 'done'}`;
 }
 
 export function verifyToolRenderStateNarrowing(
-  props: ToolRenderProps<
-    { readonly filter?: string },
-    { readonly passed: number }
-  >,
+  props: ToolRenderProps<{ readonly filter?: string }, { readonly passed: number }>
 ): number | null {
   const id: string = props.toolCallId;
   void id;
-  if (props.status === "running") {
+  if (props.status === 'running') {
     // @ts-expect-error Running tool cards have no final output until completion.
     void props.output.passed;
     return null;
@@ -205,7 +201,7 @@ export async function verifyClientTypeSafety(
   machine: MachineRef,
   project: ProjectRef,
   session: SessionRef,
-  pageProps: ProjectPageProps,
+  pageProps: ProjectPageProps
 ) {
   const lody = useLody();
   const workspaceSessions = await lody.read(workspace, lodyQueries.sessions, {
@@ -227,38 +223,37 @@ export async function verifyClientTypeSafety(
   void workspace.machineId;
 
   const machinesRead = useLodyQuery(workspace, lodyQueries.machines);
-  if (machinesRead.status === "ready") {
-    const firstMachine: MachineRef | undefined =
-      machinesRead.data.items[0]?.machine;
+  if (machinesRead.status === 'ready') {
+    const firstMachine: MachineRef | undefined = machinesRead.data.items[0]?.machine;
     void firstMachine;
   }
 
   const rolesRead = useLodyQuery(workspace, lodyQueries.agentRoles);
-  if (rolesRead.status === "ready") {
+  if (rolesRead.status === 'ready') {
     const firstRoleName: string | undefined = rolesRead.data.items[0]?.name;
     void firstRoleName;
   }
 
   const gitRead = useLodyQuery(project, lodyQueries.gitState);
-  if (gitRead.status === "ready") {
+  if (gitRead.status === 'ready') {
     const dirty: boolean = gitRead.data.dirty;
     void dirty;
   }
 
   const diffRead = useLodyQuery(session, lodyQueries.sessionDiff);
-  if (diffRead.status === "ready") {
+  if (diffRead.status === 'ready') {
     const fileCount: number = diffRead.data.files.length;
     void fileCount;
   }
 
   const okMachineRead = useQuery(machine, machineDigestQuery, {});
-  if (okMachineRead.status === "ready") {
+  if (okMachineRead.status === 'ready') {
     const count: number = okMachineRead.data.count;
     void count;
   }
 
   const okSessionRead = useQuery(session, sessionMonitorQuery, {});
-  if (okSessionRead.status === "ready") {
+  if (okSessionRead.status === 'ready') {
     const step: string | null = okSessionRead.data.activeStep;
     void step;
   }
@@ -269,7 +264,7 @@ export async function verifyClientTypeSafety(
   const detailRead = useLodyQuery(session, lodyQueries.sessionDetail, {
     recentTurnLimit: 5,
   });
-  if (detailRead.status === "ready") {
+  if (detailRead.status === 'ready') {
     const turnCount: number = detailRead.data.recentTurns.length;
     void turnCount;
     // @ts-expect-error Provider-specific elicitation internals (`pendingQuestion`) stay host-private.
@@ -281,15 +276,14 @@ export async function verifyClientTypeSafety(
   const byKeyRead = useLodyQuery(project, lodyQueries.sessions, {
     createdByMe: true,
     createdByPlugin: true,
-    businessKey: "review/42/abc123",
+    businessKey: 'review/42/abc123',
   });
-  if (byKeyRead.status === "ready") {
+  if (byKeyRead.status === 'ready') {
     const first = byKeyRead.data.items[0];
     const key: string | undefined = first?.businessKey;
     const rootOpener: string | undefined = first?.openedByRootSessionId;
     const roleId: string | undefined = first?.agentRoleId;
-    const pendingKind: "permission" | "elicitation" | undefined =
-      first?.pendingInteraction?.kind;
+    const pendingKind: 'permission' | 'elicitation' | undefined = first?.pendingInteraction?.kind;
     void key;
     void rootOpener;
     void roleId;
@@ -310,41 +304,41 @@ export async function verifyClientTypeSafety(
   void pin.mutate({ itemId: 42 });
 
   const sendReceipt = await lody.sessions.send(session, {
-    idempotencyKey: "followup-1",
-    prompt: "Summarize the latest test failures.",
-    delivery: "queue",
+    idempotencyKey: 'followup-1',
+    prompt: 'Summarize the latest test failures.',
+    delivery: 'queue',
   });
   void sendReceipt.disposition;
   await lody.sessions.respondInteraction(session, {
-    requestId: "req-1",
-    turnId: "turn-1",
-    outcome: { outcome: "selected", optionId: "allow_once" },
+    requestId: 'req-1',
+    turnId: 'turn-1',
+    outcome: { outcome: 'selected', optionId: 'allow_once' },
   });
   // @ts-expect-error Bespoke `answerQuestion` was replaced by 1:1 ACP `respondInteraction`.
   void lody.sessions.answerQuestion;
   await lody.sessions.requestStop(session);
-  lody.panels.openSession(session, "issues", { identifier: "LODY-101" });
-  lody.screens.open(workspace, "swarm-hub");
-  lody.pages.openProject(project, "worktrees");
-  lody.themes.activate("cyber-war-room");
+  lody.panels.openSession(session, 'issues', { identifier: 'LODY-101' });
+  lody.screens.open(workspace, 'swarm-hub');
+  lody.pages.openProject(project, 'worktrees');
+  lody.themes.activate('cyber-war-room');
 
   const createRequest: CreateSessionRequest = {
-    requestId: "create-review-attempt-1",
-    businessKey: "review/42/abc123",
-    roleId: "role_reviewer",
+    requestId: 'create-review-attempt-1',
+    businessKey: 'review/42/abc123',
+    roleId: 'role_reviewer',
     parentSession: session,
-    pullRequestUrl: "https://github.com/lodyai/lody/pull/42",
-    prompt: "Review PR #42 at abc123.",
+    pullRequestUrl: 'https://github.com/lodyai/lody/pull/42',
+    prompt: 'Review PR #42 at abc123.',
   };
   await lody.sessions.create(project, createRequest);
   // Unbound Sessions and drafts can target a MachineRef without a ProjectRef.
   await lody.sessions.create(machine, {
-    requestId: "create-unbound-triage-1",
-    prompt: "Inspect recent daemon alerts.",
+    requestId: 'create-unbound-triage-1',
+    prompt: 'Inspect recent daemon alerts.',
   });
   lody.drafts.open(machine, {
-    prompt: "Quick machine-scoped investigation.",
-    roleId: "role_reviewer",
+    prompt: 'Quick machine-scoped investigation.',
+    roleId: 'role_reviewer',
   });
 
   // The same immutable request is used after an uncertain result, even if the
@@ -352,62 +346,58 @@ export async function verifyClientTypeSafety(
   await lody.sessions.create(project, createRequest);
   await lody.sessions.create(project, {
     ...createRequest,
-    requestId: "create-review-attempt-2",
+    requestId: 'create-review-attempt-2',
   });
 
   // @ts-expect-error A business key alone cannot identify a retryable creation request.
   const missingRequestId: CreateSessionRequest = {
-    businessKey: "review/42",
-    prompt: "Review.",
+    businessKey: 'review/42',
+    prompt: 'Review.',
   };
   void missingRequestId;
   const legacyCreateRequest: CreateSessionRequest = {
-    requestId: "create-review-attempt-3",
+    requestId: 'create-review-attempt-3',
     // @ts-expect-error Creation separates request identity from business-task identity.
-    idempotencyKey: "review/42",
-    prompt: "Review.",
+    idempotencyKey: 'review/42',
+    prompt: 'Review.',
   };
   void legacyCreateRequest;
 
   // @ts-expect-error Raw ID objects cannot forge a branded SessionRef capability.
   lody.sessions.open({
-    workspaceId: "lw_1",
-    machineId: "m_1",
-    sessionId: "s_1",
+    workspaceId: 'lw_1',
+    machineId: 'm_1',
+    sessionId: 's_1',
   });
 
   // @ts-expect-error Route params are immutable; navigation goes through lody.pages.openProject.
-  pageProps.params.pr = "99";
+  pageProps.params.pr = '99';
 }
 
-import {
-  useHostCapabilities,
-  useLodySnapshot,
-  usePluginConfig,
-} from "@lody/plugin-sdk/client";
+import { useHostCapabilities, useLodySnapshot, usePluginConfig } from '@lody/plugin-sdk/client';
 
 export const invalidClientSecretManifest: PluginManifest = {
-  id: "bad-secret-scope",
-  version: "0.1.0",
-  sdk: "^1.0.0",
-  title: "Bad Secret Scope",
+  id: 'bad-secret-scope',
+  version: '0.1.0',
+  sdk: '^1.0.0',
+  title: 'Bad Secret Scope',
   config: {
     // @ts-expect-error Secret config fields MUST NOT target client scope.
     API_SECRET: {
-      type: "secret",
-      label: "Secret Key",
-      scope: "client",
+      type: 'secret',
+      label: 'Secret Key',
+      scope: 'client',
     },
   },
 };
 
 export async function verifyExtensibilityAndRawSnapshots(
   workspace: WorkspaceRef,
-  session: SessionRef,
+  session: SessionRef
 ) {
   const lody = useLody();
   const caps = useHostCapabilities();
-  const platform: "desktop" | "web" | "mobile" = caps.platform;
+  const platform: 'desktop' | 'web' | 'mobile' = caps.platform;
   const hasScreens: boolean = caps.containers.screens;
   void platform;
   void hasScreens;
@@ -419,19 +409,19 @@ export async function verifyExtensibilityAndRawSnapshots(
   void lody.audio;
 
   const cfg = usePluginConfig<{ readonly volume: number }>();
-  await cfg.set("volume", 0.8);
+  await cfg.set('volume', 0.8);
   // @ts-expect-error Config setter validates value types per declared key.
-  void cfg.set("volume", "loud");
+  void cfg.set('volume', 'loud');
 
   const pluginsRead = useLodyQuery(workspace, lodyQueries.plugins);
-  if (pluginsRead.status === "ready") {
+  if (pluginsRead.status === 'ready') {
     const isDevLinked: boolean | undefined = pluginsRead.data.items[0]?.devMode;
     void isDevLinked;
   }
 
   const incrementalSessions = useLodyQuery(workspace, lodyQueries.sessions, {
-    sessionIds: ["sess_1"],
-    agentRoleId: "plugin:sorbet-workflow:sorbet-architect",
+    sessionIds: ['sess_1'],
+    agentRoleId: 'plugin:sorbet-workflow:sorbet-architect',
     updatedAfter: 1_700_000_000_000,
   });
   void incrementalSessions;
@@ -439,7 +429,7 @@ export async function verifyExtensibilityAndRawSnapshots(
   const turnsRead = useLodyQuery(session, lodyQueries.sessionTurns, {
     limit: 20,
   });
-  if (turnsRead.status === "ready") {
+  if (turnsRead.status === 'ready') {
     const firstTurn = turnsRead.data.items[0];
     const firstToolName: string | undefined = firstTurn?.toolCalls[0]?.toolName;
     const rootUserTurnId: string | undefined = firstTurn?.userTurnId;
@@ -456,15 +446,15 @@ export async function verifyExtensibilityAndRawSnapshots(
   }
 
   const subagentRead = useLodyQuery(session, lodyQueries.subagentRun, {
-    runId: "run_1",
+    runId: 'run_1',
   });
-  if (subagentRead.status === "ready") {
+  if (subagentRead.status === 'ready') {
     const nestedTurnCount: number | undefined = subagentRead.data?.turns.length;
     void nestedTurnCount;
   }
 
   const rawSnap = await lody.readSnapshot({
-    kind: "session-transcript",
+    kind: 'session-transcript',
     session,
   });
   const rev: string = rawSnap.revision;
@@ -473,11 +463,25 @@ export async function verifyExtensibilityAndRawSnapshots(
   rawSnap.doc.mutated = true;
 
   const selectedSnap = useLodySnapshot(
-    { kind: "session-meta", session },
-    (snap) => snap.schemaVersion,
+    { kind: 'session-meta', session },
+    (snap) => snap.schemaVersion
   );
-  if (selectedSnap.status === "ready") {
+  if (selectedSnap.status === 'ready') {
     const ver: number = selectedSnap.data;
     void ver;
   }
+}
+
+export function verifyHostCommandContracts(workspace: WorkspaceRef, session: SessionRef) {
+  const lody = useLody();
+  const pinMutation = useLodyCommand(session, lodyCommands.sessionSetPinned);
+  void pinMutation.mutate({ pinned: true });
+  void lody.execute(session, lodyCommands.sessionUpdateTitle, {
+    title: 'Refined Title',
+  });
+  void lody.execute(workspace, lodyCommands.pinSectionCreate, {
+    name: 'Urgent Reviews',
+  });
+  // @ts-expect-error Session-scoped host commands reject WorkspaceRef targets at compile time.
+  void lody.execute(workspace, lodyCommands.sessionSettle);
 }

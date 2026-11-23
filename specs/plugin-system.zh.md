@@ -268,8 +268,11 @@ flowchart TB
 3. **脱离底层句柄、深度只读冻结与 Selector 记忆化：** 物化后的 `RawDocumentSnapshot`（`{ schemaVersion, revision, doc }`）**MUST** 与底层可变 CRDT 句柄分离并执行深度只读冻结（`Object.freeze`），一切写操作仍严格经由内核命令与 `HistoryWriter` 完成（[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)）；`useLodySnapshot(target, selector, isEqual)` 仅在 `selector(snapshot)` 变化时触发组件重渲染。
 4. **安全脱敏与一致授权：** 快照严格复用与 `lodyQueries` 相同的工作区及 E2EE 可见性门禁，并在冻结前剥离钥匙串密钥、认证令牌、E2EE KEK/签名私钥以及外部插件私有 `businessKey`。
 
-### 7.3 会话编排、幂等回执与前后端对称的通用交互结算（`respondInteraction`）
+### 7.3 共享宿主命令注册表（`lodyCommands`）、会话幂等回执与对称交互结算（`respondInteraction`）
 
+0. **第一方与插件共用的类型化宿主命令注册表（`lodyCommands` + `lody.execute` / `useLodyCommand` / `ctx.lody.execute`）：**
+   - Lody 不另建第二套仅供插件使用的命令系统，也不将原生业务变更锁死在内部 React Hook 中，而是将宿主全部业务写操作收敛为类型化 `LodyCommandDescriptor<S, TInput, TOutput>` 注册表 `lodyCommands`（完整覆盖会话执行 `sessionCreate` / `sessionSend` / `sessionRespondInteraction` / `sessionStop` / `sessionArchive` / `sessionRestore` / `sessionFork`、基于 [`status-view/command.ts`](../packages/shared/src/status-view/command.ts) `planStatusViewCommand` 与 [`use-session-actions.ts`](../packages/components/src/hooks/use-session-actions.ts) 的状态分流命令 `sessionSetPinned` / `sessionSnooze` / `sessionSettle` / `sessionMoveToFocus` / `sessionMoveOrder` / `sessionUpdateTitle` / `sessionMarkRead` / `sessionMarkUnread`、置顶分组 `pinSection*` 以及定时任务控制 `scheduleSetEnabled` / `scheduleRunNow`）。
+   - 第一方 UI 与第三方插件通过客户端 `lody.execute(target, command, input)` / `useLodyCommand` 及机器侧 `ctx.lody.execute(target, command, input)` **共用同一套授权与执行管线**（同时保留 `sessions.{create, send, respondInteraction, requestStop, requestArchive}` 作为指向 `lodyCommands.session*` 的轻量语义别名）。
 1. **原子化 `(requestId, businessKey)` `sessions.create` 幂等回执：**
    - 按 `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` 持久化。
    - 重放完全相同的归一化请求（即使目标 Session 后来已归档）始终返回原始 `SessionRef`；复用相同 `requestId` 但篡改参数时拒绝 `idempotency_conflict`。
@@ -310,7 +313,9 @@ flowchart TB
 
 ### 8.5 客户端插件实例生命周期与 `clientDigest` 幂等规则
 
-`ClientPluginHost` 按 `(workspace_id, source_key, plugin_id)` 管理实例：
+`ClientPluginHost` 严格分离 **安装实例身份（Installation Identity：`(workspace_id, source_key, plugin_id)`，其中机器侧插件 `source_key = "machine:<machine_id>"`，纯本地客户端安装为 `"local"`）** 与 **前端产物版本身份（Bundle Version Identity：`(plugin_id, clientDigest)`）**：
+
+- **安装实例身份（`(workspace_id, source_key, plugin_id)`）：** 决定该实例归属哪台来源机器、绑定哪份配置与 `query_cache` 以及默认连接哪个后端实例。同一工作区下两台机器即便安装了完全相同版本与相同 `clientDigest` 的同一插件，也各自持有独立的 `ClientPluginInstance` 而绝不串台；前端代码缓存与模块编译则按 `(plugin_id, clientDigest)` 共享去重。
 
 - 若 `clientDigest` 未变且处于 `Active`，调和过程 **MUST** 原地保留现有实例、事件监听与 `query_cache`。
 - 当 `clientDigest` 变化或执行 `disable` 时，**MUST** 先触发 `abort_controller.abort()`（摘除全部 `events.on` 与进行中查询）、执行 `cleanup_fn`、注销全部 UI/匹配器/主题贡献、移除 `<style>` 节点并清空 `query_cache`，随后才允许挂载新实例。
@@ -324,7 +329,7 @@ flowchart TB
 `PluginHost` 与 `machine` 子进程通过 `stdio: ['ignore', 'pipe', 'pipe', 'ipc']` 通信：
 
 - **Host -> Child：** `init`（`pluginId`、`instanceId`、`dataDir`、`config`）、`start`（`ready` 后派发一次以触发 `machine.onStart`）、`invoke`（`callId`、`kind`、`descriptorId`、`scope`、`target`、`input`）、`event`（`eventId`、`eventType`、`payload`、`rootUserTurnId?`）、`cancel`（`callId`）、`host_result`、`shutdown`（`graceMs`）。
-- **Child -> Host：** `ready`（`handlers`、`subscribedEvents`）、`result`（`callId`、`ok`、`data`/`error`）、`invalidate`、`host_call`（`op`: `"lody.read" | "lody.readSnapshot" | "sessions.create" | "sessions.send" | "sessions.respondInteraction" | "sessions.requestStop" | "sessions.requestArchive"`）。
+- **Child -> Host：** `ready`（`handlers`、`subscribedEvents`）、`result`（`callId`、`ok`、`data`/`error`）、`invalidate`、`host_call`（`op`: `"lody.read" | "lody.readSnapshot" | "lody.execute" | "sessions.create" | "sessions.send" | "sessions.respondInteraction" | "sessions.requestStop" | "sessions.requestArchive"`）。
 - `stdout` 与 `stderr` 仅作诊断日志写入 `logs_ring`；畸形 IPC 帧立即终止子进程并置为 `Faulted`。
 
 ### 9.2 Core 远程 `MachineRpc` 与前端产物分页流式传输
