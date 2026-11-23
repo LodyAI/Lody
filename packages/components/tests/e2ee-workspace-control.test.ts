@@ -1,3 +1,4 @@
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Result } from 'effect';
@@ -267,6 +268,7 @@ describe('encrypted workspace creation recovery', () => {
         deviceCredentialHash: 'cc'.repeat(32),
         genesisHashHex: genesisHash,
       }),
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create,
       describe: async () => result,
       history: async () => {
@@ -602,6 +604,7 @@ describe('encrypted workspace recovery classification', () => {
           user: { id: 'account', email: 'a@example.invalid', name: 'A', image: null },
         }),
         remote: {
+          deleteWorkspace: unexpectedE2eeWorkspaceOperation,
           create: () => Promise.reject(new Error('unused')),
           describe: () => Promise.resolve(descriptor as never),
           history: () => Promise.reject(new Error('unused')),
@@ -653,6 +656,7 @@ describe('saved creation requests after a server refusal', () => {
         deviceCredentialHash: 'cc'.repeat(32),
         genesisHashHex: 'bb'.repeat(32),
       }),
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw failure;
       },
@@ -723,6 +727,7 @@ it('keeps the prepared credential hash immutable before invoking the cloud creat
       deviceCredentialHash: 'cc'.repeat(32),
     }),
     remote: {
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async (input) => {
         received.push(input);
         throw new Error('synthetic temporary outage');

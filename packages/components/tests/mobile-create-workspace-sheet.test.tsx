@@ -77,7 +77,8 @@ vi.mock('../src/components/mobile/use-vertical-division', () => ({
 vi.mock('../src/hooks/useOrganization', () => ({
   useOrganization: () => ({
     createOrganization: vi.fn(),
-    deleteOrganization: async (id: string) => {
+    deleteOrganization: async (id: string, options?: { isEncrypted?: boolean }) => {
+      if (!options?.isEncrypted) throw new Error('encrypted workspace requires encrypted deletion');
       if (!state.serverWorkspaces.delete(id)) throw new Error('no such workspace');
     },
   }),

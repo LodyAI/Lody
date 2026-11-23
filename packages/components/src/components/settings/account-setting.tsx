@@ -12,6 +12,10 @@ import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import {
+  deleteAccountWorkspace,
+  hasEncryptedContentMode,
+} from '@/lib/workspace-removal-transition';
 import { usePlatform } from '@lody/platform/react';
 import { E2eeTeamSettingsHost } from './e2ee-team-settings';
 import { useCloudQuery, useCloudAction } from '@lody/platform/react';
@@ -153,11 +157,7 @@ function CloudAccountSettings({
   const currentUser = session?.user ?? null;
   const currentUserId = currentUser?.id ?? null;
   const activeOrganizationId = activeOrganization?.id;
-  const encrypted = Boolean(
-    activeOrganization &&
-    'contentMode' in activeOrganization &&
-    activeOrganization.contentMode === 'e2ee'
-  );
+  const encrypted = hasEncryptedContentMode(activeOrganization);
   const platform = usePlatform();
   const memberLimitState = useCloudQuery(
     cloudOperations.billing.getWorkspaceMemberLimitState,
@@ -694,17 +694,17 @@ function CloudAccountSettings({
 
   const handleDeleteAccount = useCallback(async () => {
     try {
-      // Per product decision, deleting your account deletes every workspace you
-      // own (including shared/team workspaces). Run the deletes in parallel.
-      // `organization.delete` is best-effort: it is only permitted for
-      // workspaces you own, so it fails harmlessly for workspaces where you are
-      // a non-owner member (those memberships are cleared when `deleteUser`
-      // removes your account below). A workspace that fails to delete must not
-      // block account deletion — removing the account is the critical step — so
-      // failures are logged, not thrown.
+      // Each service checks ownership. A refused workspace must not block account deletion.
       const ownedOrgs = organizations ?? [];
       const orgResults = await Promise.allSettled(
-        ownedOrgs.map((org) => authClient.organization.delete({ organizationId: org.id }))
+        ownedOrgs.map((org) =>
+          deleteAccountWorkspace(
+            org.id,
+            hasEncryptedContentMode(org),
+            authClient,
+            platform.e2eeWorkspaces
+          )
+        )
       );
       orgResults.forEach((result, index) => {
         if (result.status === 'rejected') {
@@ -730,7 +730,7 @@ function CloudAccountSettings({
       });
       throw error;
     }
-  }, [authClient, organizations, signOut, t]);
+  }, [authClient, organizations, platform.e2eeWorkspaces, signOut, t]);
 
   if (orgLoading) {
     return (

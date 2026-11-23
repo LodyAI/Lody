@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { File, Blob } from 'node:buffer';
 import { webcrypto } from 'node:crypto';
 import { URL as NodeURL } from 'node:url';
@@ -8,7 +9,7 @@ import { Provider, createStore } from 'jotai';
 import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createStore as createPlatformStore, type PlatformProvider } from '@lody/platform';
+import { createStore as createPlatformStore } from '@lody/platform';
 import { installAttachmentWorkspaceAccess } from '../src/lib/attachment-workspace-access';
 import {
   buildSessionTurnInputConfig,
@@ -720,7 +721,10 @@ it('preserves the original workspace draft across an unknown-mode wait and works
         started.resolve();
         return described.promise;
       },
-    } as PlatformProvider['e2eeWorkspaces'],
+      create: unexpectedE2eeWorkspaceOperation,
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
+      history: unexpectedE2eeWorkspaceOperation,
+    },
   });
   close.push(async () => remove());
   const store = await mount(f.runtime);
