@@ -5,6 +5,7 @@ import {
   nativeRoomEncryption,
   observeFlockRegisters,
   syncNativeColdRooms,
+  withNativeWriter,
 } from './native-repo';
 import { registersToBundle, type FlockExportBundle } from '../native-flock-bundle';
 
@@ -21,10 +22,12 @@ export async function commitFlockPayloads(
   const room = { kind: 'flock' as const, id: flockDocId };
   const local = nativeLocalImportOptions(client, namespace);
   for (const payload of payloads)
-    await client.importRoomState(namespace, room, {
-      ...(payload[0] === 0x7b ? { updates: [payload] } : { snapshot: payload }),
-      ...local,
-    });
+    await withNativeWriter(client, namespace, () =>
+      client.importRoomState(namespace, room, {
+        ...(payload[0] === 0x7b ? { updates: [payload] } : { snapshot: payload }),
+        ...local,
+      })
+    );
 }
 
 /** Register view of one named Flock document (creates the room if needed). */
