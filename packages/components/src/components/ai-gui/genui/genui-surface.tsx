@@ -24,7 +24,7 @@ import {
 } from '@lody/genui';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
-import { useMemo, useSyncExternalStore, type ReactNode } from 'react';
+import { Fragment, useMemo, useReducer, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { GENU_CATALOG } from './genui-catalog.js';
 
@@ -77,6 +77,8 @@ function GenuiErrorView({ diagnostics }: { diagnostics: GenuiDiagnostic[] }) {
 interface RenderContext {
   scope: Record<string, unknown>;
   diagnostics: GenuiDiagnostic[];
+  /** Event-time failures: the render that produced this callback has settled. */
+  report: (diagnostic: GenuiDiagnostic) => void;
 }
 
 function evalUiValue(value: UiValue, ctx: RenderContext): unknown {
@@ -102,7 +104,7 @@ function renderUiNode(node: UiNode, ctx: RenderContext, key: number): ReactNode 
   const renderer = GENU_CATALOG[node.tag];
   if (node.tag === '#fragment') {
     return node.children.map((child, index) => (
-      <GenuiNode key={index} node={child} ctx={ctx} index={index} />
+      <Fragment key={index}>{renderUiNode(child, ctx, index)}</Fragment>
     ));
   }
   if (!renderer) {
@@ -110,6 +112,9 @@ function renderUiNode(node: UiNode, ctx: RenderContext, key: number): ReactNode 
     return (
       <span key={key} {...stylex.props(styles.unknownTag)}>
         {`<${node.tag}>`}
+        {node.children.map((child, index) => (
+          <Fragment key={index}>{renderUiNode(child, ctx, index)}</Fragment>
+        ))}
       </span>
     );
   }
@@ -125,7 +130,7 @@ function renderUiNode(node: UiNode, ctx: RenderContext, key: number): ReactNode 
           try {
             return callValue(value, undefined, args);
           } catch (error) {
-            ctx.diagnostics.push({
+            ctx.report({
               phase: 'eval',
               message: error instanceof Error ? error.message : String(error),
             });
@@ -135,29 +140,9 @@ function renderUiNode(node: UiNode, ctx: RenderContext, key: number): ReactNode 
       : value;
   }
   const children = node.children.map((child, index) => (
-    <GenuiNode key={index} node={child} ctx={ctx} index={index} />
+    <Fragment key={index}>{renderUiNode(child, ctx, index)}</Fragment>
   ));
-  return (
-    <GenuiElement key={key} renderer={renderer} props={props}>
-      {children}
-    </GenuiElement>
-  );
-}
-
-function GenuiNode({ node, ctx, index }: { node: UiNode; ctx: RenderContext; index: number }) {
-  return <>{renderUiNode(node, ctx, index)}</>;
-}
-
-function GenuiElement({
-  renderer,
-  props,
-  children,
-}: {
-  renderer: (props: Record<string, unknown>) => ReactNode;
-  props: Record<string, unknown>;
-  children: ReactNode[];
-}) {
-  return <>{renderer({ ...props, children })}</>;
+  return renderer({ ...props, children });
 }
 
 export interface GenuiSurfaceProps {
@@ -177,10 +162,24 @@ export function GenuiSurface({ code, surfaceId, capabilities }: GenuiSurfaceProp
     [key, program]
   );
   useSyncExternalStore(surface.state.subscribe.bind(surface.state), () => surface.state.version);
+  const eventDiagnostics = useRef<GenuiDiagnostic[]>([]);
+  const [, reportEvent] = useReducer((n: number) => n + 1, 0);
+  const lastKey = useRef(key);
+  if (lastKey.current !== key) {
+    lastKey.current = key;
+    eventDiagnostics.current = [];
+  }
   const scope = surfaceScope(surface, { lody: capabilities ?? {} });
-  const ctx: RenderContext = { scope, diagnostics: [] };
+  const ctx: RenderContext = {
+    scope,
+    diagnostics: [],
+    report: (diagnostic) => {
+      eventDiagnostics.current.push(diagnostic);
+      reportEvent();
+    },
+  };
   const body = renderUiNode(surface.program.view, ctx, 0);
-  const diagnostics = [...surface.diagnostics, ...ctx.diagnostics];
+  const diagnostics = [...surface.diagnostics, ...ctx.diagnostics, ...eventDiagnostics.current];
   const fatal =
     surface.program.view.kind === 'text' && (surface.program.view.parts?.length ?? 0) === 0;
   return (
