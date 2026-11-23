@@ -177,11 +177,10 @@ export async function executeScheduleCommand(
       runtimes,
       schedule: {
         ...document,
-        prompt: requesterSessionId ? document.prompt.slice(0, 8000) : document.prompt,
         timeline: document.timeline.slice(-20),
       },
       truncated: {
-        promptCharsOmitted: requesterSessionId ? Math.max(0, document.prompt.length - 8000) : 0,
+        promptCharsOmitted: 0,
         timelineEntriesOmitted: Math.max(0, document.timeline.length - 20),
       },
       next: previewSchedule(

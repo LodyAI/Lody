@@ -762,4 +762,24 @@ describe('proposing a change to an existing schedule', () => {
     expect(describe).not.toHaveBeenCalled();
     expect(appendHistoryTurn).not.toHaveBeenCalled();
   });
+
+  it('returns prompts longer than 8000 characters in full when reading one schedule via MCP', async () => {
+    const h = await fixture();
+    const longPrompt = 'a'.repeat(12_000);
+    await h.repository.save({
+      scheduleId: 'schedule',
+      draft: { ...h.draft, prompt: longPrompt },
+      actorId: 'owner',
+      now: 2,
+      activationId: 'long',
+      activityId: 'edit-long',
+    });
+    h.context.requesterSessionId = 'session' as never;
+    const shown = (await executeScheduleCommand(h.context, {
+      action: 'show',
+      scheduleId: 'schedule',
+    })) as { schedule: { prompt: string }; truncated: { promptCharsOmitted: number } };
+    expect(shown.schedule.prompt).toBe(longPrompt);
+    expect(shown.truncated.promptCharsOmitted).toBe(0);
+  });
 });
