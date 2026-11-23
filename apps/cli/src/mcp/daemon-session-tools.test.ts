@@ -2558,6 +2558,27 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(missingModelResult.isError).toBe(true);
     expect(JSON.parse(missingModelResult.content[0]?.text ?? '{}')).toMatchObject({
       ok: false,
+      error: { code: 'COMMAND_REJECTED', retryable: false },
+    });
+
+    const unprobedAgentConfigId = await manager.createAgentConfig(
+      'builtin',
+      'codex',
+      machineId,
+      'Unprobed Codex'
+    );
+    const unprobedModelResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_create', {
+        operationId: 'local-cloud-create-unprobed-model',
+        prompt: 'start with unprobed model',
+        agentConfigId: unprobedAgentConfigId,
+        modelId: 'unseen-model-next',
+        useCurrentSessionAsParent: true,
+      })
+    );
+    expect(unprobedModelResult.isError).toBe(true);
+    expect(JSON.parse(unprobedModelResult.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
       error: { code: 'SYNC_UNAVAILABLE', retryable: true },
     });
 

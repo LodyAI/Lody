@@ -43,7 +43,7 @@ struct LodyLiveActivityPermissionResponseIntent: LiveActivityIntent {
             throw LodyLiveActivityPermissionIntentError.invalidAction
         }
         await updatePermissionActivities(responseState: .sending)
-        guard let configuration = LodyLiveActivityPermissionActionStore.configuration() else {
+        guard let configuration = LodyLiveActivityPermissionActionStore.permissionActionConfiguration() else {
             await updatePermissionActivities(responseState: .failed)
             return .result()
         }

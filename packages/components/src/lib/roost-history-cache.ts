@@ -74,7 +74,10 @@ export function parseRoostCacheCursor(
     : undefined;
 }
 
-export function createRoostHistoryCache(scope: string) {
+export const roostHistoryDatabase = (namespace?: string) =>
+  namespace ? `${ROOST_HISTORY_CACHE_DB}:${namespace}` : ROOST_HISTORY_CACHE_DB;
+
+export function createRoostHistoryCache(scope: string, namespace?: string) {
   let opening: Promise<IDBDatabase> | undefined;
   let disposed = false;
   const open = () => {
@@ -82,7 +85,7 @@ export function createRoostHistoryCache(scope: string) {
     if (!opening) {
       opening = new Promise<IDBDatabase>((resolve, reject) => {
         let blocked = false;
-        const request = indexedDB.open(ROOST_HISTORY_CACHE_DB, 1);
+        const request = indexedDB.open(roostHistoryDatabase(namespace), 1);
         request.onupgradeneeded = () => {
           const db = request.result;
           db.createObjectStore(HEADS);
@@ -100,7 +103,8 @@ export function createRoostHistoryCache(scope: string) {
             db.close();
             reject(new Error('History cache is disposed'));
           } else {
-            db.onversionchange = () => {
+            db.onversionchange = (event) => {
+              if (namespace && event.newVersion === null) disposed = true;
               db.close();
               opening = undefined;
             };

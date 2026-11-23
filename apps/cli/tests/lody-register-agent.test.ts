@@ -541,7 +541,7 @@ describe('Lody.registerAgent', () => {
 
 describe('Lody workspace cloud-port composition', () => {
   it.each([undefined, 'plaintext', 'e2ee'] as const)(
-    'uses host Git credentials only in encrypted workspaces (mode=%s)',
+    'retains account GitHub credentials without hosted PR linkage (mode=%s)',
     async (contentMode) => {
       const directory = mkdtempSync(join(tmpdir(), 'lody-execution-composition-'));
       const hostedTokenManager = {
@@ -604,18 +604,24 @@ describe('Lody workspace cloud-port composition', () => {
         }
 
         // Invoke Lody's production factory and the real SessionManager policy
-        // method: a null broker means agent git/gh uses the host credentials.
+        // method: encrypted personal identity represents only this account.
         const sessions = runtime.sessionManagerFactory();
         expect(await sessions.resolveGitIdentityOptions('user-1')).toEqual({
           preferMachineIdentity: true,
-          personalIdentityEnabled: contentMode !== 'e2ee',
+          personalIdentityEnabled: true,
+          personalIdentity: undefined,
         });
         expect(runtime.handlerConfig.cloudPort?.githubTokens).toBe(
-          contentMode === 'e2ee' ? null : cloudPort.githubTokens
+          lody.options.cloudPort.githubTokens
         );
-        expect(lody.options.cloudPort.githubTokens).toBe(
-          contentMode === 'e2ee' ? null : cloudPort.githubTokens
-        );
+        if (contentMode === 'e2ee') {
+          expect(lody.options.cloudPort.prAssociation).toBeNull();
+          expect(await sessions.resolveGitIdentityOptions('another-user')).toMatchObject({
+            personalIdentityEnabled: false,
+          });
+        } else {
+          expect(lody.options.cloudPort.githubTokens).toBe(cloudPort.githubTokens);
+        }
       } finally {
         rmSync(directory, { recursive: true, force: true });
         native.mockRestore();

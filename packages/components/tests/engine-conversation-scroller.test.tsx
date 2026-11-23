@@ -487,10 +487,6 @@ it('returns to following with the handle and keeps the latest row on screen as i
   }
 });
 
-// ---- Reader input -----------------------------------------------------------
-// Real events on the mounted DOM; the observable result is the mode (the
-// sticky state) and whether new rows at the end move the viewport.
-
 const BOTTOM = (count: number) => count * ROW - VIEWPORT;
 
 /** Append two rows; a following viewport moves to the new end, a reading one stays. */
@@ -1004,5 +1000,59 @@ it('a hidden tab reports no offset, so a view feeding it back cannot loop; shown
     expect(ctx.scrolls.at(-1)).toBe(ctx.harness.scrollTop);
   } finally {
     unmount(ctx);
+  }
+});
+
+it('persists disclosure reply room across unmount and remount, and shrinks it once content grows', async () => {
+  const sessionId = 'engine-disclosure-remount' as SessionId;
+  const keys = rowKeys(30);
+  const first = mount(sessionId, keys, undefined, {
+    disclosure: { key: 'r29', headerOffset: 0, headerHeight: 20 },
+  });
+  let headerTop = 0;
+  try {
+    await first.settle();
+    act(() => first.handle.current?.anchorToRow(28));
+    await first.settle();
+    const button = first
+      .viewport()
+      .querySelector<HTMLButtonElement>('[data-conversation-disclosure]')!;
+    headerTop = button.getBoundingClientRect().top;
+    act(() => button.click());
+    await first.settle();
+    expect(button.getBoundingClientRect().top).toBe(headerTop);
+    expect(first.state.current?.isSticky).toBe(false);
+  } finally {
+    unmount(first);
+  }
+
+  const second = mount(sessionId, keys, undefined, {
+    disclosure: { key: 'r29', headerOffset: 0, headerHeight: 20 },
+  });
+  try {
+    await second.settle();
+    expect(screenTopOf(second, 'r29')).toBe(headerTop);
+    expect(
+      parseFloat(
+        second.viewport().querySelector<HTMLElement>('[data-conversation-reply-room]')?.style
+          .height ?? '0'
+      )
+    ).toBeGreaterThan(0);
+  } finally {
+    unmount(second);
+  }
+
+  const grownKeys = [...keys, 'r30', 'r31', 'r32', 'r33', 'r34', 'r35', 'r36', 'r37'];
+  const third = mount(sessionId, grownKeys, undefined, {
+    disclosure: { key: 'r29', headerOffset: 0, headerHeight: 20 },
+  });
+  try {
+    await third.settle();
+    expect(screenTopOf(third, 'r29')).toBe(headerTop);
+    expect(
+      third.viewport().querySelector<HTMLElement>('[data-conversation-reply-room]')?.style.height
+    ).toBe('0px');
+  } finally {
+    unmount(third);
   }
 });

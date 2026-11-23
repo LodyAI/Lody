@@ -805,10 +805,15 @@ describe('Fleet PR observation composition', () => {
       });
       Object.defineProperties(cloud, {
         githubTokens: {
-          get: () => {
-            if (encrypted)
-              throw new Error('encrypted metadata must not acquire hosted credentials');
-            return null;
+          value: {
+            createTokenManager: () => ({
+              getWriteTokenInfoForRepo: async () => ({
+                token: 'synthetic-operation-token',
+                tokenSource: 'app',
+                rateLimitScope: 'github:installation:7',
+              }),
+              shutdown: async () => {},
+            }),
           },
         },
         prAssociation: {
@@ -896,7 +901,14 @@ describe('Fleet PR observation composition', () => {
           encrypted ? undefined : cloud.remoteAutomation?.verifyControl
         );
         if (encrypted) {
-          expect(runtime?.prPollerWorkspace).toBeNull();
+          expect(runtime?.prPollerWorkspace?.associatePullRequest).toBeNull();
+          await expect(
+            runtime?.prPollerWorkspace?.resolveCredential('synthetic/repo')
+          ).resolves.toEqual({
+            token: 'synthetic-operation-token',
+            source: 'managed',
+            credentialScope: 'github:installation:7',
+          });
           expect(requests).toEqual([]);
         } else {
           expect(

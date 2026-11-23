@@ -42,6 +42,7 @@ function toTypeArray(dataTransfer: DragTypes | null | undefined): string[] {
 }
 
 let inFlightSessionId: string | null = null;
+let inFlightPreviewOffsetX: number | null = null;
 const inFlightListeners = new Set<() => void>();
 let dragEndBound = false;
 
@@ -77,6 +78,15 @@ export function getInFlightSessionMentionDragId(): string | null {
 }
 
 /**
+ * Pointer x minus the drag preview's left edge, when the source knows it.
+ * Today aims a drop's depth with the preview's left edge, where the user sees
+ * the dragged row, rather than with the pointer somewhere inside it.
+ */
+export function getInFlightSessionMentionPreviewOffsetX(): number | null {
+  return inFlightSessionId ? inFlightPreviewOffsetX : null;
+}
+
+/**
  * Marks the conversation column that accepts a session-mention drop.
  *
  * Tab-strip drags use dnd-kit (no HTML5 `dataTransfer`), so drop detection
@@ -101,7 +111,8 @@ let stopPointerHover: (() => void) | null = null;
  * caller must clear (`clearSessionMentionDrag`) on drag end/cancel — there is
  * no `dragend`.
  */
-export function armSessionMentionDrag(sessionId: string): void {
+export function armSessionMentionDrag(sessionId: string, previewOffsetX?: number): void {
+  inFlightPreviewOffsetX = previewOffsetX ?? null;
   setInFlightSessionId(sessionId);
   if (stopPointerHover || typeof window === 'undefined') return;
   const move = (event: PointerEvent) => {
@@ -126,6 +137,7 @@ export function clearSessionMentionDrag(): void {
   hoveredPointerTarget?.leave?.();
   hoveredPointerTarget = null;
   unbindWindowDragEnd();
+  inFlightPreviewOffsetX = null;
   setInFlightSessionId(null);
 }
 
@@ -137,7 +149,12 @@ export function clearSessionMentionDrag(): void {
  * without it the browser starts its own link drag and never reaches this.
  */
 export function startSessionMentionDrag(
-  event: { dataTransfer: Pick<DataTransfer, 'setData' | 'effectAllowed'> | null },
+  event: {
+    dataTransfer: Pick<DataTransfer, 'setData' | 'effectAllowed'> | null;
+    /** With `currentTarget`, the row the browser snapshots as the drag image. */
+    clientX?: number;
+    currentTarget?: EventTarget | null;
+  },
   payload: SessionMentionDragPayload
 ): void {
   const dataTransfer = event.dataTransfer;
@@ -148,6 +165,10 @@ export function startSessionMentionDrag(
   dataTransfer.setData(`${SESSION_MENTION_DRAG_ID_PREFIX}${payload.sessionId.toLowerCase()}`, '');
   // A drop outside any of our surfaces still leaves something readable behind.
   dataTransfer.setData('text/plain', payload.title?.trim() || payload.sessionId);
+  inFlightPreviewOffsetX =
+    event.clientX !== undefined && event.currentTarget instanceof Element
+      ? event.clientX - event.currentTarget.getBoundingClientRect().left
+      : null;
   setInFlightSessionId(payload.sessionId);
   bindWindowDragEnd();
 }

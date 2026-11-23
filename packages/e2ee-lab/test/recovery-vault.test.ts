@@ -587,7 +587,11 @@ describe('encrypted recovery vault and genuine workflow', () => {
               assertion: prf,
               label: 'Synthetic passkey',
             });
-            const reopened = yield* openRecoveryVault({ recoveryFile, ...storage }),
+            const reopened = yield* openRecoveryVault({
+                recoveryFile,
+                locator: vault.locator,
+                ...storage,
+              }),
               fromPrf = yield* openRecoveryVaultWithPasskey({
                 vaultId: vault.vaultId,
                 locator: vault.locator,
@@ -839,6 +843,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
                 local = yield* sqliteRecoveryVaultLocalStore({ path: journal, mode: 'open' });
               const reopened = yield* openRecoveryVault({
                 recoveryFile: created.recoveryFile,
+                locator: 'https://synthetic.invalid/vault',
                 store: storage.store,
                 local,
               });
@@ -2100,6 +2105,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
               }),
               second = yield* openRecoveryVault({
                 recoveryFile: created.recoveryFile,
+                locator: created.vault.locator,
                 store: cloud.store,
                 local: other.local,
               });
@@ -2251,6 +2257,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
             };
             const pendingSession = yield* openRecoveryVault({
               recoveryFile: created.recoveryFile,
+              locator: created.vault.locator,
               store: port,
               local: storage.local,
             });

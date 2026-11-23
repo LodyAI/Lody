@@ -72,6 +72,10 @@ export function mobilePersonalHost(
   };
   const entry = personalEntry({
     run,
+    remoteMachineEndpoints: {
+      deploymentUrl: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
+      ingressUrl: import.meta.env.VITE_SERVER_URL ?? '',
+    },
     ...(iroh ? { iroh: true } : {}),
     pins: personalEntryPins('lody-e2ee:mobile:v1:entry-pins'),
     ports: (input) => {

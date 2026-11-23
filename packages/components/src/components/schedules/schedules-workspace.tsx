@@ -1,6 +1,6 @@
+import { useGithubWorkspaceQuery } from '@/hooks/use-github-workspace';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { ScheduleMentionForm } from './schedule-mention-form';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
@@ -707,7 +707,7 @@ function ScheduleEditor({
   const agents = useAtomValue(getAllAgentConfigAtom) as AgentConfigMeta[];
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const local = useVisibleLocalProjects({ includeMachineFlock: true });
-  const repos = useLegacyWorkspaceQuery(
+  const repos = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     runtime ? { workspaceId: runtime.workspaceId } : 'skip'
   ) as { repoFullName?: string; fullName?: string }[] | null | undefined;

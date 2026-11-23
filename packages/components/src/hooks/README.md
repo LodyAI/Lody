@@ -345,7 +345,11 @@ snapshot. Permission candidates only accelerate that snapshot; they never add an
 alert. Ordinary Push owns reminders. The previous alert-key Set and early return
 were removed because they both duplicated reminders and froze other conversations
 while one request was pending. The optional bridge alert field remains for legacy
-native clients, but this hook never sends it.
+native clients, but this hook never sends it. GA permits notification summaries from admitted
+E2EE workspaces through push providers. Both renderer and CLI remove permission request IDs
+from those summaries so taps open the session for signed in-App approval. Native HTTP
+approval is disabled for E2EE; token registration retains its independent authentication.
+Home Screen widget publication remains plaintext-only.
 
 `iosLiveActivitiesEnabledAtom` defaults to true, so without the native-shell check
 every desktop build would rebuild a summary it can never show. The activity id is

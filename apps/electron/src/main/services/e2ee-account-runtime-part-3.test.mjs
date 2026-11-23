@@ -127,7 +127,7 @@ void test(
   async () => {
     // keyRound never settles until keyGate opens: the approval must not wait for it.
     const f = await memberApprovalFixture()
-    const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+    const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'explicit')
     assert.deepEqual(plain(approved), {
       admitted: true,
       keyPending: true,
@@ -424,7 +424,7 @@ void test(
     const f = await memberApprovalFixture(() => outcomes.shift() ?? Effect.die('unexpected round'))
     let now = 1_000
     f.ipc.keyDeliveryNow = () => now
-    const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+    const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'explicit')
     assert.equal(approved.admitted, true)
     await f.ipc.keyDeliveryIdle('A', 'team')
     const failed = [{ requestId: approvalRequest, state: 'failed', code: 'e2ee_management_retry' }]
@@ -435,7 +435,7 @@ void test(
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), failed)
     assert.equal(outcomes.length, 1)
     now += KEY_DELIVERY_RETRY_DELAYS[0]
-    // The email admission worker's next poll drives the due retry.
+    // The next member-requests poll drives the due retry.
     await f.ipc.memberJoinRequests('team')
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
@@ -461,7 +461,7 @@ void test(
     )
     let now = 1_000
     f.ipc.keyDeliveryNow = () => now
-    const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+    const approved = await f.ipc.approveMemberJoin('team', approvalRequest, 'explicit')
     assert.equal(approved.admitted, true)
     await f.ipc.keyDeliveryIdle('A', 'team')
     const lagging = plain((await f.ipc.memberKeyDeliveries('team')).items)
@@ -509,7 +509,7 @@ for (const [name, nested] of [
       )
       let now = 1_000
       f.ipc.keyDeliveryNow = () => now
-      await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+      await f.ipc.approveMemberJoin('team', approvalRequest, 'explicit')
       await f.ipc.keyDeliveryIdle('A', 'team')
       assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [])
       now += 10 * 60_000
@@ -528,7 +528,7 @@ void test(
     const f = await memberApprovalFixture(() => Effect.void, ledger)
     let now = 1_000
     f.ipc.keyDeliveryNow = () => now
-    await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+    await f.ipc.approveMemberJoin('team', approvalRequest, 'explicit')
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
       { requestId: approvalRequest, state: 'failed', code: 'e2ee_key_not_sent' }
@@ -561,7 +561,7 @@ void test(
     const f = await memberApprovalFixture(() => outcomes.shift() ?? Effect.die('unexpected round'))
     let now = 1_000
     f.ipc.keyDeliveryNow = () => now
-    await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+    await f.ipc.approveMemberJoin('team', approvalRequest, 'explicit')
     await f.ipc.keyDeliveryIdle('A', 'team')
     const [closed] = plain((await f.ipc.memberKeyDeliveries('team')).items)
     assert.equal(closed.state, 'failed')
@@ -593,7 +593,7 @@ void test(
         throw new Error('synthetic log sink failure')
       }
     }
-    await f.ipc.approveMemberJoin('team', approvalRequest, 'automatic')
+    await f.ipc.approveMemberJoin('team', approvalRequest, 'explicit')
     await f.ipc.keyDeliveryIdle('A', 'team')
     assert.deepEqual(plain((await f.ipc.memberKeyDeliveries('team')).items), [
       { requestId: approvalRequest, state: 'failed', code: 'e2ee_key_delivery_interrupted' }
@@ -1059,7 +1059,7 @@ void test(
     await f.approver.open('team')
     const submitted = await f.submit()
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, true)
     const trail = f.logs.map(([event, fields]) => `${event}:${fields.state}:${fields.phase ?? ''}`)
@@ -1075,7 +1075,7 @@ void test(
 )
 
 void test(
-  'a relay-forged email request is never admitted unattended and waits for explicit approval',
+  'email join requests always refuse unattended automatic mode and wait for explicit approval',
   { timeout: 30_000 },
   async (t) => {
     const f = await twoDeviceMemberJoin(t)
@@ -1085,22 +1085,21 @@ void test(
     const stored = f.requests.get(submitted.requestId)
     const genuine = stored.offer
     const before = f.records.length
-    // `source: 'email'` alone, an invitation signed by the relay's own key, and a genuine
-    // signature over different pins: none is an invitation this approver can verify.
-    for (const [forged, refusal] of [
-      [undefined, /e2ee_member_invitation_invalid/],
-      // Verifies under the relay's own key, which the ledger never admitted.
-      [relaySignedOffer(genuine), /e2ee_member_invitation_endorser_ineligible/],
-      [{ ...genuine, expiresAt: genuine.expiresAt - 1 }, /e2ee_member_invitation_invalid/]
+    // Neither forged invitations nor a genuine signed email offer can bypass explicit approval.
+    for (const candidate of [
+      undefined,
+      relaySignedOffer(genuine),
+      { ...genuine, expiresAt: genuine.expiresAt - 1 },
+      genuine
     ]) {
-      stored.offer = forged
+      stored.offer = candidate
       await assert.rejects(
         f.approver.approveMemberJoin('team', submitted.requestId, 'automatic'),
-        refusal
+        /e2ee_invalid-input/
       )
       assert.equal(f.records.length, before)
     }
-    // The applicant stays listed, and an administrator's explicit approval still admits it.
+    // The applicant stays listed, and an administrator's explicit approval admits it.
     assert.equal(
       JSON.stringify(
         (await f.approver.memberJoinRequests('team')).items.map((item) => item.requestId)
@@ -1116,14 +1115,14 @@ void test(
 )
 
 void test(
-  'an email invitation admits one applicant: another account presenting its token is refused as used',
+  'an email invitation admits one applicant: another account presenting its token is refused',
   { timeout: 30_000 },
   async (t) => {
     const f = await twoDeviceMemberJoin(t)
     await f.approver.open('team')
     const first = await f.submit()
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', first.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     const before = f.records.length
     // The relay replays the same invitation for another account's keys.
@@ -1131,55 +1130,11 @@ void test(
     assert.equal(other.submitted.requestId, first.requestId)
     await assert.rejects(
       f.approver.approveMemberJoin('team', other.submitted.requestId, 'automatic'),
-      /e2ee_member_invitation_used/
+      /e2ee_invalid-input/
     )
-    assert.equal(f.records.length, before)
-  }
-)
-
-void test(
-  'invitations from an admin who was later demoted are no longer admitted unattended',
-  { timeout: 40_000 },
-  async (t) => {
-    const f = await twoDeviceMemberJoin(t)
-    await f.approver.open('team')
-    const admin = await f.submit()
-    await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', admin.requestId, 'automatic')
-    await f.approver.keyDeliveryIdle('acc1', 'team')
-    assert.equal((await f.joiner.claimMemberJoin('team', admin.requestId)).ready, true)
-    await f.joiner.memberSettleIdle('member', 'team')
-    await f.approver.setMemberRole('team', admin.requestId, 'admin')
-    await f.joiner.open('team')
-    await f.joiner.refresh('team', { keyMode: 'none' })
-    const mint = async () => {
-      const minted = await f.memberApi.withDesktopE2eeAccount(
-        (account) => account.host.memberOffer('team', 'email', 9_000_000_000_000),
-        'team',
-        false
-      )
-      f.offers.set(minted.token, minted)
-      return minted
-    }
-    const early = await mint()
-    const late = await mint()
-    // While the endorser is an admin its invitation is admitted unattended.
-    const accepted = await f.addMember('acc3', 3, early)
-    await f.approver.memberJoinRequests('team')
-    assert.equal(
-      (await f.approver.approveMemberJoin('team', accepted.submitted.requestId, 'automatic'))
-        .admitted,
-      true
-    )
-    await f.approver.keyDeliveryIdle('acc1', 'team')
-    await f.approver.setMemberRole('team', admin.requestId, 'member')
-    const waiting = await f.addMember('acc4', 4, late)
-    // Listed and pinned like any applicant: only the endorser's current role refuses it.
-    await f.approver.memberJoinRequests('team')
-    const before = f.records.length
     await assert.rejects(
-      f.approver.approveMemberJoin('team', waiting.submitted.requestId, 'automatic'),
-      /e2ee_member_invitation_endorser_ineligible/
+      f.approver.approveMemberJoin('team', other.submitted.requestId, 'explicit'),
+      /e2ee_conflict/
     )
     assert.equal(f.records.length, before)
   }
@@ -1378,7 +1333,7 @@ void test(
     held = deferredMember()
     reachedPut = deferredMember()
     const approvalStart = calls.owner.length
-    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'explicit')
     await reachedPut.promise
     const approval = calls.owner.slice(approvalStart)
     const toPut = approval.length - approval.lastIndexOf('memberRead') - 1
@@ -1484,7 +1439,7 @@ void test(
     const submitted = await f.submit()
     await f.approver.memberJoinRequests('team')
     held = deferredMember()
-    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'explicit')
     // Accepted locally while the epoch 0 envelope is still on its way.
     assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
     const release = held
@@ -1495,7 +1450,7 @@ void test(
     // required rotation publishes epoch 1.
     const other = await f.addMember('thr', 3)
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', other.submitted.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', other.submitted.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     await f.approver.removeMember('team', other.submitted.requestId)
     await f.approver.updateKeys('team')
@@ -1557,7 +1512,7 @@ void test(
     const submitted = await f.submit()
     await f.approver.memberJoinRequests('team')
     held = deferredMember()
-    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'explicit')
     assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
     held.resolve()
     held = undefined
@@ -1581,7 +1536,7 @@ void test(
     await f.approver.open('team')
     const submitted = await f.submit()
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, true)
     await f.joiner.memberSettleIdle('member', 'team')
@@ -1626,7 +1581,7 @@ void test(
     await f.approver.open('team')
     const first = await f.submit()
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', first.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
     await f.joiner.memberSettleIdle('member', 'team')
@@ -1659,7 +1614,7 @@ void test(
     await f.approver.open('team')
     const first = await f.submit()
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', first.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
     await f.joiner.memberSettleIdle('member', 'team')
@@ -1695,7 +1650,7 @@ void test(
     await f.approver.open('team')
     const first = await f.submit()
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', first.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
     await f.joiner.memberSettleIdle('member', 'team')
@@ -1725,7 +1680,7 @@ void test(
     await f.approver.open('team')
     const first = await f.submit()
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', first.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
     await f.joiner.memberSettleIdle('member', 'team')

@@ -59,10 +59,7 @@ const styles = stylex.create({
     fontSize: '11px',
     fontWeight: themeFontWeight.medium,
     lineHeight: 1,
-    color: {
-      default: themeColors.destructive,
-      [DARK_SCOPE]: 'hsl(var(--destructive-foreground) / 1)',
-    },
+    color: themeColors.destructive,
     boxShadow: themeShadow.xs,
     transitionProperty: 'none',
   },
@@ -73,7 +70,6 @@ const styles = stylex.create({
     color: {
       default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
       ':hover': themeColors.sidebarForeground,
-      [DARK_SCOPE]: 'hsl(var(--destructive-foreground) / 1)',
     },
     transitionProperty: 'opacity, color, background-color, border-color, width',
     transitionDuration: themeDuration[100],

@@ -17,10 +17,6 @@ import {
   memberInvitationUrl,
 } from '../src/components/settings/e2ee-team-settings';
 import {
-  E2eeTeamInboxHost,
-  startEmailAdmissionWorker,
-} from '../src/components/e2ee/email-admission-worker';
-import {
   desktopMemberJoinLink,
   memberJoinPath,
   parseMemberOffer,
@@ -105,58 +101,6 @@ describe('encrypted team joining', () => {
   };
   const button = (key: string) =>
     [...container.querySelectorAll('button')].find((item) => item.textContent === key)!;
-  it('automatically admits only accepted emails, isolates one failure and stops late work', async () => {
-    const states = new Map([
-      ['bad', 'pending'],
-      ['email', 'pending'],
-      ['link', 'pending'],
-    ]);
-    const stop = startEmailAdmissionWorker(
-      {
-        status: async () => status,
-        memberJoinRequests: async () => ({
-          ...empty,
-          items: [
-            application('bad', 'email'),
-            application('email', 'email'),
-            application('link', 'link'),
-          ],
-        }),
-        approveMemberJoin: async (_workspace, id, mode) => {
-          expect(mode).toBe('automatic');
-          if (id === 'bad') throw new Error('offline');
-          states.set(id, 'committed');
-          return { admitted: true, keyPending: true };
-        },
-      },
-      'team'
-    );
-    await settle();
-    expect([...states]).toEqual([
-      ['bad', 'pending'],
-      ['email', 'committed'],
-      ['link', 'pending'],
-    ]);
-    stop();
-    const pending = deferred<E2eeMemberReplies['pending']>();
-    const stopLate = startEmailAdmissionWorker(
-      {
-        status: async () => status,
-        memberJoinRequests: () => pending.promise,
-        approveMemberJoin: async (_workspace, id) => {
-          states.set(id, 'committed');
-          return { admitted: true, keyPending: true };
-        },
-      },
-      'team'
-    );
-    await settle();
-    stopLate();
-    pending.resolve({ ...empty, items: [application('link', 'email')] });
-    await settle();
-    expect(states.get('link')).toBe('pending');
-    expect(vi.getTimerCount()).toBe(0);
-  });
   it('recovers the saved original after expiry and separates membership from key readiness', async () => {
     let installed = false;
     const runtime = {
@@ -475,40 +419,9 @@ describe('encrypted team joining', () => {
     const cost = container.querySelector('[data-testid="e2ee-join-approve-cost"]');
     expect(cost?.textContent).toBe('e2ee.team.approveCost');
   });
-  it('shows why an email request needs a manual approval after the host refuses automatic admission', async () => {
-    let items = [
-      application('demoted', 'email'),
-      application('expired', 'email'),
-      application('offline', 'email'),
-      application('fresh', 'email'),
-    ];
-    const attempts: string[] = [];
-    const runtime = {
-      status: async () => status,
-      memberJoinRequests: async () => ({ ...empty, items }),
-      approveMemberJoin: async (_workspace: string, id: string) => {
-        attempts.push(id);
-        // Portable hosts fail with a typed code; desktop rejections arrive through IPC.
-        if (id === 'demoted')
-          throw Object.assign(new Error('refused'), {
-            _tag: 'PersonalHostError',
-            code: 'invitation-endorser-ineligible',
-          });
-        if (id === 'expired')
-          throw new Error(
-            "Error invoking remote method 'e2ee:approveMemberJoin': Error: e2ee_member_invitation_expired"
-          );
-        // A transient failure is not a refusal.
-        throw new Error(
-          "Error invoking remote method 'e2ee:approveMemberJoin': Error: e2ee_network"
-        );
-      },
-    };
-    const stop = startEmailAdmissionWorker(runtime, 'refused-team');
-    await settle();
-    stop();
-    // Each request was tried once in this round; recording a refusal adds no retry.
-    expect(attempts).toEqual(['demoted', 'expired', 'offline', 'fresh']);
+  it('requires explicit manual approval for both email and link join requests and keeps invitation warnings', async () => {
+    const emailOffer = { ...offer, mode: 'email' as const };
+    const approvals: Array<[string, string, 'automatic' | 'explicit']> = [];
     let created: Promise<unknown> = Promise.resolve();
     await render(
       <E2eeTeamSettings
@@ -524,35 +437,40 @@ describe('encrypted team joining', () => {
           },
           memberJoinRequests: async () => ({
             ...empty,
-            items: [...items, application('waiting', 'email')],
+            items: [application('email-req', 'email'), application('link-req', 'link')],
             invitations: [
               { ...offer, mode: 'email', needsReissue: true, email: 'legacy@synthetic.test' },
             ],
           }),
-          approveMemberJoin: async () => ({ admitted: true, keyPending: true }),
+          approveMemberJoin: async (workspace, id, mode) => {
+            approvals.push([workspace, id, mode]);
+            return { admitted: true, keyPending: true };
+          },
           rejectMemberJoin: async () => ({ state: 'rejected' }),
           revokeMemberInvitation: async () => ({ revoked: true }),
         }}
       />
     );
+    await settle();
     const mode = (id: string) =>
       container.querySelector(`[data-request-id="${id}"] [data-testid="e2ee-join-admission-mode"]`)
         ?.textContent;
-    expect(mode('demoted')).toBe('e2ee.team.automaticRefused:invitation-endorser-ineligible');
-    expect(mode('expired')).toBe('e2ee.team.automaticRefused:e2ee_member_invitation_expired');
-    // Offline and not yet attempted requests are still shown as automatic.
-    expect(mode('offline')).toBe('e2ee.team.automatic');
-    expect(mode('waiting')).toBe('e2ee.team.automatic');
     const action = (id: string) =>
-      container.querySelector(`[data-testid="e2ee-join-approve"][data-request-id="${id}"]`)
-        ?.textContent;
-    expect(action('demoted')).toBe('e2ee.team.approve');
-    expect(action('waiting')).toBe('e2ee.team.continueAdmission');
-    // An unsigned email invitation shows its address, is marked for re-sending and stays
-    // revocable.
+      container.querySelector<HTMLButtonElement>(
+        `[data-testid="e2ee-join-approve"][data-request-id="${id}"]`
+      )!;
+    expect(mode('email-req')).toBe('e2ee.team.approvalRequired');
+    expect(mode('link-req')).toBe('e2ee.team.approvalRequired');
+    expect(action('email-req').textContent).toBe('e2ee.team.approve');
+    expect(action('link-req').textContent).toBe('e2ee.team.approve');
+    // Unsigned email invitation shows its address, is marked for re-sending and stays revocable.
     expect(container.textContent).toContain('legacy@synthetic.test');
     expect(container.textContent).toContain('e2ee.team.invitationNeedsReissue');
     expect(button('e2ee.team.revoke')).toBeTruthy();
+    // Clicking approve on the email request sends explicit mode.
+    await act(async () => action('email-req').click());
+    await settle();
+    expect(approvals).toEqual([['refused-team', 'email-req', 'explicit']]);
     // Inviting while that email's earlier applicant is still waiting says what to do.
     const input = container.querySelector('input[type="email"]') as HTMLInputElement;
     await act(async () => {
@@ -566,17 +484,27 @@ describe('encrypted team joining', () => {
     await settle();
     await created.catch(() => {});
     expect(container.textContent).toContain('e2ee.team.invitationRequestPending');
-    // A request that is no longer listed loses its refusal.
-    items = items.filter((item) => item.requestId !== 'demoted');
-    const prune = startEmailAdmissionWorker(runtime, 'refused-team');
+    // Invitee waiting on an email invitation sees the explicit approval wait copy.
+    await render(
+      <E2eeMemberJoin
+        offer={emailOffer}
+        runtime={{
+          pendingMemberJoin: async () => ({ offer: emailOffer, requestId: 'email-req' }),
+          prepareMemberJoin: async () => ({ offer: emailOffer, requestId: 'email-req', state: 'pending' }),
+          claimMemberJoin: async () => ({ state: 'pending', ready: false }),
+        }}
+        accountId="account"
+        emailVerified
+        preview={{ status: 'unavailable' }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={() => {}}
+        onWorkspaceRequested={() => {}}
+        onHomeRequested={() => {}}
+      />
+    );
     await settle();
-    prune();
-    await act(async () => vi.advanceTimersByTime(10_000));
-    await settle();
-    items = [...items, application('demoted', 'email')];
-    await act(async () => vi.advanceTimersByTime(10_000));
-    await settle();
-    expect(mode('demoted')).toBe('e2ee.team.automatic');
+    expect(container.textContent).toContain('e2ee.team.waitingApproval');
+    expect(container.textContent).not.toContain('e2ee.team.waitingAdminDevice');
   });
   it('says a full free workspace cannot admit more members instead of signing a refused approval', async () => {
     const approved: string[] = [];
@@ -608,24 +536,6 @@ describe('encrypted team joining', () => {
       '[data-testid="e2ee-join-approve"]'
     )!;
     expect(approve.disabled).toBe(true);
-    // A full workspace never signs an admission automatically either.
-    const stop = startEmailAdmissionWorker(
-      {
-        status: async () => status,
-        memberJoinRequests: async () => ({
-          ...empty,
-          items: [{ ...application('emailed', 'email'), memberLimitReached: true }],
-        }),
-        approveMemberJoin: async (_workspace, id) => {
-          approved.push(id);
-          return { admitted: true, keyPending: true };
-        },
-      },
-      'team'
-    );
-    await settle();
-    stop();
-    expect(approved).toEqual([]);
 
     full = false;
     await render(<E2eeTeamSettings key="later" workspaceId="team" runtime={runtime} />);
@@ -717,43 +627,6 @@ describe('encrypted team joining', () => {
     await act(async () => vi.advanceTimersByTime(10_000));
     await settle();
     expect(row()).toBeNull();
-  });
-  it('recovers online manager qualification after an initial failed refresh and releases each owned background reader', async () => {
-    let role = 'member',
-      attempts = 0,
-      readers = 0,
-      admitted = false;
-    const runtime = {
-      open: async (_workspace: string, _observed: unknown, account: string) => {
-        expect(account).toBe('account');
-        readers++;
-        return { ...status, readerOwner: 'original' };
-      },
-      close: async (_workspace: string, account: string, owner: string) => {
-        expect(account).toBe('account');
-        expect(owner).toBe('original');
-        readers--;
-      },
-      refresh: async () => {
-        if (++attempts === 1) throw new Error('offline');
-        role = 'admin';
-        return status;
-      },
-      status: async () => ({ ...status, memberRole: role }),
-      memberJoinRequests: async () => ({ ...empty, items: [application('email', 'email')] }),
-      approveMemberJoin: async () => {
-        admitted = true;
-        return { admitted: true, keyPending: true };
-      },
-    } as unknown as E2eeWorkspaceRuntime;
-    await render(<E2eeTeamInboxHost runtime={runtime} workspaceId="team" accountId="account" />);
-    await settle();
-    expect(admitted).toBe(false);
-    expect(readers).toBe(0);
-    await act(async () => window.dispatchEvent(new Event('online')));
-    await settle();
-    expect(admitted).toBe(true);
-    expect(readers).toBe(0);
   });
   it('uses the shared member-role command and reports success only after it completes', async () => {
     let role: 'member' | 'admin' = 'member';

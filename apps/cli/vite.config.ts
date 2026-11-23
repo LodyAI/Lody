@@ -167,6 +167,10 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     target: 'node22',
+    commonjsOptions: {
+      // Undici needs Node's HTTP/2 client in the packaged ESM bundle.
+      ignoreTryCatch: (id) => id !== 'node:http2',
+    },
     outDir: './dist',
     // The second packaging pass adds flat adapter entries and hashed chunks.
     emptyOutDir: mode !== 'acp-adapters',

@@ -1,4 +1,4 @@
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
 import { useState, useEffect, useMemo } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
@@ -54,7 +54,7 @@ export function GitHubReposSelector({
   const setCacheAtom = useSetAtom(setWorkspaceReposCacheAtom);
 
   // Fetch fresh data from server
-  const freshRepositories = useLegacyWorkspaceQuery(
+  const freshRepositories = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );
@@ -73,7 +73,9 @@ export function GitHubReposSelector({
   }, [freshRepositories, currentWorkspaceId, setCacheAtom]);
 
   // Use fresh data if available, otherwise fall back to cache
-  const repositories = freshRepositories ?? cachedRepositories;
+  const githubStatus = useGithubWorkspaceStatus(currentWorkspaceId);
+  const repositories =
+    githubStatus === 'allowed' ? (freshRepositories ?? cachedRepositories) : undefined;
   const sortedRepositories = useMemo(() => {
     const items = [...(repositories ?? [])];
     if (!latestMessageAtByRepo) {

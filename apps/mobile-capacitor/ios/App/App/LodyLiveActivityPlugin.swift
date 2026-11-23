@@ -291,7 +291,8 @@ public final class LodyLiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
         let authToken = call.getString("authToken")
         LodyLiveActivityPermissionActionStore.save(
             authToken: authToken,
-            convexSiteUrl: convexSiteUrl
+            convexSiteUrl: convexSiteUrl,
+            permissionActionsEnabled: call.getBool("permissionActionsEnabled") ?? false
         )
         Task { @MainActor in
             if #available(iOS 16.1, *) { LodyActivityPushTokens.shared.resume() }

@@ -70,18 +70,10 @@ const styles = stylex.create({
       default: 'hsl(var(--foreground) / 0.04)',
       '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 0.08)' },
       [DARK_SCOPE]: {
-        default: '#ffffff0d',
-        '@supports (color: color-mix(in lab, red, red))':
-          'color-mix(in oklab, var(--color-white) 5%, transparent)',
+        default: 'hsl(var(--foreground) / 0.05)',
         ':hover': {
-          default: '#ffffff0d',
-          '@supports (color: color-mix(in lab, red, red))':
-            'color-mix(in oklab, var(--color-white) 5%, transparent)',
-          '@media (hover: hover)': {
-            default: '#ffffff1a',
-            '@supports (color: color-mix(in lab, red, red))':
-              'color-mix(in oklab, var(--color-white) 10%, transparent)',
-          },
+          default: 'hsl(var(--foreground) / 0.05)',
+          '@media (hover: hover)': 'hsl(var(--foreground) / 0.1)',
         },
       },
     },

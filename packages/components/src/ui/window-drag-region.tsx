@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { isNativeAppShell } from '@/lib/native-platform';
+import { themeSpace } from '../style/theme-scale.stylex';
 import {
   isElectronRenderer,
   isMacOSElectronRenderer,
@@ -12,17 +13,17 @@ const styles = stylex.create({
   header: { position: 'relative', zIndex: 20 },
   drag: { WebkitAppRegion: 'drag' },
   exempt: { WebkitAppRegion: 'no-drag' },
-  height: { height: 'calc(var(--spacing) * 11)' },
+  height: { height: themeSpace[11] },
   captionPad: { paddingRight: 'calc(var(--window-caption-inset-right) + 0.5rem)' },
   windowsBorder: { paddingBottom: '7px' },
-  windowsPlain: { paddingBottom: 'calc(var(--spacing) * 2)' },
+  windowsPlain: { paddingBottom: themeSpace[2] },
   macFrameBorder: { paddingBottom: '5px' },
   macFramePlain: { paddingBottom: '6px' },
   macBorder: { paddingTop: '3px' },
   macPlain: { paddingTop: '2px' },
   strip: {
-    insetInline: 'calc(var(--spacing) * 0)',
-    top: 'calc(var(--spacing) * 0)',
+    insetInline: themeSpace[0],
+    top: themeSpace[0],
     zIndex: 10,
   },
   fixed: { position: 'fixed' },

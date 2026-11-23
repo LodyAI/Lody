@@ -26,10 +26,11 @@ export class AndroidEmulatorService extends DevicePreviewService {
   override async control(
     request: AndroidEmulatorRequest,
     remote: boolean,
-    authorizeRemote?: () => Promise<unknown>
+    authorizeRemote?: () => Promise<unknown>,
+    isRemoteCurrent?: () => boolean
   ): Promise<AndroidEmulatorResponse> {
     return {
-      ...(await super.control(request, remote, authorizeRemote)),
+      ...(await super.control(request, remote, authorizeRemote, isRemoteCurrent)),
       type: 'android-emulator/control_response',
     };
   }

@@ -196,7 +196,15 @@ async function renderLanding(
       ready: true,
     });
   const refused: string[] = [];
+  const notifications: string[] = [];
   const useQuery: CloudApi['useQuery'] = (operation, args) => {
+    if (
+      args !== 'skip' &&
+      ['inbox:listMine', 'inbox:getSharingReviewState'].includes(operation.name)
+    ) {
+      notifications.push(operation.name);
+      return (operation.name === 'inbox:listMine' ? [] : null) as never;
+    }
     if (args !== 'skip' && /^(machines:|localProjects:|inbox:|github:)/.test(operation.name)) {
       refused.push(operation.name);
       throw Object.assign(new Error('e2ee_control_only'), { data: { code: 'e2ee_control_only' } });
@@ -276,12 +284,15 @@ async function renderLanding(
       </PlatformContext.Provider>
     );
   });
-  return { store, refused, router };
+  return { store, refused, router, notifications };
 }
 
-it('renders the real encrypted chat controller without legacy machines, projects, inbox or GitHub queries', async () => {
-  const { refused } = await renderLanding();
+it('renders encrypted chat with its own Inbox while legacy machine, project and GitHub catalogs stay closed', async () => {
+  const { refused, notifications } = await renderLanding();
   expect(refused).toEqual([]);
+  expect(new Set(notifications)).toEqual(
+    new Set(['inbox:listMine', 'inbox:getSharingReviewState'])
+  );
   expect(container.querySelector('textarea[aria-label="New chat"]')).not.toBeNull();
 });
 

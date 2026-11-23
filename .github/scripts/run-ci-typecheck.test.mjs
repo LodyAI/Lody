@@ -38,7 +38,7 @@ void test('affected typecheck prepares full adapters when lody is included and o
   assert.deepEqual(calls[0].args, ['--filter', 'lody', 'prepare:acp-adapters']);
   assert.equal(calls[1].args[0], '-r');
   assert.ok(calls[1].args.includes('--no-sort'));
-  assert.ok(calls[1].args.includes('--workspace-concurrency=4'));
+  assert.ok(calls[1].args.includes('--workspace-concurrency=2'));
   assert.ok(calls[1].args.includes('!{**/acp-extension-*}'));
   assert.ok(calls[1].args.includes('@loro-dev/ignore'));
   assert.ok(calls[1].args.includes('lody'));

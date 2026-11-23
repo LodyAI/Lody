@@ -263,7 +263,11 @@ opens the new personal device's workspace with the recovered keys installed.
 
 `RecoveryVaults` (_requires `RecoveryVaultStore`, `RecoveryVaultLocalStore`_)
 creates and unlocks vault-v1 vaults: a recovery file kept offline, or a
-passkey PRF. A passkey needs a registration that reported `enabled: true` and an
+passkey PRF. Every create and open takes the signed-in client's service `locator`;
+a file is written with that value, and opening a file whose `serviceLocator` differs
+fails with `locator-mismatch` before any store read. Core compares the strings
+exactly and never connects to the file's value; hosts supply one canonical value.
+A passkey needs a registration that reported `enabled: true` and an
 authentication with user verification and a 32-byte `results.first`; WebAuthn never reports
 `enabled` at authentication. Every ceremony uses `vaultPrfInput()`, and `user.id` is
 `passkeyUserHandle(vaultId)`, so a new device without the file learns the vault from the
@@ -396,3 +400,5 @@ keys and membership. It installs through the caller's normal installed-key bound
 without another admission; a revoked or mismatched identity gains no authority.
 
 New `WorkspaceControl.execute` ownership transfers require an active personal device of the successor. Revoking a member's last personal device requires `confirmedRecoveryOnly: true`; this acknowledgement is workflow metadata and never enters signed v1 bytes. Existing v1 records still replay under their original rules, including the owner governance check.
+
+An unconfirmed submission may retain the failed append as `SubmissionError.cause` for allowlisted diagnostics. It remains pending and retries the original signed bytes; the cause never proves rejection or commitment.

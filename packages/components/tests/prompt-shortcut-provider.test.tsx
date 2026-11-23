@@ -1,3 +1,7 @@
+import {
+  closePromptShortcutDatabase,
+  promptShortcutDatabaseName,
+} from '../src/lib/prompt-shortcut-storage';
 import { PromptShortcutSync as ActualShortcutSync } from '../../shared/src/prompt-shortcuts/sync';
 import { getShortcutBodyStreamId } from '../../shared/src/prompt-shortcuts/access';
 import { LoroDoc } from 'loro-crdt';
@@ -32,6 +36,9 @@ const fixture = vi.hoisted(() => {
     workspaceId: 'workspace-a',
     status: 'allowed' as 'allowed' | 'pending' | 'blocked',
     directory: [],
+    runtime: {} as Partial<import('../src/atoms/runtime').WorkspaceRuntime>,
+    queryArgs: [] as unknown[],
+    syncOptions: null as null | ConstructorParameters<typeof ActualShortcutSync>[0],
     createRepo: vi.fn(),
     openStore: vi.fn(),
     closeStore: vi.fn(),
@@ -45,7 +52,7 @@ vi.mock('@/hooks/use-authenticated-convex', () => ({
 
 vi.mock('jotai', async (original) => ({
   ...(await original<typeof import('jotai')>()),
-  useAtomValue: () => ({ workspaceId: fixture.workspaceId }),
+  useAtomValue: () => ({ workspaceId: fixture.workspaceId, ...fixture.runtime }),
 }));
 vi.mock('@/hooks/use-workspace-feature', () => ({
   useLegacyWorkspaceQueryStatus: () => fixture.status,
@@ -66,7 +73,10 @@ vi.mock('@lody/platform/react', () => ({
   usePlatformSession: () => fixture.session,
   useCloudMutation: () => vi.fn(),
   useCloudAction: () => vi.fn(),
-  useCloudQuery: () => fixture.directory,
+  useCloudQuery: (_: unknown, args: unknown) => {
+    fixture.queryArgs.push(args);
+    return args === 'skip' ? undefined : fixture.directory;
+  },
 }));
 vi.mock('@/lib/cloud-api-operations', () => ({ cloudOperations: { promptShortcuts: {} } }));
 vi.mock('loro-repo', async (importOriginal) => {
@@ -81,6 +91,9 @@ vi.mock('@lody/shared/prompt-shortcuts', async () => {
     PromptShortcutRuntime: ActualRuntime,
     LocalShortcutStore: { open: fixture.openStore },
     PromptShortcutSync: class {
+      constructor(options: ConstructorParameters<typeof ActualShortcutSync>[0]) {
+        fixture.syncOptions = options;
+      }
       async dispose() {}
     },
     shortcutByteLength: (value: string) => value.length,
@@ -139,6 +152,9 @@ describe('PromptShortcutProvider lifecycle', () => {
     fixture.auth.authSessionId = 'session-a';
     fixture.auth.confirmedUnauthenticated = false;
     fixture.status = 'allowed';
+    fixture.runtime = {};
+    fixture.queryArgs = [];
+    fixture.syncOptions = null;
     fixture.platform = fixture.makePlatform();
     fixture.records = [];
     fixture.closeStore.mockReset().mockResolvedValue(undefined);
@@ -196,6 +212,83 @@ describe('PromptShortcutProvider lifecycle', () => {
       await expect(current!.setDirectory([])).resolves.toBeUndefined();
     }
   );
+
+  it('opens verified encrypted shortcuts while legacy access is blocked, uses protected grants and exposes guest read-only state', async () => {
+    fixture.status = 'blocked';
+    const localDataScope = {
+      accountId: 'user-a',
+      workspaceId: 'workspace-a',
+      windowId: 'window',
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+    };
+    fixture.runtime = {
+      contentMode: 'e2ee',
+      cloudStreamsEnabled: true,
+      localDataScope,
+      streamsContent: {
+        mode: 'protected',
+        namespace: 'test',
+        resolve: () => {
+          throw new Error('unused');
+        },
+        snapshotUpload: { canUpload: () => false },
+      },
+      shortcutRole: { get: () => 'read', subscribe: () => () => {} },
+      getWorkspaceStreamsGrant: async (options) => {
+        if (options?.write) throw new Error('guest write');
+        return {
+          token: 'encrypted-token',
+          gatewayBaseUrl: 'https://gateway.test',
+          bucketId: 'encrypted-content',
+          shardHostSuffix: 'test',
+        };
+      },
+    };
+    await render();
+    expect(current?.workspaceId).toBe('workspace-a');
+    expect(current?.canWrite).toBe(false);
+    expect(fixture.queryArgs.every((args) => args === 'skip')).toBe(true);
+    const grant = await fixture.syncOptions!.grant(
+      { kind: 'workspace-index', workspaceId: 'workspace-a' },
+      false
+    );
+    expect(grant).toMatchObject({
+      token: 'encrypted-token',
+      bucketId: 'encrypted-content',
+      shardHostSuffix: 'test',
+      streamId: 'workspace-a:shortcut-index',
+    });
+    await expect(
+      fixture.syncOptions!.grant({ kind: 'workspace-index', workspaceId: 'workspace-a' }, true)
+    ).rejects.toThrow('read_only');
+    await expect(
+      fixture.syncOptions!.grant({ kind: 'body', bodyDocId: 'legacy' }, false)
+    ).rejects.toThrow('legacy_forbidden');
+    const captured = current!;
+    const drain = deferred();
+    fixture.closeStore.mockImplementationOnce(() => drain.promise);
+    let closed = false;
+    let closing!: Promise<void>;
+    await act(async () => {
+      closing = closePromptShortcutDatabase(
+        promptShortcutDatabaseName('workspace-a', 'user-a', localDataScope)
+      ).then(() => {
+        closed = true;
+      });
+    });
+    expect(current).toBeNull();
+    expect(closed).toBe(false);
+    expect(() => captured.flush()).toThrow('disposed');
+    await act(async () => {
+      drain.resolve();
+      await closing;
+    });
+    expect(closed).toBe(true);
+    fixture.auth.confirmedUnauthenticated = true;
+    await render();
+    expect(current).toBeNull();
+  });
 
   it('retires the previous auth-session runtime even when the same account signs in again', async () => {
     await render();
