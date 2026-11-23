@@ -93,6 +93,14 @@ export class MachineRuntime {
       if (!context) throw new Error('e2ee_rpc_unavailable');
       return this.requireHandler().readEncryptedMachineRequest(request, context);
     }
+    if (
+      request.method === 'ios-simulator/control' ||
+      request.method === 'android-emulator/control'
+    ) {
+      if (!context?.authority || context.authority.signal.aborted || !context.authority.isCurrent())
+        throw new Error('e2ee_feature_unavailable');
+      return this.requireHandler().handleEncryptedDevicePreview(request, context);
+    }
     if (request.method === 'machine/acp-interaction') {
       if (!context?.authority || context.authority.signal.aborted || !context.authority.isCurrent())
         throw new Error('e2ee_feature_unavailable');
@@ -438,10 +446,7 @@ export class MachineRuntime {
     message: LocalMachineRpcRequestValidated,
     signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
-    if (
-      this.options.handlerConfig.encryptedWorkspace &&
-      (message.method === 'session/dispatch-turn' || message.method.startsWith('ios-simulator/'))
-    )
+    if (this.options.handlerConfig.encryptedWorkspace && message.method === 'session/dispatch-turn')
       throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();
     return await handler.handleLocalMachineRpc(message, signal);

@@ -2315,6 +2315,23 @@ export class LoroDocumentManager {
     await this.machine.updateAcpAuthMethods(configId, authMethods);
   }
 
+  async recordObservedAcpModelConfigOptions(
+    machineId: MachineId,
+    configId: AgentConfigId,
+    sourceVersion: string,
+    configOptions: AcpConfigOptionSummary[]
+  ): Promise<boolean> {
+    if (!this.machine) {
+      this.machine = this.createMachineDocument(machineId);
+      await this.machine.init();
+    }
+    return await this.machine.recordObservedAcpModelConfigOptions(
+      configId,
+      sourceVersion,
+      configOptions
+    );
+  }
+
   async getAcpCapabilities(
     machineId: MachineId,
     configId: AgentConfigId
@@ -4452,6 +4469,36 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     } else {
       await handle.syncOnce().catch(() => undefined);
     }
+  }
+
+  /**
+   * Passively records a model's live `configOptions` snapshot observed during an
+   * active session (model switch or `config_option_update`). Skips when no matching
+   * runtime capability row exists yet or when the stored per-model options are unchanged.
+   */
+  async recordObservedAcpModelConfigOptions(
+    configId: AgentConfigId,
+    sourceVersion: string,
+    configOptions: AcpConfigOptionSummary[]
+  ): Promise<boolean> {
+    const modelId = getAcpConfigOptionsModelId(configOptions);
+    if (!modelId || !sourceVersion || configOptions.length === 0) return false;
+    const handle = await this.openMachineFlockDoc();
+    const existing = getMachineFlockAcpCapabilities(
+      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    )[getAcpCapabilityCacheKey(configId)];
+    if (!existing || existing.sourceVersion !== sourceVersion) return false;
+    const changed = writeAcpModelConfigOptionsToFlock(handle.flock, configId, sourceVersion, {
+      [modelId]: configOptions,
+    });
+    if (!changed) return false;
+    await this.repo.flush();
+    if (this.markMachineFlockDirty) {
+      this.markMachineFlockDirty('acp-capability-update');
+    } else {
+      await handle.syncOnce().catch(() => undefined);
+    }
+    return true;
   }
 
   async getAcpCapabilities(configId: AgentConfigId): Promise<AcpCapabilityCacheEntry | undefined> {

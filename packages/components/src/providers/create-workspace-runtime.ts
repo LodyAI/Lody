@@ -37,7 +37,11 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { desktopWindowId } from '@/lib/desktop-window';
-import { encryptedLocalNamespace, type E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
+import {
+  encryptedLocalInstance,
+  encryptedLocalNamespace,
+  type E2eeLocalDataIdentity,
+} from '../lib/e2ee-local-data';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import {
   getMachineRoomId,
@@ -205,7 +209,12 @@ import { createWorkspaceMachineRpcFacade } from './workspace-machine-rpc-facade'
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { createCodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { getIpcServices, onIpcEvent, sendLocalSessionControl } from '@/lib/electron-ipc-client';
-import { createRoostSessionDataFactoryForMachine } from '@/lib/roost-session-bridge';
+import { requireEncryptedRoostOwner } from '../lib/encrypted-roost-history';
+import {
+  createRemoteRoostSessionDataFactory,
+  createRoostSessionDataFactoryForMachine,
+  type RemoteRoostSessionBridgeOptions,
+} from '@/lib/roost-session-bridge';
 
 declare global {
   interface Window {
@@ -261,6 +270,10 @@ export type WorkspaceE2eeTransport = {
   supportsRpc?: boolean;
   /** Verified ledger file role; absent means read-only. Never an authorization. */
   codeCollabRole?: ProtectedCodeCollabRole;
+  memberRole?: {
+    get(): 'owner' | 'admin' | 'member' | 'guest' | null;
+    subscribe(listener: () => void): () => void;
+  };
   attachmentToken?: () => Promise<string>;
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   createRpcTokenProvider(
@@ -2224,8 +2237,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     ...(protectedRpcAvailable
       ? {
           requestEncryptedFeature: async (
-            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
-          ) => (await ensureEncryptedRpc()).requestFeature(request),
+            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+            options?: { requestId: string }
+          ) => (await ensureEncryptedRpc()).requestFeature(request, options),
         }
       : {}),
   });
@@ -5104,7 +5118,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     const backendKind = resolveSessionHistoryBackendKind(sessionMeta);
-    let rendererSessionDataFactory = deps.createSessionData;
+    let rendererSessionDataFactory =
+      protectedContent && backendKind === 'roost' ? undefined : deps.createSessionData;
     let disposeReaderObservation = () => {};
     let conversation: ReturnType<typeof createConversationSession>;
     try {
@@ -5113,6 +5128,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         if (!machineId) {
           throw new Error(`Roost session ${sessionId} has no owning machine`);
         }
+        if (protectedContent)
+          requireEncryptedRoostOwner({
+            protocolCapabilities: await getMachineProtocolCapabilities(machineId),
+          });
         const machineRoomId = getMachineRoomId(machineId);
         let ownerMachineMeta: MachineMeta | undefined;
         const readerWakes = new Set<() => void>();
@@ -5154,12 +5173,18 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           window.removeEventListener('offline', wakeReader);
           readerWakes.clear();
         };
-        rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
+        const bridge: RemoteRoostSessionBridgeOptions = {
           coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
-          live: () => machineSupportsSessionHistorySubscription(ownerMachineMeta),
-          subscribeHistory: subscribeSessionHistory,
+          cacheNamespace: protectedContent
+            ? encryptedLocalInstance(deps.e2eeLocalIdentity!)
+            : undefined,
+          live: () =>
+            !protectedContent && machineSupportsSessionHistorySubscription(ownerMachineMeta),
+          ...(protectedContent
+            ? { pollIntervalMs: 5000 }
+            : { subscribeHistory: subscribeSessionHistory }),
           active: () =>
             document.visibilityState !== 'hidden' &&
             (targetRouter.getPlaneForMachine(machineId) === 'local' || isBrowserOnline()),
@@ -5172,18 +5197,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           accountId: deps.accountId,
           workspaceId,
           machineId,
-          resolvePlane: async (targetMachineId) => {
-            await waitForContentAdmission();
-            const plane = await targetRouter.resolvePlaneForMachine(targetMachineId, {
-              timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
-            });
-            if (plane === 'local' && !getIpcServices()) {
-              throw new Error(
-                `Roost session ${sessionId} is local, but the Electron session-control bridge is unavailable`
-              );
-            }
-            return plane;
-          },
           requestHistoryRead: async (targetMachineId, targetSessionId, query) =>
             await requestSessionHistoryRead(targetMachineId, targetSessionId, query),
           requestHistoryWrite: async ({
@@ -5197,7 +5210,24 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               operation,
               payload,
             }),
-        });
+        };
+        rendererSessionDataFactory = protectedContent
+          ? createRemoteRoostSessionDataFactory(bridge)
+          : createRoostSessionDataFactoryForMachine({
+              ...bridge,
+              resolvePlane: async (targetMachineId) => {
+                await waitForContentAdmission();
+                const plane = await targetRouter.resolvePlaneForMachine(targetMachineId, {
+                  timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+                });
+                if (plane === 'local' && !getIpcServices()) {
+                  throw new Error(
+                    `Roost session ${sessionId} is local, but the Electron session-control bridge is unavailable`
+                  );
+                }
+                return plane;
+              },
+            });
       }
       conversation = createConversationSession(sessionDoc, {
         sessionId,
@@ -6452,6 +6482,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     protectedRpcAvailable,
     ...(protectedContent
       ? {
+          protectedMemberRole: deps.e2ee?.memberRole,
           protectedCodeCollabRole: deps.e2ee?.codeCollabRole ?? {
             get: () => 'read' as const,
             subscribe: () => () => undefined,

@@ -22,8 +22,10 @@ Automations run in plaintext and encrypted workspaces. In an encrypted workspace
 [Session adapter](actions/session-actions-legacy.ts) signs each queued continuation as this
 machine, and encrypted admission refuses an automation input without that signature, as it
 does for scheduled runs. The ledger stays machine-local, and continuation text enters the
-Session through its encrypted history. The PR poller is not registered there, so `github.*`
-reads stay `unknown`. Remote control rides workspace Machine RPC, which encrypted
+Session through its encrypted history. The local PR poller uses the account’s repository-scoped GitHub credentials and feeds
+PR/CI observations into the local automation ledger. PR state stays in protected Loro metadata;
+hosted PR association and content caches remain disabled. Device-only machine composition
+keeps its existing lack of account GitHub credentials. Remote control rides workspace Machine RPC, which encrypted
 workspaces withhold. Fleet therefore installs the remote verifier, and the renderer offers
 remote controls, only where the shared content policy supports `rpc`.
 

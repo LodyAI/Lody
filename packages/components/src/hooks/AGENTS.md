@@ -74,10 +74,10 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   With no frame owed, a press navigates and re-anchors on the route; during an owed
   frame it only advances the target. No time-based debounce.
 
-Legacy cloud machine, project, GitHub and usage catalogs require the
+Legacy machine, project and content-bearing usage catalogs require the
 runtime admission atom's explicit ordinary or legacy descriptor bound to the current
 account, workspace ID and route slug. Unknown mode stays pending; local runtime
-opening, reading and input remain available. Encrypted workspaces use the notification wrappers only for their own Inbox and push registration after matching verified runtime admission; other catalogs stay closed. Use the shared legacy query/mutation/action
+opening, reading and input remain available. E2EE Inbox and push registration use notification wrappers after matching verified runtime admission. Other catalogs stay closed. GitHub metadata uses narrow wrappers and verified runtime roles. Owner/admin manage, member uses, guest is blocked; PR caches and identity repair stay legacy. Use the shared legacy query/mutation/action
 wrappers; imperative operations recheck live admission before sending and retained
 callbacks cannot cross accounts. The repository legacy-cloud check rejects direct
 references; its inventory owns the exact control/CLI exceptions. Preserve ordinary errors and owner-only local

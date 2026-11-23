@@ -1,4 +1,49 @@
-import type { CloudPort } from '@lody/platform';
+import type { CloudPort, CloudGithubTokenPort } from '@lody/platform';
+
+/** Encrypted CLI keys cannot delegate another account's personal GitHub identity. */
+export function encryptedGithubTokenPort(
+  source: CloudGithubTokenPort | null,
+  accountId?: string
+): CloudGithubTokenPort | null {
+  return (
+    source && {
+      createTokenManager(workspaceId) {
+        const manager = source.createTokenManager(workspaceId);
+        const ownAccount = (requester: string) => !!accountId && requester === accountId;
+        return {
+          startAutoRefresh: () => manager.startAutoRefresh(),
+          shutdown: () => manager.shutdown(),
+          retainRepoOwner: (repo) => manager.retainRepoOwner(repo),
+          invalidate: (repo, context) => manager.invalidate(repo, context),
+          invalidateAll: () => manager.invalidateAll(),
+          getAppTokenForRepo: (repo) => manager.getAppTokenForRepo(repo),
+          getAppTokenInfoForRepo: (repo) => manager.getAppTokenInfoForRepo(repo),
+          getCredentialPolicy: (context, signal) =>
+            ownAccount(context.requesterUserId)
+              ? manager.getCredentialPolicy(context, signal)
+              : Promise.resolve({ personalEnabled: false }),
+          getCredentialCandidate: (repo, context, source, invalidated) => {
+            if (ownAccount(context.requesterUserId))
+              return manager.getCredentialCandidate(repo, context, source, invalidated);
+            if (source === 'personal')
+              return Promise.resolve({ available: false, reason: 'personal_unavailable' });
+            return manager
+              .getAppTokenForRepo(repo)
+              .then((token) => ({ token, tokenSource: 'app' as const }));
+          },
+          getWriteTokenForRepo: (repo, context) =>
+            ownAccount(context.requesterUserId)
+              ? manager.getWriteTokenForRepo(repo, context)
+              : manager.getAppTokenForRepo(repo),
+          getWriteTokenInfoForRepo: (repo, context) =>
+            ownAccount(context.requesterUserId)
+              ? manager.getWriteTokenInfoForRepo(repo, context)
+              : manager.getAppTokenInfoForRepo(repo),
+        };
+      },
+    }
+  );
+}
 
 /**
  * Cloud capabilities an encrypted workspace runtime may keep. Unimplemented
@@ -12,28 +57,33 @@ import type { CloudPort } from '@lody/platform';
  *   ([decision](../../../../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md)).
  *   The ordinary cloud proof verifier and simulator relay stay closed.
  */
-export function encryptedRuntimeCloudPort(port: CloudPort): CloudPort {
+export function encryptedRuntimeCloudPort(port: CloudPort, accountId?: string): CloudPort {
   const notifications = port.notifications;
-  const accountId = port.identity.userId;
+  const notificationAccountId = notifications ? port.identity.userId : undefined;
   return {
     ...port,
     streamsTokens: null,
     notifications: notifications
       ? {
           notifySessionCompleted: async (input) => {
-            if (input.userId === accountId) await notifications.notifySessionCompleted(input);
+            if (input.userId === notificationAccountId)
+              await notifications.notifySessionCompleted(input);
           },
           notifyPermissionRequested: async (input) => {
-            if (input.userId === accountId) await notifications.notifyPermissionRequested(input);
+            if (input.userId === notificationAccountId)
+              await notifications.notifyPermissionRequested(input);
           },
           recordPermissionRequested: async (input) => {
-            if (input.userId === accountId) await notifications.recordPermissionRequested(input);
+            if (input.userId === notificationAccountId)
+              await notifications.recordPermissionRequested(input);
           },
           resolvePermissionRequested: async (input) => {
-            if (input.userId === accountId) await notifications.resolvePermissionRequested(input);
+            if (input.userId === notificationAccountId)
+              await notifications.resolvePermissionRequested(input);
           },
           syncLiveActivitySummary: async (input) => {
-            if (input.userId !== accountId) return { sent: false, reason: 'different_recipient' };
+            if (input.userId !== notificationAccountId)
+              return { sent: false, reason: 'different_recipient' };
             return notifications.syncLiveActivitySummary({
               ...input,
               items: input.items.map(({ permissionRequestId: _requestId, ...item }) => item),
@@ -50,6 +100,6 @@ export function encryptedRuntimeCloudPort(port: CloudPort): CloudPort {
     remoteAutomation: undefined,
     sessionSharing: null,
     prAssociation: null,
-    githubTokens: null,
+    githubTokens: encryptedGithubTokenPort(port.githubTokens, accountId),
   };
 }

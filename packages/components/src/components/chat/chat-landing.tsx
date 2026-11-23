@@ -2,6 +2,7 @@ import {
   useWorkspaceNotificationQuery,
   useWorkspaceNotificationMutation,
 } from '@/hooks/use-workspace-notifications';
+import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
 import { text } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { field } from '@lody/ui/field/field.tokens.stylex';
@@ -10,10 +11,7 @@ import { buildDaemonInstallCommands } from '@/lib/daemon-installation';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { McpDefaultsRecovery } from './mcp-defaults-recovery';
-import {
-  useLegacyWorkspaceMutation,
-  useLegacyWorkspaceQuery,
-} from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval, localAgentRunsWorkspace } from '../e2ee-local-agent-approval';
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
@@ -993,6 +991,8 @@ function WorkspaceChatLanding({
   const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
   const notificationQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId, true);
   const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
+  const githubQueryStatus = useGithubWorkspaceStatus(workspaceId);
+  const githubQueriesEnabled = githubQueryStatus === 'allowed';
   const setLocalProjectSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
@@ -1128,17 +1128,17 @@ function WorkspaceChatLanding({
     (machineId: string) => onlineMachineIds.has(machineId as MachineId),
     [onlineMachineIds]
   );
-  const freshRepositories = useLegacyWorkspaceQuery(
+  const freshRepositories = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
-    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
+    githubQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const billingEntitlement = useCloudQuery(
     cloudOperations.billing.getWorkspaceBillingEntitlement,
     workspaceId ? { workspaceId } : 'skip'
   );
-  const workspaceReposWithStatus = useLegacyWorkspaceQuery(
+  const workspaceReposWithStatus = useGithubWorkspaceQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
-    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
+    githubQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   ) as
     | {
         repoFullName: string;
@@ -1149,18 +1149,18 @@ function WorkspaceChatLanding({
     | undefined;
   const repositories = useMemo(
     () =>
-      legacyQueriesEnabled
+      githubQueriesEnabled
         ? (freshRepositories ?? cachedRepositories ?? undefined)
-        : legacyQueryStatus === 'blocked'
+        : githubQueryStatus === 'blocked'
           ? []
           : undefined,
-    [legacyQueriesEnabled, legacyQueryStatus, freshRepositories, cachedRepositories]
+    [githubQueriesEnabled, githubQueryStatus, freshRepositories, cachedRepositories]
   );
   const isElectron = isElectronRenderer();
   const launchMode = useMemo(() => detectAppLaunchMode(isElectron), [isElectron]);
   const hasGitHubRepos = (repositories?.length ?? 0) > 0;
   const repositoriesReady =
-    legacyQueryStatus === 'blocked' || (legacyQueriesEnabled && freshRepositories !== undefined);
+    githubQueryStatus === 'blocked' || (githubQueriesEnabled && freshRepositories !== undefined);
   const sharingReviewState = useMemo(() => {
     const privateMachineIds = Array.from(accessByMachineId.values())
       .filter((access) => access.ownerUserId === userId && !access.sharedWithTeam)

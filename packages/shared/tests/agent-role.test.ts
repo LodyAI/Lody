@@ -11,6 +11,7 @@ import {
   canManageAgentRole,
   formatAgentRoleMentionValue,
   getAgentRoleTargets,
+  reconcileAgentRoleRunConfig,
   resolveAgentRoleMentionValue,
   canReadAgentRole,
   isAgentRoleContentEqual,
@@ -108,6 +109,178 @@ describe('agent role run config', () => {
     ).toEqual({
       modelId: 'gpt-5.6',
       configOptionValues: { thought_level: 'high', fast: true },
+    });
+  });
+
+  it('reconciles away borrowed per-model options the target model does not support while keeping permission pins', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'custom',
+      agentType: 'antigravity',
+      provenance: 'runtime',
+      modes: [],
+      models: [
+        { modelId: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+        { modelId: 'gemini-pro-orchestrator', name: 'Gemini Pro Orchestrator' },
+      ],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'gemini-3.1-pro',
+          options: [
+            { value: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+            { value: 'gemini-pro-orchestrator', name: 'Gemini Pro Orchestrator' },
+          ],
+        },
+        {
+          id: 'mode',
+          name: 'Permission',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'agent-auto-review',
+          options: [
+            { value: 'agent-auto-review', name: 'Agent (Auto Review)' },
+            { value: 'yolo', name: 'YOLO' },
+          ],
+        },
+        {
+          id: 'thought_level',
+          name: 'Thinking Level',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'medium',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+      observedModelConfigOptions: {
+        'gemini-pro-orchestrator': [
+          {
+            id: 'mode',
+            name: 'Permission',
+            category: 'mode',
+            type: 'select',
+            currentValue: 'agent-auto-review',
+            options: [{ value: 'agent-auto-review', name: 'Agent (Auto Review)' }],
+          },
+        ],
+      },
+      fetchedAt: 1,
+    };
+
+    const reconciled = reconcileAgentRoleRunConfig(
+      {
+        modelId: 'gemini-pro-orchestrator',
+        modeId: 'yolo',
+        configOptionValues: {
+          mode: 'yolo',
+          thought_level: 'medium',
+        },
+      },
+      capability
+    );
+    expect(reconciled).toEqual({
+      modelId: 'gemini-pro-orchestrator',
+      modeId: 'yolo',
+      configOptionValues: {
+        mode: 'yolo',
+      },
+    });
+  });
+
+  it('drops effort or fast option keys declared absent on the target model while preserving advertised values', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      provenance: 'runtime',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'gpt-6.2-sol',
+          options: [
+            { value: 'gpt-6.2-sol', name: '6.2 Sol' },
+            { value: 'no-controls-model', name: 'No Controls' },
+            { value: 'effort-only-model', name: 'Effort Only' },
+          ],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+        {
+          id: 'fast-mode',
+          name: 'Speed',
+          category: 'model_config',
+          type: 'select',
+          currentValue: 'off',
+          options: [
+            { value: 'off', name: 'Standard' },
+            { value: 'fast', name: 'Fast' },
+          ],
+        },
+      ],
+      declaredModelControls: {
+        'no-controls-model': {
+          effortValues: [],
+          fastMode: false,
+        },
+        'effort-only-model': {
+          effortValues: ['low'],
+          fastMode: false,
+        },
+      },
+      fetchedAt: 1,
+    };
+
+    expect(
+      reconcileAgentRoleRunConfig(
+        {
+          modelId: 'no-controls-model',
+          configOptionValues: {
+            reasoning_effort: 'high',
+            'fast-mode': 'fast',
+          },
+        },
+        capability
+      )
+    ).toEqual({
+      modelId: 'no-controls-model',
+      configOptionValues: {},
+    });
+
+    expect(
+      reconcileAgentRoleRunConfig(
+        {
+          modelId: 'effort-only-model',
+          configOptionValues: {
+            reasoning_effort: 'xhigh',
+            'fast-mode': 'fast',
+          },
+        },
+        capability
+      )
+    ).toEqual({
+      modelId: 'effort-only-model',
+      configOptionValues: {
+        reasoning_effort: 'xhigh',
+      },
     });
   });
 });

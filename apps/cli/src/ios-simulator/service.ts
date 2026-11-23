@@ -108,9 +108,12 @@ export class IosSimulatorService {
   async control(
     request: IosSimulatorRequest,
     remote: boolean,
-    authorizeRemote?: () => Promise<unknown>
+    authorizeRemote?: () => Promise<unknown>,
+    isRemoteCurrent?: () => boolean
   ) {
-    return response(await this.core.control(fromRequest(request), remote, authorizeRemote));
+    return response(
+      await this.core.control(fromRequest(request), remote, authorizeRemote, isRemoteCurrent)
+    );
   }
   closeSession(sessionId: string) {
     return this.core.closeSession(sessionId);

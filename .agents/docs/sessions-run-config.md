@@ -28,6 +28,11 @@ probe session to every model and stores each model's own options in
 `acpModelConfigOptions` rows, one stored list shared by every model that reported it; selectors and CLI/MCP validation compose the selected
 model's options from them, falling back to the snapshot for an unrecorded model
 ([design](../notes/proposed/architecture/2026-11-11-observed-model-config-options.md)).
+Live ACP model switches and `config_option_update` events passively record the active
+model's options into the same rows, Role authoring skips borrowed model-dependent
+defaults, and session defaults and composer drafts scope effort and multi-tier speed
+(`off` / `fast` / `ultrafast`) under each `modelId`
+([per-model session config](../notes/implemented/architecture/2026-11-23-per-model-session-config-and-same-replica-flock-authority.md)).
 
 Scope: `packages/components/src/components/sessions`. Binding rules and the
 pointer to this page live in

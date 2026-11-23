@@ -1,5 +1,6 @@
 import {
   getAcpConfigOptionsModelId,
+  resolveSessionDefaultConfigOptionValues,
   type ACPSessionId,
   type AcpConfigOptionSummary,
   type AcpConfigOptionValue,
@@ -169,6 +170,7 @@ type RawConfigOption = {
   id: string;
   category?: string | null;
   type?: string;
+  currentValue?: unknown;
   options?: ReadonlyArray<{ value?: string; options?: ReadonlyArray<{ value?: string }> }>;
 };
 
@@ -201,10 +203,18 @@ export async function applyProbeSessionDefaults<T extends { configOptions?: unkn
     Array.isArray(args.sessionResponse.configOptions) ? args.sessionResponse.configOptions : []
   ) as RawConfigOption[];
   const modelOption = current.find((option) => option.category === 'model');
+  const rawModelOptionValue =
+    modelOption && typeof defaults.configOptionValues[modelOption.id] === 'string'
+      ? (defaults.configOptionValues[modelOption.id] as string)
+      : undefined;
+  const initialModelId =
+    typeof modelOption?.currentValue === 'string' ? modelOption.currentValue : undefined;
+  const effectiveModelId = defaults.modelId ?? rawModelOptionValue ?? initialModelId;
+  const resolvedOptionValues = resolveSessionDefaultConfigOptionValues(defaults, effectiveModelId);
   const requests: Array<[string, AcpConfigOptionValue]> = [];
-  if (defaults.modelId && modelOption && !(modelOption.id in defaults.configOptionValues))
+  if (defaults.modelId && modelOption && !(modelOption.id in resolvedOptionValues))
     requests.push([modelOption.id, defaults.modelId]);
-  const entries = Object.entries(defaults.configOptionValues);
+  const entries = Object.entries(resolvedOptionValues);
   requests.push(
     ...entries.filter(([id]) => id === modelOption?.id),
     ...entries.filter(([id]) => id !== modelOption?.id)

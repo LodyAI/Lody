@@ -17,11 +17,13 @@ import { getCliPlatformKind } from '@/lib/cli-platform';
 import { AuthClient, performLogin } from '@/lib/auth';
 import {
   getAuthContextOrThrow,
+  describeEncryptedCommandFailure,
   runOneShotCommand,
   selectWorkspaceSummary,
 } from '@/lib/command-runtime';
 import { listWorkspacesForToken, registerMachineAccessForCliToken } from '@/lib/workspace';
-import { createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
+import { assertRetainedE2eeModeAllowsOpen } from '@/lib/e2ee/retained-binding';
+import { createCloudE2eePort, createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
 import { SessionAttachmentTransfer } from '@/lib/session-attachment-transfer';
 import { fileLocksLegacy } from '@/utils/file-lock';
 import { getLogger } from '@/utils/logger';
@@ -133,8 +135,8 @@ export const migrateCommand = new Command('migrate')
           ])
         ).workspace;
       const workspace = selectWorkspaceSummary(candidates, selector);
-      if ('contentMode' in workspace && workspace.contentMode === 'e2ee')
-        throw new Error('加密工作区不支持导入');
+      assertRetainedE2eeModeAllowsOpen(auth.userId, workspace);
+      const encrypted = workspace.contentMode === 'e2ee';
       const sourcePath = await fs.realpath(
         options.source ?? path.join(os.homedir(), getInstallationProfile('local').dataDirectoryName)
       );
@@ -154,6 +156,8 @@ export const migrateCommand = new Command('migrate')
           sourceUserId: catalog.identity.userId,
           sourceName: sourceWorkspace.name,
           targetWorkspaceId: workspace.id,
+          targetContentMode: encrypted ? ('protected' as const) : ('plaintext' as const),
+          ...(encrypted ? { targetGenesisHash: workspace.genesisHash } : {}),
           targetMachineId: auth.machineId,
           targetUserId: auth.userId,
           deployment: authBaseUrl,
@@ -207,45 +211,82 @@ export const migrateCommand = new Command('migrate')
           }
         }
         const journal = await loadJournal(directory, migrationId);
-        const tokenProvider = createCloudStreamsTokenPort({
-          token: auth.token,
-          authBaseUrl,
-          authSiteUrl: LODY_AUTH_SITE_URL,
-          logger,
-        }).createTokenProvider({ workspaceId: workspace.id as WorkspaceId });
         if (!manifest.documents.length) {
           console.log('No records to migrate.');
           return;
         }
-        await registerMachineAccessForCliToken({
-          token: auth.token,
-          workspaceId: workspace.id,
-          machineId: auth.machineId,
-        });
-        const program = withMigrationTokens(tokenProvider, (tokens) =>
-          Effect.acquireRelease(
-            migrationStep(() =>
-              openMigrationTarget(tokens, workspace.id as WorkspaceId, {
-                mode:
-                  'contentMode' in workspace && workspace.contentMode === 'e2ee'
-                    ? 'protected'
-                    : 'plaintext',
-              })
-            ),
-            (target) => migrationStep(() => target.close()).pipe(Effect.orDie)
-          ).pipe(
-            Effect.flatMap((target) =>
-              migrateSnapshot(manifest, journal, directory).pipe(
-                Effect.provideService(MigrationRuntime, {
-                  target,
-                  transfer: new SessionAttachmentTransfer(auth.token, serverBaseUrl),
-                  progress: console.log,
-                })
+        if (!encrypted)
+          await registerMachineAccessForCliToken({
+            token: auth.token,
+            workspaceId: workspace.id,
+            machineId: auth.machineId,
+          });
+        const program = Effect.gen(function* () {
+          const e2ee = encrypted
+            ? yield* Effect.acquireRelease(
+                migrationStep(async () => {
+                  const { openCliE2eeWorkspaceLegacy } =
+                    await import('@/lib/e2ee/workspace-legacy');
+                  return openCliE2eeWorkspaceLegacy({
+                    accountId: auth.userId,
+                    workspaceId: workspace.id,
+                    machineId: auth.machineId,
+                    genesisHash: workspace.genesisHash ?? '',
+                    cloud: createCloudE2eePort({ token: auth.token, authBaseUrl, logger }),
+                    onUnavailable: () => logger.debug('e2ee_migration_unavailable'),
+                  }).catch((error: unknown) => {
+                    throw describeEncryptedCommandFailure(workspace.id, error);
+                  });
+                }),
+                (owner) => migrationStep(() => owner.close()).pipe(Effect.orDie)
               )
-            ),
-            Effect.scoped
-          )
-        );
+            : undefined;
+          if (e2ee) yield* migrationStep(() => e2ee.authorizeImport());
+          const tokenProvider = (
+            e2ee?.tokens ??
+            createCloudStreamsTokenPort({
+              token: auth.token,
+              authBaseUrl,
+              authSiteUrl: LODY_AUTH_SITE_URL,
+              logger,
+            })
+          ).createTokenProvider({ workspaceId: workspace.id as WorkspaceId });
+          yield* withMigrationTokens(tokenProvider, (tokens) =>
+            Effect.acquireRelease(
+              migrationStep(() =>
+                openMigrationTarget(
+                  tokens,
+                  workspace.id as WorkspaceId,
+                  e2ee?.content ?? { mode: 'plaintext' },
+                  e2ee ? { authorize: e2ee.authorizeImport, bucketId: e2ee.bucketId } : undefined
+                )
+              ),
+              (target) => migrationStep(() => target.close()).pipe(Effect.orDie)
+            ).pipe(
+              Effect.flatMap((target) =>
+                migrateSnapshot(manifest, journal, directory).pipe(
+                  Effect.provideService(MigrationRuntime, {
+                    target,
+                    transfer: new SessionAttachmentTransfer(
+                      auth.token,
+                      serverBaseUrl,
+                      e2ee
+                        ? {
+                            token: async () => {
+                              await e2ee.authorizeImport();
+                              return e2ee.attachmentToken();
+                            },
+                          }
+                        : undefined
+                    ),
+                    progress: console.log,
+                  })
+                )
+              ),
+              Effect.scoped
+            )
+          );
+        }).pipe(Effect.scoped);
         const exit = await Effect.runPromiseExit(program, { signal });
         if (Exit.isFailure(exit)) throw Cause.squash(exit.cause);
         console.log(`Migration backup and resume journal: ${directory}`);

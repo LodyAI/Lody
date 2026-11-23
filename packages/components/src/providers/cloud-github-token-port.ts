@@ -53,6 +53,7 @@ export function createCloudGitHubTokenPort(
   assertAccess: (workspaceId: string) => string
 ): GitHubTokenPort {
   return {
+    assertAccess,
     getRepoToken: (input) =>
       runActionWithUnauthorizedRetry(
         () => assertAccess(input.workspaceId),

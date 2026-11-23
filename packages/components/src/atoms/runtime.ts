@@ -228,6 +228,11 @@ export type WorkspaceRuntime = {
   readonly contentMode?: 'plaintext' | 'e2ee';
   /** Host RPC support only; each operation still requires live admission and grants. */
   readonly protectedRpcAvailable?: boolean;
+  /** Host-verified ledger role, scoped to this runtime's account and workspace. */
+  readonly protectedMemberRole?: {
+    get(): 'owner' | 'admin' | 'member' | 'guest' | null;
+    subscribe(listener: () => void): () => void;
+  };
   /** Encrypted only: verified ledger file role for display gates; machines still authorize. */
   readonly protectedCodeCollabRole?: {
     get(): 'read' | 'write';

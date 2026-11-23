@@ -60,6 +60,8 @@ export class SubmissionError extends Schema.TaggedError<SubmissionError>()('Subm
     'corrupt',
     'unconfirmed',
   ]),
+  /** The failed append, for allowlisted diagnostics only; it never proves an outcome. */
+  cause: Schema.optional(Schema.Defect()),
 }) {}
 const fail = (reason: SubmissionError['reason']) => new SubmissionError({ reason });
 const fromStore = (error: LocalStoreError) =>
@@ -265,7 +267,11 @@ export class LedgerSubmission extends Context.Service<
               return yield* appended.failure;
           }
           checked = yield* inspect(record, checked.checkpoint);
-          if (!checked.outcome) return yield* fail('unconfirmed');
+          if (!checked.outcome)
+            return yield* new SubmissionError({
+              reason: 'unconfirmed',
+              ...(Result.isFailure(appended) ? { cause: appended.failure } : {}),
+            });
           const observed = yield* store(journal.load(anchor));
           yield* store(
             journal.finish(anchor, record, checked.outcome, observed.checkpoint, checked.checkpoint)

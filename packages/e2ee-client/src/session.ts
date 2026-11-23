@@ -1,3 +1,4 @@
+import { makeRemoteMachinePairing } from './remote-machine';
 import { makePersonalKeyMaintenance, type PersonalKeyRoundMode } from './maintenance';
 import {
   Cause,
@@ -1256,6 +1257,29 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       revoke: (token: string) =>
         run(Effect.flatMap(membersPort(), (port) => port.revoke(memberAccess(), token))),
     };
+    const remoteMachinePorts = platform.remoteMachine?.(prepared.binding, credential);
+    const remoteMachine = remoteMachinePorts
+      ? makeRemoteMachinePairing({
+          ...remoteMachinePorts,
+          accountId: prepared.binding.accountId,
+          workspaceId: prepared.binding.workspaceId,
+          genesisRecordHex: approval.offer.genesisRecordHex,
+          credential: toHex(credential),
+          signer: device,
+          current: admitted,
+          local: serialRound,
+          refresh: () => serialRound(control.refresh()),
+          keyRound: (recipient) =>
+            Effect.gen(function* () {
+              const view = yield* admitted();
+              const current = yield* status();
+              return yield* keyRound(
+                current.usableEpoch === view.inspectState().epoch.number ? 'distribute' : 'full',
+                [recipient]
+              );
+            }),
+        })
+      : undefined;
     if (recovered.length) {
       yield* withKeys((ctx) =>
         Effect.forEach(
@@ -1268,6 +1292,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     return Object.freeze({
       binding: Object.freeze({ ...prepared.binding }),
       accountApproval: Object.freeze(accountApproval),
+      remoteMachine: {
+        begin: () => run(remoteMachine ? remoteMachine.begin() : fail('unsupported')),
+        inspect: (session: string) =>
+          run(remoteMachine ? remoteMachine.inspect(session) : fail('unsupported')),
+        approve: (session: string, summary: string) =>
+          run(remoteMachine ? remoteMachine.approve(session, summary) : fail('unsupported')),
+        cancel: (session: string) =>
+          run(remoteMachine ? remoteMachine.cancel(session) : fail('unsupported')),
+      },
       activateAccountPairing: accountApproval.activateAccountPairing,
       ingest: (page: E2eeWorkspaceHistoryPage) => run(serialRound(ingestPage(page))),
       members: Object.freeze(members),

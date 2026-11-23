@@ -85,7 +85,11 @@ const KNOWN_INDEXEDDB_NAMES = [
  * trust pins or unacknowledged originals, even when named lody*. Keep the same
  * policy for enumeration and explicit late callers; application registration
  * cannot protect a database when cache recovery runs before application boot. */
-const REBUILDABLE_DATABASE_PREFIXES = ['lody-loro-repo-db-', 'lody-loro-stream-cursors-'];
+const REBUILDABLE_DATABASE_PREFIXES = [
+  'lody-loro-repo-db-',
+  'lody-loro-stream-cursors-',
+  `${ROOST_HISTORY_CACHE_DB}:`,
+];
 function isRecoverableDatabase(name: string): boolean {
   return (
     name !== SESSION_INPUT_DATABASE &&

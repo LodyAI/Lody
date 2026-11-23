@@ -494,5 +494,39 @@ describe('applyAcpSessionRunConfig', () => {
       logger: createLogger(),
     });
     expect(applied).toEqual([]);
+
+    applied.length = 0;
+    await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-speed-4' as SessionId,
+        acpSessionId: 'acp-speed-4' as ACPSessionId,
+        agentClient: makeClient(liveMultiTier),
+      },
+      config: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        configOptionValues: { 'fast-mode': 'normal' },
+      },
+      logger: createLogger(),
+    });
+    expect(applied).toEqual([['fast-mode', 'off']]);
+
+    applied.length = 0;
+    await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-speed-5' as SessionId,
+        acpSessionId: 'acp-speed-5' as ACPSessionId,
+        agentClient: makeClient([
+          { id: 'fast-mode', type: 'boolean', currentValue: true, options: [] },
+        ]),
+      },
+      config: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        configOptionValues: { 'fast-mode': 'standard' },
+      },
+      logger: createLogger(),
+    });
+    expect(applied).toEqual([['fast-mode', false]]);
   });
 });

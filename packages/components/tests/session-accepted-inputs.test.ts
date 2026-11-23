@@ -1,12 +1,15 @@
+import { encryptedDispatchSigner } from './helpers/encrypted-dispatch-signer';
+import { createRoostHistoryCache, roostHistoryDatabase } from '../src/lib/roost-history-cache';
 import { createHistoryWriter } from '@lody/shared/history-writer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { LoroRepo } from 'loro-repo';
-import { createLoroSessionData } from '@lody/shared/session-data';
+import { createLoroSessionData, createRoostDirectoryRow } from '@lody/shared/session-data';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getMachineRoomId,
-  getSessionRoomId} from '@lody/shared';
+  getSessionRoomId,
+} from '@lody/shared';
 import { createConversationSession } from '../src/lib/conversation-view';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
@@ -22,7 +25,7 @@ import {
   retainEncryptedWorkspaceCleanup,
 } from '../src/lib/e2ee-member-removal';
 import { resolveWorkspaceRuntimeCacheIdentity } from '../src/providers/create-workspace-runtime';
-import { encryptedLocalNamespace } from '../src/lib/e2ee-local-data';
+import { encryptedLocalInstance, encryptedLocalNamespace } from '../src/lib/e2ee-local-data';
 import { createEagerSyncHighWaterStore } from '../src/lib/eager-sync-high-water-cache';
 import {
   createAcceptedSessionInputs,
@@ -265,7 +268,7 @@ async function workspaceHarness(options: {
     setState: (change: never) => conversation.mirror.setState(change),
     waitUntilSynced: async () => {},
   };
-  const makeRuntime = () => {
+  const makeRuntime = (signer?: ReturnType<typeof encryptedDispatchSigner>) => {
     const resources = createSessionSendResources({
       acquire: async () => {
         await options.beforeAcquire?.();
@@ -291,6 +294,11 @@ async function workspaceHarness(options: {
       repo,
       writer,
       sendResources: resources,
+      ...(signer && {
+        contentMode: 'e2ee',
+        prepareEncryptedDispatch: signer.prepareEncryptedDispatch,
+        attachmentToken: async () => 'attachment-grant',
+      }),
       workspaceId: input.workspaceId,
       requestSessionDispatchTurn: async (_machineId: unknown, request: { userTurnId: string }) => {
         delivered.push(request.userTurnId);
@@ -300,7 +308,15 @@ async function workspaceHarness(options: {
     const pending = createWorkspacePendingSends({
       runtime,
       paused: options.paused,
-      accountId: 'input-account',
+      accountId: signer ? 'source-user' : 'input-account',
+      ...(signer && {
+        localIdentity: {
+          accountId: 'source-user',
+          workspaceId: input.workspaceId,
+          genesisHash: '11'.repeat(32),
+          signingPublicKey: '22'.repeat(32),
+        },
+      }),
       workspaceId: input.workspaceId,
       token: () => null,
       localMachineId: () => input.targetMachineId ?? null,
@@ -323,6 +339,78 @@ async function workspaceHarness(options: {
 }
 
 describe('locally accepted Roost input', () => {
+  it('uploads encrypted file bytes before the Roost owner receives the signed manifest', async () => {
+    const fixture = await workspaceHarness({
+      accept: async (entry, owner) => {
+        await owner.commands.appendTurn(entry);
+        return { status: 'accepted', turnId: entry.id, active: true };
+      },
+    });
+    await fixture.repo.upsertDocMeta(getMachineRoomId(fixture.input.targetMachineId!), {
+      protocolCapabilities: { ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES, e2eeRoostHistory: 1 },
+    });
+    const signer = encryptedDispatchSigner();
+    const { runtime, pending } = fixture.makeRuntime(signer);
+    const body = 'private file contents';
+    const parts: Uint8Array[] = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      expect(url).toContain('session-encrypted-file');
+      const headers = new Headers(init.headers);
+      expect(headers.get('Authorization')).toBe('Bearer attachment-grant');
+      expect(JSON.stringify([...headers])).not.toContain('original.txt');
+      const bytes = new Uint8Array(init.body as Uint8Array);
+      parts.push(bytes);
+      return Response.json({
+        file: {
+          type: 'file',
+          fileId: 'part-1',
+          fileName: 'attachment.bin',
+          mimeType: 'application/octet-stream',
+          sizeBytes: bytes.length,
+          sha256: 'a'.repeat(64),
+          textPreview: false,
+          transport: 'r2',
+          uploadedAt: 1,
+        },
+      });
+    });
+    await acceptSessionUserTurn(
+      runtime,
+      fixture.sessionId,
+      fixture.input.entry,
+      { kind: 'dispatch' },
+      undefined,
+      undefined,
+      [
+        {
+          id: 'draft-file',
+          kind: 'file',
+          name: 'original.txt',
+          mimeType: 'text/plain',
+          lastModified: 0,
+          source: new Blob([body]),
+        },
+      ]
+    );
+    await when(pending, () => !pending.has(fixture.input.id) || !!pending.getSnapshot()[0]?.error);
+    expect(pending.getSnapshot()).toEqual([]);
+    expect(parts).toHaveLength(1);
+    expect(new TextDecoder().decode(parts[0])).not.toContain(body);
+    expect(signer.signed[0]?.inputConfig.inputBlocks?.[0]).toMatchObject({
+      type: 'file',
+      transport: 'r2',
+      encryption: { parts: ['part-1'] },
+    });
+    expect(await fixture.owner.history.readAll()).toMatchObject([
+      {
+        id: fixture.input.id,
+        e2eeIntent: expect.any(String),
+        inputConfig: signer.signed[0]?.inputConfig,
+      },
+    ]);
+    expect(fixture.delivered).toEqual([fixture.input.id]);
+  });
+
   it.each(['handoff', 'cancel-dispatch', 'cancel-guide'] as const)(
     'never lets the facade reclaim delivery after its row disappears: %s',
     async (phase) => {
@@ -1273,7 +1361,34 @@ it('member removal deletes only the stopped workspace input and replica namespac
       db.close();
     }
   }
-  await removeEncryptedWorkspaceLocalData(scope);
+  for (const ns of [encryptedLocalInstance(scope), encryptedLocalInstance(otherScope)]) {
+    const cache = createRoostHistoryCache('same-session', ns);
+    const turn = send(ns).entry;
+    await cache.acceptPage(
+      {
+        startPosition: 0,
+        totalCount: 1,
+        rows: [createRoostDirectoryRow(0, turn)],
+        hasMoreOlder: false,
+        cursor: null,
+      },
+      [turn],
+      1
+    );
+    expect(await cache.getHead()).toBeDefined();
+    cache.dispose();
+  }
+  retainEncryptedWorkspaceCleanup(scope);
+  vi.resetModules();
+  await (await import('../src/lib/e2ee-member-removal')).resumeEncryptedWorkspaceCleanup(scope);
+  expect((await factory.databases()).map((db) => db.name)).not.toContain(
+    roostHistoryDatabase(encryptedLocalInstance(scope))
+  );
+  const retainedCache = createRoostHistoryCache('same-session', encryptedLocalInstance(otherScope));
+  expect(await retainedCache.readTurn(encryptedLocalInstance(otherScope))).toMatchObject({
+    role: 'user',
+  });
+  retainedCache.dispose();
   expect(await removed.list()).toEqual([]);
   expect((await otherAccount.list()).map((row) => row.id)).toEqual(['other-account']);
   expect((await otherWorkspace.list()).map((row) => row.id)).toEqual(['other-workspace']);

@@ -212,7 +212,10 @@ export class Lody {
           ...callbacks,
         });
       }
-      options = { ...options, cloudPort: encryptedRuntimeCloudPort(options.cloudPort) };
+      options = {
+        ...options,
+        cloudPort: encryptedRuntimeCloudPort(options.cloudPort, options.userId),
+      };
     }
     let manager: LoroDocumentManager | undefined;
     let encryptedExecution: EncryptedAgentExecution | undefined;

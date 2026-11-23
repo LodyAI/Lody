@@ -93,14 +93,13 @@
   Activated workspaces reopen offline. Join identical per-workspace intents; Fleet shutdown
   drains activation before cloud-port close.
 
-- Never register Fleet PR pollers for encrypted workspaces.
+- Encrypted pollers publish protected Loro metadata, with null hosted PR association.
 - `runtime-cloud-port.ts` closes plaintext cloud channels for encrypted runtimes but keeps
   the attachment relay URL and the preview tunnel, whose ordinary proof verifier rejects.
   MessageHandler fences plaintext attachment reads.
 - Edit-and-resend replacements carry this machine's `signMachineInput` intent in the same
   commit; an unsigned one is never written.
-- Encrypted cloud ports omit hosted GitHub tokens. SessionManager uses host git/gh
-  credentials; never send decrypted repository names through its credential broker.
+- Account E2EE ports retain repo-scoped GitHub credentials. Personal requests stay account-bound; other accounts use App tokens. Device-only ports omit GitHub.
 
 - Fleet/Lody/one-shot commands load `workspace-legacy` only in the encrypted branch.
   Keep custody/core off the ordinary entry graph; CLI plus maps must fit the 2 GiB heap.
