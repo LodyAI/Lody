@@ -1,7 +1,15 @@
 import http from 'node:http';
 import https from 'node:https';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { Agent, Pool, ProxyAgent, fetch as undiciFetch, setGlobalDispatcher } from 'undici';
+import {
+  Agent,
+  Pool,
+  ProxyAgent,
+  fetch as undiciFetch,
+  getGlobalDispatcher,
+  setGlobalDispatcher,
+  type Dispatcher,
+} from 'undici';
 import { resolveProxyUrlCore } from './proxy-core';
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
@@ -16,6 +24,7 @@ type GlobalAgentWithAddRequest = http.Agent & {
 };
 
 let activeDispatcher: Agent | null = null;
+let previousGlobalDispatcher: Dispatcher | null = null;
 let installedFetchWrapper: typeof globalThis.fetch | null = null;
 let originalGlobalFetch: typeof globalThis.fetch | null = null;
 let originalHttpAddRequest: GlobalAgentWithAddRequest['addRequest'] | null = null;
@@ -161,6 +170,7 @@ export function installAcpAdapterHttpProxySupport(options: AcpAdapterHttpProxyOp
     });
   }
 
+  previousGlobalDispatcher ??= getGlobalDispatcher();
   setGlobalDispatcher(activeDispatcher);
 
   if (!installedFetchWrapper) {
@@ -223,5 +233,9 @@ export async function resetAcpAdapterHttpProxySupportForTests(): Promise<void> {
   cachedProxyAgents.clear();
   const previous = activeDispatcher;
   activeDispatcher = null;
+  if (previousGlobalDispatcher) {
+    setGlobalDispatcher(previousGlobalDispatcher);
+    previousGlobalDispatcher = null;
+  }
   await previous?.close();
 }

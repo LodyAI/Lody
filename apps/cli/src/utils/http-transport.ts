@@ -5,6 +5,7 @@ import {
   Pool,
   ProxyAgent,
   fetch as undiciFetch,
+  getGlobalDispatcher,
   setGlobalDispatcher,
   type Dispatcher,
 } from 'undici';
@@ -58,6 +59,7 @@ let undiciDiagnosticsInstalled = false;
 let activeGlobalTransport: CliHttpTransport | null = null;
 let installedGlobalFetch: CliFetch | null = null;
 let currentBaseFetch: CliFetch | null = null;
+let previousGlobalDispatcher: Dispatcher | null = null;
 
 const identifiedFetches = new WeakSet<CliFetch>();
 
@@ -192,6 +194,7 @@ export function installCliHttpGlobalDispatcher(
       (activeGlobalTransport?.fetch ?? withCliUserAgent(baseFetch))(input, init);
     globalThis.fetch = installedGlobalFetch;
   }
+  previousGlobalDispatcher ??= getGlobalDispatcher();
   setGlobalDispatcher(transport.dispatcher);
 
   if (config.diagnosticsEnabled) {
@@ -219,6 +222,10 @@ export async function resetCliHttpTransportForTests(): Promise<void> {
   }
   installedGlobalFetch = null;
   currentBaseFetch = null;
+  if (previousGlobalDispatcher) {
+    setGlobalDispatcher(previousGlobalDispatcher);
+    previousGlobalDispatcher = null;
+  }
   await previous?.close();
 }
 
