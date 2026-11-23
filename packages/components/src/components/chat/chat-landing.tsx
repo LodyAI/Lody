@@ -75,6 +75,7 @@ import {
 } from '@lody/shared';
 import { useCloudMutation, useCloudQuery, usePlatform } from '@lody/platform/react';
 import { usePostHog } from '@/lib/posthog-context';
+import { useConversationPane } from '@/components/sessions/conversation-pane-context';
 import {
   ArrowUp,
   ChevronsUpDown,
@@ -697,6 +698,7 @@ interface ChatLandingProps {
    * chat route only; mobile keeps its base-context model.
    */
   onSelectionUrlSync?: (search: ChatLandingSearch) => void;
+  onSessionCreated?: (sessionId: SessionId) => void;
   /**
    * Renders the landing inside another surface (Today's "Convert to task"
    * dialog) instead of as the new-chat page. Absent on the page, whose
@@ -893,6 +895,7 @@ function WorkspaceChatLanding({
   pinSectionId: pinSectionIdProp,
   onClearPinSection,
   onSelectionUrlSync,
+  onSessionCreated,
   embedding,
 }: ChatLandingProps) {
   const embeddedSurface = embedding ? CHAT_LANDING_EMBEDDED_SURFACES[embedding.surface] : null;
@@ -907,6 +910,7 @@ function WorkspaceChatLanding({
   const preSelectedProjectGroupId =
     preSelectedContextProp === 'group' ? (preSelectedGroup ?? null) : null;
   const { t, i18n } = useTranslation();
+  const conversationPane = useConversationPane();
   const navigate = useNavigate();
   const { openSettings } = useOpenSettings();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -1554,25 +1558,28 @@ function WorkspaceChatLanding({
   // command id (and binding) with the in-session composer; the two surfaces don't both
   // "win" the shortcut — on desktop only one mounts at a time, and on mobile the registry
   // stack lets the most-recently-mounted (the open session) take the binding.
-  useCommand({
-    id: 'session.focusInput',
-    title: t('commands.session.focusInput', 'Focus Current Input'),
-    category: 'Editor',
-    keybindings: getCommandKeybindings('session.focusInput'),
-    when: () => Boolean(promptTextareaRef.current),
-    run: () => {
-      const el = promptTextareaRef.current;
-      if (!el) return;
-      // Where keyboard nav is on, ⌘L is a toggle: focus the composer, or — when it's
-      // already focused — leave its focus mode and hand control to the option ring (Esc
-      // does the same from the keyboard-nav controller).
-      if (keyboardNavEnabled && document.activeElement === el) {
-        focusFirstChatLandingOption(keyboardNavRef.current, el);
-        return;
-      }
-      el.focus();
+  useCommand(
+    {
+      id: 'session.focusInput',
+      title: t('commands.session.focusInput', 'Focus Current Input'),
+      category: 'Editor',
+      keybindings: getCommandKeybindings('session.focusInput'),
+      when: () => Boolean(promptTextareaRef.current),
+      run: () => {
+        const el = promptTextareaRef.current;
+        if (!el) return;
+        // Where keyboard nav is on, ⌘L is a toggle: focus the composer, or — when it's
+        // already focused — leave its focus mode and hand control to the option ring (Esc
+        // does the same from the keyboard-nav controller).
+        if (keyboardNavEnabled && document.activeElement === el) {
+          focusFirstChatLandingOption(keyboardNavRef.current, el);
+          return;
+        }
+        el.focus();
+      },
     },
-  });
+    conversationPane?.focused ?? true
+  );
   const landingLoadStartMsRef = useRef(getPerformanceNowMs());
   const fireLandingViewedOnce = useFireOncePerKey();
   const previousContextTypeRef = useRef(contextType);
@@ -2432,6 +2439,7 @@ function WorkspaceChatLanding({
     [executorConfigs, selectedAgent?.machineId]
   );
   useComposerCycleCommands({
+    enabled: conversationPane?.focused ?? true,
     mode: {
       values: modeOptions.map((option) => option.value),
       current: selectedModeId,
@@ -3856,6 +3864,18 @@ function WorkspaceChatLanding({
             )
           );
         }
+      } else if (onSessionCreated) {
+        try {
+          onSessionCreated(sessionId);
+        } catch (handoffError) {
+          console.error('Conversation column failed to open the new session', handoffError);
+          toast.error(
+            t(
+              'chat.embeddedHandoffFailed',
+              'The conversation was created, but this view could not be updated.'
+            )
+          );
+        }
       }
       if (!historyEntry || typeof historyEntry !== 'object' || !('id' in historyEntry)) {
         throw new Error(`Initial session history missing entry id (sessionId=${sessionId})`);
@@ -4017,8 +4037,7 @@ function WorkspaceChatLanding({
       // be misattributed.
       startFailureReason = 'unknown';
 
-      // An embedded landing handed the session to its host above; it stays put.
-      if (embeddingRef.current) return;
+      if (embeddingRef.current || onSessionCreated) return;
       // The mobile host acknowledges its committed session surface before
       // dismissing the new-chat page; navigation may resolve before portals paint.
       await navigate(
@@ -5010,7 +5029,8 @@ function WorkspaceChatLanding({
     );
   }, [activeLocalGitState, contextType, selectedLocalProjectMeta]);
   const linkedLocalProjectRepo = useMemo(
-    () => resolveLinkedWorkspaceGitHubRepo(selectedLocalProjectGithubRepoFullName, freshRepositories),
+    () =>
+      resolveLinkedWorkspaceGitHubRepo(selectedLocalProjectGithubRepoFullName, freshRepositories),
     [freshRepositories, selectedLocalProjectGithubRepoFullName]
   );
 

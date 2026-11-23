@@ -7102,5 +7102,12 @@
   "settings.promptShortcuts.anyMachine": "Any machine",
   "settings.promptShortcuts.anyAgent": "Any agent",
   "settings.promptShortcuts.nameRequired": "Give this Prompt a name.",
-  "settings.agentRoles.form.addMachine": "Add machine"
+  "settings.agentRoles.form.addMachine": "Add machine",
+  "sessions.split.splitRight": "Split right",
+  "sessions.split.full": "Up to {{count}} columns side by side",
+  "sessions.split.close": "Close column",
+  "sessions.split.emptyTitle": "Open a conversation here",
+  "sessions.split.emptyHint": "Pick one below, or click a conversation in the sidebar while this column has focus.",
+  "sessions.split.alreadyOpen": "Open in another column",
+  "sessions.split.newChat": "New chat in this column"
 }

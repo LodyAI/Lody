@@ -257,6 +257,7 @@ export interface TerminalDockProps {
   /** Active local session. Undefined => out of session: no terminal tabs. */
   sessionId?: string;
   canCreateTerminal?: boolean;
+  controllerEnabled?: boolean;
   autoOpenFirstTerminal?: boolean;
   defaultView?: DockView;
   className?: string;
@@ -266,6 +267,7 @@ export function TerminalDock({
   channel,
   sessionId,
   canCreateTerminal = Boolean(sessionId),
+  controllerEnabled = true,
   autoOpenFirstTerminal = false,
   defaultView,
   className,
@@ -301,9 +303,10 @@ export function TerminalDock({
   const isOpen = view !== null;
   const setDockOpen = useSetAtom(terminalDockOpenAtom);
   useEffect(() => {
+    if (!controllerEnabled) return undefined;
     setDockOpen(isOpen);
-  }, [isOpen, setDockOpen]);
-  useEffect(() => () => setDockOpen(false), [setDockOpen]);
+    return () => setDockOpen(false);
+  }, [isOpen, setDockOpen, controllerEnabled]);
 
   // Opening/closing the dock resizes the chat viewport above it (flex sibling)
   // over a 200ms height transition. Announce the transition so the conversation's
@@ -325,9 +328,10 @@ export function TerminalDock({
   // is false until this workspace's local runtime and session are ready).
   const setDockCanCreate = useSetAtom(terminalDockCanCreateAtom);
   useEffect(() => {
+    if (!controllerEnabled) return undefined;
     setDockCanCreate(canCreateTerminal);
-  }, [canCreateTerminal, setDockCanCreate]);
-  useEffect(() => () => setDockCanCreate(false), [setDockCanCreate]);
+    return () => setDockCanCreate(false);
+  }, [canCreateTerminal, setDockCanCreate, controllerEnabled]);
 
   // Load / reconcile the active session's terminals.
   useEffect(() => {
@@ -547,13 +551,13 @@ export function TerminalDock({
   // (`sessionId` set) — otherwise the toggle command / header icon stay hidden.
   const setTerminalController = useSetAtom(terminalControllerAtom);
   useEffect(() => {
-    if (!sessionId) return undefined;
+    if (!sessionId || !controllerEnabled) return undefined;
     const controller = { toggleOpen: toggleDock, openNewTerminal: handleNewTerminal };
     setTerminalController(controller);
     return () => {
       setTerminalController((current) => (current === controller ? null : current));
     };
-  }, [handleNewTerminal, sessionId, setTerminalController, toggleDock]);
+  }, [handleNewTerminal, sessionId, setTerminalController, toggleDock, controllerEnabled]);
 
   const updateActiveTitle = useCallback(
     (title: string) => {

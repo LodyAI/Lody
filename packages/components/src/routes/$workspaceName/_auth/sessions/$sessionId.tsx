@@ -3,10 +3,13 @@ import { lazy, Suspense } from 'react';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { AppThemeShell } from '@/components/app-theme-shell';
 
-/* Lazy so the multi-MB session-detail graph is not modulepreloaded at app
-   entry; it loads when this route's component first renders. Only the render
-   is deferred — `validateSearch`/`beforeLoad` below stay synchronous. */
-const SessionDetail = lazy(() => import('@/components/sessions/session-detail'));
+/* Keep the session workspace and its multi-MB session graph out of the app entry chunk.
+   Only the render is deferred; route validation stays synchronous. */
+const SessionConversationWorkspace = lazy(() =>
+  import('@/components/sessions/session-conversation-workspace').then((module) => ({
+    default: module.SessionConversationWorkspace,
+  }))
+);
 import { useIsMobile } from '@/hooks/use-mobile';
 import { readStoredLastActiveTabState } from '@/lib/session-draft-tabs';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
@@ -22,7 +25,7 @@ export type SessionDetailSearch = {
 };
 
 const SessionDetailRoute = () => {
-  const { sessionId } = Route.useParams();
+  const { sessionId, workspaceName } = Route.useParams();
   const search = Route.useSearch();
   const isMobile = useIsMobile();
 
@@ -49,12 +52,11 @@ const SessionDetailRoute = () => {
   return (
     <AppThemeShell>
       <Suspense fallback={null}>
-        <SessionDetail
+        <SessionConversationWorkspace
+          key={workspaceName}
+          workspaceSlug={workspaceName}
           sessionId={sessionId as SessionId}
-          urlTab={search.tab}
-          urlPrNumber={search.pr}
-          urlBrowser={search.browser}
-          urlSimulator={search.simulator}
+          search={search}
         />
       </Suspense>
     </AppThemeShell>

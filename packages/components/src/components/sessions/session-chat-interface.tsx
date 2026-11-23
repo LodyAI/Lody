@@ -4,6 +4,7 @@ import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import { tooltip, tooltip as searchTooltipTokens } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { field as searchFieldTokens } from '@lody/ui/field/field.tokens.stylex';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
+import { useConversationPane } from './conversation-pane-context';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
@@ -3526,10 +3527,11 @@ export const SessionChatInterface = memo(
     const thinkEffortCurrent = thinkEffortSelector
       ? configOptionValues[thinkEffortSelector.configId]
       : undefined;
+    const conversationPane = useConversationPane();
     useComposerCycleCommands({
       // Session detail keeps its toolbar and inactive tabs mounted. Only the active
       // conversation may own these duplicate command ids.
-      enabled: !hideMessageArea && syncEnabled,
+      enabled: !hideMessageArea && syncEnabled && (conversationPane?.focused ?? true),
       mode: hideMessageArea
         ? null
         : {
