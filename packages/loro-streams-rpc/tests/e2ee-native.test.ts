@@ -831,7 +831,7 @@ it('protects feature requests and chunked results with workspace signatures and 
   ).rejects.toThrow('intent_conflict');
 });
 
-it.each([true, false])('retains diff manifest/blob writer authority (guest=%s)', async (guest) => {
+it.each([true, false])('classifies diff reads; refuses Guest saves (guest=%s)', async (guest) => {
   const f = encryptedRpcFixture({ guest });
   fixtures.push(f);
   const requests = [
@@ -854,10 +854,6 @@ it.each([true, false])('retains diff manifest/blob writer authority (guest=%s)',
       requestId: (index + 40).toString(16).padStart(32, '0'),
       request: { workspaceId: f.workspaceId, machineId: f.machineId, ...request },
     };
-    if (guest) {
-      await expect(Effect.runPromise(f.sender.prepareFeature(input))).rejects.toThrow();
-      continue;
-    }
     const original = await Effect.runPromise(f.sender.prepareFeature(input));
     const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
     expect(opened?.input).toEqual(input);

@@ -30,8 +30,8 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
 - `codeCollabDiffBlobs` v1 gates the additive manifest/blob methods and opaque
   `[path, 'v']` generation siblings. Legacy file rows stay strict and unchanged;
   content hashes travel only through owner-scoped RPC, never the shared index.
-- Encrypted manifest/blob calls retain writer authority and execution claims; Guest
-  access is outside this capability. Manifest file-read failures, including path
+- Encrypted manifest/blob calls use same-member read authority without execution
+  claims or write-operation logs; cross-member Guest access remains unavailable. Manifest file-read failures, including path
   containment refusals, are per-file; request authorization and validation still reject
   the request.
 - File-index generation siblings count toward whole-state row/byte limits and

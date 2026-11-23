@@ -3,7 +3,10 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { expect, it } from 'vitest';
-import { RecoveryVaultSection } from '../src/components/settings/e2ee/recovery-vault-section';
+import {
+  RecoveryVaultSection,
+  preferredRecoveryUnlock,
+} from '../src/components/settings/e2ee/recovery-vault-section';
 import {
   E2eeRecoveryHostContext,
   type RecoveryPort,
@@ -159,4 +162,13 @@ it('desktop progress detaches without cancelling recovery and keeps partial-key 
     done.resolve({ outcome: 'restored', results: [] });
     window.ipc = previous;
   }
+});
+
+it('prefers known vault unlock methods before an unknown passkey', () => {
+  expect(preferredRecoveryUnlock(undefined, true)).toBeUndefined();
+  const passwordOnly = { hasFile: false, hasPassword: true, hasPasskey: null };
+  expect(preferredRecoveryUnlock(passwordOnly, true)).toBe('password');
+  expect(preferredRecoveryUnlock({ ...passwordOnly, hasFile: true }, true)).toBe('file');
+  expect(preferredRecoveryUnlock({ ...passwordOnly, hasPasskey: true }, true)).toBe('passkey');
+  expect(preferredRecoveryUnlock({ ...passwordOnly, hasPasskey: true }, false)).toBe('password');
 });

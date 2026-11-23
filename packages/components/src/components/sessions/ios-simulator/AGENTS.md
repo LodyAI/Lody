@@ -7,7 +7,7 @@ Decision and rationale:
 - The iOS Simulator is its own side-panel tab (`ios-simulator`, mobile `?simulator=1`),
   never a Browser mode: no address bar, history, annotation or sharing, and no state
   shared with `SessionBrowserPanel`.
-- The tab exists only when the Session's TARGET machine is a Mac; read that and the
+- Encrypted workspaces hide the iOS Simulator tab. Otherwise it exists only when the Session's TARGET machine is a Mac; read that and the
   protocol capability through `getIosSimulatorPanelAvailability` only. An old Mac keeps
   the tab and asks for an update without calling it.
 - Lifecycle calls are `runtime.requestIosSimulatorControl` (`ios-simulator/control`).
@@ -60,6 +60,7 @@ Decision and rationale:
   source/origin/operation checks. Copy diagnostics appears only for current errors;
   healthy fallback is not an error. Never include SDP, ICE addresses or credentials.
 
+- Encrypted workspaces hide remote Android Emulator tabs and pause their controller reads; local Android control remains available.
 - `SessionDevicePreviewPanel` also serves Android through `android-emulator/control`
   and the independent `androidEmulator: 1` capability. Keep its state/preferences
   separate from iOS, never request iOS exterior assets for it, and expose only

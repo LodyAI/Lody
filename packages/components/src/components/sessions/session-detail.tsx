@@ -2099,11 +2099,13 @@ const SessionDetail = ({
     getMachineMetaByIdAtomFamily(simulatorOwnerSession?.machineId)
   );
   const activeIosSimulatorSession =
-    simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine) !== 'hidden'
+    simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine, runtime?.contentMode) !== 'hidden'
       ? simulatorOwnerSession
       : null;
   const activeAndroidEmulatorSession =
-    simulatorOwnerSession && machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
+    simulatorOwnerSession &&
+    (runtime?.contentMode !== 'e2ee' || simulatorOwnerSession.machineId === localMachineId) &&
+    machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
       ? simulatorOwnerSession
       : null;
   const [androidEmulatorOpen, setAndroidEmulatorOpen] = useState(false);

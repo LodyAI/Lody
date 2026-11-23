@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  E2eeAutomaticPairingState,
   E2eeAccountPairingPreview,
   E2eeAccountPairingRequestState,
   E2eeWorkspaceRuntime,
@@ -477,8 +478,25 @@ describe('account pairing relay operations', () => {
 
 describe('automatic pairing product flow', () => {
   /** A waiting runtime for one workspace whose request the page may cancel. */
-  const waitingRuntime = (cancelled: string[]) =>
-    ({
+  const waitingRuntime = (
+    cancelled: string[],
+    phase: E2eeAutomaticPairingState['phase'] = 'waiting'
+  ): E2eeWorkspaceRuntime => {
+    const unused = async (): Promise<never> => {
+      throw new Error('Unexpected runtime operation');
+    };
+    return {
+      account: unused,
+      recordCreated: unused,
+      open: unused,
+      close: unused,
+      status: unused,
+      refresh: unused,
+      contentStreamsToken: unused,
+      seal: unused,
+      openContent: unused,
+      ingestLedgerRecords: unused,
+      ledgerView: unused,
       automaticPairingState: async () => ({
         id: 'request',
         workspaceId: 'w1',
@@ -486,12 +504,13 @@ describe('automatic pairing product flow', () => {
         deviceName: 'Phone',
         comparisonCode: '123456',
         expiresAt: NOW + 300_000,
-        phase: 'waiting',
+        phase,
       }),
-      cancelAutomaticPairing: async (workspaceId: string) => {
+      cancelAutomaticPairing: async (workspaceId) => {
         cancelled.push(workspaceId);
       },
-    }) as unknown as E2eeWorkspaceRuntime;
+    };
+  };
   const inDialog = (label: string) =>
     [...document.body.querySelectorAll('button')].find((value) =>
       (value.textContent ?? '').startsWith(label)
@@ -523,6 +542,21 @@ describe('automatic pairing product flow', () => {
     );
     await tick(0);
   };
+  it.each(['expired', 'revoked', 'declined', 'cancelled'] as const)(
+    'keeps lost-access recovery available after pairing is %s',
+    async (phase) => {
+      const runtime = waitingRuntime([], phase);
+      await renderWaiting(runtime, {
+        workspaceName: 'Alpha',
+        accountRole: 'owner',
+        onBackToWorkspaces: () => {},
+        onRemoved: () => {},
+      });
+      expect(text()).toContain(`e2ee.auto.${phase}.title`);
+      await click('e2ee.lostAccess.entry');
+      expect(testId('e2ee-lost-access-lost')).not.toBeNull();
+    }
+  );
   /** An account removal port whose submit the test settles by hand. */
   const removalPort = (listed: () => Promise<boolean | null>) => {
     const port = {

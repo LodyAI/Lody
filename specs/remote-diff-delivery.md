@@ -16,10 +16,11 @@ disk are distinct sources. Historical turns never substitute current disk, and
 an expired source fails explicitly. Raw bytes must verify against the advertised
 content key before decoding or caching, including BOM and newline bytes.
 
-These two handlers do not start watches or mutate evidence. Encrypted calls retain
-the existing writer authority and execution claims. Guest diff access is deferred
-to a separate PR; this transport change does not grant access to Git bases or
-retained evidence to read-only members.
+These two handlers do not start watches or mutate evidence. Encrypted manifest/blob
+calls use fresh session-bound read authority within the same member, without
+execution claims or write-operation logs. This does not grant cross-member Guest access to Git bases
+or retained evidence; shared-machine execution authority is a separate contract. Legacy methods that can publish
+or initialize writable storage retain writer authority.
 Shared file indexes carry only opaque per-path invalidation tokens, never content
 hashes that would reveal whether a guessed file body exists. Read-only evidence
 access opens an existing recognized database without initialization, migration or GC.

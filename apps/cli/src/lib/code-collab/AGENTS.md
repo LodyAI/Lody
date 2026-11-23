@@ -109,8 +109,8 @@ File-by-file responsibilities: [README.md](README.md).
 - Root-scoped file state shares the owner publication and physical-file save chains. Watch subscriptions include root identity; wire keys must be decoded before filesystem access.
 
 - Diff blob handlers are capability-gated reads. They do not start watches, initialize
-  a snapshot database or migrate it. Encrypted calls retain writer authority and
-  execution claims. Reauthorize each page and serve only session-issued handles;
+  a snapshot database or migrate it. Encrypted manifest/blob calls use same-member read authority
+  without execution claims or write-operation logs; this does not grant cross-member Guest access. Reauthorize each page and serve only session-issued handles;
   never resolve a caller's hash as global authority.
   Whole-list manifests omit patches; single-file requests prepare bounded remote hunks.
   Generation rows contain no content hashes. Disk identity and non-Git base metadata
