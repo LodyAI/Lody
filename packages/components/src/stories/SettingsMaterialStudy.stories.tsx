@@ -4,7 +4,6 @@ import { composeStories } from '@storybook/react';
 
 import * as AccountSettingsStories from './AccountSettings.stories';
 import * as AccountMachinesOverviewStories from './AccountMachinesOverview.stories';
-import * as AgentRoleFormStories from './AgentRoleForm.stories';
 import * as GeneralSettingsStories from './GeneralSettings.stories';
 const storyLayout = stylex.create({
   grid: {
@@ -24,7 +23,6 @@ const storyLayout = stylex.create({
 
 const { OwnerView } = composeStories(AccountSettingsStories);
 const { Default: MachinesOverview } = composeStories(AccountMachinesOverviewStories);
-const { Configured: RoleForm } = composeStories(AgentRoleFormStories);
 const { Desktop: General } = composeStories(GeneralSettingsStories);
 
 /**
@@ -42,7 +40,6 @@ function SettingsMaterialStudy() {
       </div>
       <div {...stylex.props(storyLayout.stack)}>
         <MachinesOverview />
-        <RoleForm />
       </div>
     </div>
   );

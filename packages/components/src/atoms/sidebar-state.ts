@@ -162,6 +162,16 @@ export const pinSectionsCollapsedAtom = atomWithStorage<Record<string, boolean>>
   {}
 );
 
+/**
+ * Pin sections hidden on this device, keyed by `pinSectionKey(section.id)`
+ * (`'default'` for the default section). The visibility menu on the Pinned
+ * header can restore sections.
+ */
+export const pinSectionsHiddenAtom = atomWithStorage<Record<string, boolean>>(
+  'lody-sidebar-pin-sections-hidden',
+  {}
+);
+
 export type LocalProjectCollapseState = Record<string, boolean>;
 
 /**
@@ -389,16 +399,49 @@ export const sidebarUpdatedBucketCollapseStateAtom = atomWithStorage<Record<stri
   {}
 );
 
-/**
- * Per-bucket "show all" state for the Updated and Status organize modes.
- * Buckets above the preview threshold default to a compact preview; this map
- * records which buckets the user has explicitly expanded. Mirrors the pattern
- * that `sidebarShowFullListAtom` uses for Workspace task groups, keyed by
- * Updated's 'all' bucket and Status's 'idle' group (the only one that folds).
- */
-export const sidebarUpdatedBucketShowFullStateAtom = atomWithStorage<Record<string, boolean>>(
+const storedUpdatedBucketRevealRowsAtom = atomWithStorage<Record<string, number | boolean>>(
   'lody-sidebar-updated-bucket-show-full',
   {}
+);
+
+/**
+ * Per-bucket incremental reveal for the Updated and Status organize modes:
+ * extra top-level rows beyond the preview threshold. Buckets above the
+ * threshold default to a compact preview; this map records how much further
+ * each bucket was revealed through "Show more". Mirrors the pattern that
+ * `sidebarRevealedRowsAtom` uses for Workspace task groups, keyed by Updated's
+ * 'all' bucket and Status's 'settled' group. Persisted legacy boolean "show
+ * all" values read as fully revealed.
+ */
+export const sidebarUpdatedBucketRevealedRowsAtom = atom(
+  (get) => {
+    const stored = get(storedUpdatedBucketRevealRowsAtom);
+    let next: Record<string, number> | null = null;
+    for (const [key, value] of Object.entries(stored)) {
+      const rows =
+        typeof value === 'number' && Number.isFinite(value) && value > 0
+          ? Math.floor(value)
+          : value === true
+            ? Number.MAX_SAFE_INTEGER
+            : 0;
+      if (rows !== value) {
+        next ??= { ...(stored as Record<string, number>) };
+        next[key] = rows;
+      }
+    }
+    return next ?? (stored as Record<string, number>);
+  },
+  (
+    get,
+    set,
+    update: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)
+  ) => {
+    const current = get(sidebarUpdatedBucketRevealedRowsAtom);
+    set(
+      storedUpdatedBucketRevealRowsAtom,
+      typeof update === 'function' ? update(current) : update
+    );
+  }
 );
 
 export type ArchiveScopeValue = 'my' | 'team';

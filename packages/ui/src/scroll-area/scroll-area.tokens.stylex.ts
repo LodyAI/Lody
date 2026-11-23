@@ -2,10 +2,15 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '../tokens/colors.stylex';
 import { radius } from '../tokens/scales.stylex';
 
-/** A scrollbar is a neutral position mark, on no elevation rung. */
+/**
+ * A scrollbar is a neutral position mark, on no elevation rung. `size` is the
+ * hit area; the thumb is `inset` in from it at rest and `hoverInset` while the
+ * pointer is on the track or drags it.
+ */
 export const scrollbar = stylex.defineVars({
-  size: '8px',
-  inset: '2px',
+  size: '12px',
+  inset: '4px',
+  hoverInset: '2px',
   compactSize: '4px',
   radius: radius.full,
   thumb: colors.gray3,
@@ -24,6 +29,7 @@ export const scrollbarNativeTheme = stylex.create({
   variables: {
     '--lody-scrollbar-size': scrollbar.size,
     '--lody-scrollbar-inset': scrollbar.inset,
+    '--lody-scrollbar-hover-inset': scrollbar.hoverInset,
     '--lody-scrollbar-radius': scrollbar.radius,
     '--lody-scrollbar-thumb': scrollbar.thumb,
     '--lody-scrollbar-thumb-hover': scrollbar.thumbHover,

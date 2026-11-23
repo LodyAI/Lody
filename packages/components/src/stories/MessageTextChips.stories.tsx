@@ -1,3 +1,4 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
@@ -370,7 +371,7 @@ export const SentRows: Story = {
   args: { withSpans: true },
   render: () => (
     <SettingsStoryProviders>
-      <div className="flex h-dvh flex-col bg-background">
+      <div {...stylex.props(themeStyles.column)}>
         <SessionChatStreamView
           sessionId={rowsSessionId}
           items={SENT_ROWS}
@@ -386,3 +387,7 @@ export const SentRows: Story = {
     </SettingsStoryProviders>
   ),
 };
+
+const themeStyles = stylex.create({
+  column: { display: 'flex', height: '100dvh', flexDirection: 'column', backgroundColor: uiColors.background },
+});

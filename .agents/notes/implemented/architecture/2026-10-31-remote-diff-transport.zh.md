@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756), [#2765](https://github.com/LodyAI/Lody/pull/2765), [#2891](https://github.com/LodyAI/Lody/pull/2891)
+PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.com/LodyAI/Lody/pull/2753), [#2756](https://github.com/LodyAI/Lody/pull/2756), [#2765](https://github.com/LodyAI/Lody/pull/2765), [#2891](https://github.com/LodyAI/Lody/pull/2891), [#3163](https://github.com/LodyAI/Lody/pull/3163)
 
 [English](2026-10-31-remote-diff-transport.md)
 
@@ -17,8 +17,8 @@ PR: [#2316](https://github.com/LodyAI/Lody/pull/2316), [#2753](https://github.co
 ## 决策
 
 增量 capability `codeCollabDiffBlobs` v1 控制 `open-diff-manifest` 与 `read-blob`。
-不支持时保留旧接口与原预算。两个新接口不启动监听、不修改证据；加密调用维持既有 write
-权限与执行 claim。按 #2316 的 owner 决定，Guest diff 功能拆到后续独立 PR。明文缓存和兼容性约定记录在待人工审阅的
+不支持时保留旧接口与原预算。两个新接口不启动监听、不修改证据；加密清单/blob 调用现属于
+会话读取，不使用执行 claim 或写操作日志：Owner 已决定（2026-11-23）持有该会话当前读取授权的 Guest 可查看其 diff，与 `session/history-read` 使用同一可撤销策略。保存及所有写通道 diff 接口仍拒绝 Guest；此分类不改变共享机器执行权限。明文缓存和兼容性约定记录在待人工审阅的
 [Spec 草案](../../../../specs/remote-diff-delivery.zh.md) 中。
 
 清单枚举已有的 turn、All Changes 或单路径变化集合，焦点文件优先，其后按变化量排序。
@@ -116,7 +116,7 @@ provider 在自身生命周期内拥有实时 Branch 列表及监听者，完整
 另一份陈旧侧栏列表会给同一比较提供两个矛盾答案，因此不采用。
 
 写入者的 diff 活动单独续用已有 `init-directory` 发布流程，每五分钟最多一次，失败后
-至少间隔五秒，以保留十分钟的监听寿命。Guest 文件读取跳过此动作；加密工作区的 diff 仍要求 write 权限。激活是有错误观测的后台
+至少间隔五秒，以保留十分钟的监听寿命。只读文件及同成员清单/blob 读取跳过此动作。激活是有错误观测的后台
 工作，发布失败不阻塞正文；两个 blob RPC 仍为纯读取。provider runtime 内合并并发激活，
 owner 或根目录变化时更换 runtime。取消后，RPC 并发许可仍保留到原请求实际结束。
 
@@ -173,7 +173,7 @@ loader 不进入跨工作区的不可变 turn 缓存；已经完整读取的 tur
 - daemon 高亮 token 增加正文且绑定主题与语法；Paseo 的整份 hunk 快照也会在每次更新重传。
   Zed 的基线缓存与 Orca 的编码后远程预算启发了当前拆分；同步文本 CRDT 仍不属于 Code Collab。
 - 在 Flock 放内容哈希更易失效，但会形成内容确认 oracle；随机 generation 保持兼容且避免披露。
-- Guest diff 会扩大 Git 基线与历史证据的访问权限。#2316 维持既有 write 限制，功能拆到后续独立审阅的 PR。
+- 清单/blob 读取属于会话读取：Git 基线和历史证据仍绑定当前会话读取授权，并逐页重新校验。归类为读取消除了写操作日志，但不授予共享机器执行权限。索引、当前及 All Changes 接口可能启动监听和发布，因此保留 write 权限；旧 turn 接口的存储适配器可能初始化可写数据库，同样保留该权限。
 - 仓库没有允许加密工作区在 IndexedDB 存明文的现行约定。因此实现选择仅内存，它不是待确认的前提。
 - 服务端持久化 diff 正文可以提供离线查看，但会改变数据所有权，不在本次范围内；客户端仍需在线且
   通过准入的机器与清单。
@@ -201,7 +201,7 @@ loader 不进入跨工作区的不可变 turn 缓存；已经完整读取的 tur
 - `packages/shared/tests/code-collab.test.ts` 与 CLI Flock 发布测试：仅 generation 变化
   不影响旧文件行，删除也清理兄弟行。
 - `packages/loro-streams-rpc/tests/machine-rpc-server.test.ts` 与 `tests/e2ee-native.test.ts`：
-  实际 owner envelope 计量、错误 owner 拒绝，以及真实签名 writer 授权和 Guest 的清单、blob 与保存拒绝。
+  实际 owner envelope 计量、错误 owner 拒绝，以及真实签名的清单/blob 只读请求和 Guest 保存拒绝。这些传输测试不证明跨成员目标授权。
 - `packages/components/tests/code-collab-session-file-provider-v2.test.ts`：清单阶段正文为零，
   第一次打开传两侧，再次打开没有新增正文字节，索引 generation 未更新时也重新校验元数据且只传输新 head；
   还覆盖损坏、取消、加密内存策略、IndexedDB 保留与淘汰、存储不可用。

@@ -1,7 +1,7 @@
 import { Clock, Deferred, Effect } from 'effect';
-import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import { e2eeFeatureTarget, isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type { makeE2eeRpcNative } from '@lody/loro-streams-rpc/e2ee-native';
-import { e2eeRpcEnvelope } from '@lody/loro-streams-rpc/e2ee-streams';
+import { makeEncryptedStreamsEnvelopeDelivery } from '@lody/loro-streams-rpc/e2ee-streams';
 import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import type {
   LocalMachineRpcRequest,
@@ -68,6 +68,7 @@ export function makeEncryptedFeatureAuthorization(options: {
     }),
     ...(options.requesterIdentity ? { requesterIdentity: options.requesterIdentity } : {}),
     authorize: authorization.authorizeOwnedExecution,
+    authorizeProjectExecution: authorization.authorizeExecution,
     authorizeRead: authorization.authorizeRead,
     authorizeHistoryRead: Effect.fnUntraced(function* (
       workspaceId: string,
@@ -76,10 +77,12 @@ export function makeEncryptedFeatureAuthorization(options: {
     ) {
       if (!resolveHistoryTarget)
         return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+      // An unknown, deleted or foreign Session is a denial, never an unanswered request.
       const target = yield* Effect.tryPromise({
         try: () => resolveHistoryTarget(sessionId),
         catch: (cause) => cause,
-      });
+      }).pipe(Effect.orElseSucceed(() => undefined));
+      if (!target) return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
       const editing = yield* authorization.authorizeExecution(
         workspaceId,
         requester,
@@ -115,7 +118,7 @@ export type EncryptedFeatureContext = {
   expiresAt: number;
   signal: AbortSignal;
   authority?: { isCurrent(): boolean; signal: AbortSignal };
-  /** Set for session execution methods (`session/fork`) after their scope authorization. */
+  /** Set for Session and project work (`e2eeFeatureTarget`) after its scope authorization. */
   requester?: EncryptedFeatureRequester;
 };
 export type EncryptedFeatureHandler = (
@@ -152,11 +155,16 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     requesterDevice: string,
     sessionId: string
   ) => ReturnType<AuthorizeEncryptedExecution>;
-  /** Session execution methods (`session/fork`): owner or shared member, per project. */
+  /** Session work (`e2eeFeatureTarget` kind `session`): owner or shared member, per project. */
   authorizeSessionExecution?: (
     workspaceId: string,
     requesterDevice: string,
     sessionId: string
+  ) => ReturnType<AuthorizeEncryptedExecution>;
+  authorizeProjectExecution?: (
+    workspaceId: string,
+    requesterDevice: string,
+    localProjectId?: string
   ) => ReturnType<AuthorizeEncryptedExecution>;
   requesterIdentity?: (
     requesterDevice: string
@@ -168,6 +176,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
   client?: LoroStreamsJsonStreamClient;
 }) {
   const scope = yield* Effect.scope;
+  const delivery = options.client ? makeEncryptedStreamsEnvelopeDelivery(options.client) : null;
   const reads = new Set<string>(),
     writes = new Set<string>();
   const receive = Effect.fnUntraced(function* (
@@ -185,27 +194,28 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     const active = read ? reads : writes;
     if (active.has(envelope.id) || active.size >= 32) return true;
     active.add(envelope.id);
-    const historyRequest =
-      opened.input.request.method === 'session/history-read' ? opened.input.request : undefined;
-    const forkRequest =
-      opened.input.request.method === 'session/fork' ? opened.input.request : undefined;
-    const authorize: AuthorizeEncryptedExecution = historyRequest
-      ? (workspaceId, requesterDevice) =>
-          options.authorizeHistoryRead?.(
-            workspaceId,
-            requesterDevice,
-            historyRequest.params.sessionId
-          ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
-      : forkRequest
+    const target = e2eeFeatureTarget(opened.input.request);
+    const sharedWork = target.kind === 'session' || target.kind === 'project';
+    const refused = Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const });
+    const authorize: AuthorizeEncryptedExecution =
+      target.kind === 'session-read'
         ? (workspaceId, requesterDevice) =>
-            options.authorizeSessionExecution?.(
-              workspaceId,
-              requesterDevice,
-              forkRequest.params.sourceSessionId
-            ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
-        : read
-          ? options.authorizeRead
-          : options.authorize;
+            options.authorizeHistoryRead?.(workspaceId, requesterDevice, target.sessionId) ??
+            refused
+        : target.kind === 'session'
+          ? (workspaceId, requesterDevice) =>
+              options.authorizeSessionExecution?.(workspaceId, requesterDevice, target.sessionId) ??
+              refused
+          : target.kind === 'project'
+            ? (workspaceId, requesterDevice) =>
+                options.authorizeProjectExecution?.(
+                  workspaceId,
+                  requesterDevice,
+                  target.localProjectId
+                ) ?? refused
+            : read
+              ? options.authorizeRead
+              : options.authorize;
     let requester: EncryptedFeatureRequester | undefined;
     const invoke = (authority: { isCurrent(): boolean; signal: AbortSignal } | undefined) =>
       Effect.acquireUseRelease(
@@ -253,7 +263,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       const authority = yield* authorize(options.workspaceId, opened.requesterDevice);
       const authoritySignal = options.authoritySignal?.();
       if (
-        forkRequest &&
+        sharedWork &&
         authority._tag === 'Denied' &&
         authority.reason === 'e2ee_machine_not_shared' &&
         options.isOpen() &&
@@ -269,34 +279,28 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           error: 'This machine or one of its projects is not shared with you.',
         });
         yield* options.native.verifyFeatureRequest(opened);
-        const client = options.client;
-        if (!sink && !client) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
+        if (!sink && !delivery) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
         const stream = options.native.responseStream(opened.requesterDevice);
-        if (!sink)
-          yield* Effect.tryPromise({
-            try: () => client!.ensureJsonStream(stream, 86400),
-            catch: (cause) => cause,
-          });
+        if (!sink) yield* delivery!.ensure(stream);
         for (const frame of refusal) {
           if (!options.isOpen() || (yield* Clock.currentTimeMillis) >= opened.expiresAt)
             return yield* Effect.void;
-          yield* Effect.tryPromise({
-            try: async () => {
-              if (sink) return await sink.deliver(opened.requestId, frame);
-              await client!.appendJson(
-                stream,
-                e2eeRpcEnvelope({ id: opened.requestId, frame: Buffer.from(frame).toString('hex') })
-              );
-            },
-            catch: (cause) => cause,
-          });
+          yield* sink
+            ? Effect.tryPromise({
+                try: () => sink.deliver(opened.requestId, frame),
+                catch: (cause) => cause,
+              })
+            : delivery!.deliver(stream, {
+                id: opened.requestId,
+                frame: Buffer.from(frame).toString('hex'),
+              });
         }
         return yield* Effect.void;
       }
       if (
         authority._tag !== 'Authorized' ||
         ((opened.input.request.method === 'machine/acp-interaction' ||
-          opened.input.request.method === 'session/history-read') &&
+          target.kind === 'session-read') &&
           (!authority.isCurrent ||
             !authoritySignal ||
             authoritySignal.aborted ||
@@ -311,7 +315,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           : undefined;
       const currentAdmission = () =>
         !admittedAuthority || (!admittedAuthority.signal.aborted && admittedAuthority.isCurrent());
-      if (forkRequest) {
+      if (sharedWork) {
         // Execution identity comes from the verified signer, never from the request.
         requester = options.requesterIdentity
           ? yield* options.requesterIdentity(opened.requesterDevice)
@@ -453,20 +457,16 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       )
         return yield* Effect.void;
       yield* options.native.verifyFeatureRequest(opened);
-      const client = options.client;
-      if (!sink && !client) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
+      if (!sink && !delivery) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
       const stream = options.native.responseStream(opened.requesterDevice);
-      if (!sink)
-        yield* Effect.tryPromise({
-          try: () => client!.ensureJsonStream(stream, 86400),
-          catch: (cause) => cause,
-        });
+      if (!sink) yield* delivery!.ensure(stream);
       for (const frame of frames) {
         // Metadata can change without a ledger/policy revision (for example an
         // assigned owner transfer). Re-resolve actual target access after stream I/O.
-        const latest = historyRequest
-          ? yield* authorize(options.workspaceId, opened.requesterDevice)
-          : current;
+        const latest =
+          target.kind === 'session-read'
+            ? yield* authorize(options.workspaceId, opened.requesterDevice)
+            : current;
         if (
           latest._tag !== 'Authorized' ||
           (latest.isCurrent && !latest.isCurrent()) ||
@@ -475,23 +475,28 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           (yield* Clock.currentTimeMillis) >= opened.expiresAt
         )
           return yield* Effect.void;
-        yield* Effect.tryPromise({
-          try: async () => {
-            if (
-              !options.isOpen() ||
-              !currentAdmission() ||
-              (latest.isCurrent && !latest.isCurrent()) ||
-              clock.currentTimeMillisUnsafe() >= opened.expiresAt
-            )
-              throw new Error('e2ee_history_authority_withdrawn');
-            if (sink) return await sink.deliver(opened.requestId, frame);
-            await client!.appendJson(
+        const admit = () => {
+          if (
+            !options.isOpen() ||
+            !currentAdmission() ||
+            (latest.isCurrent && !latest.isCurrent()) ||
+            clock.currentTimeMillisUnsafe() >= opened.expiresAt
+          )
+            throw new Error('e2ee_history_authority_withdrawn');
+        };
+        yield* sink
+          ? Effect.tryPromise({
+              try: async () => {
+                admit();
+                await sink.deliver(opened.requestId, frame);
+              },
+              catch: (cause) => cause,
+            })
+          : delivery!.deliver(
               stream,
-              e2eeRpcEnvelope({ id: opened.requestId, frame: Buffer.from(frame).toString('hex') })
+              { id: opened.requestId, frame: Buffer.from(frame).toString('hex') },
+              admit
             );
-          },
-          catch: (cause) => cause,
-        });
       }
       return yield* Effect.void;
     }).pipe(

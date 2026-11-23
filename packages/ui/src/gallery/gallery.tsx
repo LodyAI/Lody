@@ -2010,14 +2010,15 @@ function CompactMenu({ bounded = false }: { bounded?: boolean }) {
           maxWidth={bounded ? 280 : undefined}
           maxHeight={bounded ? 128 : undefined}
         >
-          <Menu.CheckboxItem indicatorSide="end" defaultChecked>
+          <Menu.CheckboxItem indicatorSide="end" indicator="checkbox" defaultChecked>
             Online
           </Menu.CheckboxItem>
-          <Menu.CheckboxItem indicatorSide="end">My machines</Menu.CheckboxItem>
+          <Menu.CheckboxItem indicatorSide="end" indicator="checkbox">My machines</Menu.CheckboxItem>
         </Menu.Content>
       </Menu.Root>
       {bounded ? <span {...stylex.props(styles.readout)}>{readout}</span> : null}
     </div>
+
   );
 }
 

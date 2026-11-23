@@ -526,7 +526,7 @@ function SessionAccessMembers({
               <Button
                 variant="ghost"
                 size="small"
-                className="justify-start"
+                xstyle={themeStyles.layout}
                 disabled={busy || !state.setMemberReadAccess || !available.length}
               >
                 <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
@@ -729,7 +729,7 @@ export function SessionAccessControl({
                 <Button
                   variant="ghost"
                   size="small"
-                  className="justify-start"
+                  xstyle={themeStyles.layout}
                   onClick={() => act(() => state.openMachineSettings?.())}
                 >
                   <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
@@ -791,7 +791,7 @@ export function SessionAccessControl({
                       key={row.id}
                       variant="ghost"
                       size="small"
-                      className="justify-start"
+                      xstyle={themeStyles.layout}
                       disabled={row.disabled}
                       title={row.title}
                       onClick={() => (row.keepOpen ? void row.onSelect() : act(row.onSelect))}
@@ -896,7 +896,7 @@ function ShareConfirmationDialog({
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Content>
         <AlertDialog.Header>
-          <AlertDialog.Title className="line-clamp-2 break-words">{title}</AlertDialog.Title>
+          <AlertDialog.Title>{title}</AlertDialog.Title>
           <AlertDialog.Description>{description}</AlertDialog.Description>
         </AlertDialog.Header>
         <AlertDialog.Footer>
@@ -909,7 +909,7 @@ function ShareConfirmationDialog({
               onConfirm();
             }}
           >
-            {isSharing ? <Spinner className="mr-1.5 h-4 w-4" /> : null}
+            {isSharing ? <Spinner className={stylex.props(themeStyles.glyph).className} /> : null}
             {actionLabel}
           </Button>
         </AlertDialog.Footer>
@@ -1005,3 +1005,9 @@ export function ProjectShareDialog({
     />
   );
 }
+
+const themeStyles = stylex.create({
+  layout: { justifyContent: 'flex-start' },
+  layout2: { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'break-word' },
+  glyph: { marginRight: 'calc(var(--spacing) * 1.5)', height: 'calc(var(--spacing) * 4)', width: 'calc(var(--spacing) * 4)' },
+});

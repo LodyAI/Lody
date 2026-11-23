@@ -122,3 +122,6 @@ StyleX rules must land in the initial renderer stylesheet: `index` for Web and
   superellipse; round is the non-Chromium fallback.
 - `ScrollArea` exposes its native viewport ref. Delete obsolete Radix files once
   all in-repo callers migrate; private consumers sync on typecheck.
+- Scrollbars are hidden at rest. Native thumbs paint only under the attributes
+  `installScrollbarPresence` publishes, which a host mounts once at its root;
+  never reveal a bar on container hover.

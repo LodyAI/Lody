@@ -351,7 +351,7 @@ export type SidebarUpdatedItem = {
 
 /**
  * The Updated organize mode renders ONE section ("Chats") — a flat
- * recency-sorted list. The bucket plumbing (collapse / show-all state maps,
+ * recency-sorted list. The bucket plumbing (collapse / reveal state maps,
  * toggle callbacks) survives from the earlier today/week/older design, now
  * keyed by the single 'all' bucket.
  */
@@ -431,21 +431,21 @@ export function sortUpdatedItems(items: SidebarUpdatedItem[]): SidebarUpdatedIte
 
 /**
  * When a bucket has more than this many rows, the row list collapses to the
- * latest N and reveals a "Show all (count)" toggle. Mirrors the per-group
- * preview pattern in TaskList, but with a higher threshold because Updated
- * mode is a flat firehose rather than a small per-repo group.
+ * latest N and reveals a "Show more" stepper. Mirrors the per-group preview
+ * pattern in TaskList, but with a higher threshold because Updated mode is a
+ * flat firehose rather than a small per-repo group.
  */
-export const SHOW_FULL_BUCKET_THRESHOLD = 20;
+export const UPDATED_BUCKET_PREVIEW_MAX = 20;
 
 export function getVisibleUpdatedItems(
   orderedItems: SidebarUpdatedItem[],
-  canToggleFullList: boolean,
-  showFull: boolean
+  canRevealRows: boolean,
+  revealedRows: number
 ): SidebarUpdatedItem[] {
-  if (!canToggleFullList || showFull || orderedItems.length <= SHOW_FULL_BUCKET_THRESHOLD) {
+  if (!canRevealRows || orderedItems.length <= UPDATED_BUCKET_PREVIEW_MAX) {
     return orderedItems;
   }
-  return orderedItems.slice(0, SHOW_FULL_BUCKET_THRESHOLD);
+  return orderedItems.slice(0, UPDATED_BUCKET_PREVIEW_MAX + revealedRows);
 }
 
 export type SidebarUpdatedTaskListProps = {
@@ -501,12 +501,14 @@ export type SidebarUpdatedTaskListProps = {
   onToggleBucket?: (key: SidebarUpdatedBucketKey) => void;
   toggleBucketLabel?: string;
   /**
-   * Per-bucket "show all" state. When false (default) and the bucket exceeds
-   * {@link SHOW_FULL_BUCKET_THRESHOLD} items, only the latest N render and a
-   * "Show all" button appears.
+   * Per-bucket incremental reveal. When a bucket exceeds
+   * {@link UPDATED_BUCKET_PREVIEW_MAX} rows, only the latest N render and a
+   * "Show more" button uncovers one more page per click; "Show less" returns
+   * to the preview.
    */
-  showFullBuckets?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
-  onToggleFullBucket?: (key: SidebarUpdatedBucketKey) => void;
+  revealedRowsByBucket?: Partial<Record<SidebarUpdatedBucketKey, number>>;
+  onShowMore?: (key: SidebarUpdatedBucketKey) => void;
+  onShowLess?: (key: SidebarUpdatedBucketKey) => void;
   /**
    * Always-visible action rendered at the right end of the FIRST bucket's
    * header row (desktop sidebar filter trigger). While loading or empty the
@@ -542,8 +544,9 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
   collapsedBuckets,
   onToggleBucket,
   toggleBucketLabel,
-  showFullBuckets,
-  onToggleFullBucket,
+  revealedRowsByBucket,
+  onShowMore,
+  onShowLess,
   headerAction,
 }: SidebarUpdatedTaskListProps) {
   const { t } = useTranslation();
@@ -649,7 +652,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
   }
 
   const canToggleBucket = typeof onToggleBucket === 'function';
-  const canToggleFullBucket = typeof onToggleFullBucket === 'function';
+  const canToggleFullBucket = typeof onShowMore === 'function';
 
   return (
     <Tooltip.Provider>
@@ -661,13 +664,18 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
             if (!canToggleBucket) return;
             onToggleBucket?.(bucket.key);
           };
-          const showFull = Boolean(showFullBuckets?.[bucket.key]);
-          const overflows = bucket.items.length > SHOW_FULL_BUCKET_THRESHOLD;
-          const visibleItems = getVisibleUpdatedItems(bucket.items, canToggleFullBucket, showFull);
-          const showToggleFullList = canToggleFullBucket && overflows && !collapsed;
-          const toggleFullListLabel = showFull
-            ? t('sessions.showLess', 'Show less')
-            : t('sessions.showAll', 'Show all ({{count}})', { count: bucket.items.length });
+          const revealedRows = revealedRowsByBucket?.[bucket.key] ?? 0;
+          const overflows = bucket.items.length > UPDATED_BUCKET_PREVIEW_MAX;
+          const hasMoreRows = bucket.items.length > UPDATED_BUCKET_PREVIEW_MAX + revealedRows;
+          const visibleItems = getVisibleUpdatedItems(
+            bucket.items,
+            canToggleFullBucket,
+            revealedRows
+          );
+          const showMoreRow = canToggleFullBucket && overflows && hasMoreRows && !collapsed;
+          const showLessRow = canToggleFullBucket && overflows && revealedRows > 0 && !collapsed;
+          const showMoreLabel = t('sessions.showMore', 'Show more');
+          const showLessLabel = t('sessions.showLess', 'Show less');
           return (
             <div
               key={bucket.key}
@@ -719,16 +727,35 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
                       archiveConfirmLabel={archiveLabels.confirm}
                     />
                   ))}
-                  {showToggleFullList ? (
+                  {showMoreRow ? (
                     <button
                       type="button"
                       data-sidebar-updated-show-more={bucket.key}
                       {...stylex.props(updatedStyles.showMore)}
-                      aria-label={toggleFullListLabel}
-                      onClick={() => onToggleFullBucket?.(bucket.key)}
+                      aria-label={showMoreLabel}
+                      onClick={() => onShowMore?.(bucket.key)}
                     >
-                      <span {...stylex.props(updatedStyles.showMoreBox)} aria-hidden="true" />
-                      <span>{toggleFullListLabel}</span>
+                      <span
+                        {...stylex.props(updatedStyles.showMoreBox)}
+                        aria-hidden="true"
+                      />
+                      <span>{showMoreLabel}</span>
+                    </button>
+                  ) : null}
+                  {showLessRow ? (
+                    <button
+                      type="button"
+                      data-sidebar-updated-show-less={bucket.key}
+                      {...stylex.props(updatedStyles.showMore)}
+                      aria-label={showLessLabel}
+                      onClick={() => onShowLess?.(bucket.key)}
+                    >
+                      <span
+                        {...stylex.props(updatedStyles.showMoreBox)}
+                        aria-hidden="true"
+                      />
+                      <span>{showLessLabel}</span>
+
                     </button>
                   ) : null}
                 </div>

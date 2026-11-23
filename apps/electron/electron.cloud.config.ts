@@ -1,3 +1,4 @@
+import { isLoroStreamsWebSocketEnabled } from '../../packages/shared/src/loro-streams-websocket'
 import { resolveSessionShareOrigin } from '../../scripts/session-share-origin.mjs'
 import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker'
 
@@ -9,9 +10,8 @@ import type { UserConfig } from 'electron-vite'
 import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
 import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
-import tailwindcss from '@tailwindcss/vite'
 import stylex from '@stylexjs/unplugin'
-import { stylexOptions } from '../../packages/ui/stylex-options'
+import { componentsStylexOptions } from '../../packages/components/stylex-options'
 import {
   loroCrdtBundlerAlias,
   loroCrdtWasmUrlWorkaround
@@ -67,6 +67,11 @@ function loadBuildEnv(buildMode: string): Record<string, string> {
     if (!env[key]?.trim()) throw new Error(`Cloud Electron requires ${key}`)
   }
   env.VITE_LODY_PLATFORM = 'cloud'
+  const streamsWebSocket =
+    process.env.LODY_LORO_STREAMS_WS_ENABLED ?? env.VITE_LORO_STREAMS_WS_ENABLED
+  env.VITE_LORO_STREAMS_WS_ENABLED = isLoroStreamsWebSocketEnabled(undefined, streamsWebSocket)
+    ? '1'
+    : '0'
   return env
 }
 
@@ -296,8 +301,7 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
         cloudRendererCspHtmlPlugin({
           env: runtimeEnv
         }),
-        tailwindcss(),
-        stylex.vite(stylexOptions),
+        stylex.vite(componentsStylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),

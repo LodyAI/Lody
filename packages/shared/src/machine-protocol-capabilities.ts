@@ -33,9 +33,11 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   e2eeAcpInteraction: 'e2eeAcpInteraction',
   e2eeSessionFork: 'e2eeSessionFork',
   e2eeSessionEditAndResend: 'e2eeSessionEditAndResend',
+  e2eeRemoteControl: 'e2eeRemoteControl',
   acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
+  localProjectBranchListing: 'localProjectBranchListing',
   providerSetup: 'providerSetup',
   schedules: 'schedules',
   sessionAutomations: 'sessionAutomations',
@@ -67,7 +69,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   codeCollabDiffBlobs: 'codeCollabDiffBlobs',
   sessionHistory: 'sessionHistory',
   sessionHistoryIncremental: 'sessionHistoryIncremental',
-  sessionHistoryWatch: 'sessionHistoryWatch',
+  sessionHistorySubscription: 'sessionHistorySubscription',
   sessionHistoryInspection: 'sessionHistoryInspection',
   sessionHistoryPatches: 'sessionHistoryPatches',
   sessionInputAcceptance: 'sessionInputAcceptance',
@@ -78,6 +80,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   machineDiskStatus: 'machineDiskStatus',
   managedDaemonUpdates: 'managedDaemonUpdates',
   sessionInputWithdraw: 'sessionInputWithdraw',
+  localProjectFileSearch: 'localProjectFileSearch',
+  localProjectSkillsFingerprint: 'localProjectSkillsFingerprint',
 } as const;
 
 export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
@@ -85,6 +89,8 @@ export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
 export const E2EE_SESSION_FORK_PROTOCOL_VERSION = 1;
 /** Encrypted feature RPC accepts `session/edit-and-resend` from the machine owner. */
 export const E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION = 1;
+/** Encrypted feature RPC accepts `E2EE_REMOTE_CONTROL_METHODS` (`e2ee-rpc.ts`). */
+export const E2EE_REMOTE_CONTROL_PROTOCOL_VERSION = 1;
 export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
 
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
@@ -96,8 +102,15 @@ export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_PROTOCOL_VERSION = 1;
 export const SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION = 1;
-export const SORBET_PROVIDERS_PROTOCOL_VERSION = 2;
-export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = 1;
+/** v2 (the page's minimum): list, create, delete, refresh, models. v3 adds update. */
+export const SORBET_PROVIDERS_PROTOCOL_VERSION = 3;
+export const SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION = 2;
+export const SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION = 3;
+/**
+ * The encrypted feature path forwards every `sorbet/providers-*` and `sorbet/models-list`
+ * method to the same owner-scoped handler, so the remote version tracks the local one.
+ */
+export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = SORBET_PROVIDERS_PROTOCOL_VERSION;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
 export const E2EE_ACP_INTERACTION_PROTOCOL_VERSION = 1;
@@ -108,6 +121,7 @@ export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION = 1;
+export const LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 // v2 preserves ACP string/boolean values and reads legacy stringified booleans.
 const SCHEDULES_PROMPT_PROTOCOL_VERSION = 2;
@@ -133,13 +147,20 @@ export const CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION = 1;
 /** v4 adds purpose-bound member read/edit proofs; older strict payloads are incompatible. */
 export const SESSION_HISTORY_PROTOCOL_VERSION = 4;
 export const SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION = 1;
-export const SESSION_HISTORY_WATCH_PROTOCOL_VERSION = 1;
+export const SESSION_HISTORY_SUBSCRIPTION_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION = 2;
 export const SESSION_HISTORY_PATCHES_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 /** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
 export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
+/**
+ * `local-project/search-files` exists. An older daemon's strict request schema
+ * drops the unknown type without replying, so a caller must check before sending.
+ */
+export const LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION = 1;
+/** `local-project/list-skills` / `list-global-skills` accept `knownFingerprint`. */
+export const LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -239,6 +260,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection]: PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
     LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing]:
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
@@ -274,13 +297,54 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryPatches]: SESSION_HISTORY_PATCHES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental]:
     SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION,
-  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryWatch]: SESSION_HISTORY_WATCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistorySubscription]:
+    SESSION_HISTORY_SUBSCRIPTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection]:
     SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectFileSearch]:
+    LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectSkillsFingerprint]:
+    LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION,
 };
+
+/**
+ * Fits a local-project control request to what the target daemon understands:
+ * `knownFingerprint` is dropped for a daemon without it (the request still
+ * works, it just returns everything), and a file search the daemon cannot
+ * answer returns `null` so the caller never sends it.
+ */
+export function adaptLocalProjectControlRequestToMachine<
+  TRequest extends { type: string; knownFingerprint?: string },
+>(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  request: TRequest
+): TRequest | null {
+  if (
+    request.type === 'local-project/search-files' &&
+    !machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.localProjectFileSearch,
+      LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION
+    )
+  ) {
+    return null;
+  }
+  if (
+    request.knownFingerprint !== undefined &&
+    !machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.localProjectSkillsFingerprint,
+      LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION
+    )
+  ) {
+    const { knownFingerprint: _dropped, ...rest } = request;
+    return rest as TRequest;
+  }
+  return request;
+}
 
 /**
  * Whether `machine/bug-report` may carry `clientLog`. Its request schema is
@@ -306,14 +370,14 @@ export function machineSupportsSessionInputDispatch(
   );
 }
 
-export function machineSupportsSessionHistoryWatch(
+export function machineSupportsSessionHistorySubscription(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
   return (
     machineSupportsProtocolCapability(
       machine,
-      MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryWatch,
-      SESSION_HISTORY_WATCH_PROTOCOL_VERSION
+      MACHINE_PROTOCOL_CAPABILITIES.sessionHistorySubscription,
+      SESSION_HISTORY_SUBSCRIPTION_PROTOCOL_VERSION
     ) && machineSupportsSessionHistoryIncremental(machine)
   );
 }
@@ -421,6 +485,16 @@ export function machineSupportsLocalProjectRemovalProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval,
     LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsLocalProjectBranchListing(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing,
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION
   );
 }
 

@@ -1,3 +1,5 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
@@ -6,10 +8,12 @@ import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import {
+  useLegacyWorkspaceQueryStatus,
   useWorkspaceFeature,
   useWorkspaceFeatureReason,
   useMachineRpcFeatureReason,
 } from '@/hooks/use-workspace-feature';
+import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { useLocalSessionContinuation } from './use-local-session-continuation';
 import { SessionContinuationNote } from './session-continuation-note';
@@ -217,7 +221,12 @@ import {
   resolveSessionConversationPreparationState,
   type SessionConversationPreparationState,
 } from '@/lib/session-conversation-preparation';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import {
+  clearSessionPrMergeStatus,
+  sessionPrMergeStatusAtomFamily,
+} from '@/atoms/session-pr-merge-status';
+import { isGitHubOperationTokenConnectionLostError } from '@/lib/github-token';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -1864,7 +1873,7 @@ export function SessionHeaderMenu({
               <Menu.SubmenuTrigger>
                 {t('sessions.continuation.tweaks.title', '自动化设置')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="w-[290px] p-3">{continuationTweaks}</Menu.Content>
+              <Menu.Content xstyle={themeStyles.glyph}>{continuationTweaks}</Menu.Content>
             </Menu.Submenu>
           )}
 
@@ -1887,13 +1896,13 @@ export function SessionHeaderMenu({
               <Menu.SubmenuTrigger icon={CircleDot}>
                 {t('sessions.status.change', 'Change status')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="min-w-[200px]">
+              <Menu.Content xstyle={themeStyles.glyph2}>
                 {onSnooze ? (
                   <Menu.Submenu>
                     <Menu.SubmenuTrigger icon={AlarmClock}>
                       {t('sessions.contextMenu.snooze', 'Later')}
                     </Menu.SubmenuTrigger>
-                    <Menu.Content className="min-w-[200px]">
+                    <Menu.Content xstyle={themeStyles.glyph2}>
                       {buildSnoozePresets(statusNow).map((preset) => {
                         const label =
                           preset.id === 'oneHour'
@@ -1911,9 +1920,9 @@ export function SessionHeaderMenu({
                             key={preset.id}
                             onClick={() => void onSnooze(preset.timestamp)}
                           >
-                            <span className="flex w-full items-center justify-between gap-4">
+                            <span {...stylex.props(themeStyles.row)}>
                               <span>{label}</span>
-                              <span className="text-[11px] tabular-nums text-muted-foreground">
+                              <span {...stylex.props(themeStyles.hint)}>
                                 {preset.countdown}
                               </span>
                             </span>
@@ -1953,7 +1962,7 @@ export function SessionHeaderMenu({
             <Menu.SubmenuTrigger icon={Share2}>
               {t('sharing.manager.title', 'Share')}
             </Menu.SubmenuTrigger>
-            <Menu.Content className="min-w-[200px]">
+            <Menu.Content xstyle={themeStyles.glyph2}>
               {onOpenPublicShare && !sharingReason && (
                 <Menu.Item icon={Link} onClick={onOpenPublicShare}>
                   {t('sessions.share.publicLink', 'Public link…')}
@@ -3149,17 +3158,34 @@ export const SessionChatInterface = memo(
     const [resolvingConflictsSessionId, setResolvingConflictsSessionId] =
       useState<SessionId | null>(null);
     const isResolvingConflicts = resolvingConflictsSessionId === session.id;
+    const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
     const repositories = useLegacyWorkspaceQuery(
       cloudOperations.github.getWorkspaceRepositories,
       workspaceId ? { workspaceId } : 'skip'
     );
-    const isRepoPublic = useMemo(() => {
-      if (!repoFullName || !repositories) return undefined;
-      const repo = repositories.find((r) => r.fullName === repoFullName);
-      return repo ? !repo.private : undefined;
-    }, [repoFullName, repositories]);
+    const linkedRepo = useMemo(
+      () => resolveLinkedWorkspaceGitHubRepo(repoFullName, repositories),
+      [repoFullName, repositories]
+    );
+    const isRepoPublic = linkedRepo?.isPublic;
+    const isRepoLinked = useMemo(() => {
+      if (!repoFullName || !hasHostedGitHub || legacyQueryStatus === 'blocked') return false;
+      if (session.project?.kind === 'local') return Boolean(linkedRepo);
+      if (repositories !== undefined) return Boolean(linkedRepo);
+      return undefined;
+    }, [
+      hasHostedGitHub,
+      legacyQueryStatus,
+      linkedRepo,
+      repoFullName,
+      repositories,
+      session.project?.kind,
+    ]);
 
-    const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(repoFullName, isRepoPublic);
+    const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(
+      isRepoLinked === false ? undefined : (linkedRepo?.fullName ?? repoFullName),
+      isRepoPublic
+    );
 
     type InputActionState = 'ready' | 'dispatching';
     const [inputActionState, setInputActionState] = useState<InputActionState>('ready');
@@ -3201,6 +3227,7 @@ export const SessionChatInterface = memo(
               session,
               sessionLocalProjectRootPath: resolvedLocalProjectMeta?.rootPath ?? null,
               isRepoPublic,
+              isRepoLinked,
             },
         availableCommands,
         skillAgent: editSkillAgent,
@@ -3209,6 +3236,7 @@ export const SessionChatInterface = memo(
         availableCommands,
         editSkillAgent,
         isArchivedSession,
+        isRepoLinked,
         isRepoPublic,
         resolvedLocalProjectMeta?.rootPath,
         session,
@@ -3622,7 +3650,7 @@ export const SessionChatInterface = memo(
 
     /** The hydrated tail; every reader below that scans backwards for the latest turn uses it. */
     const sessionHistory = sessionTailHistory;
-    const turnFacts = useSessionTurnFacts(conversationView);
+    const turnFacts = useSessionTurnFacts(conversationView, isVisible && !hideMessageArea);
     const conversationIndexRows = useConversationIndexRows(conversationView, {
       includeSummary: false,
     });
@@ -5841,16 +5869,41 @@ export const SessionChatInterface = memo(
       workspaceDirty,
     ]);
 
-    const effectivePrStatus = latestPr?.status ?? null;
+    const jotaiStore = useStore();
+    const prMergeStatus = useAtomValue(sessionPrMergeStatusAtomFamily(prSessionId ?? ''));
+    const effectivePrStatus =
+      latestPr?.status === 'merged'
+        ? 'merged'
+        : prMergeStatus?.phase === 'merged' &&
+            (!prMergeStatus.prNumber || prMergeStatus.prNumber === latestPrNumber)
+          ? 'merged'
+          : (latestPr?.status ?? null);
+
+    useEffect(() => {
+      if (prSessionId) {
+        clearSessionPrMergeStatus(jotaiStore, prSessionId, 'failed');
+      }
+    }, [jotaiStore, prSessionId]);
+
+    useEffect(() => {
+      if (prSessionId && latestPr?.status === 'merged') {
+        clearSessionPrMergeStatus(jotaiStore, prSessionId, 'merged');
+      }
+    }, [jotaiStore, latestPr?.status, prSessionId]);
+
     const { awaiting: awaitedPrStatus, awaitStatus: awaitPrStatus } = useAwaitedPrStatus(
       latestPr?.url ?? null,
       effectivePrStatus
     );
-    const isMergeSettling = isActivePrMerging || !!awaitedPrStatus?.includes('merged');
+    const isMergeSettling =
+      isActivePrMerging ||
+      prMergeStatus?.phase === 'merging' ||
+      !!awaitedPrStatus?.includes('merged');
     const isReadySettling = isActivePrMarkingReady || !!awaitedPrStatus?.includes('open');
 
     const handleMergePullRequest = useCallback(
       async (method: GitHubMergeMethod) => {
+        const targetPrNumber = latestPrNumber;
         captureSessionEvent('session/quick_action_selected', {
           action_id: 'merge',
           merge_method: method,
@@ -5860,12 +5913,27 @@ export const SessionChatInterface = memo(
         try {
           if (await mergeActivePullRequest(method)) awaitPrStatus(['merged']);
         } catch (error) {
-          toast.error(t('sessions.prTab.mergeError', 'Failed to merge'), {
-            description: getErrorMessage(error),
-          });
+          if (isGitHubOperationTokenConnectionLostError(error)) return;
+          toast.error(
+            targetPrNumber
+              ? t('sessions.prMergeStatus.failedNumber', 'Failed to merge PR #{{number}}', {
+                  number: targetPrNumber,
+                })
+              : t('sessions.prTab.mergeError', 'Failed to merge'),
+            {
+              description: getErrorMessage(error),
+            }
+          );
         }
       },
-      [awaitPrStatus, captureSessionEvent, mergeActivePullRequest, t, workspaceDirty]
+      [
+        awaitPrStatus,
+        captureSessionEvent,
+        latestPrNumber,
+        mergeActivePullRequest,
+        t,
+        workspaceDirty,
+      ]
     );
 
     const handleMarkReadyForReview = useCallback(async () => {
@@ -8118,6 +8186,7 @@ export const SessionChatInterface = memo(
                             }
                             ref={inputAreaRef}
                             session={session}
+                            messageHistory={conversationView}
                             sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
                             isMachineRemoved={isMachineRemoved}
                             isAgentBusy={isAgentBusy}
@@ -8147,6 +8216,7 @@ export const SessionChatInterface = memo(
                             configOptionSelectors={configOptionSelectors}
                             configOptionValues={configOptionValues}
                             isRepoPublic={isRepoPublic}
+                            isRepoLinked={isRepoLinked}
                             availableCommands={availableCommands}
                             commandsEnabled={isVisible}
                             freeTurnLimitNotice={freeSessionTurnNotice}
@@ -8242,3 +8312,10 @@ export const SessionChatInterface = memo(
 );
 
 SessionChatInterface.displayName = 'SessionChatInterface';
+
+const themeStyles = stylex.create({
+  glyph: { width: '290px', padding: 'calc(var(--spacing) * 3)' },
+  glyph2: { minWidth: '200px' },
+  row: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 'calc(var(--spacing) * 4)' },
+  hint: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
+});

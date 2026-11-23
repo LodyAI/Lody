@@ -277,7 +277,7 @@ export function SessionInfoDialog({
                     image: ownerMember.image,
                   }}
                   size="mini"
-                  className="shrink-0"
+                  {...stylex.props(themeStyles.layout)}
                 />
               ) : null}
               <span {...stylex.props(styles.truncate)}>
@@ -308,7 +308,7 @@ function SessionOwnerPicker({
           </Button>
         }
       />
-      <Menu.Content align="end" className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
+      <Menu.Content align="end" xstyle={themeStyles.glyph}>
         <Menu.RadioGroup
           value={owner.ownerUserId}
           onValueChange={(userId) => {
@@ -334,12 +334,12 @@ function SessionOwnerPicker({
                 title={disabledReason ?? member.email ?? member.name}
                 indicator="check"
                 indicatorSide="end"
-                endContent={isPending ? <Spinner className="h-3.5 w-3.5 shrink-0" /> : undefined}
+                endContent={isPending ? <Spinner className={stylex.props(themeStyles.glyph2).className} /> : undefined}
               >
                 <UserAvatar
                   user={{ id: member.userId, name: member.name, image: member.image }}
                   size="mini"
-                  className="shrink-0"
+                  {...stylex.props(themeStyles.layout)}
                 />
                 {member.name}
                 {disabledReason ? <span>{disabledReason}</span> : null}
@@ -351,3 +351,9 @@ function SessionOwnerPicker({
     </Menu.Root>
   );
 }
+
+const themeStyles = stylex.create({
+  layout: { flexShrink: 0 },
+  glyph: { maxHeight: 'calc(var(--spacing) * 72)', minWidth: '200px', maxWidth: '280px', overflowY: 'auto' },
+  glyph2: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)', flexShrink: 0 },
+});

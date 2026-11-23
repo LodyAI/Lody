@@ -20,11 +20,16 @@ const testAtoms = await vi.hoisted(async () => {
     agentConfigsAtom: atom<AgentConfigMeta[]>([]),
     userAtom: atom<{ id: string } | null>({ id: 'user-1' }),
     liveActivitiesEnabledAtom: atom<boolean>(true),
+    runtimeAtom: atom<{ workspaceId: string; contentMode?: string } | null>({
+      workspaceId: 'ws-1',
+      contentMode: 'plaintext',
+    }),
     workspaceIdAtom: atom<string | null>('ws-1'),
     nativeIOSAppShell: { value: true },
   };
 });
 
+vi.mock('../src/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: testAtoms.runtimeAtom }));
 vi.mock('../src/atoms/doc-meta', () => ({ allActiveSessionsAtom: testAtoms.sessionsAtom }));
 vi.mock('../src/atoms/presence', () => ({
   lodyPresenceStatesAtom: testAtoms.presenceStatesAtom,
@@ -159,6 +164,47 @@ describe('useLodyLiveActivity summary throttling', () => {
       );
     });
   };
+
+  it('never publishes encrypted titles or commands and ends an existing activity on mode change', async () => {
+    await setSessions([session('secret', { title: 'Secret title', status: { type: 'running' } })]);
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads.length).toBeGreaterThan(0);
+    syncedPayloads.length = 0;
+    await act(async () => {
+      store.set(testAtoms.runtimeAtom, { workspaceId: 'ws-1', contentMode: 'e2ee' });
+    });
+    await setSessions([
+      session('secret', { title: 'Decrypted title', status: { type: 'requestPermission' } }),
+    ]);
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS + SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toEqual([]);
+    expect(endedActivityIds).toContain(ACTIVITY_ID_WS_1);
+  });
+
+  it('does not publish when mounted in an encrypted workspace', async () => {
+    store.set(testAtoms.runtimeAtom, { workspaceId: 'ws-1', contentMode: 'e2ee' });
+    await setSessions([session('secret', { title: 'Decrypted title' })]);
+    await mount();
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS + SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toEqual([]);
+    expect(endedActivityIds).toContain(ACTIVITY_ID_WS_1);
+  });
+
+  it.each([null, { workspaceId: 'other', contentMode: 'plaintext' }, { workspaceId: 'ws-1' }])(
+    'ends activity and blocks publication for unadmitted runtime %j',
+    async (runtime) => {
+      await mount();
+      await advance(SYNC_DEBOUNCE_MS);
+      expect(syncedPayloads.length).toBeGreaterThan(0);
+      syncedPayloads.length = 0;
+      await act(async () => store.set(testAtoms.runtimeAtom, runtime));
+      await setSessions([session('secret', { title: 'Decrypted title' })]);
+      await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS + SYNC_DEBOUNCE_MS);
+      expect(syncedPayloads).toEqual([]);
+      expect(endedActivityIds).toContain(ACTIVITY_ID_WS_1);
+    }
+  );
 
   beforeEach(async () => {
     vi.useFakeTimers();
@@ -311,6 +357,7 @@ describe('useLodyLiveActivity summary throttling', () => {
     await advance(100);
     await act(async () => {
       store.set(testAtoms.workspaceIdAtom as PrimitiveAtom<string | null>, 'ws-2');
+      store.set(testAtoms.runtimeAtom, { workspaceId: 'ws-2', contentMode: 'plaintext' });
       store.set(testAtoms.sessionsAtom as PrimitiveAtom<SessionMeta[]>, [session('z')]);
     });
     await advance(SYNC_DEBOUNCE_MS);

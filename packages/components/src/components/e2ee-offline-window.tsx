@@ -1,3 +1,4 @@
+import { Badge } from '@lody/ui/badge';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -78,16 +79,15 @@ export function E2eeMachineWindowPillView(props: { window: E2eeOfflineWindow; no
   const left = props.window.executionUntilMs - props.now;
   const minutes = Math.max(0, Math.floor(left / 60_000));
   return (
-    <span
+    <Badge
       data-e2ee-machine-window={left > 0 ? 'active' : 'paused'}
-      className="inline-flex h-4 shrink-0 items-center rounded-full border border-sidebar-foreground-muted/30 px-1.5 text-[10px] font-normal leading-none tracking-normal text-sidebar-foreground-muted"
     >
       {left > 0
         ? t('e2ee.offline.machinePill', {
             time: `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`,
           })
         : t('e2ee.offline.machinePillPaused')}
-    </span>
+    </Badge>
   );
 }
 

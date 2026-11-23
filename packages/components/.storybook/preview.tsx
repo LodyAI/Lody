@@ -18,6 +18,7 @@ import {
 import { ThemeProvider, useTheme, type Theme } from '../src/theme-provider';
 import { Tooltip } from '@lody/ui/tooltip';
 import { installFocusModality } from '@lody/ui/focus-modality';
+import { installScrollbarPresence } from '@lody/ui/scrollbar-presence';
 import { I18nextProvider } from 'react-i18next';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -150,6 +151,7 @@ void i18next.use(initReactI18next).init({
 
 // The app installs this in AppInitializer; stories render outside it.
 installFocusModality();
+installScrollbarPresence();
 
 const preview: Preview = {
   decorators: [

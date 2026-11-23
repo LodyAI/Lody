@@ -859,7 +859,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         id: 'prompt_shortcut',
         namespace: 'shortcut',
         directTrigger: '/',
-        label: t('mention.category.promptShortcut.label', 'Prompt Shortcuts'),
+        label: t('mention.category.promptShortcut.label', 'Prompts'),
         icon: 'prompt_shortcut',
         ...sourceCategoryFields('promptShortcut', promptShortcut),
         getCandidates: promptShortcut.getCandidates,

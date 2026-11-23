@@ -55,6 +55,10 @@ export interface SessionBackend {
   readonly readHistoryInspection?: (
     query: import('@lody/shared').SessionHistoryInspectionQuery
   ) => Promise<import('@lody/shared').SessionHistoryReadResponse>;
+  readonly readHistoryCatchup?: (
+    query: import('./roost-history-catchup').RoostCatchupQuery,
+    signal?: AbortSignal
+  ) => Promise<import('@lody/shared').SessionHistoryReadResponse | undefined>;
   readonly readHistoryReplay?: (
     excludeTurnId?: string
   ) => Promise<import('@lody/shared').ReplayPromptResult>;

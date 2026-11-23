@@ -69,7 +69,9 @@ type HomeWidgetScopeInput = {
   userId: string | null;
   hasAuthToken: boolean;
   slug: string | null;
-  runtime: (WorkspaceIdentity & { accountId: string | null }) | null;
+  runtime:
+    | (WorkspaceIdentity & { accountId: string | null; contentMode?: 'plaintext' | 'e2ee' })
+    | null;
 };
 
 // Authentication and the current runtime establish ownership. Session metadata
@@ -85,6 +87,7 @@ export function resolveHomeWidgetIdentity({
     !hasAuthToken ||
     !slug ||
     !runtime?.workspaceId ||
+    runtime.contentMode !== 'plaintext' ||
     runtime.accountId !== userId ||
     runtime.workspaceSlug !== slug
   )

@@ -17,7 +17,7 @@ import {
   machineSupportsSessionHistoryIncremental,
   machineSupportsSessionHistoryInspection,
   machineSupportsSessionHistoryPatches,
-  machineSupportsSessionHistoryWatch,
+  machineSupportsSessionHistorySubscription,
 } from '@lody/shared';
 import type { AgentConfigId, MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
 import { createWorkspacePendingSends } from './workspace-pending-sends';
@@ -53,12 +53,19 @@ import {
   type RepoRoomSubscription,
   type RepoWatchHandle,
 } from 'loro-repo';
-import { createWorkspaceRepoStorage } from './workspace-repo-storage';
+import {
+  createWorkspaceRepoStorage,
+  createWorkspaceIncompleteRecoveryStore,
+} from './workspace-repo-storage';
 import {
   reportWorkspaceCloseFailure,
   type WorkspaceCloseStage,
 } from './workspace-close-diagnostics';
-import { isLoroStreamsWebSocketEnabled } from '@lody/shared';
+import {
+  isLoroStreamsWebSocketEnabled,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  machineSupportsProtocolCapability,
+} from '@lody/shared';
 import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import type { PlatformSyncMode } from '@lody/platform';
@@ -610,6 +617,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | ((room: WorkspaceTransportRoom) => WorkspaceTransportRoute)
     | null = null;
   const repoStorage = createWorkspaceRepoStorage(cacheIdentity.repoDbName);
+  const incompleteRecoveryStore = createWorkspaceIncompleteRecoveryStore(cacheIdentity.repoDbName);
   const openSessionWithSnapshot = createSessionSnapshotLoader(repoStorage);
   const repo = await LoroRepo.create({
     storageAdapter: repoStorage,
@@ -2092,7 +2100,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         workspaceId,
         machineId,
         encryptedQuery: async (method, params, timeoutMs) =>
-          (await ensureEncryptedRpc()).query(machineId, method, params, timeoutMs),
+          (await ensureEncryptedRpc()).query(machineId, method, params, timeoutMs, async () =>
+            machineSupportsProtocolCapability(
+              { protocolCapabilities: await getMachineProtocolCapabilities(machineId) },
+              MACHINE_PROTOCOL_CAPABILITIES.e2eeRemoteControl
+            )
+          ),
       });
       machineRpcClients.set(machineId, next);
       return next;
@@ -2157,6 +2170,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionEditAndResend,
     requestSessionDispatchTurn,
     requestSessionHistoryRead,
+    subscribeSessionHistory,
     requestSessionHistoryWrite,
     requestFilePreview,
     requestFileDownloadChunk,
@@ -2181,6 +2195,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestIosSimulatorControl,
     requestAndroidEmulatorControl,
     requestLocalProjectGitState,
+    requestLocalProjectBranches,
     requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,
@@ -3765,6 +3780,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): StreamsTransportAdapter => {
     durableStreamsBaseUrl = streamsBaseUrl;
     return createWorkspaceStreamsTransport({
+      incompleteRecoveryStore,
       webSocketEnabled: isLoroStreamsWebSocketEnabled(
         deps.streamsWebSocketEnabled,
         import.meta.env.VITE_LORO_STREAMS_WS_ENABLED
@@ -5129,18 +5145,21 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         sessionReaderWakeListeners.add(wakeReader);
         document.addEventListener('visibilitychange', wakeReader);
         window.addEventListener('online', wakeReader);
+        window.addEventListener('offline', wakeReader);
         disposeReaderObservation = () => {
           machineObservation.unsubscribe();
           sessionReaderWakeListeners.delete(wakeReader);
           document.removeEventListener('visibilitychange', wakeReader);
           window.removeEventListener('online', wakeReader);
+          window.removeEventListener('offline', wakeReader);
           readerWakes.clear();
         };
         rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
           coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
-          watch: () => machineSupportsSessionHistoryWatch(ownerMachineMeta),
+          live: () => machineSupportsSessionHistorySubscription(ownerMachineMeta),
+          subscribeHistory: subscribeSessionHistory,
           active: () =>
             document.visibilityState !== 'hidden' &&
             (targetRouter.getPlaneForMachine(machineId) === 'local' || isBrowserOnline()),
@@ -6583,6 +6602,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestIosSimulatorControl,
     requestAndroidEmulatorControl,
     requestLocalProjectGitState,
+    requestLocalProjectBranches,
     requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,

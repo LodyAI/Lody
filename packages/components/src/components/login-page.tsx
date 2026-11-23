@@ -1863,7 +1863,7 @@ export function LoginPage({
         type="button"
         variant="secondary"
         onClick={() => void handleUseInWebBrowser()}
-        className="h-10 w-full"
+        width="100%" size="large"
         disabled={isSwitchingElectronAccount}
       >
         {t('login.desktopHandoff.useWeb', 'Continue in browser')}

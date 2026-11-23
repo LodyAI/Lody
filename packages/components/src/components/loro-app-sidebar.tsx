@@ -384,7 +384,7 @@ import {
   sessionSidebarCodeChangesOnlyAtom,
   sidebarCollapsedOpenedBySessionsAtom,
   toggleSidebarCollapsedOpenedBySessionAtom,
-  sidebarShowFullListAtom,
+  sidebarRevealedRowsAtom,
   setMobileDrawerOpenAtom,
   userAtom,
   WORKSPACE_FOCUS_SCOPES,
@@ -427,6 +427,7 @@ import {
   localProjectsSectionCollapseStateAtom,
   pinnedSectionCollapsedAtom,
   pinSectionsCollapsedAtom,
+  pinSectionsHiddenAtom,
   repoCollapseStateAtom,
   repoOrderAtom,
   sidebarCollapsedAtom,
@@ -436,10 +437,11 @@ import {
   sidebarShowBranchNamesAtom,
   sidebarUpdatedShowProjectNamesAtom,
   sidebarUpdatedBucketCollapseStateAtom,
-  sidebarUpdatedBucketShowFullStateAtom,
+  sidebarUpdatedBucketRevealedRowsAtom,
   type SidebarOrganizeMode,
 } from '@/atoms/sidebar-state';
 import {
+  UPDATED_BUCKET_PREVIEW_MAX,
   sortUpdatedItems,
   toStatusViewSession,
   type SidebarUpdatedBucketKey,
@@ -495,7 +497,7 @@ import {
   type EffectiveSessionActivitySummary,
   type SessionListScope,
 } from './sessions/session-list-rows';
-import { getSelectedLocalProjectKey } from './chat/chat-landing-derived';
+import { getSelectedLocalProjectKey, parseChatLandingSearch } from './chat/chat-landing-derived';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import {
   useLocalProjectRemovalResultNotifications,
@@ -1121,6 +1123,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     return (
       <>
         <SessionInfoHoverCard
+          menuOpen={rowMenuOpen}
           kind="local"
           author={author ?? undefined}
           title={title}
@@ -1182,7 +1185,8 @@ export type LocalProjectItemProps = {
   canRemoveProject: boolean;
   removalState?: LocalProjectRemovalState | null;
   collapsed: boolean;
-  whetherShowFullList: boolean;
+  /** Extra top-level rows revealed beyond {@link MAX_VISIBLE_SESSIONS}. */
+  revealedRows: number;
   isSelected: boolean;
   sessionsForProject: SessionMeta[];
   /**
@@ -1234,7 +1238,8 @@ export type LocalProjectItemProps = {
   /** Names the Machine of a Session that joined this group under its opener. */
   resolveMachineName?: (machineId: MachineId) => string | null;
   onToggleCollapsed: (machineId: MachineId, localProjectId: LocalProjectId) => void;
-  onToggleFullList: (groupKey: string) => void;
+  onShowMore: (groupKey: string) => void;
+  onShowLess: (groupKey: string) => void;
   onRequestRemoval: (info: LocalProjectRemovalRequest) => void;
   dragHandle?: ReactNode;
 };
@@ -1299,7 +1304,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   canRemoveProject,
   removalState = null,
   collapsed,
-  whetherShowFullList,
+  revealedRows,
   isSelected,
   sessionsForProject,
   childSessionsByParent,
@@ -1335,7 +1340,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   resolveOpenerRowId = normalizeSessionRowId,
   resolveMachineName,
   onToggleCollapsed,
-  onToggleFullList,
+  onShowMore,
+  onShowLess,
   onRequestRemoval,
   dragHandle,
 }: LocalProjectItemProps) {
@@ -1347,7 +1353,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   // Same opened-by presentation the GitHub/Chats groups use: MCP-opened
   // independent Sessions indent under the Session that created them, and a
   // list with no such relationship keeps its previous flat geometry.
-  const { canToggleFullList, sessionNodes } = useMemo(() => {
+  const { canRevealRows, hasMoreRows, sessionNodes } = useMemo(() => {
     const accessors = {
       getId: (session: SessionMeta) => session.id,
       // Nest under the opener's sidebar ROW, not necessarily the precise
@@ -1361,12 +1367,13 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       rootRank: (session: SessionMeta) =>
         getEffectiveLatestMessageAt(session, childSessionsByParent),
     } as const;
-    const canToggle = countOpenedByTreeRoots(sessionsForProject, accessors) > MAX_VISIBLE_SESSIONS;
+    const rootCount = countOpenedByTreeRoots(sessionsForProject, accessors);
     return {
-      canToggleFullList: canToggle,
+      canRevealRows: rootCount > MAX_VISIBLE_SESSIONS,
+      hasMoreRows: rootCount > MAX_VISIBLE_SESSIONS + revealedRows,
       sessionNodes: buildOpenedBySessionTree(sessionsForProject, {
         ...accessors,
-        ...(whetherShowFullList ? {} : { maxRoots: MAX_VISIBLE_SESSIONS }),
+        maxRoots: MAX_VISIBLE_SESSIONS + revealedRows,
       }),
     };
   }, [
@@ -1374,12 +1381,11 @@ export const LocalProjectItem = memo(function LocalProjectItem({
     collapsedOpenedBySessionIds,
     resolveOpenerRowId,
     sessionsForProject,
-    whetherShowFullList,
+    revealedRows,
   ]);
   const showTreeGutter = hasOpenedByTreeNesting(sessionNodes);
-  const toggleListLabel = whetherShowFullList
-    ? t('sessions.showLess', 'Show less')
-    : t('sessions.showAll', 'Show all ({{count}})', { count: sessionsForProject.length });
+  const showMoreLabel = t('sessions.showMore', 'Show more');
+  const showLessLabel = t('sessions.showLess', 'Show less');
   const trimmedMachineName =
     typeof machineName === 'string' && machineName.trim() ? machineName.trim() : null;
   const baseAriaLabel = formattedPath
@@ -1781,7 +1787,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               </SessionOpenedByTreeRow>
             );
           })}
-          {canToggleFullList ? (
+          {canRevealRows && hasMoreRows ? (
             <button
               type="button"
               data-id={`show-more:${groupKey}`}
@@ -1792,11 +1798,26 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                 SIDEBAR_CAPTION_TEXT_CLASS,
                 stylex.props(appStyles.showMore, appStyles.noFocusRing).className
               )}
-              aria-label={toggleListLabel}
-              onClick={() => onToggleFullList(groupKey)}
+              aria-label={showMoreLabel}
+              onClick={() => onShowMore(groupKey)}
             >
               <span {...stylex.props(appStyles.glyphBox16)} aria-hidden="true" />
-              <span>{toggleListLabel}</span>
+              <span>{showMoreLabel}</span>
+            </button>
+          ) : null}
+          {canRevealRows && revealedRows > 0 ? (
+            <button
+              type="button"
+              data-id={`show-less:${groupKey}`}
+              data-scope-item="row"
+              data-sidebar-show-less={groupKey}
+              {...stylex.props(appStyles.showMore)}
+              aria-label={showLessLabel}
+              onClick={() => onShowLess(groupKey)}
+            >
+              <span {...stylex.props(appStyles.glyphBox16)} aria-hidden="true" />
+              <span>{showLessLabel}</span>
+
             </button>
           ) : null}
         </div>
@@ -2491,7 +2512,7 @@ export function LoroAppSidebar({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
-  const [showFullSessionGroups, setShowFullSessionGroups] = useAtom(sidebarShowFullListAtom);
+  const [revealedRowsByGroup, setRevealedRowsByGroup] = useAtom(sidebarRevealedRowsAtom);
   // Shared with SessionList (same atom) so an opener collapsed in one sidebar
   // surface stays collapsed in the other, and with the keyboard nav model so
   // arrow keys never visit a hidden row.
@@ -2507,17 +2528,26 @@ export function LoroAppSidebar({
         [key]: !(prev[key] ?? false),
       }));
       if (!(localProjectCollapseState[key] ?? false)) {
-        setShowFullSessionGroups((prev) => ({ ...prev, [groupKey]: false }));
+        setRevealedRowsByGroup((prev) => ({ ...prev, [groupKey]: 0 }));
       }
     },
-    [localProjectCollapseState, setLocalProjectCollapseState, setShowFullSessionGroups]
+    [localProjectCollapseState, setLocalProjectCollapseState, setRevealedRowsByGroup]
   );
 
-  const handleToggleLocalProjectFullList = useCallback(
+  const handleShowMoreLocalProjectRows = useCallback(
     (groupKey: string) => {
-      setShowFullSessionGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+      setRevealedRowsByGroup((prev) => ({
+        ...prev,
+        [groupKey]: (prev[groupKey] ?? 0) + MAX_VISIBLE_SESSIONS,
+      }));
     },
-    [setShowFullSessionGroups]
+    [setRevealedRowsByGroup]
+  );
+  const handleShowLessLocalProjectRows = useCallback(
+    (groupKey: string) => {
+      setRevealedRowsByGroup((prev) => ({ ...prev, [groupKey]: 0 }));
+    },
+    [setRevealedRowsByGroup]
   );
 
   const handleNavigateToProject = useCallback(
@@ -3336,9 +3366,22 @@ export function LoroAppSidebar({
           reportStatusViewError
         );
       },
+      onNewChat: (sectionId) => {
+        if (!workspaceSlug) return;
+        const { pathname, search } = router.state.location;
+        const { context, machine, project, repo, group } =
+          pathname === `/${workspaceSlug}/chat` ? parseChatLandingSearch(search) : {};
+        void router.navigate({
+          to: '/$workspaceName/chat',
+          params: { workspaceName: workspaceSlug },
+          search: { context, machine, project, repo, group, pinSection: sectionId },
+        });
+      },
     };
   }, [
     reportStatusViewError,
+    router,
+    workspaceSlug,
     runSidebarStatusViewCommand,
     runStatusViewCommand,
     runtime,
@@ -3350,6 +3393,16 @@ export function LoroAppSidebar({
       setPinSectionsCollapsed((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
     },
     [setPinSectionsCollapsed]
+  );
+  const [pinSectionsHidden, setPinSectionsHidden] = useAtom(pinSectionsHiddenAtom);
+  const handleSetPinSectionHidden = useCallback(
+    (sectionKey: string, hidden: boolean) => {
+      setPinSectionsHidden((prev) => {
+        const { [sectionKey]: _, ...rest } = prev;
+        return hidden ? { ...rest, [sectionKey]: true } : rest;
+      });
+    },
+    [setPinSectionsHidden]
   );
 
   const updatedItems = useMemo(
@@ -3886,7 +3939,7 @@ export function LoroAppSidebar({
                                   : null
                               }
                               collapsed={collapsed}
-                              whetherShowFullList={showFullSessionGroups[sessionGroupKey] ?? false}
+                              revealedRows={revealedRowsByGroup[sessionGroupKey] ?? 0}
                               isSelected={isSelected}
                               sessionsForProject={sessionsForProject}
                               childSessionsByParent={childSessionsByParent}
@@ -3927,7 +3980,8 @@ export function LoroAppSidebar({
                               resolveOpenerRowId={resolveOpenerRowId}
                               resolveMachineName={resolveMachineName}
                               onToggleCollapsed={toggleLocalProjectCollapsed}
-                              onToggleFullList={handleToggleLocalProjectFullList}
+                              onShowMore={handleShowMoreLocalProjectRows}
+                              onShowLess={handleShowLessLocalProjectRows}
                               onRequestRemoval={(request) => {
                                 void handleRequestRemoval(request);
                               }}
@@ -4409,14 +4463,23 @@ export function LoroAppSidebar({
     },
     [reportStatusViewError, runSidebarStatusViewCommand]
   );
-  const [updatedBucketShowFullState, setUpdatedBucketShowFullState] = useAtom(
-    sidebarUpdatedBucketShowFullStateAtom
+  const [updatedBucketRevealedRows, setUpdatedBucketRevealedRows] = useAtom(
+    sidebarUpdatedBucketRevealedRowsAtom
   );
-  const handleToggleUpdatedShowFullBucket = useCallback(
+  const handleShowMoreUpdatedRows = useCallback(
     (key: SidebarUpdatedBucketKey) => {
-      setUpdatedBucketShowFullState((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }));
+      setUpdatedBucketRevealedRows((prev) => ({
+        ...prev,
+        [key]: (prev[key] ?? 0) + UPDATED_BUCKET_PREVIEW_MAX,
+      }));
     },
-    [setUpdatedBucketShowFullState]
+    [setUpdatedBucketRevealedRows]
+  );
+  const handleShowLessUpdatedRows = useCallback(
+    (key: SidebarUpdatedBucketKey) => {
+      setUpdatedBucketRevealedRows((prev) => ({ ...prev, [key]: 0 }));
+    },
+    [setUpdatedBucketRevealedRows]
   );
   const handleOpenUpdatedItemPullRequest = handleOpenTaskPullRequest;
 
@@ -4458,8 +4521,8 @@ export function LoroAppSidebar({
           machineId,
           localProjectId: project.id,
           collapsed,
-          showFull:
-            showFullSessionGroups[getLocalProjectSessionGroupKey(machineId, project.id)] ?? false,
+          revealedRows:
+            revealedRowsByGroup[getLocalProjectSessionGroupKey(machineId, project.id)] ?? 0,
           // Mirror exactly what LocalProjectItem renders: same nesting target and
           // the same group ranking, or arrow keys drift from the visible order.
           sessions: sessionsForProject.map((s) => ({
@@ -4487,7 +4550,7 @@ export function LoroAppSidebar({
     localProjectsSectionCollapseState,
     projectGroupPlacement,
     resolveOpenerRowId,
-    showFullSessionGroups,
+    revealedRowsByGroup,
     workspaceLocalProjectSessionsByKey,
   ]);
 
@@ -4560,15 +4623,16 @@ export function LoroAppSidebar({
     () =>
       buildSidebarNavigationItems({
         organizeMode,
-        showFullSessionGroups,
+        revealedRowsByGroup,
         collapsedOpenedBySessions: collapsedOpenedBySessionIds,
         pinnedSections: pinnedSections.map((section) => ({
           id: section.id,
           items: section.items,
           collapsed:
-            section.id === null
+            pinSectionsHidden[pinSectionKey(section.id)] === true ||
+            (section.id === null
               ? pinnedSectionCollapsed
-              : pinSectionsCollapsed[section.id] === true,
+              : pinSectionsCollapsed[section.id] === true),
         })),
         workspace: {
           localSections: keyboardNavLocalSections,
@@ -4582,7 +4646,7 @@ export function LoroAppSidebar({
         updated: {
           items: updatedItems,
           collapsedBuckets: updatedBucketCollapseState,
-          showFullBuckets: updatedBucketShowFullState,
+          revealedRowsByBucket: updatedBucketRevealedRows,
         },
       }),
     [
@@ -4595,10 +4659,11 @@ export function LoroAppSidebar({
       pinnedSections,
       pinnedSectionCollapsed,
       pinSectionsCollapsed,
+      pinSectionsHidden,
       repos,
-      showFullSessionGroups,
+      revealedRowsByGroup,
       updatedBucketCollapseState,
-      updatedBucketShowFullState,
+      updatedBucketRevealedRows,
       updatedItems,
       workspaceChatSessions,
       workspaceRepoSessions,
@@ -4670,7 +4735,7 @@ export function LoroAppSidebar({
         activeNav={activeNav}
         topContent={
           <>
-            <E2eeDeviceRequestsButton className="mb-2 w-full justify-start" />
+            <E2eeDeviceRequestsButton {...stylex.props(themeStyles.glyph)} />
             {sidebarTopContent}
           </>
         }
@@ -4687,11 +4752,13 @@ export function LoroAppSidebar({
         collapsedPinSectionIds={pinSectionsCollapsed}
         pinnedHiddenCounts={pinnedHiddenCounts}
         onTogglePinSection={handleTogglePinSection}
+        hiddenPinSectionKeys={pinSectionsHidden}
+        onSetPinSectionHidden={handleSetPinSectionHidden}
         pinSectionActions={pinSectionActions}
         updatedItems={updatedItems}
         updatedSelectedItemId={updatedSelectedItemId}
         updatedBucketsCollapsed={updatedBucketCollapseState}
-        updatedShowFullBuckets={updatedBucketShowFullState}
+        updatedRevealedRows={updatedBucketRevealedRows}
         updatedIsLoading={organizeMode !== 'workspace' && sessionsListLoading}
         onOrganizeModeChange={handleOrganizeModeChange}
         showUpdatedProjectNames={showUpdatedProjectNames}
@@ -4704,7 +4771,8 @@ export function LoroAppSidebar({
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}
         onToggleUpdatedBucket={handleToggleUpdatedBucket}
-        onToggleUpdatedShowFullBucket={handleToggleUpdatedShowFullBucket}
+        onShowMoreUpdatedRows={handleShowMoreUpdatedRows}
+        onShowLessUpdatedRows={handleShowLessUpdatedRows}
         onArchiveUpdatedItem={handleArchiveSession}
         onMarkUpdatedItemUnread={handleMarkSessionUnread}
         onRenameUpdatedItem={handleRenameSession}
@@ -4780,3 +4848,7 @@ export function LoroAppSidebar({
     </FocusScope>
   );
 }
+
+const themeStyles = stylex.create({
+  glyph: { marginBottom: 'calc(var(--spacing) * 2)', width: '100%', justifyContent: 'flex-start' },
+});

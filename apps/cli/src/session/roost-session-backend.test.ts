@@ -189,14 +189,25 @@ describe('Roost owner RPC reader', () => {
     vi.useFakeTimers();
     const doc = { sessionId: 'native-observed-session' } as SessionDocument;
     const waiting = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<SessionHistoryReadResponse>();
+    const release = Promise.withResolvers<void>();
     const changes: unknown[] = [];
     let writeCompleted = false;
     const services = createRoostRpcSessionServices(doc, {
+      subscribe: async (_open, publish, signal) => {
+        waiting.resolve();
+        await release.promise;
+        if (!signal.aborted) publish({ checkpoint: 'native-scope:3', revision: 3 });
+      },
       read: async (query) => {
-        if (query.kind === 'watchChanges') {
-          waiting.resolve();
-          return release.promise;
+        if (query.kind === 'readChanges') {
+          return {
+            type: 'session/history-read_response',
+            sessionId: doc.sessionId,
+            success: true,
+            historyRevision: 3,
+            historyCount: 1,
+            result: { state: 'ready', checkpoint: 'native-scope:3', ids: ['owner-turn'] },
+          };
         }
         return {
           type: 'session/history-read_response',
@@ -238,20 +249,80 @@ describe('Roost owner RPC reader', () => {
         if (change.kind === 'changed') notified.resolve();
       });
       await second.initial;
-      release.resolve({
-        type: 'session/history-read_response',
-        sessionId: doc.sessionId,
-        success: true,
-        historyRevision: 3,
-        historyCount: 1,
-        result: { state: 'ready', checkpoint: 'native-scope:3', ids: ['owner-turn'] },
-      });
+      release.resolve();
       await notified.promise;
       expect(changes).toContainEqual({ kind: 'changed', ids: ['owner-turn'] });
       second.unsubscribe();
       observation.unsubscribe();
       await services.dispose?.();
       await vi.runOnlyPendingTimersAsync();
+    } finally {
+      observation.unsubscribe();
+      await services.dispose?.();
+      vi.useRealTimers();
+    }
+  });
+
+  it('backs off when a publication arrives but the follow-up history read fails', async () => {
+    vi.useFakeTimers();
+    const doc = { sessionId: 'interrupted-owner-observation' } as SessionDocument;
+    const initialClosed = Promise.withResolvers<void>();
+    const recovered = Promise.withResolvers<void>();
+    let shouldFail = true;
+    const services = createRoostRpcSessionServices(doc, {
+      subscribe: async (_open, publish, signal) => {
+        const closed = Promise.withResolvers<void>();
+        signal.addEventListener('abort', () => closed.resolve(), { once: true });
+        publish({ checkpoint: 'native-scope:2', revision: 2 });
+        await closed.promise;
+        initialClosed.resolve();
+      },
+      read: async (query) => {
+        if (query.kind === 'readChanges') {
+          if (shouldFail) throw new Error('Synthetic history read failure');
+          return {
+            type: 'session/history-read_response',
+            sessionId: doc.sessionId,
+            success: true,
+            historyRevision: 2,
+            result: { state: 'ready', checkpoint: 'native-scope:2', ids: ['new-turn'] },
+          };
+        }
+        return {
+          type: 'session/history-read_response',
+          sessionId: doc.sessionId,
+          success: true,
+          historyRevision: 1,
+          result: {
+            checkpoint: 'native-scope:1',
+            startPosition: 0,
+            totalCount: 0,
+            rows: [],
+            hasMoreOlder: false,
+            cursor: null,
+          },
+        };
+      },
+      write: async () => {
+        throw new Error('Read-only transport');
+      },
+    });
+    let applied = false;
+    const observation = services.sessionData.history.observe((change) => {
+      if (change.kind === 'changed' && change.ids.includes('new-turn')) {
+        applied = true;
+        recovered.resolve();
+      }
+    });
+    try {
+      await observation.initial;
+      await initialClosed.promise;
+      await vi.advanceTimersByTimeAsync(0);
+      shouldFail = false;
+      await vi.advanceTimersByTimeAsync(249);
+      expect(applied).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await recovered.promise;
     } finally {
       observation.unsubscribe();
       await services.dispose?.();

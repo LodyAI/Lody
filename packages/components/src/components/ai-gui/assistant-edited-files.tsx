@@ -108,7 +108,7 @@ const styles = stylex.create({
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-    backgroundColor: {
+    backgroundColor: { default: null,
       '@media (hover: hover)': { ':hover': 'hsl(var(--hover) / 0.45)' },
       ':focus-visible': 'hsl(var(--hover) / 0.45)',
     },
@@ -133,7 +133,7 @@ const styles = stylex.create({
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-    backgroundColor: {
+    backgroundColor: { default: null,
       '@media (hover: hover)': { ':hover': 'hsl(var(--hover) / 0.45)' },
       ':focus-visible': 'hsl(var(--hover) / 0.45)',
     },

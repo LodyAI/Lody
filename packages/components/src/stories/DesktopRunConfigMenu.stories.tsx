@@ -1,3 +1,4 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
@@ -23,6 +24,9 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import { registerBuiltInCommands } from '@/lib/commands';
+
+registerBuiltInCommands();
 
 const offlineScope = stylex.create({
   frame: {
@@ -555,6 +559,61 @@ function LongModelNameShell() {
   );
 }
 
+const speedTierSelectors: AcpConfigOptionSelector[] = [
+  selectors[0]!,
+  {
+    type: 'select',
+    configId: 'fast-mode',
+    category: 'fast-mode',
+    label: 'Speed',
+    currentValue: 'off',
+    options: [
+      { value: 'off', label: 'Standard' },
+      { value: 'fast', label: 'Fast' },
+      { value: 'ultrafast', label: 'Ultrafast' },
+    ],
+  },
+];
+
+/** The face for each speed tier: no glyph, the Fast bolt, and the stacked Ultrafast bolts. */
+function SpeedTierShell() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(agents.map((agent) => [getAgentConfigRoomId(agent.id), agent]))
+    );
+    return next;
+  }, []);
+  return (
+    <Provider store={store}>
+      <div {...stylex.props(themeStyles.column)}>
+        {['off', 'fast', 'ultrafast'].map((tier) => (
+          <div
+            key={tier}
+            data-speed-tier-row={tier}
+            style={{ width: 420 }}
+            {...stylex.props(runConfigSceneStyles.composer)}
+          >
+            <DesktopRunConfigMenu
+              agentSelection={{ agentId: codexId, machineId }}
+              allowedMachineIds={[machineId]}
+              availableAgentConfigs={agents}
+              showAgentNameInTrigger
+              agentLocked
+              modelOptions={modelOptions}
+              selectedModelId={modelOptions[0]!.value}
+              configOptionSelectors={speedTierSelectors}
+              configOptionValues={{ reasoning_effort: 'medium', 'fast-mode': tier }}
+              onConfigOptionChange={fn()}
+            />
+          </div>
+        ))}
+      </div>
+    </Provider>
+  );
+}
+
 function EmptyMachineScopeShell() {
   return (
     <div {...stylex.props(storyLayout.row3)}>
@@ -643,3 +702,15 @@ export const GenericSelect: Story = {
     );
   },
 };
+
+export const SpeedTiers: Story = {
+  args: { isEmptyConversation: false },
+  render: () => <SpeedTierShell />,
+
+};
+
+const themeStyles = stylex.create({
+  column: { display: 'flex', minHeight: '100dvh', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-end', gap: 'calc(var(--spacing) * 4)', backgroundColor: uiColors.background, padding: 'calc(var(--spacing) * 8)' },
+});
+
+const runConfigSceneStyles = stylex.create({ composer: { containerType: 'inline-size', containerName: 'composer-face', display: 'flex', alignItems: 'center', borderRadius: '14px', backgroundColor: uiColors.elevatedBackground, paddingInline: 'calc(var(--spacing) * 2)', paddingBlock: 'calc(var(--spacing) * 1.5)' } });

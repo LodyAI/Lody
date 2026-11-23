@@ -270,6 +270,7 @@ type CliServiceOptions = {
 function resolveLocalProjectControlTimeoutMs(type: LocalProjectControlRequest['type']): number {
   if (
     type === 'local-project/list-files' ||
+    type === 'local-project/search-files' ||
     type === 'local-project/list-skills' ||
     type === 'local-project/list-global-skills' ||
     type === 'worktree/list-files' ||
@@ -416,6 +417,7 @@ function buildCliRuntimeEnvOverrides(): NodeJS.ProcessEnv {
   assignEnvIfPresent(env, 'LODY_AUTH_SITE_URL', import.meta.env.VITE_CONVEX_SITE_URL)
   assignEnvIfPresent(env, 'LODY_SERVER_URL', import.meta.env.VITE_SERVER_URL)
   assignEnvIfPresent(env, 'SITE_URL', import.meta.env.VITE_SITE_URL)
+  env.LODY_LORO_STREAMS_WS_ENABLED = import.meta.env.VITE_LORO_STREAMS_WS_ENABLED ?? '0'
   // The embedded CLI serves encrypted RPC over iroh only with the same relays and
   // a native module that exists on this host; otherwise it keeps Streams RPC.
   const iroh = desktopIrohConfig({

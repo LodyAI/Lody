@@ -206,6 +206,7 @@ export type ProjectSettingsViewProps = {
     provider: LocalProjectHistoryProvider,
     selectedIds: string[]
   ) => void;
+  onWorktreeProjectViewChange?: (projectKey: string | null) => void;
   onWorktreeSetupChange?: (
     row: ProjectSettingsRow,
     config: WorktreeSetupScriptConfig
@@ -964,6 +965,7 @@ export function ProjectSettingsComponent({
     setAddLocalProjectMachineId(machineId ?? null);
     setAddLocalProjectDialogOpen(true);
   }, []);
+  const [worktreeProjectKey, setWorktreeProjectKey] = useState<string | null>(null);
   /* All state + handlers live in `useLocalProjectsAdmin` so the mobile
      per-project surface (`MobileLocalProjectSettings`) can drive the
      same data model without duplicating mutations / catalog state. */
@@ -977,7 +979,7 @@ export function ProjectSettingsComponent({
     onHistorySelectionChange,
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
-  } = useLocalProjectsAdmin();
+  } = useLocalProjectsAdmin(worktreeProjectKey);
   const { workspaceReposWithStatus, workspaceReposLoading } = useSettingsDataCache();
   const {
     setupSavingByKey: githubSetupSavingByKey,
@@ -1086,6 +1088,7 @@ export function ProjectSettingsComponent({
         onImportHistory={onImportHistory}
         onResolveHistoryConflict={onResolveHistoryConflict}
         onHistorySelectionChange={onHistorySelectionChange}
+        onWorktreeProjectViewChange={setWorktreeProjectKey}
         onWorktreeSetupChange={onWorktreeSetupChange}
         onWorktreeCleanupChange={onWorktreeCleanupChange}
         onGithubWorktreeSetupChange={onGithubWorktreeSetupChange}
@@ -1129,6 +1132,7 @@ function ProjectSettingsDesktop({
   onImportHistory,
   onResolveHistoryConflict,
   onHistorySelectionChange,
+  onWorktreeProjectViewChange,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
@@ -1221,6 +1225,7 @@ function ProjectSettingsDesktop({
     onImportHistory,
     onResolveHistoryConflict,
     onHistorySelectionChange,
+    onWorktreeProjectViewChange,
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
     onGithubWorktreeSetupChange,
@@ -1603,6 +1608,7 @@ function ProjectWindow({
   onImportHistory,
   onResolveHistoryConflict,
   onHistorySelectionChange,
+  onWorktreeProjectViewChange,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
@@ -1640,6 +1646,11 @@ function ProjectWindow({
   const localRow = selection.kind === 'local' ? selection.row : null;
   const githubRow = selection.kind === 'github' ? selection.row : null;
   const [page, setPage] = useState<ProjectWindowPage>('general');
+  const viewedWorktreeProjectKey = page === 'worktree' ? (localRow?.key ?? null) : null;
+  useEffect(() => {
+    onWorktreeProjectViewChange?.(viewedWorktreeProjectKey);
+    return () => onWorktreeProjectViewChange?.(null);
+  }, [onWorktreeProjectViewChange, viewedWorktreeProjectKey]);
 
   const machineReachable = localRow
     ? (localMachineId != null && localRow.machineId === localMachineId) ||
@@ -2678,6 +2689,7 @@ export type ProjectRowProps = {
     provider: LocalProjectHistoryProvider,
     selectedIds: string[]
   ) => void;
+  onWorktreeProjectViewChange?: (projectKey: string | null) => void;
   onWorktreeSetupChange?: (
     row: ProjectSettingsRow,
     config: WorktreeSetupScriptConfig

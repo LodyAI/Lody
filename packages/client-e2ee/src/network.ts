@@ -1,4 +1,8 @@
 import { SeatInvitePreviewSchema } from '@lody/cloud-api/seat-invite-preview';
+import {
+  isTransientGatewayStatus,
+  TRANSIENT_GATEWAY_RETRY_DELAYS_MS,
+} from '@lody/shared/transient-gateway';
 import { Cause, Effect, Exit, Result } from 'effect';
 import { z } from 'zod';
 import type { FunctionArgs, FunctionReference, FunctionReturnType } from 'convex/server';
@@ -145,6 +149,18 @@ export class E2eeAccessRefusal extends BackendRefusal {
     this.name = 'E2eeAccessRefusal';
   }
 }
+class SelfServiceRateLimitRefusal extends BackendRefusal {
+  constructor(readonly retryAt: number) {
+    super('e2ee_self_service_rate_limited');
+    this.name = 'SelfServiceRateLimitRefusal';
+  }
+}
+const selfServiceRateLimit = (cause: unknown) => {
+  const retryAt = (cause as { data?: { retryAt?: unknown } } | null)?.data?.retryAt;
+  return typeof retryAt === 'number' && Number.isSafeInteger(retryAt) && retryAt >= 0
+    ? new SelfServiceRateLimitRefusal(retryAt)
+    : null;
+};
 const accessLossCodes = new Set(['e2ee_device_revoked', 'e2ee_member_removed']);
 /** The backend's `ConvexError` refusal code, if it is a well-formed `e2ee_*` code. */
 export const refusalCode = (cause: unknown) => {
@@ -170,7 +186,8 @@ const callFailure = (cause: unknown, bound: boolean) => {
           cause:
             bound && accessLossCodes.has(code)
               ? new E2eeAccessRefusal(code as E2eeAccessRefusal['code'])
-              : new BackendRefusal(code),
+              : ((code === 'e2ee_self_service_rate_limited' ? selfServiceRateLimit(cause) : null) ??
+                new BackendRefusal(code)),
         }
       : {}),
   });
@@ -212,21 +229,22 @@ const isTransientGatewayError = (cause: unknown): boolean => {
   const error = cause as { status?: unknown; statusCode?: unknown; message?: unknown };
   if (typeof error.message === 'string' && /e2ee_[a-z0-9_-]+/.test(error.message)) return false;
   const status = error.status ?? error.statusCode;
-  if (status !== undefined) return status === 502 || status === 503 || status === 504;
+  if (status !== undefined) return isTransientGatewayStatus(status);
   // Some transports expose an explicit HTTP status only in the error message.
-  return (
-    typeof error.message === 'string' &&
-    /^(?:Server Error: |HTTP (?:error |status )?)(502|503|504)\b/i.test(error.message)
-  );
+  const reported =
+    typeof error.message === 'string'
+      ? /^(?:Server Error: |HTTP (?:error |status )?)(\d{3})\b/i.exec(error.message)
+      : null;
+  return reported !== null && isTransientGatewayStatus(Number(reported[1]));
 };
 
 export const gatewayRequest = (
   work: () => Promise<unknown>,
   guard: Effect.Effect<unknown, unknown>,
-  backoff: readonly number[] = [60, 150]
+  backoff: readonly number[] = TRANSIENT_GATEWAY_RETRY_DELAYS_MS
 ): Effect.Effect<unknown, unknown> =>
   Effect.gen(function* () {
-    const delays = backoff.slice(0, 2);
+    const delays = backoff.slice(0, TRANSIENT_GATEWAY_RETRY_DELAYS_MS.length);
     for (let attempt = 0; ; attempt++) {
       yield* guard;
       const result = yield* Effect.result(
@@ -684,7 +702,16 @@ export function makePersonalCloudNetwork(
             if (result.recordHash !== id || result.status !== 'committed')
               return yield* failure('conflict');
             return undefined;
-          }).pipe(Effect.mapError(() => new LedgerLogError({})));
+          }).pipe(
+            Effect.mapError((error) =>
+              error instanceof BackendError && error.cause instanceof SelfServiceRateLimitRefusal
+                ? new LedgerLogError({
+                    reason: 'self-service-rate-limited',
+                    retryAt: error.cause.retryAt,
+                  })
+                : new LedgerLogError({})
+            )
+          );
         },
       },
     };

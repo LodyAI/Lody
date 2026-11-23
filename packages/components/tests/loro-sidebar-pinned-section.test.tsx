@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 
@@ -524,6 +525,72 @@ describe('LoroSidebar pinned section', () => {
     expect(onTogglePinSection).toHaveBeenCalledWith('maintenance');
   });
 
+  it('hides pin sections on this device and toggles them back from the first header menu', async () => {
+    const actions = {
+      onDropItem: () => {},
+      onMoveSection: () => {},
+      onCreateSection: () => {},
+      onRenameSection: () => {},
+      onDeleteSection: () => {},
+    };
+    const sections = [
+      { id: null, name: 'Pinned', items: [pinnedItem] },
+      { id: 'maintenance', name: 'Maintenance', items: [] },
+    ];
+    function Harness() {
+      const [hidden, setHidden] = useState<Record<string, boolean>>({});
+      return (
+        <LoroSidebar
+          {...baseProps}
+          pinnedSections={sections}
+          pinSectionActions={actions}
+          hiddenPinSectionKeys={hidden}
+          onSetPinSectionHidden={(key, value) => setHidden((prev) => ({ ...prev, [key]: value }))}
+        />
+      );
+    }
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    flushSync(() => root?.render(<Harness />));
+    const renderedSections = () =>
+      Array.from(container?.querySelectorAll('[data-pin-section]') ?? []).map((section) =>
+        section.getAttribute('data-pin-section')
+      );
+    const menuItem = (label: string) =>
+      Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((item) =>
+        item.textContent?.startsWith(label)
+      );
+    const click = async (target: Element | null | undefined) => {
+      flushSync(() => (target as HTMLElement | null | undefined)?.click());
+      await flushFrame();
+    };
+    const headerMenu = () => container?.querySelectorAll('[aria-label="Section actions"]') ?? [];
+
+    const toggle = (label: string) =>
+      Array.from(document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')).find((item) =>
+        item.textContent?.startsWith(label)
+      );
+
+    await click(headerMenu()[0]);
+    await click(menuItem('Visible Sections'));
+    expect(toggle('Maintenance')?.getAttribute('aria-checked')).toBe('true');
+    await click(toggle('Maintenance'));
+    expect(renderedSections()).toEqual(['default']);
+    expect(container?.textContent).not.toContain('Maintenance');
+    expect(toggle('Maintenance')?.getAttribute('aria-checked')).toBe('false');
+    await click(toggle('Pinned'));
+    expect(renderedSections()).toEqual([]);
+    expect(container?.querySelector('[data-sidebar-updated-id="pinned-session"]')).toBeNull();
+    expect(headerMenu()).toHaveLength(1);
+    expect(toggle('Pinned')?.getAttribute('aria-checked')).toBe('false');
+    await click(toggle('Maintenance'));
+    expect(renderedSections()).toEqual(['maintenance']);
+    expect(toggle('Maintenance')?.getAttribute('aria-checked')).toBe('true');
+    await click(menuItem('Show All'));
+    expect(renderedSections()).toEqual(['default', 'maintenance']);
+  });
+
   it('names the rows a scope hides inside an expanded pin section', () => {
     renderSidebar({
       pinnedItems: [pinnedItem],
@@ -920,6 +987,47 @@ describe('LoroSidebar pinned section', () => {
     expect(updated?.getAttribute('draggable')).toBe('true');
   });
 
+  it('starts a new chat from a user section menu, not from the default one', async () => {
+    const onNewChat = vi.fn();
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [pinnedItem] },
+        { id: 'maintenance', name: 'Maintenance', items: [] },
+      ],
+      pinSectionActions: {
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+        onNewChat,
+      },
+    });
+    const openMenu = async (section: string) => {
+      const trigger = container?.querySelector<HTMLElement>(
+        `[data-pin-section="${section}"] button[aria-label="Section actions"]`
+      );
+      expect(trigger).not.toBeNull();
+      flushSync(() => {
+        trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        trigger?.click();
+      });
+      await flushFrame();
+      return Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+        (entry) => entry.textContent === 'New Chat in This Section'
+      );
+    };
+    expect(await openMenu('default')).toBeUndefined();
+    flushSync(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await flushFrame();
+    const item = await openMenu('maintenance');
+    expect(item).toBeDefined();
+    flushSync(() => item?.click());
+    expect(onNewChat).toHaveBeenCalledWith('maintenance');
+  });
+
   it('creates an empty section from the Pinned header menu', async () => {
     const onCreateSection = vi.fn();
     renderSidebar({
@@ -959,6 +1067,61 @@ describe('LoroSidebar pinned section', () => {
     });
     await flushFrame();
     expect(onCreateSection).toHaveBeenCalledWith('Routine', undefined);
+  });
+
+  it('overlays the section menu on the folded pin section activity mark and hides the mark on hover', () => {
+    const onTogglePinSection = vi.fn();
+    const unreadItem = {
+      ...pinnedItem,
+      id: 'unread-in-ops',
+      title: 'Unread ops item',
+      hasUnreadMessages: true,
+    };
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [{ ...pinnedItem, hasUnreadMessages: true }] },
+        { id: 'ops', name: 'Ops', items: [unreadItem] },
+      ],
+      pinnedSectionCollapsed: true,
+      collapsedPinSectionIds: { ops: true },
+      onTogglePinSection,
+      pinSectionActions: {
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+
+    const opsHeader = container?.querySelector<HTMLElement>(
+      '[data-pin-section="ops"] .group\\/section-header'
+    );
+    const opsMenuSlot = opsHeader?.querySelector('.group\\/section-menu');
+    const opsMenu = opsMenuSlot?.querySelector('button[aria-label="Section actions"]');
+    const opsMark = opsMenuSlot?.querySelector('[data-sidebar-group-activity]');
+    expect(opsMenu).not.toBeNull();
+    expect(opsMark).not.toBeNull();
+    expect(opsMark?.querySelector('[data-session-row-indicator]')).not.toBeNull();
+    expect(opsMark?.parentElement?.className).toContain('group-hover/section-header:opacity-0');
+    expect(opsMenu?.parentElement?.className).toContain('group-hover/section-header:opacity-100');
+
+    flushSync(() => {
+      opsMark?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onTogglePinSection).toHaveBeenCalledWith('ops');
+
+    const defaultHeader = container?.querySelector<HTMLElement>(
+      '[data-pin-section="default"] .group\\/section-header'
+    );
+    const defaultMenuSlot = defaultHeader?.querySelector('.group\\/section-menu');
+    const defaultMark = defaultMenuSlot?.querySelector('[data-sidebar-group-activity]');
+    const filterButton = defaultHeader?.querySelector('button[aria-label="Filter sidebar"]');
+    expect(defaultMark).not.toBeNull();
+    expect(filterButton).not.toBeNull();
+    expect(
+      defaultMenuSlot!.compareDocumentPosition(filterButton!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 });
 

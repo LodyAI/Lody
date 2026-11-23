@@ -1,3 +1,6 @@
+import { shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
+import { colors as linkColors } from '@lody/ui/tokens/colors.stylex';
+import { popup as linkPopup } from '@lody/ui/popup/popup.tokens.stylex';
 import { control } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -1122,7 +1125,7 @@ export function ContextChip({
   const prMarker = (
     <>
       <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
-      {value ? <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span> : null}
+      {value ? <span {...stylex.props(themeStyles.layout)}>{value}</span> : null}
     </>
   );
   const prControl = pr ? (
@@ -1288,13 +1291,11 @@ function PrHistoryControl({
             aria-label={label}
             title={label}
             className={cn(
-              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
-              INFO_BAR_TEXT_CLASS,
-              open && 'bg-muted-foreground/10'
+              stylex.props(linkStyles.trigger, open && linkStyles.open).className, INFO_BAR_TEXT_CLASS
             )}
           >
             {children}
-            <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+            <ChevronDown {...stylex.props(themeStyles.glyph)} aria-hidden="true" />
           </button>
         }
       />
@@ -1303,7 +1304,7 @@ function PrHistoryControl({
         align="start"
         sideOffset={8}
         aria-label={label}
-        className="w-max max-w-[min(20rem,90vw)] border-border/60 p-0 shadow-xl"
+        xstyle={themeStyles.panel}
       >
         {/* One child: the popup surface spaces its direct children apart. */}
         <div>
@@ -1384,14 +1385,12 @@ function LinkedPrControl({
             aria-label={label}
             title={label}
             className={cn(
-              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
-              INFO_BAR_TEXT_CLASS,
-              open && 'bg-muted-foreground/10'
+              stylex.props(linkStyles.trigger, open && linkStyles.open).className, INFO_BAR_TEXT_CLASS
             )}
           >
             {children}
             {links.items.length > 1 ? (
-              <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <ChevronDown {...stylex.props(themeStyles.glyph)} aria-hidden="true" />
             ) : null}
           </button>
         }
@@ -1401,7 +1400,7 @@ function LinkedPrControl({
         align="start"
         sideOffset={8}
         aria-label={label}
-        className="w-[min(22rem,90vw)] border-border/60 p-0 shadow-xl"
+        xstyle={themeStyles.panel2}
       >
         <SessionPullRequestLinksPanel
           {...links}
@@ -1670,3 +1669,15 @@ export function useScheduledTaskSignature(
       .join(',');
   }, [tasks]);
 }
+
+const themeStyles = stylex.create({
+  layout: { display: { 'default': 'none', '@container (min-width: 420px)': 'inline' }, flexShrink: 0, fontVariantNumeric: 'tabular-nums' },
+  glyph: { height: 'calc(var(--spacing) * 3)', width: 'calc(var(--spacing) * 3)', flexShrink: 0 },
+  panel: { width: 'max-content', maxWidth: 'min(20rem,90vw)', padding: 0, boxShadow: uiShadow.popover },
+  panel2: { width: 'min(22rem,90vw)', padding: 0, boxShadow: uiShadow.popover },
+});
+
+const linkStyles = stylex.create({
+ trigger: { display: 'flex', height: 'calc(var(--spacing) * 6)', flexShrink: 0, userSelect: 'none', alignItems: 'center', gap: 'calc(var(--spacing) * 1)', borderRadius: 'var(--radius-md)', paddingInline: 'calc(var(--spacing) * 1)', fontWeight: 500, color: linkColors.secondaryLabel, backgroundColor: { default: 'transparent', ':hover': linkPopup.highlight } },
+ open: { backgroundColor: linkPopup.highlight },
+});

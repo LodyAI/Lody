@@ -1,3 +1,5 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Provider } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -540,7 +542,7 @@ function TourWindow({
           <span {...stylex.props(tourSurface.chromeDot, tourSurface.chromeDotYellow)} />
           <span {...stylex.props(tourSurface.chromeDot, tourSurface.chromeDotGreen)} />
         </span>
-        {/* <span className="flex-1 text-center text-[11.5px] text-muted-foreground">
+        {/* <span {...stylex.props(previewStyles.row)}>
           {identity.projectName}
         </span> */}
         <span {...stylex.props(tourSurface.chromeSpacer)} />
@@ -903,3 +905,7 @@ function TourDiffPlaceholder(): React.JSX.Element {
     </div>
   );
 }
+
+const previewStyles = stylex.create({
+  row: { flex: '1 1 0%', textAlign: 'center', fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, color: uiColors.secondaryLabel },
+});

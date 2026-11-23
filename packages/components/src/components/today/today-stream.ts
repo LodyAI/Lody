@@ -55,7 +55,10 @@ export function todayRouteOutcome(input: {
   return input.pinned && !input.compact ? 'to-column' : 'page';
 }
 
-export type TodaySearch = { member?: string; date?: string };
+/** `focus`: `'day'` for the day alone, or a node id to zoom into. */
+export type TodaySearch = { member?: string; date?: string; focus?: string };
+
+const FOCUS_PATTERN = /^(day|\d+@\d+)$/;
 
 /** The member/date search shared by the Today page and the Today window routes. */
 export function validateTodaySearch(search: Record<string, unknown>): TodaySearch {
@@ -63,6 +66,9 @@ export function validateTodaySearch(search: Record<string, unknown>): TodaySearc
     ...(typeof search.member === 'string' && search.member ? { member: search.member } : {}),
     ...(typeof search.date === 'string' && parseTodayDate(search.date)
       ? { date: search.date }
+      : {}),
+    ...(typeof search.focus === 'string' && FOCUS_PATTERN.test(search.focus)
+      ? { focus: search.focus }
       : {}),
   };
 }

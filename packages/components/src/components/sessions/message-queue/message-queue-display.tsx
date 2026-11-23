@@ -155,7 +155,6 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   failed: { color: colors.destructive },
-  scrollMask: { overflow: 'hidden' },
   scrollRegion: { overflowY: 'auto' },
 });
 
@@ -376,9 +375,9 @@ export function MessageQueueDisplay({
               `overflow: auto` element that also carries `mask-image` as a
               solid black tile — the queued list, with one line peeking out. */}
           <div
-            {...stylex.props(styles.scrollMask)}
             style={{
               maxHeight: LIST_MAX_HEIGHT,
+              overflow: 'hidden',
               maskImage: fadeMask,
               WebkitMaskImage: fadeMask,
             }}

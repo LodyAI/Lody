@@ -1,3 +1,5 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import {
@@ -12,7 +14,7 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <div className="h-screen bg-background">
+      <div {...stylex.props(previewStyles.glyph)}>
         <Story />
       </div>
     ),
@@ -28,3 +30,7 @@ export const Opening: Story = { render: () => <SessionAccessWait /> };
 export const NotShared: Story = { render: () => <SessionAccessUnavailable /> };
 
 export const CheckFailed: Story = { render: () => <SessionAccessReadFailed onRetry={fn()} /> };
+
+const previewStyles = stylex.create({
+  glyph: { height: '100vh', backgroundColor: uiColors.background },
+});

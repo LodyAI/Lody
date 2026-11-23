@@ -62,7 +62,7 @@ Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
   `placeWorkspaceSessionsWithOpeners` first moves a Session whose opener renders in
   another group into that group. Before splitting desktop sections, pinned openers bring
   their visible opened-by descendants into Pinned without changing descendant pin flags. `MAX_VISIBLE_SESSIONS` /
-  `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
+  `UPDATED_BUCKET_PREVIEW_MAX` count top-level rows. Every list passes `rootRank` for
   latest-activity sorting; rank an opener by its freshest opened Session.
 - Collapse state uses `sidebarCollapsedOpenedBySessionsAtom`, default expanded. Keep
   both navigation directions reachable through the tree, every sidebar row's "Go to

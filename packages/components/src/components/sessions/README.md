@@ -190,10 +190,12 @@ with a reason-specific next step. See the
 Binary previews share `SessionFileNoticeCard` with unavailable-file states, including
 the same card spacing, full-width actions and Copy file path callback.
 
-The [video viewer](session-file-video-preview.tsx) uses native controls for
-browser-decodable WebM, MP4/M4V, MOV, and OGV. It consumes authorized bytes or
-resource URLs, releases the player when inactive, and preserves file actions on
-failure. The mobile project browser uses the same player.
+The [video viewer](session-file-video-preview.tsx) uses the shared custom
+[video player](../shared/video-player.tsx) (play/pause, scrubbing progress bar,
+time, volume, playback rate, fullscreen) for browser-decodable WebM, MP4/M4V,
+MOV, and OGV. It consumes authorized bytes or resource URLs, pauses and releases
+the player when inactive, and preserves file actions on failure. Both
+conversation video attachments and the mobile project browser share this player.
 
 ## Usage reset time
 

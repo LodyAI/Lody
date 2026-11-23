@@ -273,6 +273,24 @@ export const SidePanelPlainText: Story = {
   render: (args) => sidePanel(args),
 };
 
+const syntheticVideoUrl = new URL('./fixtures/video-preview.webm', import.meta.url).href;
+
+export const SidePanelVideo: Story = {
+  args: {
+    file: file({
+      fileId: 'preview-video',
+      fileName: 'walkthrough.webm',
+      mimeType: 'video/webm',
+      sizeBytes: 12_800,
+      textPreview: false,
+    }),
+    status: { kind: 'video', src: syntheticVideoUrl },
+    onDownload: () => {},
+  },
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
 export const SidePanelTruncated: Story = {
   args: Truncated.args,
   parameters: { layout: 'centered' },

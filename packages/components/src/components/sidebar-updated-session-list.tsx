@@ -1,3 +1,5 @@
+import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
+import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { clsx } from 'clsx';
 import { cn } from '@/lib/utils';
 import { isElectronRenderer } from '@/lib/electron';
@@ -231,7 +233,7 @@ export type SidebarUpdatedItem = {
  * The Updated organize mode renders ONE section ("Chats") — a flat
  * recency-sorted list keyed 'all'. The Status organize mode renders one
  * section per {@link StatusViewTier}, keyed by the group, skipping empty
- * groups. Both share the collapse / show-all state maps.
+ * groups. Both share the collapse / reveal state maps.
  */
 export type SidebarUpdatedBucketKey = 'all' | StatusViewTier;
 
@@ -367,8 +369,8 @@ export function toStatusViewSession(item: SidebarUpdatedItem): StatusViewSession
 }
 
 /**
- * Whether a section folds past {@link SHOW_FULL_BUCKET_THRESHOLD} rows behind
- * "Show all". Focus and Later list in full when expanded; Settled and Updated
+ * Whether a section folds past {@link UPDATED_BUCKET_PREVIEW_MAX} rows behind
+ * "Show more". Focus and Later list in full when expanded; Settled and Updated
  * recency lists fold past the preview cap.
  */
 export function updatedBucketCanFold(key: SidebarUpdatedBucketKey): boolean {
@@ -402,11 +404,11 @@ export function resolveUpdatedItemProjectLabel(item: SidebarUpdatedItem): string
 
 /**
  * When a bucket has more than this many rows, the row list collapses to the
- * latest N and reveals a "Show all (count)" toggle. Mirrors the per-group
- * preview pattern in SessionList, but with a higher threshold because Updated
- * mode is a flat firehose rather than a small per-repo group.
+ * latest N and reveals a "Show more" stepper. Mirrors the per-group preview
+ * pattern in SessionList, but with a higher threshold because Updated mode is
+ * a flat firehose rather than a small per-repo group.
  */
-export const SHOW_FULL_BUCKET_THRESHOLD = 20;
+export const UPDATED_BUCKET_PREVIEW_MAX = 20;
 
 /** Group ranking key: pinned first, then latest activity. */
 function updatedItemRootRank(item: SidebarUpdatedItem): number {
@@ -423,13 +425,13 @@ export const SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS = {
     item.openedByRowSessionId ?? item.openedBySessionId ?? null,
 } as const;
 
-/** TOP-LEVEL row count — what the "Show all" threshold is measured against. */
+/** TOP-LEVEL row count — what the preview threshold is measured against. */
 export function countUpdatedItemRoots(orderedItems: SidebarUpdatedItem[]): number {
   return countOpenedByTreeRoots(orderedItems, SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS);
 }
 
 export function updatedBucketOverflowsPreview(orderedItems: SidebarUpdatedItem[]): boolean {
-  return countUpdatedItemRoots(orderedItems) > SHOW_FULL_BUCKET_THRESHOLD;
+  return countUpdatedItemRoots(orderedItems) > UPDATED_BUCKET_PREVIEW_MAX;
 }
 
 /**
@@ -439,12 +441,12 @@ export function updatedBucketOverflowsPreview(orderedItems: SidebarUpdatedItem[]
  */
 export function getVisibleUpdatedItemTree(
   orderedItems: SidebarUpdatedItem[],
-  canToggleFullList: boolean,
-  showFull: boolean,
+  canRevealRows: boolean,
+  revealedRows: number,
   collapsedOpenedBySessionIds?: Record<string, boolean>,
   preserveOrder = false
 ): OpenedBySessionTreeNode<SidebarUpdatedItem>[] {
-  const capped = canToggleFullList && !showFull && updatedBucketOverflowsPreview(orderedItems);
+  const capped = canRevealRows && updatedBucketOverflowsPreview(orderedItems);
   return buildOpenedBySessionTree(orderedItems, {
     ...SIDEBAR_UPDATED_OPENED_BY_TREE_ACCESSORS,
     isCollapsed: (openerId) => collapsedOpenedBySessionIds?.[openerId] === true,
@@ -452,21 +454,21 @@ export function getVisibleUpdatedItemTree(
     // Session so nesting can never bury a just-updated row under a stale opener.
     // A manually ordered pin section keeps its roots where the user put them.
     ...(preserveOrder ? {} : { rootRank: updatedItemRootRank }),
-    ...(capped ? { maxRoots: SHOW_FULL_BUCKET_THRESHOLD } : {}),
+    ...(capped ? { maxRoots: UPDATED_BUCKET_PREVIEW_MAX + revealedRows } : {}),
   });
 }
 
 export function getVisibleUpdatedItems(
   orderedItems: SidebarUpdatedItem[],
-  canToggleFullList: boolean,
-  showFull: boolean,
+  canRevealRows: boolean,
+  revealedRows: number,
   collapsedOpenedBySessionIds?: Record<string, boolean>,
   preserveOrder = false
 ): SidebarUpdatedItem[] {
   return getVisibleUpdatedItemTree(
     orderedItems,
-    canToggleFullList,
-    showFull,
+    canRevealRows,
+    revealedRows,
     collapsedOpenedBySessionIds,
     preserveOrder
   ).map((node) => node.item);
@@ -537,12 +539,14 @@ export type SidebarUpdatedSessionListProps = {
   onToggleBucket?: (key: SidebarUpdatedBucketKey) => void;
   toggleBucketLabel?: string;
   /**
-   * Per-bucket "show all" state. When false (default) and the bucket exceeds
-   * {@link SHOW_FULL_BUCKET_THRESHOLD} items, only the latest N render and a
-   * "Show all" button appears.
+   * Per-bucket incremental reveal. When a bucket exceeds
+   * {@link UPDATED_BUCKET_PREVIEW_MAX} top-level rows, only the latest N
+   * render and a "Show more" button uncovers one more page per click; "Show
+   * less" returns to the preview.
    */
-  showFullBuckets?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
-  onToggleFullBucket?: (key: SidebarUpdatedBucketKey) => void;
+  revealedRowsByBucket?: Partial<Record<SidebarUpdatedBucketKey, number>>;
+  onShowMore?: (key: SidebarUpdatedBucketKey) => void;
+  onShowLess?: (key: SidebarUpdatedBucketKey) => void;
   /**
    * Always-visible action rendered at the right end of the FIRST bucket's
    * header row (desktop sidebar filter trigger). While loading or empty the
@@ -550,6 +554,7 @@ export type SidebarUpdatedSessionListProps = {
    * instead — it must stay reachable in every state.
    */
   headerAction?: ReactNode;
+  headerMenu?: ReactNode;
   /**
    * Updated organize mode mixes sessions from every project into one recency
    * list, so top-level rows show a second line: folder / GitHub owner mark +
@@ -621,9 +626,11 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   collapsedBuckets,
   onToggleBucket,
   toggleBucketLabel,
-  showFullBuckets,
-  onToggleFullBucket,
+  revealedRowsByBucket,
+  onShowMore,
+  onShowLess,
   headerAction,
+  headerMenu,
   showProjectContext = false,
   grouping = 'recency',
   pinSectionMenu,
@@ -715,7 +722,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   const handleToggleOpenedBySessions = useSetAtom(toggleSidebarCollapsedOpenedBySessionAtom);
 
   const canToggleBucket = typeof onToggleBucket === 'function';
-  const canToggleFullBucket = typeof onToggleFullBucket === 'function';
+  const canToggleFullBucket = typeof onShowMore === 'function';
 
   const nowMs = now instanceof Date ? now.getTime() : Date.now();
   const buckets = useMemo(
@@ -746,7 +753,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           nodes: getVisibleUpdatedItemTree(
             bucket.items,
             canToggleFullBucket && updatedBucketCanFold(bucket.key),
-            Boolean(showFullBuckets?.[bucket.key]),
+            revealedRowsByBucket?.[bucket.key] ?? 0,
             collapsedOpenedBySessionIds,
             preserveOrder || bucket.key === 'focus' || bucket.key === 'later'
           ),
@@ -759,7 +766,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       collapsedOpenedBySessionIds,
       preserveOrder,
       sendStates,
-      showFullBuckets,
+      revealedRowsByBucket,
     ]
   );
 
@@ -801,6 +808,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       >
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
+          const bucketHeaderMenu = bucketIndex === 0 ? headerMenu : null;
           const collapsed = isSidebarBucketCollapsed(bucket.key, collapsedBuckets);
           const handleToggle = () => {
             if (!canToggleBucket) return;
@@ -810,7 +818,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             return (
               <div
                 key={bucket.key}
-                className={cn('group flex flex-col gap-0.5', collapsed && 'mb-1 last:mb-0')}
+                className={cn('group', stylex.props(bucketStyles.group, collapsed && bucketStyles.folded).className)}
               >
                 <SidebarFocusDndContainer
                   items={bucket.items}
@@ -824,7 +832,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       // drop section, not a margin outside it: a release just below
                       // the last row still lands at the end of Focus.
                       className={
-                        !collapsed && bucketIndex < buckets.length - 1 ? 'pb-4' : undefined
+                        stylex.props(!collapsed && bucketIndex < buckets.length - 1 && bucketStyles.sectionGap).className
                       }
                       items={orderedFocusItems}
                       now={now}
@@ -863,7 +871,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
               </div>
             );
           }
-          const showFull = Boolean(showFullBuckets?.[bucket.key]);
+          const revealedRows = revealedRowsByBucket?.[bucket.key] ?? 0;
           const {
             overflows,
             nodes: visibleNodes,
@@ -876,9 +884,9 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           const showBucketCount =
             (bucket.key === 'later' || bucket.key === 'settled') && bucket.items.length > 0;
           const headerLabel = showBucketCount ? (
-            <span className="inline-flex items-center gap-1.5">
+            <span {...stylex.props(themeStyles.row)}>
               <span>{bucketLabels[bucket.key]}</span>
-              <span className="text-[11px] font-normal tabular-nums text-sidebar-foreground-muted/70">
+              <span {...stylex.props(themeStyles.hint)}>
                 {bucket.items.length}
               </span>
             </span>
@@ -888,11 +896,14 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           // Only a bucket that actually contains an opened Session enables the
           // tree wrapper. Unrelated top-level rows keep their flat geometry.
           const showTreeGutter = hasOpenedByTreeNesting(visibleNodes);
-          const showToggleFullList =
-            canToggleFullBucket && updatedBucketCanFold(bucket.key) && overflows && !collapsed;
-          const toggleFullListLabel = showFull
-            ? t('sessions.showLess', 'Show less')
-            : t('sessions.showAll', 'Show all ({{count}})', { count: bucket.items.length });
+          const bucketCanFold = canToggleFullBucket && updatedBucketCanFold(bucket.key);
+          const hasMoreRows =
+            bucketCanFold &&
+            countUpdatedItemRoots(bucket.items) > UPDATED_BUCKET_PREVIEW_MAX + revealedRows;
+          const showMoreRow = bucketCanFold && overflows && hasMoreRows && !collapsed;
+          const showLessRow = bucketCanFold && overflows && revealedRows > 0 && !collapsed;
+          const showMoreLabel = t('sessions.showMore', 'Show more');
+          const showLessLabel = t('sessions.showLess', 'Show less');
           return (
             <div
               key={bucket.key}
@@ -909,6 +920,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                   label={headerLabel}
                   collapsed={collapsed}
                   activity={collapsedActivity}
+                  menu={bucketHeaderMenu}
                   action={bucketHeaderAction}
                   isMobile={isMobile}
                   toggleLabel={toggleBucketLabel}
@@ -919,7 +931,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                 <div
                   ref={pinDrag?.rowsRef}
                   data-pin-rows={pinDrag ? '' : undefined}
-                  className={cn(SIDEBAR_ROW_LIST_CLASS, pinDrag && 'relative')}
+                  className={cn(SIDEBAR_ROW_LIST_CLASS, stylex.props(pinDrag && bucketStyles.positioned).className)}
                   style={pinDrag?.rowsStyle}
                 >
                   {(() => {
@@ -989,7 +1001,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       return (
                         <div
                           data-status-focus-empty=""
-                          className="flex min-h-10 items-center justify-center rounded-md border border-dashed border-sidebar-border/60 px-3 py-2 text-xs text-sidebar-foreground-muted/75"
+                          {...stylex.props(themeStyles.row2)}
                         >
                           {t('sidebar.status.focusEmptyDrop', 'Drag a conversation here to focus')}
                         </div>
@@ -1022,16 +1034,35 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       );
                     });
                   })()}
-                  {showToggleFullList ? (
+                  {showMoreRow ? (
                     <button
                       type="button"
                       data-sidebar-updated-show-more={bucket.key}
                       {...stylex.props(updatedStyles.showMore)}
-                      aria-label={toggleFullListLabel}
-                      onClick={() => onToggleFullBucket?.(bucket.key)}
+                      aria-label={showMoreLabel}
+                      onClick={() => onShowMore?.(bucket.key)}
                     >
-                      <span {...stylex.props(updatedStyles.showMoreIcon)} aria-hidden="true" />
-                      <span>{toggleFullListLabel}</span>
+                      <span
+                        {...stylex.props(updatedStyles.showMoreIcon)}
+                        aria-hidden="true"
+                      />
+                      <span>{showMoreLabel}</span>
+                    </button>
+                  ) : null}
+                  {showLessRow ? (
+                    <button
+                      type="button"
+                      data-sidebar-updated-show-less={bucket.key}
+                      {...stylex.props(updatedStyles.showMore)}
+                      aria-label={showLessLabel}
+                      onClick={() => onShowLess?.(bucket.key)}
+                    >
+                      <span
+                        {...stylex.props(updatedStyles.showMoreIcon)}
+                        aria-hidden="true"
+                      />
+                      <span>{showLessLabel}</span>
+
                     </button>
                   ) : null}
                 </div>
@@ -1522,9 +1553,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                           ? new Date(item.snoozedUntil).toLocaleString()
                           : undefined
                       }
-                      className="inline-flex items-center gap-1 rounded-full bg-sidebar-foreground/10 px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums text-sidebar-foreground-muted"
+                      {...stylex.props(previewStyles.row)}
                     >
-                      <Timer className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      <Timer {...stylex.props(themeStyles.glyph)} aria-hidden="true" />
                       <span>{snoozeCountdown}</span>
                     </span>
                   ) : null}
@@ -1543,7 +1574,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
               showInlineSettle ? (
                 <SidebarRowActionButton
                   label={contextMenuLabels.settle}
-                  icon={<CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                  icon={<CheckCircle2 {...stylex.props(themeStyles.glyph2)} aria-hidden="true" />}
                   onConfirm={() => onSettle?.(item.id)}
                   revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
                 />
@@ -1614,7 +1645,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             <ContextMenu.SubmenuTrigger icon={FolderInput}>
               {pinSectionMenu.labels.moveToSection}
             </ContextMenu.SubmenuTrigger>
-            <ContextMenu.SubmenuContent className="min-w-[180px]">
+            <ContextMenu.SubmenuContent xstyle={themeStyles.glyph3}>
               {pinSectionMenu.sections.map((section) => (
                 <ContextMenu.Item
                   key={section.id ?? DEFAULT_PIN_SECTION_KEY}
@@ -1636,7 +1667,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             <ContextMenu.SubmenuTrigger icon={AlarmClock}>
               {contextMenuLabels.snooze}
             </ContextMenu.SubmenuTrigger>
-            <ContextMenu.SubmenuContent className="min-w-[200px]">
+            <ContextMenu.SubmenuContent xstyle={themeStyles.glyph4}>
               {buildSnoozePresets(now).map((preset) => {
                 const label =
                   preset.id === 'oneHour'
@@ -1651,9 +1682,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                     key={preset.id}
                     onClick={() => onSnooze?.(item.id, preset.timestamp)}
                   >
-                    <span className="flex w-full items-center justify-between gap-4">
+                    <span {...stylex.props(themeStyles.row3)}>
                       <span>{label}</span>
-                      <span className="text-[11px] tabular-nums text-muted-foreground">
+                      <span {...stylex.props(themeStyles.hint2)}>
                         {preset.countdown}
                       </span>
                     </span>
@@ -1809,6 +1840,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 
   return (
     <SessionInfoHoverCard
+      menuOpen={rowMenuOpen}
       kind={item.kind}
       author={item.owner ?? undefined}
       title={item.title}
@@ -2314,7 +2346,7 @@ type PinnedRowSlotProps = {
 const slotClassName = (gutter: boolean) =>
   // A nested trunk draws into the list's 1px gap; the slot keeps that pixel
   // inside its own (paint-contained) box, as `SessionOpenedByTreeRow` does.
-  cn('flex min-w-0 flex-col gap-px', gutter && 'relative pb-px -mb-px');
+  stylex.props(bucketStyles.slot, gutter && bucketStyles.gutter).className;
 
 /**
  * One row slot of a pin section (a top-level row and the Sessions it opened).
@@ -2336,3 +2368,28 @@ function DraggablePinnedRowSlot({ id, drag, gutter, children }: PinnedRowSlotPro
     </div>
   );
 }
+
+const themeStyles = stylex.create({
+  row: { display: 'inline-flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1.5)' },
+  hint: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontWeight: 400, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
+  row2: { display: 'flex', minHeight: 'calc(var(--spacing) * 10)', alignItems: 'center', justifyContent: 'center', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: 'calc(var(--spacing) * 3)', paddingBlock: 'calc(var(--spacing) * 2)', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  glyph: { height: 'calc(var(--spacing) * 3)', width: 'calc(var(--spacing) * 3)', flexShrink: 0 },
+  glyph2: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)' },
+  glyph3: { minWidth: '180px' },
+  glyph4: { minWidth: '200px' },
+  row3: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 'calc(var(--spacing) * 4)' },
+  hint2: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
+});
+
+const bucketStyles = stylex.create({
+ sectionGap: { paddingBottom: 'calc(var(--spacing) * 4)' },
+  group: { display: 'flex', flexDirection: 'column', gap: 'calc(var(--spacing) * 0.5)' },
+  folded: { marginBottom: { default: 'calc(var(--spacing) * 1)', ':last-child': 0 } },
+  positioned: { position: 'relative' },
+  slot: { display: 'flex', minWidth: 0, flexDirection: 'column', gap: '1px' },
+  gutter: { position: 'relative', paddingBottom: '1px', marginBottom: '-1px' },
+});
+
+const previewStyles = stylex.create({
+  row: { display: 'inline-flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1)', borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: 'calc(var(--spacing) * 1.5)', paddingBlock: 'calc(var(--spacing) * 0.5)', fontSize: uiText.captionSize, lineHeight: 1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
+});

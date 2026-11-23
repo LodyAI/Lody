@@ -160,7 +160,7 @@ const styles = stylex.create({
     '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
   },
   selectedMark: { boxShadow: '0 0 0 1px hsl(var(--foreground))' },
-  dayBarInteractive: {
+  dayBarInteractive: { default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',
@@ -172,7 +172,7 @@ const styles = stylex.create({
       [stylex.when.ancestor(':focus-visible')]: '0 0 0 2px hsl(var(--ring))',
     },
   },
-  weekDotInteractive: {
+  weekDotInteractive: { default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',

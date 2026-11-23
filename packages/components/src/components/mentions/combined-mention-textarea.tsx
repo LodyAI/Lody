@@ -59,6 +59,7 @@ import {
   SKILL_MENTION_TRIGGER_ALIASES,
   SkillMentionHydrator,
   getAllowedSkillMentionDirs,
+  hasProjectSkillSource,
   type SkillMentionAgent,
   type SkillMentionItem,
   useMentionProjectSkills,
@@ -91,6 +92,8 @@ function TwoLevelMentionMenu({
   fileSourceKind,
   enableFileMentions,
   onLazyDirectoryOpen,
+  onFilesActivate,
+  searchRemoteFiles,
   enableIssueMentions,
   repoFullName,
   issuePrData,
@@ -119,6 +122,10 @@ function TwoLevelMentionMenu({
   fileSourceKind: MentionFileSourceKind;
   enableFileMentions: boolean;
   onLazyDirectoryOpen?: (directoryId: string) => void;
+  /** Starts the file index; the composer keeps it off until something asks. */
+  onFilesActivate: () => void;
+  /** Present when the host searches files: called with each typed file term. */
+  searchRemoteFiles?: (term: string) => void;
   enableIssueMentions: boolean;
   repoFullName?: string;
   issuePrData: ReturnType<typeof useKnownIssuePrItems>['issuePrData'];
@@ -209,10 +216,11 @@ function TwoLevelMentionMenu({
               'Project is very large; local file list was truncated.'
             )
         : undefined,
+      onActivate: onFilesActivate,
       // Attach worker results after resolving the registered namespaces.
       getCandidates: () => [],
     }),
-    [enableFileMentions, fileData, fileSourceKind, t]
+    [enableFileMentions, fileData, fileSourceKind, onFilesActivate, t]
   );
 
   // `refresh` is async, but `onActivate` is fire-and-forget (`() => void`).
@@ -376,6 +384,9 @@ function TwoLevelMentionMenu({
           : null
         : context.filterStore.search || null
       : null;
+  React.useEffect(() => {
+    if (fileTerm !== null) searchRemoteFiles?.(fileTerm);
+  }, [fileTerm, searchRemoteFiles]);
   const fileSearch = useMentionFileSearch(fileData.entry, fileTerm);
   const searchedCategories = React.useMemo(
     () =>
@@ -843,9 +854,19 @@ export const CombinedMentionTextarea = React.forwardRef<
             ? mentionSource.githubRepoFullName
             : undefined;
     const githubRepoIsPublic =
-      mentionSource?.kind === 'github' || mentionSource?.kind === 'provider'
+      mentionSource?.kind === 'github' ||
+      mentionSource?.kind === 'local' ||
+      mentionSource?.kind === 'provider'
         ? mentionSource.isPublic
         : undefined;
+    const issuePrAllowedBySource =
+      mentionSource?.kind === 'github' || mentionSource?.kind === 'provider'
+        ? mentionSource.issuePrEnabled !== false
+        : true;
+    const { knownItems: knownIssuePrItems, issuePrData } = useKnownIssuePrItems(
+      issuePrAllowedBySource ? githubRepoFullName : undefined,
+      githubRepoIsPublic
+    );
     // Resolve the analytics source_kind: worktree (live session FS) wins over the
     // project/github source, mirroring useMentionProjectFiles' source resolution.
     const usesWorktreeSource =
@@ -862,25 +883,18 @@ export const CombinedMentionTextarea = React.forwardRef<
         : mentionSource?.kind === 'local'
           ? Boolean(mentionSource.localProjectId)
           : Boolean(githubRepoFullName);
-    const enableIssueMentions = Boolean(githubRepoFullName);
+    const enableIssueMentions =
+      Boolean(githubRepoFullName) &&
+      issuePrAllowedBySource &&
+      issuePrData.status !== 'unavailable';
     // The machine the chat runs on (selected agent's machine). Lets the `$` menu
     // list that machine's global skills even when the chat has no local project
     // (GitHub / plain-agent chats) — see useMentionProjectSkills.
     const skillGlobalMachineId = skillAgent?.machineId;
-    const hasProjectSkillSource =
-      mentionSource?.kind === 'local'
-        ? Boolean(
-            mentionSource.localProjectId && mentionSource.workspaceId && mentionSource.machineId
-          )
-        : mentionSource?.kind === 'github'
-          ? Boolean(mentionSource.repoFullName)
-          : mentionSource?.kind === 'provider'
-            ? Boolean(mentionSource.githubRepoFullName)
-            : false;
     // Enable `$` when there are project skills OR a known machine whose global
     // skills we can list (so GitHub / plain-agent chats still offer skills).
     const enableSkillMentions =
-      (hasProjectSkillSource || Boolean(skillGlobalMachineId)) &&
+      (hasProjectSkillSource(mentionSource) || Boolean(skillGlobalMachineId)) &&
       (!templateScope || (!!templateScope.providerKey && !!skillAgent));
     // Only scan/fetch skills once they are actually asked for, so the composer
     // doesn't kick a skills RPC on every mount. Two things ask: the menu, when a
@@ -894,8 +908,11 @@ export const CombinedMentionTextarea = React.forwardRef<
       enableSkillMentions &&
       (skillsRequested || (!templateScope && value.includes(SKILL_MENTION_TRIGGER)));
 
-    const { fileData, initializeLazyDirectory, getKnownFileTokens } =
-      useMentionProjectFiles(mentionSource);
+    const [filesRequested, setFilesRequested] = React.useState(false);
+    const activateFiles = React.useCallback(() => setFilesRequested(true), []);
+    const filesActive = filesRequested || value.includes(MENTION_TRIGGER);
+    const { fileData, initializeLazyDirectory, getKnownFileTokens, searchRemoteFiles } =
+      useMentionProjectFiles(mentionSource, { active: filesActive, hydrationText: value });
     // `initializeLazyDirectory` is async, but the menu's `onLazyDirectoryOpen`
     // is fire-and-forget (`=> void`). Wrap once so the promise is explicitly
     // discarded while keeping a stable identity — the consumer effect lists it
@@ -944,10 +961,6 @@ export const CombinedMentionTextarea = React.forwardRef<
       () =>
         getAllowedSkillMentionDirs({ cliType: skillAgentCliType, agentType: skillAgentAgentType }),
       [skillAgentAgentType, skillAgentCliType]
-    );
-    const { knownItems: knownIssuePrItems, issuePrData } = useKnownIssuePrItems(
-      githubRepoFullName,
-      githubRepoIsPublic
     );
 
     const [uncontrolledMentionValues, setUncontrolledMentionValues] = React.useState<string[]>([]);
@@ -1206,6 +1219,8 @@ export const CombinedMentionTextarea = React.forwardRef<
           fileSourceKind={fileSourceKind}
           enableFileMentions={enableFileMentions}
           onLazyDirectoryOpen={handleLazyDirectoryOpen}
+          onFilesActivate={activateFiles}
+          searchRemoteFiles={searchRemoteFiles}
           enableIssueMentions={enableIssueMentions}
           repoFullName={githubRepoFullName}
           issuePrData={issuePrData}

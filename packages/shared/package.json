@@ -33,6 +33,10 @@
       "types": "./src/session-link.ts",
       "import": "./src/session-link.ts"
     },
+    "./transient-gateway": {
+      "types": "./src/transient-gateway.ts",
+      "import": "./src/transient-gateway.ts"
+    },
     "./streams-snapshot-codec": {
       "types": "./src/streams-snapshot-codec.ts",
       "import": "./src/streams-snapshot-codec.ts"

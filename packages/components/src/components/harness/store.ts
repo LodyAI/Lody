@@ -12,7 +12,6 @@ import { useSyncExternalStore } from 'react';
 
 import {
   MODELS,
-  PLUGIN_PRESETS,
   type Autonomy,
   type Effort,
   type FsScope,
@@ -25,7 +24,6 @@ export interface HarnessConfig {
   subModel: string;
   effort: Effort;
   fallback: boolean;
-  plugins: string[];
   autonomy: Autonomy;
   fsScope: FsScope;
   network: Network;
@@ -84,6 +82,12 @@ export interface HarnessState {
   models: SorbetModel[];
   status: 'loading' | 'ready' | 'error' | 'unsupported' | 'no-agent' | 'no-runtime';
   profile: HarnessConfig;
+  /**
+   * Profile keys someone set through "Profile · all devices". Only these mark
+   * a device that differs as an override; until then the profile shows the
+   * selected device's own value.
+   */
+  profileKeys?: ConfigKey[];
   overrides: Record<string, Partial<HarnessConfig>>;
   setupDone: boolean;
   setupStep: number;
@@ -99,7 +103,6 @@ const DEFAULT_PROFILE: HarnessConfig = {
   subModel: '',
   effort: 'medium',
   fallback: true,
-  plugins: PLUGIN_PRESETS.recommended,
   autonomy: 'smart',
   fsScope: 'workspace',
   network: 'allowlist',
@@ -259,6 +262,14 @@ export const harness = {
     if (JSON.stringify(state.profile[key]) === JSON.stringify(value)) delete current[key];
     else current[key] = value;
     commit({ ...state, overrides: { ...state.overrides, [scope.device]: current } });
+  },
+
+  /** A profile value that was also written to every device's Lody Agent. */
+  setProfileDefault<K extends ConfigKey>(key: K, value: HarnessConfig[K]) {
+    const profileKeys = state.profileKeys?.includes(key)
+      ? state.profileKeys
+      : [...(state.profileKeys ?? []), key];
+    commit({ ...state, profile: { ...state.profile, [key]: value }, profileKeys });
   },
 
   resetOverride(device: string, keys: ConfigKey[]) {

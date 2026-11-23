@@ -144,6 +144,38 @@ describe('composer cycle command ownership', () => {
     expect(first.thinkEffort).toHaveBeenCalledTimes(1);
   });
 
+  it("cycles thinking effort on ⌘' only while the composer is focused", () => {
+    const thinkEffort = vi.fn();
+    act(() => {
+      root.render(
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="composer"
+              enabled
+              onModeSelect={vi.fn()}
+              onModelSelect={vi.fn()}
+              onThinkEffortSelect={thinkEffort}
+            />
+          </>,
+          testI18n
+        )
+      );
+    });
+
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: "'", code: 'Quote', ctrlKey: true, bubbles: true })
+    );
+    expect(thinkEffort).not.toHaveBeenCalled();
+
+    const composer = container.querySelector<HTMLTextAreaElement>('#composer');
+    composer?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: "'", code: 'Quote', ctrlKey: true, bubbles: true })
+    );
+    expect(thinkEffort).toHaveBeenCalledWith('high');
+  });
+
   it('lets a custom mode binding run outside the composer while keeping default Shift+Tab scoped', () => {
     const mode = vi.fn();
     act(() => {

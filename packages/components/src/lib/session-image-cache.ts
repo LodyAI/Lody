@@ -1,4 +1,4 @@
-import { assertEncryptedImageReference } from '@lody/shared';
+import { assertEncryptedAttachmentReference } from '@lody/shared';
 import { getIpcServices } from './electron-ipc-client';
 import { protectedAttachmentBlob } from './encrypted-session-attachment';
 import type { SessionId, WorkspaceId } from '@lody/shared';
@@ -306,7 +306,7 @@ const getSessionImageCacheEntry = async (
       if (generation !== cacheGeneration || !token) throw error;
     }
   }
-  if (args.encryption) assertEncryptedImageReference(args.imageId, args.encryption);
+  if (args.encryption) assertEncryptedAttachmentReference('image', args.imageId, args.encryption);
   const originalUrl = buildSessionImageDownloadUrl(workspaceId, sessionId, imageId);
   const requestUrl =
     variant === 'thumbnail' && !args.encryption

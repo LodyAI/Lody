@@ -47,6 +47,20 @@ const emptySnapshot = () => EMPTY;
 // durable writes before reopening the same IndexedDB as a new replica.
 const closingDatabases = new Map<string, Promise<void>>();
 
+/**
+ * Hands settings an already-open runtime. Storybook renders the real Prompts page
+ * through this; the product always mounts `PromptShortcutProvider`.
+ */
+export function PromptShortcutRuntimeProvider({
+  runtime,
+  children,
+}: {
+  runtime: PromptShortcutRuntime;
+  children: ReactNode;
+}) {
+  return <Context.Provider value={{ runtime }}>{children}</Context.Provider>;
+}
+
 export function usePromptShortcuts() {
   const { runtime, error, retry, disabled } = useContext(Context);
   const snapshot = useSyncExternalStore(

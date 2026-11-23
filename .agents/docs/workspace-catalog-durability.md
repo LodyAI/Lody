@@ -84,7 +84,8 @@ inputs, active-conversation requirements and retry receipts.
 Renderer and CLI use `@lody/shared/workspace-streams-persistence` around
 `createRepoStreamsPersistence`. Meta and named Flock (`:mf`, `:wf`, `:sr`) keep
 the exact Repo-owned checkpoint stores and per-resource persistence barriers.
-LoroDoc cursor behavior is unchanged. Each calling package constructs its own
+Both native storage adapters resolve known gateway URL aliases without moving
+checkpoints between replicas. Each calling package constructs its own
 Streams adapter, preserving SDK class identity across pnpm peer graphs.
 
 Checkpoint load compares the live Flock version with `serverLowerBoundVersion`.
@@ -132,3 +133,15 @@ Deterministic renderer and CLI suites cover selection, concurrent drafts, timeou
 recovery and durable reopen. The published Promise Repo boundary remains; native
 Effect consumer migration is separate, as described in
 [the Effect guide](cli-effect-ts.md#small-migrations-during-feature-and-fix-work).
+
+Incomplete recovery metadata records an unchanged tail with unresolved dependencies,
+not permission to advance a replay cursor. The renderer persists it in a separate
+`<repoDbName>-incomplete-recovery` IndexedDB, within the existing rebuildable cache
+family. The CLI daemon writes atomic JSON records under its workspace's
+`incomplete-recovery/` directory; commands read them but save/delete only in memory,
+so this metadata cannot contend with SQLite document transactions. Recognized gateway
+aliases share one metadata key. Failed or timed-out IndexedDB operations degrade to
+ordinary SDK recovery, with late connections closed. The SDK probes an unchanged
+incomplete tail with HEAD, retains live tail observation for subscriptions, and
+resumes recovery after remote progress or when a writer can supply missing data.
+Read compaction keeps the SDK's default `compactionOnRead: true`.

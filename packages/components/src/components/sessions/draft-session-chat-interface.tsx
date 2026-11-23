@@ -54,7 +54,7 @@ import {
 } from '@/lib/session-local-file-source';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { buildDraftSessionAgentRolePatch, type DraftSessionTab } from '@/lib/session-draft-tabs';
-import { agentDefaultsCache } from '@/lib/local-storage-cache';
+import { readAgentStartDefaults } from '@/lib/local-storage-cache';
 import {
   isThoughtLevelSelector,
   type AcpConfigOptionSelector,
@@ -143,6 +143,8 @@ export type DraftSessionSendPayload = {
 export interface DraftSessionChatInterfaceProps {
   draft: DraftSessionTab;
   parentSession: SessionMeta;
+  isRepoPublic?: boolean;
+  isRepoLinked?: boolean;
   commandsEnabled?: boolean;
   onDraftChange: (draftId: DraftSessionTab['id'], patch: Partial<DraftSessionTab>) => void;
   onSendDraft: (payload: DraftSessionSendPayload) => Promise<boolean>;
@@ -164,6 +166,8 @@ export const DraftSessionChatInterface = memo(
       {
         draft,
         parentSession,
+        isRepoPublic,
+        isRepoLinked,
         commandsEnabled = true,
         onDraftChange,
         onSendDraft,
@@ -214,8 +218,17 @@ export const DraftSessionChatInterface = memo(
       // Same resolution the composer uses: a local project may carry its repo
       // only in project.githubRepoFullName, not in repoFullName.
       const parentRepoFullName = resolveSessionRepoFullName(parentSession);
+      const issuePrRepoFullName =
+        parentSession.project?.kind === 'local'
+          ? isRepoLinked
+            ? parentRepoFullName || undefined
+            : undefined
+          : isRepoLinked === false
+            ? undefined
+            : parentRepoFullName || undefined;
       const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(
-        parentRepoFullName || undefined
+        issuePrRepoFullName,
+        isRepoPublic
       );
       const {
         doc: parentSessionDoc,
@@ -245,9 +258,11 @@ export const DraftSessionChatInterface = memo(
       const draftAgentDefaults = useMemo(
         () =>
           preferAgentDefaults && draft.agentConfigId
-            ? agentDefaultsCache.get(draft.agentConfigId)
+            ? readAgentStartDefaults(
+                agentConfigs.find((config) => config.id === draft.agentConfigId)
+              )
             : null,
-        [draft.agentConfigId, preferAgentDefaults]
+        [agentConfigs, draft.agentConfigId, preferAgentDefaults]
       );
       const preferredSessionConfig = useMemo(() => {
         if (agentRolePreference) {
@@ -616,7 +631,7 @@ export const DraftSessionChatInterface = memo(
             return;
           }
           const useParentConfig = nextConfig.id === parentSession.agentConfigId;
-          const agentDefaults = useParentConfig ? null : agentDefaultsCache.get(nextConfig.id);
+          const agentDefaults = useParentConfig ? null : readAgentStartDefaults(nextConfig);
           onDraftChange(draft.id, {
             agentConfigId: nextConfig.id,
             cliType: nextConfig.cliType,
@@ -690,6 +705,8 @@ export const DraftSessionChatInterface = memo(
             }
             configOptionSelectors={configOptionSelectors}
             configOptionValues={configOptionValues}
+            isRepoPublic={isRepoPublic}
+            isRepoLinked={isRepoLinked}
             availableCommands={availableCommands}
             onModeChange={selectMode}
             onModelChange={selectModel}

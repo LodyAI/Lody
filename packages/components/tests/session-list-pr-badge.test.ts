@@ -6,6 +6,13 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { sessionSendStatusesAtom } from '../src/atoms/session-send-status';
+import {
+  clearSessionPrMergeStatus,
+  OPTIMISTIC_PR_MERGED_TTL_MS,
+  setSessionPrMergeFailed,
+  setSessionPrMergedOptimistic,
+  setSessionPrMerging,
+} from '../src/atoms/session-pr-merge-status';
 import { SessionList } from '../src/components/session-list';
 import { initI18n } from '../src/i18n';
 import { WORKING_HAND_OVER_MS } from '../src/ui/working-status-mark';
@@ -413,4 +420,90 @@ describe('SessionList PR badge', () => {
       }
     }
   );
+  it('shows merging spinner, optimistic merged icon, and failed alert in the sidebar row', () => {
+    vi.useFakeTimers();
+    const store = createStore();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    flushSync(() => {
+      root?.render(
+        React.createElement(
+          Provider,
+          { store },
+          React.createElement(SessionList, {
+            repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+            sessions: [
+              {
+                sessionId: 'session-merge',
+                title: 'Mergeable PR',
+                repoFullName: 'loro-dev/lody',
+                branchName: 'feat/merge-feedback',
+                prUrl: 'https://github.com/loro-dev/lody/pull/42',
+                prNumber: 42,
+                prStatus: 'open',
+                prReadiness: 'y',
+                latestMessageAt: '2026-04-22T00:00:00.000Z',
+                addedLines: 5,
+                deletedLines: 1,
+                isWorking: false,
+                hasUnreadMessages: false,
+                isOffline: false,
+                isWaitingPermission: false,
+              },
+            ],
+          })
+        )
+      );
+    });
+
+    const row = () => container!.querySelector<HTMLElement>('[data-sidebar-session-id="session-merge"]');
+    expect(row()?.querySelector('[data-session-mergeable-pill]')).not.toBeNull();
+
+    flushSync(() => {
+      setSessionPrMerging(store, 'session-merge', { prNumber: 42, repoFullName: 'loro-dev/lody' });
+    });
+    expect(row()?.querySelector('[data-session-mergeable-pill]')).toBeNull();
+    const mergingIndicator = row()?.querySelector<HTMLElement>('[data-session-row-indicator]');
+    expect(mergingIndicator?.dataset.sessionPrMergePhase).toBe('merging');
+    expect(mergingIndicator?.getAttribute('aria-label')).toBe('Merging PR #42…');
+    expect(mergingIndicator?.querySelector('[data-session-send-ring]')?.getAttribute('data-session-send-ring')).toBe('indeterminate');
+
+    flushSync(() => {
+      setSessionPrMergedOptimistic(store, 'session-merge', {
+        prNumber: 42,
+        repoFullName: 'loro-dev/lody',
+      });
+    });
+    expect(row()?.querySelector('[data-session-row-indicator]')).toBeNull();
+    expect(row()?.querySelector('[data-session-mergeable-pill]')).toBeNull();
+    expect(row()?.querySelector('.lucide-git-merge')).not.toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(OPTIMISTIC_PR_MERGED_TTL_MS);
+    });
+    expect(row()?.querySelector('[data-session-mergeable-pill]')).not.toBeNull();
+
+    flushSync(() => {
+      setSessionPrMergeFailed(store, 'session-merge', {
+        prNumber: 42,
+        repoFullName: 'loro-dev/lody',
+        error: 'Merge conflict',
+      });
+    });
+    const failedIndicator = row()?.querySelector<HTMLElement>('[data-session-row-indicator]');
+    expect(failedIndicator?.dataset.sessionPrMergePhase).toBe('failed');
+    expect(failedIndicator?.getAttribute('aria-label')).toBe(
+      'Failed to merge PR #42: Merge conflict'
+    );
+    expect(failedIndicator?.querySelector('.lucide-circle-alert')).not.toBeNull();
+
+    flushSync(() => {
+      clearSessionPrMergeStatus(store, 'session-merge', 'failed');
+    });
+    expect(row()?.querySelector('[data-session-row-indicator]')).toBeNull();
+    vi.useRealTimers();
+  });
+
 });

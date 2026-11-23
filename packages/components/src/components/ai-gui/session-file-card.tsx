@@ -2,7 +2,7 @@ import { clsx } from 'clsx';
 import { type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, Clock, Download, Eye } from 'lucide-react';
+import { AlertCircle, Clock, Download, Eye, Play } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
@@ -29,6 +29,7 @@ import {
   getSessionFileDisplayState,
   getSessionFileKind,
   isHtmlSessionFile,
+  isVideoSessionFile,
   type SessionFileDisplayState,
 } from '@/lib/session-file-presentation';
 
@@ -82,9 +83,11 @@ const buildSubtitle = ({
 const buildActionIcon = ({
   state,
   isDownloading,
+  isVideo,
 }: {
   state: SessionFileDisplayState;
   isDownloading: boolean;
+  isVideo: boolean;
 }): ReactNode => {
   if (state === 'pending') {
     return <Spinner size="small" aria-hidden="true" />;
@@ -98,6 +101,9 @@ const buildActionIcon = ({
     ) : (
       <Download {...stylex.props(card.glyph)} aria-hidden="true" />
     );
+  }
+  if (isVideo) {
+    return <Play {...stylex.props(card.glyph)} aria-hidden="true" />;
   }
   // previewable — a download in flight belongs to the separate download
   // button, so the preview affordance keeps reading as a preview.
@@ -418,7 +424,11 @@ export function SessionFileCard({
     pendingMachineName,
     t,
   });
-  const actionIcon = buildActionIcon({ state, isDownloading });
+  const actionIcon = buildActionIcon({
+    state,
+    isDownloading,
+    isVideo: isVideoSessionFile(file),
+  });
 
   const isMuted = state === 'expired' || state === 'pending';
 

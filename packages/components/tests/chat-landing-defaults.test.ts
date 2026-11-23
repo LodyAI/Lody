@@ -18,6 +18,8 @@ import {
   resolveChatLandingBranchSelection,
 } from '../src/lib/chat-landing-branches';
 import {
+  LocalProjectBranchSwrCache,
+  deriveLocalProjectGitStateFromMeta,
   getLocalProjectWorktreeAvailability,
   isLocalProjectMachineOffline,
   resolveLocalProjectBranchSelection,
@@ -371,6 +373,50 @@ describe('chat-landing-git-state', () => {
         'feature/selected'
       );
       expect(getLocalProjectWorktreeAvailability(state)).toBe(true);
+    });
+
+    it('derives immediate worktree availability and default branch from synced LocalProjectMeta', () => {
+      const state = deriveLocalProjectGitStateFromMeta({
+        id: 'local-project-1' as never,
+        name: 'Repo',
+        rootPath: '/repo',
+        createdAtMs: 1,
+        git: true,
+        defaultBranch: 'lody:branch:local:main',
+        currentBranch: 'session/old-work',
+      });
+      expect(state).not.toBeNull();
+      expect(getLocalProjectWorktreeAvailability(state)).toBe(true);
+      expect(resolveLocalProjectBranchSelection(state!, null)).toBe('lody:branch:local:main');
+      expect(resolveLocalProjectBranchSelection(state!, 'feat/custom-picked')).toBe(
+        'feat/custom-picked'
+      );
+
+      const nonGit = deriveLocalProjectGitStateFromMeta({
+        id: 'local-project-2' as never,
+        name: 'Plain',
+        rootPath: '/plain',
+        createdAtMs: 1,
+        git: false,
+      });
+      expect(getLocalProjectWorktreeAvailability(nonGit)).toBe(false);
+    });
+
+    it('serves stale-while-revalidate branch pages until stale TTL expires', () => {
+      const cache = new LocalProjectBranchSwrCache({ freshTtlMs: 1_000, staleTtlMs: 10_000 });
+      const payload = {
+        git: true as const,
+        currentBranch: 'main',
+        defaultBranch: 'main',
+        pinnedBranches: ['main'],
+        branches: ['main', 'feat/a'],
+        truncated: false,
+        totalCount: 2,
+      };
+      cache.set('w:m:p:', payload, 100);
+      expect(cache.get('w:m:p:', 500)).toEqual({ result: payload, isFresh: true });
+      expect(cache.get('w:m:p:', 2_000)).toEqual({ result: payload, isFresh: false });
+      expect(cache.get('w:m:p:', 10_200)).toBeNull();
     });
   });
 

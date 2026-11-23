@@ -709,6 +709,9 @@ export interface LoroSidebarProps {
    */
   pinnedHiddenCounts?: Readonly<Record<string, number>>;
   onTogglePinSection?: (sectionId: string) => void;
+  /** Pin sections hidden on this device, by `pinSectionKey(section.id)`. */
+  hiddenPinSectionKeys?: Readonly<Record<string, boolean>>;
+  onSetPinSectionHidden?: (sectionKey: string, hidden: boolean) => void;
   /** Create, rename, delete and move between pin sections; absent hides those controls. */
   pinSectionActions?: SidebarPinSectionActions;
   /** Selected item id used to highlight a row in 'updated' mode. */
@@ -716,11 +719,11 @@ export interface LoroSidebarProps {
   /** Per-bucket collapse state for the 'updated' organize mode. */
   updatedBucketsCollapsed?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
   /**
-   * Per-bucket "show all" state for the 'updated' organize mode. Buckets above
-   * the threshold default to a compact preview; this map records which buckets
-   * the user has expanded.
+   * Per-bucket incremental reveal for the 'updated' organize mode. Buckets
+   * above the threshold default to a compact preview; each entry counts extra
+   * top-level rows "Show more" has uncovered beyond it.
    */
-  updatedShowFullBuckets?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
+  updatedRevealedRows?: Partial<Record<SidebarUpdatedBucketKey, number>>;
   /**
    * Loading state for the 'updated' organize mode. When true and there are no
    * items yet, the list renders a skeleton instead of the empty state — keeps
@@ -741,7 +744,8 @@ export interface LoroSidebarProps {
   onSelectUpdatedItem?: (id: string, tabSessionId?: string) => void;
   onTogglePinnedSection?: () => void;
   onToggleUpdatedBucket?: (key: SidebarUpdatedBucketKey) => void;
-  onToggleUpdatedShowFullBucket?: (key: SidebarUpdatedBucketKey) => void;
+  onShowMoreUpdatedRows?: (key: SidebarUpdatedBucketKey) => void;
+  onShowLessUpdatedRows?: (key: SidebarUpdatedBucketKey) => void;
   /**
    * Archive a session from the 'updated' organize mode. Mirrors `sessionListProps.onArchiveSession`
    * so both organize modes share the same destination handler.
@@ -1077,8 +1081,8 @@ function ConnectionPill({
   if (state !== 'offline' || !offlineDetail) return badge;
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger render={<span className="inline-flex">{badge}</span>} />
-      <Tooltip.Content side="bottom" className="max-w-[280px]">
+      <Tooltip.Trigger render={<span {...stylex.props(themeStyles.row)}>{badge}</span>} />
+      <Tooltip.Content side="bottom" xstyle={themeStyles.glyph}>
         {offlineDetail}
       </Tooltip.Content>
     </Tooltip.Root>
@@ -1250,20 +1254,13 @@ function NavButton({
   );
 }
 
-/**
- * A navigation row's shortcut pill, at the row's end: it fades in on hover or
- * keyboard focus, and shows with the session rows' ⌘1–9 pills while the
- * modifier is held. A leaf, so holding the modifier re-renders only these.
- */
+
 function NavShortcut({ binding, selected }: { binding: string; selected: boolean }) {
   const held = useAtomValue(sidebarShortcutOverlayActiveAtom);
   return (
     <span
       data-nav-shortcut=""
-      className={cn(
-        'ml-auto flex shrink-0 items-center pl-2 transition-opacity duration-150 motion-reduce:transition-none',
-        held ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'
-      )}
+      {...stylex.props(shortcutStyles.slot, held && shortcutStyles.held)}
     >
       <SidebarBindingPill binding={binding} selected={selected} />
     </span>
@@ -1315,10 +1312,12 @@ export const LoroSidebar = memo(function LoroSidebar({
   collapsedPinSectionIds,
   pinnedHiddenCounts,
   onTogglePinSection,
+  hiddenPinSectionKeys,
+  onSetPinSectionHidden,
   pinSectionActions,
   updatedSelectedItemId,
   updatedBucketsCollapsed,
-  updatedShowFullBuckets,
+  updatedRevealedRows,
   updatedIsLoading = false,
   showUpdatedProjectNames = true,
   onShowUpdatedProjectNamesChange,
@@ -1331,7 +1330,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   onSelectUpdatedItem,
   onTogglePinnedSection,
   onToggleUpdatedBucket,
-  onToggleUpdatedShowFullBucket,
+  onShowMoreUpdatedRows,
+  onShowLessUpdatedRows,
   onArchiveUpdatedItem,
   onMarkUpdatedItemUnread,
   onRenameUpdatedItem,
@@ -1896,8 +1896,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                           ) : null
                         }
                       >
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <span className="truncate">{ws.name}</span>
+                        <span {...stylex.props(themeStyles.row2)}>
+                          <span {...stylex.props(themeStyles.layout)}>{ws.name}</span>
                           {ws.encrypted ? <EncryptedWorkspaceMark /> : null}
                         </span>
                       </Menu.RadioItem>
@@ -2066,7 +2066,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               active={activeNav === 'today'}
               isMobile={isMobile}
               label={t('today.nav', 'Today')}
-              icon={<CalendarDays className="h-4 w-4" strokeWidth={1.5} />}
+              icon={<CalendarDays {...stylex.props(themeStyles.glyph2)} strokeWidth={1.5} />}
               onClick={onTodayClicked}
               shortcut={todayBinding}
             />
@@ -2098,9 +2098,6 @@ export const LoroSidebar = memo(function LoroSidebar({
               isMobile ? shellStyles.scrollColumnMobile : shellStyles.scrollColumnDesktop
             ).className
           )}
-          // Overlay only while the list is scrolling. ScrollArea defaults to `hover`,
-          // which paints the thumb as soon as the pointer enters the sidebar.
-          visibility="scroll"
           // The horizontal gutter must live on the *viewport*, not the ScrollArea
           // root. The viewport is the scroll/clip container; with rows at
           // `w-full` and the gutter on the root, the selected row's 1px `outline`
@@ -2133,6 +2130,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                   collapsedSectionIds={collapsedPinSectionIds}
                   hiddenCounts={pinnedHiddenCounts}
                   onToggleSection={onTogglePinSection}
+                  hiddenSectionKeys={hiddenPinSectionKeys}
+                  onSetSectionHidden={onSetPinSectionHidden}
                   headerAction={sectionHeaderFilterAction ?? undefined}
                   actions={pinSectionActions}
                   onDropIntoFocus={organizeMode === 'status' ? onDropFocusItem : undefined}
@@ -2171,10 +2170,11 @@ export const LoroSidebar = memo(function LoroSidebar({
                     selectedItemId={updatedSelectedItemId ?? null}
                     labels={mergedLabels.updated}
                     collapsedBuckets={updatedBucketsCollapsed}
-                    showFullBuckets={updatedShowFullBuckets}
+                    revealedRowsByBucket={updatedRevealedRows}
                     onSelectItem={onSelectUpdatedItem}
                     onToggleBucket={onToggleUpdatedBucket}
-                    onToggleFullBucket={onToggleUpdatedShowFullBucket}
+                    onShowMore={onShowMoreUpdatedRows}
+                    onShowLess={onShowLessUpdatedRows}
                     onArchiveItem={onArchiveUpdatedItem}
                     onMarkItemUnread={onMarkUpdatedItemUnread}
                     onRenameItem={onRenameUpdatedItem}
@@ -2415,3 +2415,16 @@ export const LoroSidebar = memo(function LoroSidebar({
 });
 
 LoroSidebar.displayName = 'LoroSidebar';
+
+const themeStyles = stylex.create({
+  row: { display: 'inline-flex' },
+  glyph: { maxWidth: '280px' },
+  row2: { display: 'flex', minWidth: 0, alignItems: 'center', gap: 'calc(var(--spacing) * 1.5)' },
+  layout: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  glyph2: { height: 'calc(var(--spacing) * 4)', width: 'calc(var(--spacing) * 4)' },
+});
+
+const shortcutStyles = stylex.create({
+ slot: { display: 'flex', marginLeft: 'auto', flexShrink: 0, alignItems: 'center', paddingLeft: 'calc(var(--spacing) * 2)', opacity: { default: 0, ':is(:where(.group):hover *)': 1, ':is(:where(.group):focus-visible *)': 1 }, transitionProperty: { default: 'opacity', '@media (prefers-reduced-motion: reduce)': 'none' }, transitionDuration: '150ms' },
+ held: { opacity: 1 },
+});

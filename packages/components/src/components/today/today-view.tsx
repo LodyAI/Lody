@@ -1,20 +1,39 @@
 import * as stylex from '@stylexjs/stylex';
-import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Pin, PinOff } from 'lucide-react';
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Maximize2,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Pin,
+  PinOff,
+  Square,
+  SquareCheck,
+  Trash2,
+  Type,
+} from 'lucide-react';
+import { formatKeyBinding, isMac } from '@/lib/commands';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { todayFullWidthAtom } from '@/atoms/sidebar-state';
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ComponentType,
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  TODAY_MENTION_CHAR,
   buildTodayLink,
   getSessionRoomId,
+  getTodayDocId,
   parseTodayDate,
   readTodayText,
   type SessionId,
@@ -61,7 +80,7 @@ import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayLiveSessionPicker } from './today-mention-picker';
 import { TodayMembersContext } from './today-members';
 import { TodayDaySection } from './today-day-section';
-import { todayOutline } from './outline.stylex';
+import { TodayMoreAtEndContext, todayOutline } from './outline.stylex';
 import { TodayConvertDialog } from './today-convert-dialog';
 import { TodaySelectionBar } from './today-selection-bar';
 import { TodayMentionStatusMenuHost } from './today-mention-status-menu';
@@ -69,9 +88,14 @@ import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selecti
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayNodeId } from '@lody/shared';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
+import { TodayBreadcrumb, type TodayCrumb } from './today-breadcrumb';
 import { useTodayClock } from './use-today-clock';
 
-export type TodayViewTarget = { member?: string; date?: string };
+/**
+ * What a Today surface shows: a member's stream around `date`, or with
+ * `focus` only that day (`'day'`) or one node of it (its id).
+ */
+export type TodayViewTarget = { member?: string; date?: string; focus?: string };
 
 /** Opens a conversation a mention points at; the host decides where it shows. */
 export type TodayOpenSession = (target: { sessionId: SessionId; workspaceId: string }) => void;
@@ -250,9 +274,12 @@ export function TodayView(props: {
       return next;
     });
   }, []);
+  const focus = props.target.focus;
+  const focusDate = focus ? (anchor ?? today) : null;
+  const zoomRoot = focus && focus !== 'day' ? (focus as TodayNodeId) : null;
   const days = useMemo(
-    () => buildDayStream({ today, anchor, registered, empty }),
-    [anchor, empty, registered, today]
+    () => (focusDate ? [focusDate] : buildDayStream({ today, anchor, registered, empty })),
+    [anchor, empty, focusDate, registered, today]
   );
   const cache = runtime?.todayPages ?? null;
   const jotai = useStore();
@@ -289,6 +316,57 @@ export function TodayView(props: {
     userId && userId !== self
       ? members.find((member) => member.userId === userId)?.name
       : undefined;
+  useEffect(
+    () => controller?.setFocus(focusDate ? { date: focusDate, rootId: zoomRoot } : null),
+    [controller, focusDate, zoomRoot]
+  );
+
+  const streamReturn = useRef<{ target: TodayViewTarget; anchor: TodayScrollAnchor | null } | null>(
+    null
+  );
+  const dateParam = (date: TodayDate) => (date === today ? undefined : date);
+  const enterFocus = (next: TodayViewTarget) => {
+    if (!props.target.focus) {
+      streamReturn.current = {
+        target: props.target,
+        anchor: captureScrollAnchor(controller?.getSurface() ?? null),
+      };
+    }
+    props.onNavigate(next);
+  };
+  const leaveFocus = () =>
+    props.onNavigate(streamReturn.current?.target ?? { member: props.target.member });
+  const focusPage = () =>
+    focusDate && userId ? cache?.peek(getTodayDocId(userId, focusDate)) : undefined;
+  const nav = {
+    zoom: (store: TodayPageStore, nodeId: TodayNodeId) =>
+      enterFocus({ member: props.target.member, date: dateParam(store.date), focus: nodeId }),
+    zoomOut: () => {
+      if (!focusDate) return;
+      if (!zoomRoot) return leaveFocus();
+      const parent = focusPage()?.outline.getNode(zoomRoot)?.parentId;
+      props.onNavigate({ ...props.target, focus: parent ?? 'day' });
+    },
+    openDay: (date: TodayDate) =>
+      enterFocus({ member: props.target.member, date: dateParam(date), focus: 'day' }),
+  };
+  const navRef = useRef(nav);
+  navRef.current = nav;
+  useEffect(() => {
+    if (!controller) return undefined;
+    controller.onZoom = (store, nodeId) => navRef.current.zoom(store, nodeId);
+    controller.onZoomOut = () => navRef.current.zoomOut();
+    return () => {
+      controller.onZoom = null;
+      controller.onZoomOut = null;
+    };
+  }, [controller]);
+  useLayoutEffect(() => {
+    if (focusDate || !streamReturn.current) return undefined;
+    const { anchor } = streamReturn.current;
+    streamReturn.current = null;
+    return restoreScrollAnchor(controller?.getSurface() ?? null, anchor);
+  }, [controller, focusDate]);
 
   if (!runtime || !userId) return null;
   return (
@@ -299,8 +377,24 @@ export function TodayView(props: {
             pinned={pinnedColumn}
             standalone={standalone}
             title={
-              memberName ? t('today.memberTitle', '{{name}}’s Today', { name: memberName }) : null
+              focusDate ? (
+                <TodayFocusCrumbs
+                  page={focusPage}
+                  date={focusDate}
+                  zoomRoot={zoomRoot}
+                  rootLabel={
+                    memberName
+                      ? t('today.memberTitle', '{{name}}’s Today', { name: memberName })
+                      : t('today.nav', 'Today')
+                  }
+                  onStream={leaveFocus}
+                  onFocus={(next) => props.onNavigate({ ...props.target, focus: next })}
+                />
+              ) : memberName ? (
+                t('today.memberTitle', '{{name}}’s Today', { name: memberName })
+              ) : null
             }
+            interactiveTitle={!!focusDate}
           >
             <TodayCalendar
               today={today}
@@ -317,7 +411,13 @@ export function TodayView(props: {
                 size="small"
                 icon
                 aria-label={t('today.openWindow', 'Open Today in a new window')}
-                onClick={() => openTodayWindow({ workspace: workspaceSlug, ...props.target })}
+                onClick={() =>
+                  openTodayWindow({
+                    workspace: workspaceSlug,
+                    member: props.target.member,
+                    date: props.target.date,
+                  })
+                }
               >
                 <OpenWindowIcon />
               </Button>
@@ -423,13 +523,15 @@ export function TodayView(props: {
                 today={today}
                 isTop={index === 0}
                 onEmptyChange={onEmptyChange}
+                zoomRoot={zoomRoot}
+                onOpenDay={focusDate ? undefined : nav.openDay}
               />
             ))}
           </TodayOutlineSurface>
           <TodayLiveSessionPicker />
           <TodayNodeActions pinned={pinnedColumn} />
           <TodayMentionStatusMenuHost />
-          {anchor && anchor !== today ? (
+          {anchor && anchor !== today && !focusDate ? (
             <div {...stylex.props(styles.back)}>
               <span {...stylex.props(styles.backButton)}>
                 <Button
@@ -461,6 +563,8 @@ export function TodayToolbar(props: {
   /** The standalone Today window's top row: window chrome without sidebar controls. */
   standalone?: boolean;
   title: ReactNode;
+  /** The title holds controls (the focus view's breadcrumb): they must take clicks. */
+  interactiveTitle?: boolean;
   children: ReactNode;
 }) {
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
@@ -507,11 +611,198 @@ export function TodayToolbar(props: {
       {!sidebarVisible && !props.standalone ? (
         <SidebarHistoryControls onToggleSidebar={showSidebar} className={exemptClassName} />
       ) : null}
-      <span {...stylex.props(styles.title)}>{props.title}</span>
+      <span
+        {...withClassName(
+          stylex.props(styles.title),
+          props.interactiveTitle ? exemptClassName : undefined
+        )}
+      >
+        {props.title}
+      </span>
       <div {...withClassName(stylex.props(styles.controls), exemptClassName)}>{props.children}</div>
     </div>
   );
 }
+
+/**
+ * A node's menu, from its "⋯" button or a right-click on its bullet: the
+ * selection bar's actions for that one node, plus zooming into it.
+ */
+function TodayNodeMenu(props: {
+  store: TodayPageStore;
+  nodeId: TodayNodeId;
+  anchor: HTMLElement | { x: number; y: number };
+  controller: TodayEditorController;
+  onConvert: () => void;
+  onClose: (keepSelection: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const { store, nodeId, controller, anchor } = props;
+  const node = store.outline.getNode(nodeId);
+  const positioned = useMemo(
+    () =>
+      anchor instanceof HTMLElement
+        ? anchor
+        : {
+            getBoundingClientRect: () => new DOMRect(anchor.x, anchor.y, 0, 0),
+          },
+    [anchor]
+  );
+  if (!node) return null;
+  const canConvert = node.text.replaceAll(TODAY_MENTION_CHAR, '').trim().length > 0;
+  const todo =
+    node.todo === undefined
+      ? { icon: <Square size={16} />, label: t('today.todo.make', 'Turn into to-do') }
+      : node.todo === 'todo'
+        ? { icon: <SquareCheck size={16} />, label: t('today.todo.markDone', 'Mark as done') }
+        : { icon: <Type size={16} />, label: t('today.todo.clear', 'Back to plain text') };
+  const isMacPlatform = isMac();
+  return (
+    <Menu.Root open onOpenChange={(open) => !open && props.onClose(false)}>
+      <Menu.Content anchor={positioned} side="bottom" align="start">
+        <Menu.Item
+          icon={<Maximize2 size={16} />}
+          shortcut={isMacPlatform ? '⌥→' : 'Alt+→'}
+          onClick={() => {
+            props.onClose(false);
+            controller.onZoom?.(store, nodeId);
+          }}
+        >
+          {t('today.zoomIn', 'Zoom in')}
+        </Menu.Item>
+        <Menu.Item
+          icon={todo.icon}
+          shortcut={formatKeyBinding('Mod+Enter')}
+          onClick={() => {
+            store.undo.structural(() => store.outline.cycleTodo([nodeId]));
+            props.onClose(false);
+          }}
+        >
+          {todo.label}
+        </Menu.Item>
+        <Menu.Item
+          icon={<MessageSquarePlus size={16} />}
+          disabled={!canConvert}
+          onClick={() => {
+            props.onClose(true);
+            props.onConvert();
+          }}
+        >
+          {t('today.convertToTask', 'Convert to task')}
+        </Menu.Item>
+        <Menu.Separator />
+        <Menu.Item
+          icon={<Copy size={16} />}
+          shortcut={formatKeyBinding('Mod+C')}
+          onClick={() => {
+            controller.copySelection();
+            props.onClose(false);
+          }}
+        >
+          {t('common.copy', 'Copy')}
+        </Menu.Item>
+        <Menu.Item
+          icon={<Trash2 size={16} />}
+          tone="destructive"
+          onClick={() => {
+            controller.deleteSelection();
+            props.onClose(true);
+          }}
+        >
+          {t('common.delete', 'Delete')}
+        </Menu.Item>
+      </Menu.Content>
+    </Menu.Root>
+  );
+}
+
+/** Where the stream was: the top visible row and its offset (plus the raw scroll, as a fallback). */
+export type TodayScrollAnchor = { nodeId: string | null; offset: number; scrollTop: number };
+
+export function captureScrollAnchor(surface: HTMLElement | null): TodayScrollAnchor | null {
+  if (!surface) return null;
+  const top = surface.getBoundingClientRect().top;
+  for (const row of surface.querySelectorAll<HTMLElement>('[data-today-node]')) {
+    const rect = row.getBoundingClientRect();
+    if (rect.bottom > top) {
+      return {
+        nodeId: row.dataset.todayNode ?? null,
+        offset: rect.top - top,
+        scrollTop: surface.scrollTop,
+      };
+    }
+  }
+  return { nodeId: null, offset: 0, scrollTop: surface.scrollTop };
+}
+
+/**
+ * Put the stream back where it was. Days above may have grown or shrunk
+ * meanwhile, so after the raw offset the anchor row is lined up again once it
+ * mounts (the stream's pages open over a few frames).
+ */
+export function restoreScrollAnchor(surface: HTMLElement | null, anchor: TodayScrollAnchor | null) {
+  if (!surface || !anchor) return undefined;
+  surface.scrollTop = anchor.scrollTop;
+  let frames = 0;
+  let handle = 0;
+  const align = () => {
+    const row = anchor.nodeId
+      ? surface.querySelector<HTMLElement>(`[data-today-node="${CSS.escape(anchor.nodeId)}"]`)
+      : null;
+    if (row) {
+      surface.scrollTop +=
+        row.getBoundingClientRect().top - surface.getBoundingClientRect().top - anchor.offset;
+      return;
+    }
+    frames += 1;
+    if (frames < 30) handle = requestAnimationFrame(align);
+  };
+  align();
+  return () => cancelAnimationFrame(handle);
+}
+
+/** The focus view's breadcrumb: back to the stream, the day, and the zoomed node's ancestors. */
+export function TodayFocusCrumbs(props: {
+  /** The focused day's page, once a section has opened it. */
+  page: () => TodayPageStore | undefined;
+  date: TodayDate;
+  zoomRoot: TodayNodeId | null;
+  rootLabel: string;
+  onStream: () => void;
+  onFocus: (focus: string) => void;
+}) {
+  const { t } = useTranslation();
+  const { zoomRoot } = props;
+  useTodayEditor();
+  const page = props.page();
+  useSyncExternalStore(page?.subscribe ?? noopSubscribe, page?.getSnapshot ?? noSnapshot);
+  const label = (nodeId: TodayNodeId) => {
+    const text = page?.outline.getNode(nodeId)?.text.replaceAll(TODAY_MENTION_CHAR, '').trim();
+    return text || t('today.untitledNode', 'Untitled');
+  };
+  const ancestors: TodayNodeId[] = [];
+  for (
+    let parent = zoomRoot ? (page?.outline.getNode(zoomRoot)?.parentId ?? null) : null;
+    parent;
+    parent = page?.outline.getNode(parent)?.parentId ?? null
+  ) {
+    ancestors.unshift(parent);
+  }
+  const crumbs: TodayCrumb[] = [
+    { key: 'stream', label: props.rootLabel, onSelect: props.onStream },
+    {
+      key: 'day',
+      label: props.date,
+      onSelect: zoomRoot ? () => props.onFocus('day') : undefined,
+    },
+    ...ancestors.map((id) => ({ key: id, label: label(id), onSelect: () => props.onFocus(id) })),
+    ...(zoomRoot ? [{ key: zoomRoot, label: label(zoomRoot) }] : []),
+  ];
+  return <TodayBreadcrumb crumbs={crumbs} />;
+}
+
+const noopSubscribe = () => () => {};
+const noSnapshot = () => null;
 
 /** Two stacked windows, the front one lower left: opens Today on its own. */
 function OpenWindowIcon() {
@@ -591,6 +882,7 @@ export function TodayOutlineSurface(props: {
       }}
       tabIndex={-1}
       role="tree"
+      data-today-scroller=""
       aria-multiselectable
       onKeyDown={(event) => {
         if (event.target === event.currentTarget) controller?.onBlockKey(event.nativeEvent);
@@ -601,7 +893,9 @@ export function TodayOutlineSurface(props: {
         if (event.target === event.currentTarget) controller?.onBlockPaste(event.nativeEvent);
       }}
     >
-      <div {...stylex.props(!props.fullWidth && styles.column)}>{props.children}</div>
+      <TodayMoreAtEndContext.Provider value={props.placement === 'pinnedAtWindowEdge'}>
+        <div {...stylex.props(!props.fullWidth && styles.column)}>{props.children}</div>
+      </TodayMoreAtEndContext.Provider>
       <TodayDragLayer />
     </div>
   );
@@ -707,6 +1001,7 @@ function TodayDragLayer() {
 export type TodayConvertDialogComponent = ComponentType<{
   open: boolean;
   prompt: string;
+  promptWithAncestors?: string | null;
   onAccepted: (sessionId: SessionId) => void;
   onOpenChange: (open: boolean) => void;
 }>;
@@ -728,29 +1023,68 @@ export function TodayNodeActions(props: {
     store: TodayPageStore;
     nodeId: TodayNodeId;
     prompt: string;
+    promptWithAncestors: string | null;
     /** The node's text when the dialog opened: unchanged, the line becomes the mention. */
     snapshot: TodayRichText;
   } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{
+    store: TodayPageStore;
+    nodeId: TodayNodeId;
+    anchor: HTMLElement | { x: number; y: number };
+  } | null>(null);
+  useEffect(() => {
+    if (!controller) return undefined;
+    controller.onNodeMenu = (store, nodeId, anchor) => {
+      controller.selectBlocks(store, [nodeId]);
+      setNodeMenu({ store, nodeId, anchor });
+    };
+    return () => {
+      controller.onNodeMenu = null;
+    };
+  }, [controller]);
+  const convert = (store: TodayPageStore, nodeId: TodayNodeId) => {
+    const [fragment] = store.outline.extract([nodeId]);
+    const text = store.outline.getText(nodeId);
+    if (!fragment || !text || !controller) return;
+    const ancestors: TodayRichText[] = [];
+    for (
+      let parent = store.outline.getNode(nodeId)?.parentId ?? null;
+      parent;
+      parent = store.outline.getNode(parent)?.parentId ?? null
+    ) {
+      const node = store.outline.getNode(parent);
+      if (!node) break;
+      ancestors.unshift({ text: node.text, mentions: [...node.mentions] });
+    }
+    setConverting({
+      store,
+      nodeId,
+      prompt: buildConvertPrompt(fragment, controller.mentionText),
+      promptWithAncestors:
+        ancestors.length > 0
+          ? buildConvertPrompt(fragment, controller.mentionText, ancestors)
+          : null,
+      snapshot: readTodayText(text),
+    });
+  };
   return (
     <>
-      {converting ? null : (
-        <TodaySelectionBar
-          onConvert={(store, nodeId) => {
-            const [fragment] = store.outline.extract([nodeId]);
-            const text = store.outline.getText(nodeId);
-            if (!fragment || !text || !controller) return;
-            setConverting({
-              store,
-              nodeId,
-              prompt: buildConvertPrompt(fragment, controller.mentionText),
-              snapshot: readTodayText(text),
-            });
+      {converting || nodeMenu ? null : <TodaySelectionBar onConvert={convert} />}
+      {nodeMenu && controller ? (
+        <TodayNodeMenu
+          {...nodeMenu}
+          controller={controller}
+          onConvert={() => convert(nodeMenu.store, nodeMenu.nodeId)}
+          onClose={(keepSelection) => {
+            setNodeMenu(null);
+            if (!keepSelection) controller.clearBlockSelection();
           }}
         />
-      )}
+      ) : null}
       <ConvertDialog
         open={converting !== null}
         prompt={converting?.prompt ?? ''}
+        promptWithAncestors={converting?.promptWithAncestors ?? null}
         onOpenChange={(open) => {
           if (!open) {
             setConverting(null);

@@ -13,10 +13,14 @@ import { MobileChatList } from '../src/components/mobile/mobile-chat-list';
 import type { MobileConversationItem } from '../src/components/mobile/mobile-project-screen';
 import type { MobileStatusCommands } from '../src/components/mobile/use-mobile-status-list';
 import { LIFT_DELAY_MS } from '../src/components/mobile/use-status-list-drag';
-import { resolveCustomLaterTime } from '../src/components/mobile/mobile-later-sheet';
+import {
+  presetTimeFormatter,
+  resolveCustomLaterTime,
+} from '../src/components/mobile/mobile-later-sheet';
 import { planStatusUndo } from '../src/components/mobile/use-mobile-status-actions';
 import { toStatusViewSession } from '../src/components/mobile/mobile-status-view';
 import { initI18n } from '../src/i18n';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
 /** The fake host runs the real shared planner and applies its writes to the rows. */
 
@@ -264,14 +268,14 @@ describe('phone Status grouping', () => {
     expect(rowTitles().slice(-2).sort()).toEqual(['quiet', 'settled']);
   });
 
-  it('folds Settled past 20 rows behind Show all', () => {
+  it('folds Settled past 20 rows behind Show more', () => {
     const settled = Array.from({ length: 23 }, (_, index) =>
       item({ id: `s${index}`, settledAt: NOW - index })
     );
     render({ chats: settled, sections: [] });
     act(() => heading('Settled').click());
     expect(rowTitles()).toHaveLength(20);
-    expect(text()).toContain('Show all (23)');
+    expect(text()).toContain('Show more');
   });
 
   it('offers each tier its own swipe actions', () => {
@@ -554,6 +558,35 @@ describe('phone Status grouping', () => {
 });
 
 describe('phone Later sheet and Undo', () => {
+  it('mounts the list and picks a Later preset under zh_CN without Intl RangeError', () => {
+    const zhI18n = createTestI18n({ language: 'zh_CN' });
+    act(() => {
+      root.render(
+        withTestI18n(
+          <Provider store={createStore()}>
+            <Harness initial={{ chats: [item({ id: 'focus-a', orderKey: '80' })], sections: [] }} />
+          </Provider>,
+          zhI18n
+        )
+      );
+    });
+    longPress('focus-a');
+    clickSheet('Later');
+    const oneHour = document.querySelector<HTMLButtonElement>('[data-later-preset="oneHour"]');
+    expect(oneHour).not.toBeNull();
+    act(() => oneHour!.click());
+    expect(currentHost.chats[0]?.snoozedUntil).toBe(NOW + LIFT_DELAY_MS + HOUR);
+    act(() => heading('Later').click());
+    expect(
+      container.querySelector('[data-status-area="later"][data-status-row-id="focus-a"]')
+    ).not.toBeNull();
+
+    const formatZhProduct = presetTimeFormatter('zh_CN', NOW);
+    const formatZhBcp47 = presetTimeFormatter('zh-CN', NOW);
+    expect(formatZhProduct(NOW + HOUR)).toBe(formatZhBcp47(NOW + HOUR));
+    expect(formatZhProduct(NOW + 2 * DAY)).toBe(formatZhBcp47(NOW + 2 * DAY));
+  });
+
   it('refuses a custom time that is not in the future', () => {
     expect(resolveCustomLaterTime('2026-11-21T09:00', Date.parse('2026-11-21T10:00'))).toBeNull();
     expect(resolveCustomLaterTime('', NOW)).toBeNull();

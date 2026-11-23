@@ -22,6 +22,8 @@ import {
 import { MobileSessionRunConfig } from '../src/components/mobile/mobile-session-run-config';
 import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { initI18n } from '../src/i18n';
+import { commands, formatKeyBinding } from '../src/lib/commands';
+import { CommandShortcutHost } from '../src/lib/commands/shortcut-host';
 import { Tooltip } from '@lody/ui/tooltip';
 
 (
@@ -108,7 +110,7 @@ describe('DesktopRunConfigMenu role face', () => {
       root?.render(
         createElement(
           Tooltip.Provider,
-          { delayDuration: 0 },
+          { delay: 0 },
           createElement(DesktopRunConfigMenu, { ...baseProps, ...props })
         )
       );
@@ -146,6 +148,47 @@ describe('DesktopRunConfigMenu role face', () => {
       trigger?.click();
     });
     expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('shows speed tiers on the face as glyphs only and keeps their names in the menu', async () => {
+    const speedSelector = {
+      configId: 'fast-mode',
+      category: 'other',
+      label: 'Speed',
+      type: 'select' as const,
+      currentValue: 'off',
+      options: [
+        { value: 'off', label: 'Standard' },
+        { value: 'fast', label: 'Fast' },
+        { value: 'ultrafast', label: 'Ultrafast' },
+      ],
+    };
+    const speedGlyph = async (value: string) => {
+      const view = await render({
+        configOptionSelectors: [speedSelector],
+        configOptionValues: { 'fast-mode': value },
+      });
+      const trigger = view.querySelector<HTMLButtonElement>('[data-run-config-trigger]')!;
+      return { trigger, glyph: trigger.querySelector('[role="img"]') };
+    };
+
+    const fast = await speedGlyph('fast');
+    expect(fast.glyph?.getAttribute('aria-label')).toBe('Fast');
+    expect(fast.trigger.textContent).not.toContain('Fast');
+    const fastMarkup = fast.glyph?.outerHTML;
+
+    const ultra = await speedGlyph('ultrafast');
+    expect(ultra.glyph?.getAttribute('aria-label')).toBe('Ultrafast');
+    expect(ultra.trigger.textContent).not.toContain('Ultrafast');
+    expect(ultra.glyph?.outerHTML).not.toBe(fastMarkup);
+
+    expect((await speedGlyph('off')).glyph).toBeNull();
+
+    await speedGlyph('ultrafast');
+    await act(async () => {
+      ultra.trigger.click();
+    });
+    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Ultrafast');
   });
 
   it('keeps Role identity and pinned values on the locked face', async () => {
@@ -365,6 +408,123 @@ describe('DesktopRunConfigMenu role face', () => {
     const actualSelection = view.querySelector<HTMLElement>('[data-run-config-trigger]');
     expect(actualSelection?.dataset.agentConfigId).toBe(second.id);
     expect(actualSelection?.dataset.machineId).toBe(second.machineId);
+  });
+});
+
+describe('DesktopRunConfigMenu ⌘/ chord', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  let originalMatchMedia: typeof window.matchMedia | undefined;
+
+  const manyModels = ['gpt-5.5', 'gpt-5.4', 'gpt-5.3', 'gpt-5.2', 'gpt-5.1', 'gpt-5.0'].map(
+    (value) => ({ value, label: value })
+  );
+
+  const pressRunConfigChord = (target: Window | Element) =>
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key: '/', code: 'Slash', ctrlKey: true, bubbles: true })
+    );
+
+  const renderComposerBox = async (props: Partial<MenuProps> = {}) => {
+    await act(async () => {
+      root?.render(
+        createElement(
+          Tooltip.Provider,
+          { delay: 0 },
+          createElement(
+            'div',
+            null,
+            createElement(CommandShortcutHost),
+            createElement('textarea', { 'data-lody-composer-input': '' }),
+            createElement(DesktopRunConfigMenu, { ...baseProps, ...props })
+          )
+        )
+      );
+    });
+    return container as HTMLDivElement;
+  };
+
+  beforeEach(async () => {
+    await initI18n('en');
+    commands.resetAllUserKeybindings();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    if (originalMatchMedia !== undefined) {
+      window.matchMedia = originalMatchMedia;
+      originalMatchMedia = undefined;
+    }
+    if (root) {
+      await act(async () => {
+        root?.unmount();
+      });
+      root = undefined;
+    }
+    for (const command of commands.list()) commands.unregister(command.id);
+    commands.resetAllUserKeybindings();
+    container?.remove();
+    container = undefined;
+  });
+
+  it('opens into the model search on ⌘/ while its composer is focused', async () => {
+    originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query === '(pointer: fine)',
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => true,
+    })) as unknown as typeof window.matchMedia;
+    const view = await renderComposerBox({ modelOptions: manyModels });
+    const composer = view.querySelector('[data-lody-composer-input]')!;
+    expect(document.body.querySelector('[data-lody-menu-search]')).toBeNull();
+
+    await act(async () => {
+      pressRunConfigChord(window);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+
+    await act(async () => {
+      pressRunConfigChord(composer);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    expect(document.body.querySelector('[role="menu"]')).not.toBeNull();
+
+    const search = document.body.querySelector('[data-lody-menu-search]');
+    expect(search).not.toBeNull();
+    await vi.waitFor(() => expect(document.activeElement).toBe(search));
+  });
+
+  it('does not open on ⌘/ while its surface is inactive', async () => {
+    const view = await renderComposerBox({ commandsEnabled: false });
+    await act(async () => {
+      pressRunConfigChord(view.querySelector('[data-lody-composer-input]')!);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('shows the active ⌘/ binding in the trigger tooltip', async () => {
+    const view = await renderComposerBox({ modelOptions: manyModels });
+    const trigger = view.querySelector('[data-run-config-trigger]')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('mouseenter'));
+      trigger.dispatchEvent(new MouseEvent('mousemove'));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    const expected = commands
+      .getKeybindingsFor('session.openRunConfig')
+      .map((binding) => formatKeyBinding(binding))[0];
+    expect(expected).toBeTruthy();
+    expect(document.body.textContent).toContain(`Run configuration`);
+    expect(document.body.textContent).toContain(expected);
   });
 });
 

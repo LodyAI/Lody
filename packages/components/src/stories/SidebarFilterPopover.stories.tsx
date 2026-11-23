@@ -1,3 +1,4 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
@@ -101,9 +102,9 @@ function FilterShell({
             <span {...stylex.props(storyLayout.label)}>Branch line:</span>{' '}
             <span {...stylex.props(storyLayoutStyles.label)}>{showBranchNames ? 'on' : 'off'}</span>
           </div>
-          <div className="mt-1">
-            <span className="text-sidebar-foreground-muted">Hide empty projects:</span>{' '}
-            <span className="font-medium">{hideEmptyProjects ? 'on' : 'off'}</span>
+          <div {...stylex.props(themeStyles.spaced)}>
+            <span {...stylex.props(themeStyles.hint)}>Hide empty projects:</span>{' '}
+            <span {...stylex.props(themeStyles.layout)}>{hideEmptyProjects ? 'on' : 'off'}</span>
           </div>
         </div>
         <p {...stylex.props(storyLayoutStyles.caption2)}>
@@ -170,3 +171,9 @@ export const TeamScope: Story = {
     scope: 'team',
   },
 };
+
+const themeStyles = stylex.create({
+  spaced: { marginTop: 'calc(var(--spacing) * 1)' },
+  hint: { color: uiColors.secondaryLabel },
+  layout: { fontWeight: 500 },
+});

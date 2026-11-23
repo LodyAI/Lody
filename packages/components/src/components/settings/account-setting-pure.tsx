@@ -10,7 +10,7 @@ import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Alert } from '@lody/ui/alert';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { duration, space } from '@lody/ui/tokens/scales.stylex';
 import { Menu } from '@/ui/menu';
 import type { OrganizationMemberRef, OrganizationMemberRole } from '@/lib/organization-member-role';
 import { Dialog } from '@/ui/dialog';
@@ -28,7 +28,8 @@ import { MobileAccountSettings } from '@/components/mobile/mobile-account-settin
 import { useIsMobile } from '@/hooks/use-mobile';
 import { UserAvatar } from '@/components/user-avatar';
 import { settingsSurface } from './surface';
-import { describeCliApiKey } from './cli-api-key-display';
+import { describeCliApiKey, partitionCliApiKeys } from './cli-api-key-display';
+import { Collapsible } from '@lody/ui/collapsible';
 import { Badge } from '@lody/ui/badge';
 
 const styles = stylex.create({
@@ -66,6 +67,9 @@ const styles = stylex.create({
   noteLoading: { display: 'flex', alignItems: 'center', gap: space[2] },
   /** A token's "This computer" badge beside its Revoke answer. */
   tokenControls: { display: 'inline-flex', alignItems: 'center', gap: space[2] },
+  chevron: { transitionProperty: 'transform', transitionDuration: duration.fast },
+  chevronOpen: { transform: 'rotate(180deg)' },
+  block: { display: 'block' },
 
   /** A dialog's body between its header and its answers. */
   dialogBody: { display: 'flex', flexDirection: 'column', gap: space[3] },
@@ -99,6 +103,46 @@ export interface AccountMember {
 export type WorkspaceDeleteBillingGuard =
   | { kind: 'active-subscription' }
   | { kind: 'cancel-scheduled'; formattedPeriodEnd: string | null };
+
+/** The billing-overview fields the workspace deletion guard reads. */
+export type WorkspaceDeleteBillingOverview = {
+  readonly effectivePlanTier: string;
+  readonly entitlementSource: string;
+  readonly autoRenewAfterGift: boolean;
+  readonly cancelAtPeriodEnd: boolean;
+  readonly giftEndsAt: number | null;
+  readonly currentPeriodEnd: number | null;
+};
+
+/**
+ * The billing-aware guard on deleting a workspace: a live subscription blocks deletion
+ * (cancel first); a cancel-scheduled one gets a warning that deletion preserves its
+ * scheduled end and any accrued charges. A subscription belongs to the workspace, not to
+ * its content mode, so encrypted workspaces are guarded exactly like plaintext ones.
+ * No overview (loading, no billing capability, or none for this workspace) means no guard.
+ */
+export function deriveWorkspaceDeleteBillingGuard(
+  overview: WorkspaceDeleteBillingOverview | null | undefined,
+  now: number
+): WorkspaceDeleteBillingGuard | null {
+  if (
+    !overview ||
+    overview.effectivePlanTier === 'free' ||
+    (overview.entitlementSource === 'stripe_gift' && !overview.autoRenewAfterGift)
+  )
+    return null;
+  if (!overview.cancelAtPeriodEnd) return { kind: 'active-subscription' };
+  const entitlementEnd =
+    overview.giftEndsAt && overview.giftEndsAt > now
+      ? overview.giftEndsAt
+      : overview.currentPeriodEnd;
+  return {
+    kind: 'cancel-scheduled',
+    formattedPeriodEnd: entitlementEnd
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(entitlementEnd))
+      : null,
+  };
+}
 
 export type AccountSettingsSurface = 'account' | 'workspace';
 
@@ -274,6 +318,41 @@ export function AccountSettingsPure({
       t,
     });
   const cliApiKeyToRevokeDisplay = cliApiKeyToRevoke ? describeApiKey(cliApiKeyToRevoke) : null;
+  const { listed: listedCliApiKeys, signIn: signInCliApiKeys } = partitionCliApiKeys(cliApiKeys);
+  const [signInCliApiKeysOpen, setSignInCliApiKeysOpen] = useState(false);
+  const renderCliApiKeyRow = (apiKey: CliApiKeyRecord) => {
+    const display = describeApiKey(apiKey);
+    return (
+      <CompactRow
+        key={apiKey.id}
+        label={display.title}
+        helper={[
+          apiKey.keyPreview,
+          display.sourceLabel,
+          display.lifetime,
+          display.createdAt,
+          display.lastUsed,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+      >
+        <span {...stylex.props(styles.tokenControls)}>
+          {display.isCurrentMachine ? (
+            <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+          ) : null}
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() => setCliApiKeyToRevoke(apiKey)}
+            disabled={revokingCliApiKeyId === apiKey.id}
+          >
+            {revokingCliApiKeyId === apiKey.id ? <Spinner size="small" /> : null}
+            {t('settings.account.cliAuth.revokeButton')}
+          </Button>
+        </span>
+      </CompactRow>
+    );
+  };
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   // Profile: user display-name inline edit (mirrors the workspace name pattern).
@@ -980,39 +1059,65 @@ export function AccountSettingsPure({
               {t('settings.account.cliAuth.noRecords')}
             </p>
           ) : (
-            cliApiKeys.map((apiKey) => {
-              const display = describeApiKey(apiKey);
-              return (
-                <CompactRow
-                  key={apiKey.id}
-                  label={display.title}
-                  helper={[
-                    apiKey.keyPreview,
-                    display.sourceLabel,
-                    display.lifetime,
-                    display.createdAt,
-                    display.lastUsed,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
+            [
+              ...listedCliApiKeys.map(renderCliApiKeyRow),
+              signInCliApiKeys.length > 0 ? (
+                <Collapsible.Root
+                  key="sign-in-tokens"
+                  open={signInCliApiKeysOpen}
+                  onOpenChange={setSignInCliApiKeysOpen}
                 >
-                  <span {...stylex.props(styles.tokenControls)}>
-                    {display.isCurrentMachine ? (
-                      <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
-                    ) : null}
-                    <Button
-                      variant="secondary"
-                      size="small"
-                      onClick={() => setCliApiKeyToRevoke(apiKey)}
-                      disabled={revokingCliApiKeyId === apiKey.id}
-                    >
-                      {revokingCliApiKeyId === apiKey.id ? <Spinner size="small" /> : null}
-                      {t('settings.account.cliAuth.revokeButton')}
-                    </Button>
-                  </span>
-                </CompactRow>
-              );
-            })
+                  <Collapsible.Trigger
+                    render={
+                      <button
+                        type="button"
+                        {...stylex.props(
+                          settingsSurface.row,
+                          settingsSurface.pressableLine,
+                          settingsSurface.linkRow
+                        )}
+                      />
+                    }
+                  >
+                    <span {...stylex.props(settingsSurface.rowText)}>
+                      <span {...stylex.props(styles.block, settingsSurface.rowLabel)}>
+                        {t('settings.account.cliAuth.signInGroup')}
+                      </span>
+                      <span {...stylex.props(styles.block, settingsSurface.rowHelper)}>
+                        {t('settings.account.cliAuth.signInGroupHelper', {
+                          count: signInCliApiKeys.length,
+                        })}
+                      </span>
+                    </span>
+                    <span {...stylex.props(settingsSurface.rowControl, settingsSurface.linkEnd)}>
+                      {signInCliApiKeys.some(
+                        (apiKey) => describeApiKey(apiKey).isCurrentMachine
+                      ) ? (
+                        <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+                      ) : null}
+                      <ChevronDown
+                        aria-hidden="true"
+                        {...stylex.props(
+                          settingsSurface.linkMark,
+                          styles.chevron,
+                          signInCliApiKeysOpen && styles.chevronOpen
+                        )}
+                      />
+                    </span>
+                  </Collapsible.Trigger>
+                  <Collapsible.Panel>
+                    {signInCliApiKeys.map((apiKey) => (
+                      <div
+                        key={apiKey.id}
+                        {...stylex.props(settingsSurface.line, settingsSurface.lineRuled)}
+                      >
+                        {renderCliApiKeyRow(apiKey)}
+                      </div>
+                    ))}
+                  </Collapsible.Panel>
+                </Collapsible.Root>
+              ) : null,
+            ]
           )}
         </CompactSection>
       ) : null}

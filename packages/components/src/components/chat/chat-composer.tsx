@@ -23,6 +23,8 @@ import {
   Info,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useAtomValue } from 'jotai';
+import { conversationFontSizeAtom } from '@/atoms/settings';
 
 import type { AcpCommandSummary } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
@@ -98,6 +100,7 @@ import {
 const typography = stylex.create({
   imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
   prompt: { fontSize: textScale.bodySize, lineHeight: textScale.bodyLeading },
+  sheetPrompt: { fontSize: textScale.headlineSize },
   helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   code: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
@@ -112,7 +115,6 @@ const styles = stylex.create({
     flex: '1 1 0%',
     paddingInline: themeSpace[5],
     paddingBlock: space[4],
-    fontSize: '1rem',
     lineHeight: '1.75rem',
   },
   preservedDisabled: { opacity: control.disabledOpacity },
@@ -376,7 +378,6 @@ const styles = stylex.create({
     zIndex: 10,
     display: 'flex',
     alignItems: 'center',
-    // Match every original .group ancestor, including one outside this composer.
     color: colors.tertiaryLabel,
     opacity: { default: 1, ':where(.group:focus-within *)': 0 },
     transitionProperty: 'opacity',
@@ -539,11 +540,7 @@ const modalStyles = stylex.create({
     paddingBlock: 0,
     resize: 'none',
   },
-  // One row, like a create dialog's property bar (Linear): it never wraps.
-  // Running short, the project label truncates to its minimum first; past
-  // that (desktop windows go down to 400px) the row scrolls sideways, its
-  // scrollbar hidden. The block padding keeps the pills' lift and focus rings
-  // inside the scroll box.
+  // Truncate the project first, then scroll the single row; block padding contains focus rings.
   pills: {
     display: 'flex',
     flexWrap: 'nowrap',
@@ -560,10 +557,7 @@ const modalStyles = stylex.create({
     paddingInline: '3px',
     marginInline: '-3px',
   },
-  // The run-config group follows the scope pills on their line at its own
-  // size; only a model name long enough to take over half the row truncates.
-  // It is not the footer's `composer-face` container, whose narrow form hides
-  // labels.
+  // This row truncates long model names; only the footer's composer-face hides labels.
   face: {
     display: 'flex',
     flexWrap: 'nowrap',
@@ -600,19 +594,14 @@ const modalStyles = stylex.create({
 });
 
 const promptSuggestionStyles = stylex.create({
-  // The hint is ghost text over the empty textarea, set in the textarea's own
-  // size and line height so it sits exactly where typing will appear. The
-  // empty textarea grows to the hint's height (see the auto-resize effect), so
-  // a wrapped hint never covers the footer. Only the mobile "Apply" control
-  // takes pointer events; everything else lets the press reach the input.
+  // Match the textarea's type and grow it to the hint; only Apply intercepts pointer events.
   anchor: { position: 'relative' },
   anchorSheet: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
   overlay: {
     position: 'absolute',
     insetInlineStart: space[1],
     insetInlineEnd: space[1],
-    // The empty textarea's caret blinks at the line start; leave room so it
-    // shows just before the hint instead of under the key cap.
+    // Leave the empty caret visible before the hint's key cap.
     paddingInlineStart: space[1.5],
     top: 0,
     zIndex: 20,
@@ -624,7 +613,6 @@ const promptSuggestionStyles = stylex.create({
     userSelect: 'none',
     color: colors.secondaryLabel,
     fontSize: textScale.bodySize,
-    // The session textarea's `leading-6`.
     lineHeight: '1.5rem',
   },
   overlayLanding: {
@@ -632,12 +620,11 @@ const promptSuggestionStyles = stylex.create({
     insetInlineEnd: 0,
     lineHeight: textScale.bodyLeading,
   },
-  // The sheet textarea's `px-5 py-4 text-base leading-7`.
   overlaySheet: {
     insetInlineStart: '1.25rem',
     insetInlineEnd: '1.25rem',
     top: space[4],
-    fontSize: '1rem',
+    fontSize: textScale.headlineSize,
     lineHeight: '1.75rem',
   },
   text: {
@@ -649,8 +636,7 @@ const promptSuggestionStyles = stylex.create({
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
-  // Leads the hint, away from the send button. One line tall, so the key cap or
-  // Apply control centres on the hint's first line.
+  // Keep the leading key cap or Apply control centred on the hint's first line.
   accept: {
     display: 'inline-flex',
     flexShrink: 0,
@@ -812,6 +798,7 @@ export function getChatComposerTextareaStyles({
   const isModal = variant === 'modal';
   return [
     typography.prompt,
+    variant === 'sheet' && typography.sheetPrompt,
     styles.textarea,
     variant === 'sheet'
       ? styles.textareaSheet
@@ -821,6 +808,7 @@ export function getChatComposerTextareaStyles({
           ? styles.textareaModal
           : [styles.textareaSession, isMobile ? styles.textareaMobile : styles.textareaDesktop],
   ];
+
 }
 
 /**
@@ -908,17 +896,15 @@ export function ChatComposer({
     [i18n.language, i18n.resolvedLanguage]
   );
   const isMobile = useIsMobile();
+  const conversationFontSize = useAtomValue(conversationFontSizeAtom);
   const isDialog = variant === 'dialog';
   const isLanding = variant === 'landing';
   const isSheet = variant === 'sheet';
   const isModal = variant === 'modal';
-  // Mobile session composer starts at a single line to save vertical space
-  // (desktop keeps its 2-line default); it still auto-grows as the user types.
+  // Start mobile at one line and desktop at two; both grow with input.
   const singleLineMobile = isMobile && variant === 'session';
   const effectivePromptRows = singleLineMobile || isSheet ? 1 : promptRows;
-  // Desktop-only ⌘L discovery hint in the empty composer. Requires a fine pointer
-  // AND non-mobile layout so phone frames / narrow viewports never show a
-  // keyboard shortcut that doesn't exist on touch. Hidden once focused or typing.
+  // Show the empty, unfocused ⌘L hint only on non-mobile layouts with a fine pointer.
   const focusHintSupported = useMemo(
     () =>
       !isMobile &&
@@ -1398,7 +1384,15 @@ export function ChatComposer({
       else if (caret.top < top) textarea.scrollTop -= top - caret.top;
     });
     return () => cancelAnimationFrame(frame);
-  }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows, promptSuggestionHeight]);
+  }, [
+    autoResize,
+    promptValue,
+    promptRef,
+    effectivePromptRows,
+    maxRows,
+    promptSuggestionHeight,
+    conversationFontSize,
+  ]);
 
   const boxTextareaStyles = getChatComposerTextareaStyles({ tone, variant, isMobile });
   const mentionContainerClassName = !isLanding
@@ -1411,6 +1405,7 @@ export function ChatComposer({
     : undefined;
   const dialogTextareaStyles: stylex.StyleXStyles = [
     typography.prompt,
+    variant === 'sheet' && typography.sheetPrompt,
     styles.textarea,
     styles.textareaDialog,
     promptDisabled && preservePromptFocus && styles.preservedDisabled,
@@ -1955,6 +1950,7 @@ export function ChatComposer({
                       mcp={mcp}
                       onScheduleSend={onScheduleSend}
                       scheduleDisabledReason={scheduleDisabledReason}
+                      commandsEnabled={commandsEnabled}
                     />
                     <div {...stylex.props(modalStyles.actions)}>{primaryAction}</div>
                   </div>
@@ -1983,6 +1979,7 @@ export function ChatComposer({
                     mcp={mcp}
                     onScheduleSend={onScheduleSend}
                     scheduleDisabledReason={scheduleDisabledReason}
+                    commandsEnabled={commandsEnabled}
                   />
 
                   {/* Single row only: long model names must shrink/truncate inside

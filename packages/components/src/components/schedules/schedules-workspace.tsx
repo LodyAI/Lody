@@ -1,6 +1,7 @@
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { ScheduleMentionForm } from './schedule-mention-form';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { ScheduledMessageEditor } from './scheduled-message-editor';
@@ -953,14 +954,23 @@ function ScheduleEditor({
     <ScheduleMentionForm
       mentionSource={
         mentionProject?.kind === 'github'
-          ? { kind: 'github', repoFullName: mentionProject.repoFullName }
+          ? {
+              kind: 'github',
+              repoFullName: mentionProject.repoFullName,
+              issuePrEnabled:
+                repos === undefined ||
+                Boolean(resolveLinkedWorkspaceGitHubRepo(mentionProject.repoFullName, repos)),
+            }
           : mentionProject?.kind === 'local' && machineId && runtime
             ? {
                 kind: 'local',
                 machineId,
                 workspaceId: runtime.workspaceId,
                 localProjectId: mentionProject.localProjectId,
-                githubRepoFullName: mentionProject.githubRepoFullName,
+                githubRepoFullName: resolveLinkedWorkspaceGitHubRepo(
+                  mentionProject.githubRepoFullName,
+                  repos
+                )?.fullName,
               }
             : undefined
       }

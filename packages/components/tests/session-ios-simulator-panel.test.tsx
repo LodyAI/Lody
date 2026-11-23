@@ -20,7 +20,7 @@ import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { lodyPresenceSyncStateAtom } from '../src/atoms/presence';
 import { writeTextToClipboard } from '../src/lib/clipboard';
-import { downloadBytesAsFile } from '../src/lib/download-file';
+import { saveBytesAsFile } from '../src/lib/download-file';
 import { toast } from '../src/lib/toast';
 import { writeIosSimulatorSelectedDevice } from '../src/lib/ios-simulator/ios-simulator-model';
 import { clearAllDevicePreviewCaches } from '../src/components/sessions/ios-simulator/device-preview-cache';
@@ -45,7 +45,7 @@ vi.mock('@/lib/toast', () => ({
 }));
 
 vi.mock('../src/lib/download-file', () => ({
-  downloadBytesAsFile: vi.fn(),
+  saveBytesAsFile: vi.fn(async () => ({ saved: true })),
 }));
 
 const MACHINE = 'mac-studio' as MachineId;
@@ -163,6 +163,7 @@ afterEach(() => {
 async function renderPanel(options: {
   machine: ReturnType<typeof createFakeMachine>;
   platform?: 'ios' | 'android';
+  contentMode?: 'plaintext' | 'e2ee';
   androidControl?: WorkspaceRuntime['requestAndroidEmulatorControl'];
   meta?: MachineMeta;
   presence?: 'synced' | 'idle';
@@ -175,6 +176,7 @@ async function renderPanel(options: {
   store.set(runtimeAtom, {
     workspaceId: WORKSPACE,
     workspaceSlug: 'sim',
+    contentMode: options.contentMode,
     requestIosSimulatorControl: options.machine.requestIosSimulatorControl,
     requestAndroidEmulatorControl: options.androidControl,
   } as unknown as WorkspaceRuntime);
@@ -239,6 +241,41 @@ async function advance(ms: number) {
   });
   await flush();
 }
+
+it.each([false, true])(
+  'encrypted Android previews are shown only for a local machine (local=%s)',
+  async (localMachine) => {
+    const machine = createFakeMachine({ devices: [] });
+    await renderPanel({
+      machine,
+      platform: 'android',
+      contentMode: 'e2ee',
+      localMachine,
+      meta: macMeta({ androidEmulator: 1 }),
+      androidControl: async ({ sessionId, command }) => ({
+        type: 'android-emulator/control_response',
+        sessionId,
+        success: true,
+        devices:
+          command.action === 'list'
+            ? [
+                {
+                  id: 'Pixel_A',
+                  name: 'Pixel A',
+                  runtime: 'Android',
+                  deviceType: 'AVD',
+                  state: 'Booted',
+                  available: true,
+                  occupancy: 'available',
+                },
+              ]
+            : undefined,
+      }),
+    });
+    if (localMachine) expect(text()).toContain('Pixel A');
+    else expect(container?.innerHTML).toBe('');
+  }
+);
 
 describe('SessionIosSimulatorPanel', () => {
   it('discovers an agent replacement when reopening instead of querying the cached operation', async () => {
@@ -750,77 +787,95 @@ describe('SessionIosSimulatorPanel controls', () => {
     vi.unstubAllGlobals();
   });
 
-  it('attaches a screenshot to the composer without sending, trusting only its own reply', async () => {
-    vi.stubGlobal('PointerEvent', TestPointerEvent);
-    const attached: File[] = [];
-    const machine = createFakeMachine({
-      devices: [
-        device({
-          udid: 'phone',
-          name: 'iPhone 16 Pro',
-          state: 'Booted',
-          occupancy: 'this-session',
-        }),
-      ],
-      preview: READY,
-    });
-    await renderPanel({
-      machine,
-      meta: CONTROLS_META,
-      onAttachScreenshot: (file) => {
-        attached.push(file);
-        return true;
-      },
-    });
-    const frame = container?.querySelector('iframe') as HTMLIFrameElement;
-    const posted: Array<{ type: string; requestId?: string }> = [];
-    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((message: {
-      type: string;
-      requestId?: string;
-    }) => posted.push(message)) as never);
-    await act(async () => {
-      frame.dispatchEvent(new Event('load'));
-    });
-
-    await pointerClick(labelled('Screenshot')!);
-    await pointerClick(await until(() => menuItem('Attach screenshot to message'), 'the menu'));
-    const request = posted.find((message) => message.type === 'lody:ios-simulator:capture');
-    expect(request).toMatchObject({ operationId: 'op-1' });
-
-    const png = new Uint8Array(16);
-    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const reply = (requestId: string, source: MessageEventSource | null) =>
-      new MessageEvent('message', {
-        data: {
-          type: 'lody:ios-simulator:capture-result',
-          operationId: 'op-1',
-          requestId,
-          mimeType: 'image/png',
-          data: png.buffer,
-        },
-        origin: VIEWER_ORIGIN,
-        source,
+  it.each(['attach', 'save-error'])(
+    'handles screenshot %s using only its own reply',
+    async (mode) => {
+      if (mode === 'save-error')
+        vi.mocked(saveBytesAsFile).mockRejectedValueOnce(new Error('Share failed'));
+      vi.stubGlobal('PointerEvent', TestPointerEvent);
+      const attached: File[] = [];
+      const machine = createFakeMachine({
+        devices: [
+          device({
+            udid: 'phone',
+            name: 'iPhone 16 Pro',
+            state: 'Booted',
+            occupancy: 'this-session',
+          }),
+        ],
+        preview: READY,
       });
-    await act(async () => {
-      window.dispatchEvent(reply('someone-else', frame.contentWindow));
-      window.dispatchEvent(reply(request!.requestId!, window));
-    });
-    await flush();
-    expect(attached).toEqual([]);
+      await renderPanel({
+        machine,
+        meta: CONTROLS_META,
+        onAttachScreenshot: (file) => {
+          attached.push(file);
+          return true;
+        },
+      });
+      const frame = container?.querySelector('iframe') as HTMLIFrameElement;
+      const posted: Array<{ type: string; requestId?: string }> = [];
+      vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((message: {
+        type: string;
+        requestId?: string;
+      }) => posted.push(message)) as never);
+      await act(async () => {
+        frame.dispatchEvent(new Event('load'));
+      });
 
-    await act(async () => {
-      window.dispatchEvent(reply(request!.requestId!, frame.contentWindow));
-    });
-    await flush();
-    expect(attached).toHaveLength(1);
-    expect(attached[0]).toMatchObject({ type: 'image/png' });
-    expect(attached[0]?.name).toMatch(/^iPhone 16 Pro .+\.png$/);
-    // Attaching is not sending: nothing else reached the machine.
-    expect(
-      machine.commands.every((command) => command.action === 'list' || command.action === 'status')
-    ).toBe(true);
-    vi.unstubAllGlobals();
-  });
+      await pointerClick(labelled('Screenshot')!);
+      await pointerClick(
+        await until(
+          () => menuItem(mode === 'attach' ? 'Attach screenshot to message' : 'Save screenshot'),
+          'the menu'
+        )
+      );
+      const request = posted.find((message) => message.type === 'lody:ios-simulator:capture');
+      expect(request).toMatchObject({ operationId: 'op-1' });
+
+      const png = new Uint8Array(16);
+      png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const reply = (requestId: string, source: MessageEventSource | null) =>
+        new MessageEvent('message', {
+          data: {
+            type: 'lody:ios-simulator:capture-result',
+            operationId: 'op-1',
+            requestId,
+            mimeType: 'image/png',
+            data: png.buffer,
+          },
+          origin: VIEWER_ORIGIN,
+          source,
+        });
+      await act(async () => {
+        window.dispatchEvent(reply('someone-else', frame.contentWindow));
+        window.dispatchEvent(reply(request!.requestId!, window));
+      });
+      await flush();
+      expect(attached).toEqual([]);
+
+      await act(async () => {
+        window.dispatchEvent(reply(request!.requestId!, frame.contentWindow));
+      });
+      await flush();
+      if (mode === 'attach') {
+        expect(attached).toHaveLength(1);
+        expect(attached[0]).toMatchObject({ type: 'image/png' });
+        expect(attached[0]?.name).toMatch(/^iPhone 16 Pro .+\.png$/);
+      } else {
+        expect(attached).toEqual([]);
+        expect(toast.error).toHaveBeenCalledWith('Could not download that file.');
+        expect(labelled('Screenshot')?.hasAttribute('disabled')).toBe(false);
+      }
+      // Attaching is not sending: nothing else reached the machine.
+      expect(
+        machine.commands.every(
+          (command) => command.action === 'list' || command.action === 'status'
+        )
+      ).toBe(true);
+      vi.unstubAllGlobals();
+    }
+  );
 });
 
 it.each(['null', 'file://'])(

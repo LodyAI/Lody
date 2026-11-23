@@ -1,3 +1,5 @@
+import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
+import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import React from 'react';
@@ -191,23 +193,23 @@ export function ProjectList({ projects }: { projects: Project[] }) {
   }, [projects]);
 
   return (
-    <section className="space-y-4">
-      <header className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Projects</h2>
-        <span className="text-xs text-muted-foreground">
+    <section {...stylex.props(themeStyles.layout)}>
+      <header {...stylex.props(themeStyles.row)}>
+        <h2 {...stylex.props(themeStyles.copy)}>Projects</h2>
+        <span {...stylex.props(themeStyles.hint)}>
           {visible.length} total
         </span>
       </header>
-      <ul className="divide-y divide-border/70">
+      <ul >
         {visible.map((project) => (
-          <li key={project.id} className="flex items-center justify-between py-3">
-            <div className="space-y-1">
-              <div className="text-sm font-medium">{project.name}</div>
-              <div className="text-xs text-muted-foreground">
+          <li key={project.id} {...stylex.props(themeStyles.row2)}>
+            <div {...stylex.props(themeStyles.layout2)}>
+              <div {...stylex.props(themeStyles.copy2)}>{project.name}</div>
+              <div {...stylex.props(themeStyles.hint)}>
                 {STATUS_LABELS[project.status] ?? 'Unknown'}
               </div>
             </div>
-            <button className="text-xs text-primary hover:underline">Open</button>
+            <button {...stylex.props(previewStyles.copy)}>Open</button>
           </li>
         ))}
       </ul>
@@ -217,7 +219,6 @@ export function ProjectList({ projects }: { projects: Project[] }) {
 `;
 
 const newText = `import { useMemo } from 'react';
-import type { Project } from '../types';
 import { cn } from '../lib/cn';
 
 const STATUS_LABELS = {
@@ -242,38 +243,35 @@ export function ProjectList({
 
   if (visible.length === 0) {
     return (
-      <section className="rounded-lg border border-dashed border-border/60 p-6 text-sm text-muted-foreground">
+      <section {...stylex.props(themeStyles.hint2)}>
         No projects yet. Create your first workspace.
       </section>
     );
   }
 
   return (
-    <section className="space-y-4">
-      <header className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Projects</h2>
+    <section {...stylex.props(themeStyles.layout)}>
+      <header {...stylex.props(themeStyles.row)}>
+        <h2 {...stylex.props(themeStyles.copy)}>Projects</h2>
         {showCount ? (
-          <span className="text-xs text-muted-foreground">
+          <span {...stylex.props(themeStyles.hint)}>
             {visible.length} total
           </span>
         ) : null}
       </header>
-      <ul className="divide-y divide-border/70">
+      <ul >
         {visible.map((project) => (
           <li
             key={project.id}
-            className={cn(
-              'flex items-center justify-between py-3',
-              project.state === 'error' ? 'bg-amber-50/40' : ''
-            )}
+            {...stylex.props(projectSceneStyles.row, project.state === 'error' && projectSceneStyles.error)}
           >
-            <div className="space-y-1">
-              <div className="text-sm font-medium">{project.name}</div>
-              <div className="text-xs text-muted-foreground">
+            <div {...stylex.props(themeStyles.layout2)}>
+              <div {...stylex.props(themeStyles.copy2)}>{project.name}</div>
+              <div {...stylex.props(themeStyles.hint)}>
                 {getStatusLabel(project.state)}
               </div>
             </div>
-            <button className="text-xs text-primary hover:underline">View</button>
+            <button {...stylex.props(previewStyles.copy)}>View</button>
           </li>
         ))}
       </ul>
@@ -585,3 +583,20 @@ export const MultiFileDiffList: Story = {
   },
   render: () => <MultiFileDiffListComponent />,
 };
+
+const themeStyles = stylex.create({
+  layout: { display: 'flex', flexDirection: 'column', rowGap: 'calc(var(--spacing) * 4)' },
+  row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  copy: { fontSize: uiText.headlineSize, lineHeight: uiText.headlineLeading, fontWeight: 600 },
+  hint: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  row2: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBlock: 'calc(var(--spacing) * 3)' },
+  layout2: { display: 'flex', flexDirection: 'column', rowGap: 'calc(var(--spacing) * 1)' },
+  copy2: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500 },
+  hint2: { borderRadius: uiRadius.medium, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+});
+
+const previewStyles = stylex.create({
+  copy: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.accent, textDecorationLine: { ':hover': 'underline' } },
+});
+
+const projectSceneStyles = stylex.create({ row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBlock: 'calc(var(--spacing) * 3)' }, error: { color: uiColors.warning } });

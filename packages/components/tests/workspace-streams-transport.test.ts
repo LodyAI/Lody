@@ -1,3 +1,7 @@
+import {
+  createWorkspaceRepoStorage,
+  createWorkspaceIncompleteRecoveryStore,
+} from '../src/providers/workspace-repo-storage';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 /**
  * Web tabs (and a reloaded primary window) of one workspace open the same repo
@@ -33,6 +37,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
   createLoroStreamUrl,
+  DEFAULT_LORO_STREAMS_BASE_URL,
+  LEGACY_LORO_STREAMS_BASE_URL,
   getLoroStreamIdForDocId,
   LORO_STREAMS_BUCKET_ID,
   type WorkspaceId,
@@ -140,7 +146,7 @@ async function openTab(
 ): Promise<Tab> {
   const identity = resolveWorkspaceRuntimeCacheIdentity(workspaceId, '');
   const repo = await LoroRepo.create({
-    storageAdapter: storage ?? new IndexedDBStorageAdaptor({ dbName: identity.repoDbName }),
+    storageAdapter: storage ?? createWorkspaceRepoStorage(identity.repoDbName),
     metaDebounceCommitMs: 0,
     ...(cloudOnly ? { resolveRoomTransports: () => ({ transportIds: ['cloud'] }) } : {}),
   });
@@ -188,6 +194,136 @@ afterEach(async () => {
 });
 
 describe('renderer Streams checkpoints are bound to the replica that loaded them', () => {
+  it.each(['meta', 'flock'] as const)('resumes %s after a gateway alias switch', async (kind) => {
+    const server = createMetaServer();
+    const workspace = `alias-${++sequence}` as WorkspaceId;
+    const sync = async (tab: Tab, baseUrl: string) => {
+      const flock =
+        kind === 'meta' ? tab.repo.getMeta() : (await tab.repo.openFlockDoc('named')).flock;
+      const transport = transportFor(
+        tab,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        baseUrl
+      );
+      const result =
+        kind === 'meta'
+          ? await transport.syncMeta(flock)
+          : await transport.syncFlockDoc('named', flock);
+      expect(result.ok).toBe(true);
+      expect(flock.get(keyA)).toBe('A');
+      await transport.close();
+      openTransports.delete(transport);
+      await tab.repo.flush();
+    };
+    const first = await openTab(workspace);
+    await sync(first, LEGACY_LORO_STREAMS_BASE_URL);
+    await first.repo.destroy();
+    openTabs.delete(first);
+    await sync(await openTab(workspace), DEFAULT_LORO_STREAMS_BASE_URL);
+    expect(server.bootstraps()).toBe(1);
+  });
+
+  it.each(['unchanged', 'tail-advanced', 'writer'] as const)(
+    'persists incomplete-tail recovery across IndexedDB instances: %s',
+    async (scenario) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      const server = createByteServer();
+      const workspace = `persistent-gap-${++sequence}` as WorkspaceId;
+      const id = 'gap';
+      const url = docUrl(workspace, id);
+      const path = new URL(url).pathname;
+      const author = new LoroDoc();
+      author.setPeerId('1');
+      author.getText('t').insert(0, 'prefix');
+      author.commit();
+      const prefix = author.export({ mode: 'snapshot' });
+      const from = author.version();
+      author.getText('t').push('|tail');
+      author.commit();
+      const dependent = author.export({ mode: 'update', from });
+      const frame = new Uint8Array(4 + dependent.byteLength);
+      new DataView(frame.buffer).setUint32(0, dependent.byteLength);
+      frame.set(dependent, 4);
+      server.room(path).batches.push(frame);
+      const db = `lody-loro-repo-db-${workspace}`;
+      const firstStore = createWorkspaceIncompleteRecoveryStore(db);
+      const first = await openTab(workspace);
+      const doc = (await first.repo.openPersistedDoc(id)).doc;
+      const transport = transportFor(
+        first,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        firstStore
+      );
+      const subscription = transport.joinDocRoom(id, doc);
+      void subscription.firstSyncedWithRemote.catch(() => {});
+      await vi.waitFor(async () => expect(await firstStore.load(url)).not.toBeNull(), {
+        interval: 0,
+      });
+      subscription.unsubscribe();
+      await settle(transport.close());
+      openTransports.delete(transport);
+      await settle(first.repo.destroy());
+      openTabs.delete(first);
+      const nextStore = createWorkspaceIncompleteRecoveryStore(db);
+      expect(await nextStore.load(url)).not.toBeNull();
+      // A new remote snapshot also advances the tail. A writer instead has the
+      // missing prefix locally and must be allowed to upload it at the same tail.
+      if (scenario === 'tail-advanced') {
+        const complete = author.export({ mode: 'snapshot' });
+        server.room(path).batches.push(new Uint8Array(4));
+        server.room(path).snapshot = {
+          offset: server.offset(frame.byteLength + 4),
+          body: await streamsSnapshotCodec.compress(complete),
+        };
+      }
+      const next = await openTab(workspace);
+      const loaded = (await next.repo.openPersistedDoc(id)).doc;
+      if (scenario === 'writer') {
+        loaded.import(prefix);
+        await next.repo.flush();
+      }
+      const resumed = transportFor(
+        next,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        nextStore
+      );
+      const before = server.requests.length;
+      const live = scenario === 'unchanged' ? undefined : resumed.joinDocRoom(id, loaded);
+      void live?.firstSyncedWithRemote.catch(() => {});
+      try {
+        if (!live) {
+          expect((await settle(resumed.syncDoc(id, loaded))).ok).toBe(false);
+          expect(server.requests.slice(before).map((r) => [r.method, r.url.pathname])).toEqual([
+            ['HEAD', path],
+          ]);
+          expect(loaded.getText('t').toString()).toBe('');
+        } else {
+          await settle(live.firstSyncedWithRemote);
+          expect(loaded.getText('t').toString()).toBe('prefix|tail');
+          expect(await nextStore.load(url)).toBeNull();
+          if (scenario === 'writer')
+            expect(server.requests.slice(before).some((r) => r.method === 'POST')).toBe(true);
+        }
+      } finally {
+        live?.unsubscribe();
+        author.free();
+      }
+    }
+  );
+
   it.each([undefined, false, true])(
     'passes foreground WS opt-in %s while the installed HTTP SDK still syncs',
     async (enabled) => {
@@ -230,18 +366,21 @@ function transportFor(
   cursorStore?: RemoteCursorStore,
   auth?: Parameters<typeof createWorkspaceStreamsTransport>[0]['auth'],
   incompleteRecoveryScope?: object,
-  webSocketEnabled?: boolean
+  webSocketEnabled?: boolean,
+  incompleteRecoveryStore?: import('@loro-dev/streams-crdt').IncompleteRecoveryStore,
+  baseUrl = streamsBaseUrl
 ) {
   const transport = createWorkspaceStreamsTransport({
     repo: tab.repo,
     webSocketEnabled,
+    incompleteRecoveryStore,
     incompleteRecoveryScope,
     recoverFlockCheckpointsOnTimeout: true,
     workspaceId: tab.workspaceId,
     documentRemoteCursorStore:
       cursorStore ?? createResilientRemoteCursorStore({ dbName: tab.cursorDbName }),
     auth: auth ?? (async () => 'streams-jwt'),
-    streamsBaseUrl,
+    streamsBaseUrl: baseUrl,
     shardHostSuffix: undefined,
     bucketId: LORO_STREAMS_BUCKET_ID,
     content: content === undefined ? { mode: 'plaintext' } : content,

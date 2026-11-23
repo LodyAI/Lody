@@ -1,3 +1,6 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { E2eeAutomaticPairingPage } from '@/components/pages/e2ee-automatic-pairing';
 import {
   E2eeRemoteMachineDisclosure,
@@ -986,7 +989,7 @@ export function E2eeWorkspaceConsole({
   return (
     <>
       {current?.offline && (
-        <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
+        <p role="status" {...stylex.props(themeStyles.hint)}>
           {t('sessions.offline')}
         </p>
       )}
@@ -1176,3 +1179,7 @@ export function E2eeWorkspaceConsole({
     </>
   );
 }
+
+const themeStyles = stylex.create({
+  hint: { paddingInline: 'calc(var(--spacing) * 4)', paddingBlock: 'calc(var(--spacing) * 2)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+});

@@ -4,6 +4,8 @@ import { getSessionChatInputAreaShellClassName } from '@/components/chat/compose
 export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 import { useScheduledMessage } from '../schedules/use-scheduled-message';
 import { useLatestRef } from '@/hooks/use-latest-ref';
+import type { ConversationView } from '@/lib/conversation-view/types';
+import { useComposerMessageRecall } from './composer-message-recall';
 import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
 import { formatUpcoming } from '../schedules/schedule-format';
 import type { AgentConfigMeta } from '@lody/shared';
@@ -518,6 +520,7 @@ export interface SessionChatInputAreaProps {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   /** Whether the session's repo is public (for #mention feature) */
   isRepoPublic?: boolean;
+  isRepoLinked?: boolean;
   /** Available slash commands from the ACP agent. */
   availableCommands?: AcpCommandSummary[];
   /** False while this retained composer is hidden behind another session tab. */
@@ -557,6 +560,8 @@ export interface SessionChatInputAreaProps {
   onAgentRoleSaved?: (role: AgentRole, meta: { created: boolean }) => void;
   initialInputText?: string;
   onInputValueChange?: (value: string) => void;
+  /** This session's turns; Up/Down in an empty composer steps through its sent messages. */
+  messageHistory?: ConversationView | null;
   disableImageUpload?: boolean;
   /** Called when a comment reference chip is clicked to navigate to the comment */
   onNavigateToComment?: (reference: CommentReferencePayload) => void;
@@ -646,6 +651,7 @@ export const SessionChatInputArea = memo(
       configOptionSelectors,
       configOptionValues,
       isRepoPublic,
+      isRepoLinked,
       availableCommands,
       commandsEnabled = true,
       hideTopSpacer = false,
@@ -663,6 +669,7 @@ export const SessionChatInputArea = memo(
       onAgentRoleSaved,
       initialInputText,
       onInputValueChange,
+      messageHistory,
       disableImageUpload = false,
       onNavigateToComment,
       onCommentReferencesChange,
@@ -1866,14 +1873,39 @@ export const SessionChatInputArea = memo(
       ]
     );
 
+    const showRecalledText = useCallback(
+      (value: string) => {
+        setUserInputState(value);
+        onInputValueChange?.(value);
+      },
+      [onInputValueChange]
+    );
+    const { absorbChange: absorbRecallChange } = useComposerMessageRecall({
+      sessionId: session.id,
+      view: isArchived ? null : messageHistory,
+      inputRef: textareaRef,
+      value: userInput,
+      canStart:
+        !submissionPending &&
+        userInput === '' &&
+        pendingImages.length === 0 &&
+        pendingFiles.length === 0 &&
+        pastedTextDrafts.length === 0 &&
+        commentReferences.length === 0 &&
+        visualAnnotationReferences.length === 0,
+      showText: showRecalledText,
+      commitText: setUserInput,
+    });
+
     const handleInputChange = useCallback(
       (nextValue: string) => {
         if (isArchived) {
           return;
         }
+        if (absorbRecallChange(nextValue)) return;
         setUserInput(nextValue);
       },
-      [isArchived, setUserInput]
+      [absorbRecallChange, isArchived, setUserInput]
     );
     const handlePastedTextDraftsChange = useCallback(
       (drafts: PastedTextDraft[]) => {
@@ -2207,6 +2239,7 @@ export const SessionChatInputArea = memo(
       session,
       sessionLocalProjectRootPath,
       isRepoPublic,
+      isRepoLinked,
       // No index is borrowed until someone could actually type `@`.
       enableCodeCollabProvider: userInput.includes('@'),
       debugLabel: 'session-chat-input:mention-provider',
@@ -2450,6 +2483,7 @@ export const SessionChatInputArea = memo(
           modeOptions={modeOptions}
           selectedModeId={selectedModeId}
           agentRoles={agentRolesProp}
+          commandsEnabled={commandsEnabled}
         />
         {selectedAgentRolePinsPermissionMode ? null : (
           <DesktopPermissionModeButton

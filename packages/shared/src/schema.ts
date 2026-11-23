@@ -50,7 +50,6 @@ import type { messageQueueItemSchema, sessionDocSchema } from './session-doc-sch
 // pulling in the loro-mirror/loro-crdt graph through this file.
 export * from './session-pull-request-meta';
 import type {
-  SessionPullRequestLifecycleFields,
   SessionAutoDelivery,
   SessionPullRequestRecordFields,
   SessionPullRequestMeta,
@@ -175,6 +174,15 @@ export type TitleGenerationConfig = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
 };
 
+/**
+ * Provider values a session runs with where its request names none, keyed by
+ * the agent's config ids (Sorbet: `model`, `thought_level`, `permission_mode`).
+ */
+export type AgentSessionDefaults = {
+  modelId?: string;
+  configOptionValues: Record<string, AcpConfigOptionValue>;
+};
+
 export type AgentConfigMeta = {
   codexAuth?: import('./codex-auth-profile').CodexAuthProfile;
   id: AgentConfigId;
@@ -209,6 +217,7 @@ export type AgentConfigMeta = {
   prompt?: string;
   /** Title generation settings. When set, enables automatic title generation for this agent. */
   titleGeneration?: TitleGenerationConfig;
+  sessionDefaults?: AgentSessionDefaults;
   /**
    * Provider brand this config was created for (e.g. a "DeepSeek over Claude Code"
    * preset). Optional and forward-compatible: the runtime stays `builtin`/`claude`,

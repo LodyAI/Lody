@@ -264,153 +264,12 @@ export const MODELS: Model[] = [
   { id: 'llama-70b', provider: 'ollama', name: 'llama 3.3 70b', context: '128K', tier: 'local' },
 ];
 
-export type PluginGroup = 'mcp' | 'skills' | 'hooks' | 'context';
-
-export interface Plugin {
-  id: string;
-  group: PluginGroup;
-  name: string;
-  body: string;
-  /** Tokens the injection adds to every request. */
-  tokens: number;
-  needsAuth?: boolean;
-}
-
-export const PLUGIN_GROUPS: { id: PluginGroup; label: string; hint: string }[] = [
-  { id: 'context', label: 'Context', hint: 'Injected into the system prompt' },
-  { id: 'mcp', label: 'MCP servers', hint: 'Tools the agent can call' },
-  { id: 'skills', label: 'Skills', hint: 'Loaded on demand, near-zero idle cost' },
-  { id: 'hooks', label: 'Hooks', hint: 'Run around tool calls, never in context' },
-];
-
-export const PLUGINS: Plugin[] = [
-  {
-    id: 'rules',
-    group: 'context',
-    name: 'Project rules',
-    body: 'AGENTS.md and .rules files from the repo root',
-    tokens: 900,
-  },
-  {
-    id: 'repomap',
-    group: 'context',
-    name: 'Repo map',
-    body: 'A ranked outline of symbols the agent can navigate',
-    tokens: 2400,
-  },
-  {
-    id: 'git',
-    group: 'context',
-    name: 'Git status',
-    body: 'Branch, diff stat and recent commits at session start',
-    tokens: 300,
-  },
-  {
-    id: 'fs',
-    group: 'mcp',
-    name: 'Filesystem',
-    body: 'Read, write and search inside the workspace',
-    tokens: 1100,
-  },
-  {
-    id: 'github',
-    group: 'mcp',
-    name: 'GitHub',
-    body: 'Issues, pull requests, reviews and checks',
-    tokens: 2600,
-    needsAuth: true,
-  },
-  {
-    id: 'browser',
-    group: 'mcp',
-    name: 'Browser',
-    body: 'Headless Chromium for docs, previews and screenshots',
-    tokens: 1800,
-  },
-  {
-    id: 'postgres',
-    group: 'mcp',
-    name: 'Postgres',
-    body: 'Read-only queries against a connection string',
-    tokens: 900,
-    needsAuth: true,
-  },
-  {
-    id: 'linear',
-    group: 'mcp',
-    name: 'Linear',
-    body: 'Read and update tickets in your team',
-    tokens: 1500,
-    needsAuth: true,
-  },
-  {
-    id: 'review',
-    group: 'skills',
-    name: 'Code review',
-    body: 'A checklist pass before anything is committed',
-    tokens: 60,
-  },
-  {
-    id: 'tests',
-    group: 'skills',
-    name: 'Test writer',
-    body: 'Generates and runs tests for changed files',
-    tokens: 60,
-  },
-  {
-    id: 'design',
-    group: 'skills',
-    name: 'UI verify',
-    body: 'Screenshots the app and compares against intent',
-    tokens: 60,
-  },
-  {
-    id: 'fmt',
-    group: 'hooks',
-    name: 'Format on write',
-    body: 'Runs the project formatter after every edit',
-    tokens: 0,
-  },
-  {
-    id: 'notify',
-    group: 'hooks',
-    name: 'Notify when done',
-    body: 'Desktop and phone notification on finish or block',
-    tokens: 0,
-  },
-  {
-    id: 'guard',
-    group: 'hooks',
-    name: 'Secret guard',
-    body: 'Blocks writes that contain keys or tokens',
-    tokens: 0,
-  },
-];
-
-export type PluginPreset = 'minimal' | 'recommended' | 'everything';
-
-export const PLUGIN_PRESETS: Record<PluginPreset, string[]> = {
-  minimal: ['rules', 'fs', 'guard'],
-  recommended: [
-    'rules',
-    'git',
-    'fs',
-    'github',
-    'browser',
-    'review',
-    'tests',
-    'fmt',
-    'notify',
-    'guard',
-  ],
-  everything: PLUGINS.map((plugin) => plugin.id),
-};
-
-/** Context window the token meter is measured against. */
-export const CONTEXT_BUDGET = 16000;
-
 export type Autonomy = 'ask' | 'smart' | 'auto';
 
+/**
+ * The three cards are Sorbet's selectable permission modes (`ask`, `auto`,
+ * `full-access`; see `AUTONOMY_PERMISSION_MODE`), described as Sorbet runs them.
+ */
 export const AUTONOMY: { id: Autonomy; title: string; body: string; example: string }[] = [
   {
     id: 'ask',
@@ -420,15 +279,15 @@ export const AUTONOMY: { id: Autonomy; title: string; body: string; example: str
   },
   {
     id: 'smart',
-    title: 'Ask when it matters',
-    body: 'Reads and edits run. Anything outward or destructive waits.',
-    example: 'What most teams pick.',
+    title: 'Automatic review',
+    body: 'Runs inside the workspace sandbox; a reviewer model approves each action instead of you.',
+    example: 'Hands-off without leaving the workspace.',
   },
   {
     id: 'auto',
-    title: 'Autonomous',
-    body: 'Runs end to end inside the sandbox. Locked actions still wait.',
-    example: 'For sandboxes and long background jobs.',
+    title: 'Full access',
+    body: 'No approvals and no sandbox: the agent can do whatever you can on this machine.',
+    example: 'For throwaway machines and long background jobs.',
   },
 ];
 

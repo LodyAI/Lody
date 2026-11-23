@@ -1,3 +1,5 @@
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
 import { useRef, useState } from 'react';
@@ -8,19 +10,23 @@ import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } 
 import { Button } from '@lody/ui/button';
 import { button } from '@lody/ui/button/button.tokens.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
+import { Kbd } from '@lody/ui/kbd';
+import {
+  commands,
+  composerScopedKeybindings,
+  formatKeyBinding,
+  getCommandKeybindings,
+  useCommand,
+  useCommands,
+} from '@/lib/commands';
+
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeSpace } from '../../style/theme-scale.stylex';
 
-/**
- * Desktop flyout and the mobile pushed panel. A real length, not
- * `w-[min(20rem,calc(100vw-2rem))]`: that calc is invalid CSS (the minus needs
- * spaces), so the declaration was dropped and the panel grew out to
- * `--available-width` — a one-line description then stretched across the
- * composer and the footnote landed on the model row.
- */
-const MCP_PANEL_CLASS = 'w-80 max-w-[calc(100vw_-_2rem)]';
+
+
 
 /** Per-turn MCP selection, surfaced as a second level of the "+" menu. */
 export interface AttachmentAddMenuMcp {
@@ -49,13 +55,12 @@ export interface AttachmentAddMenuProps {
   scheduleDisabledReason?: string;
   /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
+  /** Register the `session.openAddMenu` command only while this surface owns
+   *  the composer's shortcuts (hidden retained panes pass `false`). */
+  commandsEnabled?: boolean;
 }
 
-/**
- * The pushed panel slides in from the right and the root returns from the
- * left. These are the `tw-animate-css` `enter` keyframes, restated: the panel
- * fades in while it slides half a spacing step.
- */
+
 const enterFromRight = stylex.keyframes({
   from: { opacity: 0, transform: 'translate3d(0.5rem, 0, 0)' },
   to: { opacity: 1, transform: 'none' },
@@ -66,16 +71,14 @@ const enterFromLeft = stylex.keyframes({
 });
 
 const styles = stylex.create({
+  tooltipRow: { display: 'flex', alignItems: 'center', gap: themeSpace[1.5] },
   trigger: {
-    [button.ghostHover]: 'hsl(var(--hover) / 1)',
-    // Keep the trigger filled while its menu is open — the affordance that the
-    // menu belongs to this "+" button. `hsl(var(--hover))` (not accent/muted)
-    // because those equal the background in the dark theme and paint nothing.
+    [button.ghostHover]: popup.highlight,
     backgroundColor: {
       default: null,
-      ':is([data-state="open"])': 'hsl(var(--hover) / 1)',
+      ':is([data-popup-open], [data-state="open"])': popup.highlight,
     },
-    color: { default: null, ':is([data-state="open"])': 'hsl(var(--foreground) / 1)' },
+    color: { default: null, ':is([data-popup-open], [data-state="open"])': colors.label },
   },
   sheetTrigger: { borderRadius: 'calc(infinity * 1px)' },
   item: { cursor: 'pointer' },
@@ -181,6 +184,7 @@ export function AttachmentAddMenu({
   onScheduleSend,
   scheduleDisabledReason,
   mcp,
+  commandsEnabled = true,
 }: AttachmentAddMenuProps) {
   const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
   const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
@@ -192,11 +196,33 @@ export function AttachmentAddMenu({
   // keyboard returns instead), so choosing the picker skips the composer
   // focus restore every other selection gets.
   const filePickerOpenedRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const triggerLabel = t('sessions.addAttachmentMenu', 'Add attachment');
 
   const mcpServers = mcp?.servers ?? [];
   const hasMcp = mcpServers.length > 0;
-  if (!onAddAttachment && !hasMcp && !onScheduleSend) {
+  const hasMenuContent = Boolean(onAddAttachment || hasMcp || onScheduleSend);
+
+  useCommands();
+  const openAddMenuKey = commands.getKeybindingsFor('session.openAddMenu')[0];
+
+  useCommand(
+    {
+      id: 'session.openAddMenu',
+      titleKey: 'commands.session.openAddMenu',
+      title: t('commands.session.openAddMenu', 'Open Composer + Menu'),
+      category: 'Session',
+      keybindings: composerScopedKeybindings(
+        getCommandKeybindings('session.openAddMenu'),
+        () => triggerRef.current
+      ),
+      when: () => hasMenuContent && !disabled,
+      run: () => setOpen(true),
+    },
+    commandsEnabled
+  );
+
+  if (!hasMenuContent) {
     return null;
   }
 
@@ -254,35 +280,44 @@ export function AttachmentAddMenu({
         if (!nextOpen) setView('root');
       }}
     >
-      <Menu.Trigger
-        render={
-          <Button
-            type="button"
-            variant={isSheet ? 'secondary' : 'ghost'}
-            icon
-            width={triggerSize}
-            height={triggerSize}
-            disabled={disabled}
-            aria-label={triggerLabel}
-            xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
-          >
-            <Plus strokeWidth={1.5} className={plusClassName} />
-          </Button>
-        }
-      >
-        <Button
-          type="button"
-          variant={isSheet ? 'secondary' : 'ghost'}
-          icon
-          width={triggerSize}
-          height={triggerSize}
-          disabled={disabled}
-          aria-label={triggerLabel}
-          xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
-        >
-          <Plus strokeWidth={1.5} className={plusClassName} />
-        </Button>
-      </Menu.Trigger>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          delay={500}
+          render={
+            <Menu.Trigger
+              ref={triggerRef}
+              render={
+                <Button
+                  type="button"
+                  variant={isSheet ? 'secondary' : 'ghost'}
+                  icon
+                  disabled={disabled}
+                  aria-label={triggerLabel}
+                  width={triggerSize} height={triggerSize} xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
+                >
+                  <Plus strokeWidth={1.5} className={plusClassName} />
+                </Button>
+              }
+            >
+              <Button
+                type="button"
+                variant={isSheet ? 'secondary' : 'ghost'}
+                icon
+                disabled={disabled}
+                aria-label={triggerLabel}
+                width={triggerSize} height={triggerSize} xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
+              >
+                <Plus strokeWidth={1.5} className={plusClassName} />
+              </Button>
+            </Menu.Trigger>
+          }
+        />
+        <Tooltip.Content side="top" {...stylex.props(styles.tooltipRow)}>
+          <span>{triggerLabel}</span>
+          {openAddMenuKey ? <Kbd>{formatKeyBinding(openAddMenuKey)}</Kbd> : null}
+        </Tooltip.Content>
+      </Tooltip.Root>
+
       <Menu.Content
         align="start"
         side="top"
@@ -363,7 +398,6 @@ export function AttachmentAddMenu({
                       align="end"
                       sideOffset={8}
                       xstyle={styles.mcpContent}
-                      className={MCP_PANEL_CLASS}
                     >
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
                     </Menu.Content>

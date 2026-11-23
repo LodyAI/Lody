@@ -936,6 +936,8 @@ describe('useSessionActions', () => {
     ['promotion-failed', 'canceled', false],
     ['promotion-failed', 'failed', false],
     ['promotion-failed', 'removed', false],
+    ['unsupported', 'pending_apply', true],
+    ['unsupported', 'pending_apply', false, true],
     ['delivery-unknown', 'pending_apply', false],
     ['applied', 'pending_apply', false],
     ['no-active-turn', 'pending_apply', false, true],

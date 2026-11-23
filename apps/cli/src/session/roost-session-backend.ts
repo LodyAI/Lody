@@ -54,6 +54,7 @@ import type {
 export type RoostSessionBackendServices = {
   readonly sessionData: RoostSessionData;
   readonly readHistoryInspection?: SessionBackend['readHistoryInspection'];
+  readonly readHistoryCatchup?: SessionBackend['readHistoryCatchup'];
   readonly readHistoryReplay?: SessionBackend['readHistoryReplay'];
   readonly readHistoryTranscript?: SessionBackend['readHistoryTranscript'];
   readonly readHistoryEntry?: SessionBackend['readHistoryEntry'];
@@ -127,6 +128,10 @@ export class RoostSessionBackend implements SessionBackend {
 
   get readHistoryInspection() {
     return this.services.readHistoryInspection;
+  }
+
+  get readHistoryCatchup() {
+    return this.services.readHistoryCatchup;
   }
 
   get readHistoryReplay() {

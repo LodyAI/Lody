@@ -230,7 +230,7 @@ describe('MessageHandler machine registration', () => {
         sessionHistory: 4,
         sessionHistoryIncremental: 1,
         sessionHistoryInspection: 2,
-        sessionHistoryWatch: 1,
+        sessionHistorySubscription: 1,
         sessionHistoryPatches: 1,
         sessionInputAcceptance: 1,
         localAttachmentDownload: 1,
@@ -244,7 +244,12 @@ describe('MessageHandler machine registration', () => {
         acpAuthenticationInteractions: 2,
         acpAuthenticationMethodSelection: 1,
         ...(encryptedWorkspace
-          ? { e2eeAcpInteraction: 1, e2eeSessionFork: 1, e2eeSessionEditAndResend: 1 }
+          ? {
+              e2eeAcpInteraction: 1,
+              e2eeSessionFork: 1,
+              e2eeSessionEditAndResend: 1,
+              e2eeRemoteControl: 1,
+            }
           : {}),
         previewControl: 1,
         previewStopProcess: 1,
@@ -257,6 +262,7 @@ describe('MessageHandler machine registration', () => {
         iosSimulatorShutdown: 1,
         localProjectRemoval: 1,
         localProjectCreateDirectory: 1,
+        localProjectBranchListing: 1,
         localProjectHistoryProvider: 1,
         localFileResources: 1,
         fileDownload: 1,
@@ -277,6 +283,8 @@ describe('MessageHandler machine registration', () => {
         sessionDirectoryListing: 1,
         bugReportClientLog: 1,
         sessionLiveActivity: 1,
+        localProjectFileSearch: 1,
+        localProjectSkillsFingerprint: 1,
       });
 
       await handler.cleanup();

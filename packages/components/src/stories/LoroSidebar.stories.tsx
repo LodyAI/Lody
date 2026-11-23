@@ -767,7 +767,7 @@ export const EncryptedWorkspaceOffline: Story = {
 function NarrowThreeColumnLayout(args: Parameters<typeof LoroSidebar>[0]) {
   const [width, setWidth] = useAtom(sidebarLastWidthAtom);
   return (
-    <div className="max-w-[867px]">
+    <div {...stylex.props(themeStyles.glyph)}>
       <WorkspaceSidebarHarness
         {...args}
         fullApp
@@ -778,12 +778,12 @@ function NarrowThreeColumnLayout(args: Parameters<typeof LoroSidebar>[0]) {
             defaultSizes={{ main: 50, sidebar: 50 }}
             topBar={null}
             chatSurfaces={
-              <section aria-label="Conversation" className="h-full p-4">
+              <section aria-label="Conversation" {...stylex.props(themeStyles.glyph2)}>
                 Conversation
               </section>
             }
             secondaryPanel={
-              <section aria-label="iOS Simulator" className="h-full p-4">
+              <section aria-label="iOS Simulator" {...stylex.props(themeStyles.glyph2)}>
                 iOS Simulator
               </section>
             }
@@ -1164,7 +1164,7 @@ export const UpdatedMode: Story = {
 /**
  * The "Status" organize mode: the Updated rows split into Needs you, Just
  * finished, Open pull requests, Running and Idle, as on mobile Home. Empty
- * groups are skipped; only Idle folds behind "Show all".
+ * groups are skipped; only Idle folds behind "Show more".
  */
 export const StatusMode: Story = {
   render: (args) => <StoryLayout {...args} />,
@@ -1556,7 +1556,7 @@ function ProductionLikeTopContent({
                         project={project}
                         canRemoveProject
                         collapsed={collapsed}
-                        whetherShowFullList={false}
+                        revealedRows={0}
                         isSelected={false}
                         sessionsForProject={
                           localProjectSessionsByKey?.[key] ??
@@ -1588,7 +1588,8 @@ function ProductionLikeTopContent({
                             [key]: !(previous[key] ?? false),
                           }))
                         }
-                        onToggleFullList={() => {}}
+                        onShowMore={() => {}}
+                  onShowLess={() => {}}
                         onRequestRemoval={() => {}}
                       />
                     );
@@ -1968,7 +1969,7 @@ function MachineGroupScrollFixture() {
                   project={project}
                   canRemoveProject
                   collapsed={collapsedProjects[key] ?? true}
-                  whetherShowFullList={false}
+                  revealedRows={0}
                   isSelected={index === 0}
                   sessionsForProject={[]}
                   childSessionsByParent={new Map()}
@@ -1990,7 +1991,8 @@ function MachineGroupScrollFixture() {
                   onToggleCollapsed={() =>
                     setCollapsedProjects((prev) => ({ ...prev, [key]: !(prev[key] ?? true) }))
                   }
-                  onToggleFullList={() => {}}
+                  onShowMore={() => {}}
+                  onShowLess={() => {}}
                   onRequestRemoval={() => {}}
                 />
               );
@@ -2007,3 +2009,8 @@ export const MachineGroupScrollingHeader: Story = {
   render: () => <MachineGroupScrollFixture />,
   args: { ...Default.args! },
 };
+
+const themeStyles = stylex.create({
+  glyph: { maxWidth: '867px' },
+  glyph2: { height: '100%', padding: 'calc(var(--spacing) * 4)' },
+});

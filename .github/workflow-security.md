@@ -24,7 +24,10 @@ apply; read this file before changing a workflow.
 `macos-product-tests.yml` preserves full Darwin product coverage on hosted ARM64 macOS
 for each main SHA. Keep read-only permissions, no production credentials, adapter
 preparation before tests, and non-canceling concurrency per SHA. Manual runs cannot
-replace main-push evidence.
+replace main-push evidence. PRs affecting the CLI or its workspace dependencies also
+run the full CLI suite on Darwin before merge; docs-only and unrelated scopes may
+skip it using the fail-open CI scope planner. Only superseded PR runs cancel;
+main-push coverage remains non-canceling.
 
 ## Private composition builds
 

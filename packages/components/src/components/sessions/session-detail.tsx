@@ -7,7 +7,11 @@ import { copyTextToClipboard, writeTextToClipboard } from '@/lib/clipboard';
 import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
-import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceQueryStatus, useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { cloudOperations } from '@/lib/cloud-api-operations';
+import { resolveLinkedWorkspaceGitHubRepo, resolveSessionRepoFullName } from '@/lib/session-repo';
+import { usePlatformCapability } from '@lody/platform/react';
 import {
   useArchiveConfirmationRequest,
   useArchiveSessionWithConfirmation,
@@ -1392,6 +1396,35 @@ const SessionDetail = ({
   const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
   const docMetaCacheSettled = useAtomValue(sessionMetaCacheSettledAtomFamily(sessionId));
   const activeSession = session ?? null;
+  const hasHostedGitHub = usePlatformCapability('githubIntegration');
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(currentWorkspaceId);
+  const workspaceRepositories = useLegacyWorkspaceQuery(
+    cloudOperations.github.getWorkspaceRepositories,
+    currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
+  );
+  const activeSessionRepoFullName = useMemo(
+    () => (activeSession ? resolveSessionRepoFullName(activeSession) : ''),
+    [activeSession]
+  );
+  const activeSessionLinkedRepo = useMemo(
+    () => resolveLinkedWorkspaceGitHubRepo(activeSessionRepoFullName, workspaceRepositories),
+    [activeSessionRepoFullName, workspaceRepositories]
+  );
+  const activeSessionIsRepoLinked = useMemo(() => {
+    if (!activeSessionRepoFullName || !hasHostedGitHub || legacyQueryStatus === 'blocked') {
+      return false;
+    }
+    if (activeSession?.project?.kind === 'local') return Boolean(activeSessionLinkedRepo);
+    if (workspaceRepositories !== undefined) return Boolean(activeSessionLinkedRepo);
+    return undefined;
+  }, [
+    activeSession?.project?.kind,
+    activeSessionLinkedRepo,
+    activeSessionRepoFullName,
+    hasHostedGitHub,
+    legacyQueryStatus,
+    workspaceRepositories,
+  ]);
   const activeSessionSharing = useMemo(
     () => (showSessionSharing && activeSession ? resolveSessionSharing(activeSession) : null),
     [activeSession, resolveSessionSharing, showSessionSharing]
@@ -1928,20 +1961,44 @@ const SessionDetail = ({
     }
     return sourceByTarget;
   }, [pendingForks]);
+  // `useResolvedMachineMeta` already merged the Machine Flock local-project rows
+  // (honouring deletions) into `sessionMachine`; do not re-scan the raw rows.
+  const sessionMachineLocalProjects = sessionMachine?.localProjects ?? EMPTY_LOCAL_PROJECTS;
+  const getSourceLocalProjectMeta = useCallback(
+    (source: SessionMeta): LocalProjectMeta | null => {
+      if (source.project?.kind !== 'local') return null;
+      if (sessionMachine?.id === source.machineId) {
+        return sessionMachineLocalProjects[source.project.localProjectId] ?? null;
+      }
+      return null;
+    },
+    [sessionMachine?.id, sessionMachineLocalProjects]
+  );
   const getForkWorktreeAvailability = useCallback(
     (source: SessionMeta): SessionForkWorktreeAvailability => {
       if (!canForkSessionToWorktree(source)) return 'hidden';
       if (source.project?.kind === 'github') return 'available';
+      if (source.project?.kind === 'local') {
+        if (source.isWorktree === true || source.project.useWorktree === true) {
+          return 'available';
+        }
+        const projectMeta = getSourceLocalProjectMeta(source);
+        if (projectMeta?.git === true) return 'available';
+        if (projectMeta?.git === false) return 'hidden';
+      }
       const cached = worktreeAvailabilityBySessionId[source.id];
       if (cached === 'unavailable') return 'hidden';
       if (cached === 'available') return 'available';
       return 'checking';
     },
-    [canForkSessionToWorktree, worktreeAvailabilityBySessionId]
+    [canForkSessionToWorktree, getSourceLocalProjectMeta, worktreeAvailabilityBySessionId]
   );
   const resolveForkWorktreeAvailability = useCallback(
     async (source: SessionMeta) => {
       if (!canForkSessionToWorktree(source) || source.project?.kind !== 'local') return;
+      if (source.isWorktree === true || source.project.useWorktree === true) return;
+      const projectMeta = getSourceLocalProjectMeta(source);
+      if (typeof projectMeta?.git === 'boolean') return;
       if (!runtime || !user?.id) return;
       if (worktreeAvailabilityRequestRef.current.has(source.id)) return;
       worktreeAvailabilityRequestRef.current.add(source.id);
@@ -1950,13 +2007,13 @@ const SessionDetail = ({
         [source.id]: 'checking',
       }));
       try {
-        const gitState = await runtime.requestLocalProjectGitState(
+        const response = await runtime.requestLocalProjectBranches(
           source.machineId,
           source.project.localProjectId,
           user.id,
-          { timeoutMs: 15_000 }
+          { limit: 1, timeoutMs: 15_000 }
         );
-        const available = gitState?.success === true && gitState.state.git === true;
+        const available = response?.success === true && response.result.git === true;
         setWorktreeAvailabilityBySessionId((current) => ({
           ...current,
           [source.id]: available ? 'available' : 'unavailable',
@@ -1970,7 +2027,7 @@ const SessionDetail = ({
         });
       }
     },
-    [canForkSessionToWorktree, runtime, user?.id]
+    [canForkSessionToWorktree, getSourceLocalProjectMeta, runtime, user?.id]
   );
   const handleForkDestination = useCallback(
     (source: SessionMeta, turnId: string, destination: SessionForkDestination = 'shared') => {
@@ -2013,9 +2070,6 @@ const SessionDetail = ({
       ),
     [isActiveSessionLocalMachine, localHomeDir, machineFlockRows]
   );
-  // `useResolvedMachineMeta` already merged the Machine Flock local-project rows
-  // (honouring deletions) into `sessionMachine`; do not re-scan the raw rows.
-  const sessionMachineLocalProjects = sessionMachine?.localProjects ?? EMPTY_LOCAL_PROJECTS;
   const sessionMachineSupportsLocalProjectHistoryRpc =
     sessionMachine?.supportsLocalProjectHistoryRpc === true;
   const resolvedLocalProjectMeta = useMemo(() => {
@@ -2063,11 +2117,13 @@ const SessionDetail = ({
     getMachineMetaByIdAtomFamily(simulatorOwnerSession?.machineId)
   );
   const activeIosSimulatorSession =
-    simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine) !== 'hidden'
+    simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine, runtime?.contentMode) !== 'hidden'
       ? simulatorOwnerSession
       : null;
   const activeAndroidEmulatorSession =
-    simulatorOwnerSession && machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
+    simulatorOwnerSession &&
+    (runtime?.contentMode !== 'e2ee' || simulatorOwnerSession.machineId === localMachineId) &&
+    machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
       ? simulatorOwnerSession
       : null;
   const [androidEmulatorOpen, setAndroidEmulatorOpen] = useState(false);
@@ -6097,6 +6153,7 @@ const SessionDetail = ({
         key={`${activeSession.id}:${tab.id}`}
         file={tab.file}
         sessionId={tab.sessionId}
+        active={active}
         className={className}
       />
     ) : tab.type === 'file' ? (
@@ -6657,6 +6714,8 @@ const SessionDetail = ({
                   ref={(el) => setChatTabRef(draft.id, el)}
                   draft={draft}
                   parentSession={activeSession}
+                  isRepoPublic={activeSessionLinkedRepo?.isPublic}
+                  isRepoLinked={activeSessionIsRepoLinked}
                   commandsEnabled={isActive}
                   onDraftChange={handleDraftChange}
                   onSendDraft={handleSendDraft}
@@ -7465,6 +7524,8 @@ const SessionDetail = ({
               ref={(el) => setChatTabRef(draft.id, el)}
               draft={draft}
               parentSession={activeSession}
+              isRepoPublic={activeSessionLinkedRepo?.isPublic}
+              isRepoLinked={activeSessionIsRepoLinked}
               commandsEnabled={isActive}
               onDraftChange={handleDraftChange}
               onSendDraft={handleSendDraft}

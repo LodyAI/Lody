@@ -1,3 +1,5 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createStore, Provider as JotaiProvider } from 'jotai';
@@ -82,7 +84,7 @@ function DelegatedMessageRowDemo() {
 
   return (
     <JotaiProvider store={store}>
-      <div className="w-[720px] max-w-full bg-background py-6">
+      <div {...stylex.props(themeStyles.glyph)}>
         <ConversationColumn>
           <MessageRowView
             message={delegatedMessage}
@@ -99,3 +101,7 @@ function DelegatedMessageRowDemo() {
 export const DelegatedMessageRow: Story = {
   render: () => <DelegatedMessageRowDemo />,
 };
+
+const themeStyles = stylex.create({
+  glyph: { width: '720px', maxWidth: '100%', backgroundColor: uiColors.background, paddingBlock: 'calc(var(--spacing) * 6)' },
+});

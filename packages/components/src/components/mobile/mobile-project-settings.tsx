@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, Folder, FolderOpen, FolderPlus, Folders, Github } from 'lucide-react';
+import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import type { MachineId } from '@lody/shared';
 import { Switch } from '@lody/ui/switch';
@@ -319,6 +320,7 @@ export function MobileProjectSettings({
   onImportHistory,
   onResolveHistoryConflict,
   onHistorySelectionChange,
+  onWorktreeProjectViewChange,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
@@ -471,6 +473,7 @@ export function MobileProjectSettings({
               onImportHistory={onImportHistory}
               onResolveHistoryConflict={onResolveHistoryConflict}
               onHistorySelectionChange={onHistorySelectionChange}
+              onWorktreeProjectViewChange={onWorktreeProjectViewChange}
               onWorktreeSetupChange={onWorktreeSetupChange}
               onWorktreeCleanupChange={onWorktreeCleanupChange}
             />
@@ -584,9 +587,11 @@ function MobileProjectRow({
   onImportHistory,
   onResolveHistoryConflict,
   onHistorySelectionChange,
+  onWorktreeProjectViewChange,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
 }: MobileProjectRowProps) {
+  const [worktreeOpen, setWorktreeOpen] = useState(false);
   const { t } = useTranslation();
   const visibleHistoryImports = row.historyImports.filter(
     (state) => state.canSync || state.catalog
@@ -651,24 +656,40 @@ function MobileProjectRow({
     <div {...stylex.props(hasDivider && styles.rowDivider)}>
       <MobileSettingsRow label={label}>{shareControl}</MobileSettingsRow>
       <div {...stylex.props(styles.rowEditors)}>
-        <WorktreeSetupEditor
-          phase="setup"
-          config={row.worktreeSetup}
-          shell={row.shell}
-          isLoading={row.isWorktreeSetupLoading}
-          isSaving={row.isWorktreeSetupSaving}
-          errorMessage={row.worktreeSetupError}
-          onSave={(config) => onWorktreeSetupChange?.(row, config)}
-        />
-        <WorktreeSetupEditor
-          phase="cleanup"
-          config={row.worktreeCleanup}
-          shell={row.shell}
-          isLoading={row.isWorktreeCleanupLoading}
-          isSaving={row.isWorktreeCleanupSaving}
-          errorMessage={row.worktreeCleanupError}
-          onSave={(config) => onWorktreeCleanupChange?.(row, config)}
-        />
+        <Button
+          variant="secondary"
+          aria-expanded={worktreeOpen}
+          onClick={() => {
+            const open = !worktreeOpen;
+            setWorktreeOpen(open);
+            onWorktreeProjectViewChange?.(open ? row.key : null);
+          }}
+        >
+          {t('workspace.projects.worktreeConfigRow', 'Worktree setup & cleanup')}
+        </Button>
+        {worktreeOpen ? (
+          <>
+            <WorktreeSetupEditor
+              phase="setup"
+              config={row.worktreeSetup}
+              shell={row.shell}
+              isLoading={row.isWorktreeSetupLoading}
+              isSaving={row.isWorktreeSetupSaving}
+              errorMessage={row.worktreeSetupError}
+              onSave={(config) => onWorktreeSetupChange?.(row, config)}
+            />
+            <WorktreeSetupEditor
+              phase="cleanup"
+              config={row.worktreeCleanup}
+              shell={row.shell}
+              isLoading={row.isWorktreeCleanupLoading}
+              isSaving={row.isWorktreeCleanupSaving}
+              errorMessage={row.worktreeCleanupError}
+              onSave={(config) => onWorktreeCleanupChange?.(row, config)}
+            />
+          </>
+        ) : null}
+
       </div>
       {activeHistoryState ? (
         <div {...stylex.props(styles.historyPanel)}>

@@ -8,7 +8,8 @@ Experimental daily outline notes ([Spec](../../../../../specs/today-outline.md))
 | `today-pinned-column.tsx`, `use-open-today.ts`                | Column pinned beside the sidebar; `use-open-today.ts` opens a day in it or as the page                                      |
 | `today-window.tsx`                                            | Desktop standalone Today window (route `$workspaceName/today-window`): pin keeps it on top                                  |
 | `today-view.tsx`                                              | Day stream shell: calendar, member menu, surface, picker, drag layer; window-top toolbar                                    |
-| `today-day-section.tsx`                                       | One day: lazy page store, rows with inline mentions, to-do checkboxes                                                       |
+| `today-day-section.tsx`                                       | One day: lazy page store, rows with inline mentions, to-do checkboxes; 200+ visible rows are virtualized                    |
+| `today-breadcrumb.tsx`                                        | Focus view breadcrumb ("Today › date › ancestors"); the view and its node menu live in `today-view.tsx`                     |
 | `today-selection-bar.tsx`                                     | Floating actions of a block selection (to-do step, Convert to task, Copy, Delete); a bullet click selects, so also its menu |
 | `outline.stylex.ts`                                           | Outline geometry shared by rows and the surface (the fold toggle's overhang)                                                |
 | `today-command.tsx`                                           | "Open Today" command placeholder, listed only while the experiment is on                                                    |

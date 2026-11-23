@@ -1,10 +1,14 @@
-import { Cause, Deferred, Effect, Fiber, Queue, Schedule } from 'effect';
+import { Cause, Deferred, Effect, Fiber, Queue, Result, Schedule } from 'effect';
 import { z } from 'zod';
 import type {
   E2eeDispatchAck,
   E2eeDispatchInput,
   E2eePreparedDispatch,
 } from '@lody/shared/e2ee-rpc';
+import {
+  isTransientGatewayStatus,
+  TRANSIENT_GATEWAY_RETRY_DELAYS_MS,
+} from '@lody/shared/transient-gateway';
 import type {
   LoroJsonStreamState,
   LoroStreamsJsonStreamClient,
@@ -36,6 +40,63 @@ export type E2eeRpcTiming = {
   requestId: string;
   at: number;
   userTurnId?: string;
+};
+
+const gatewayStatus = (cause: unknown) =>
+  cause instanceof Error && 'status' in cause ? cause.status : undefined;
+/**
+ * Retry on an explicit gateway 502/503/504 with the shared short backoff; refusals, other
+ * statuses and raw network failures fail at once. Envelope appends are idempotent by id:
+ * receivers journal the exact original and requesters settle a request id once.
+ * Interrupting the caller (its receipt timeout or scope close) stops the retries.
+ */
+export const retryTransientGateway = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    for (const delay of TRANSIENT_GATEWAY_RETRY_DELAYS_MS) {
+      const attempt = yield* Effect.result(effect);
+      if (Result.isSuccess(attempt)) return attempt.success;
+      if (!isTransientGatewayStatus(gatewayStatus(attempt.failure)))
+        return yield* Effect.fail(attempt.failure);
+      yield* Effect.sleep(delay);
+    }
+    return yield* effect;
+  });
+
+/**
+ * Deliver signed envelopes to response streams. A stream is ensured once per owner; a
+ * missing stream (404) is re-ensured and appended once more. Ensure and append share
+ * {@link retryTransientGateway}. `admit` runs right before every append and may throw.
+ */
+export const makeEncryptedStreamsEnvelopeDelivery = (client: LoroStreamsJsonStreamClient) => {
+  const ensured = new Set<string>();
+  const ensureOnce = async (stream: string) => {
+    await client.ensureJsonStream(stream, 86400);
+    if (ensured.size >= 128) ensured.clear();
+    ensured.add(stream);
+  };
+  const attempt = (work: () => Promise<void>) =>
+    retryTransientGateway(Effect.tryPromise({ try: work, catch: (cause) => cause }));
+  return {
+    ensure: (stream: string) =>
+      attempt(async () => {
+        if (!ensured.has(stream)) await ensureOnce(stream);
+      }),
+    deliver: (stream: string, envelope: { id: string; frame: string }, admit?: () => void) =>
+      attempt(async () => {
+        const value = e2eeRpcEnvelope(envelope);
+        if (!ensured.has(stream)) await ensureOnce(stream);
+        admit?.();
+        try {
+          await client.appendJson(stream, value);
+        } catch (cause) {
+          ensured.delete(stream);
+          if (gatewayStatus(cause) !== 404) throw cause;
+          await ensureOnce(stream);
+          admit?.();
+          await client.appendJson(stream, value);
+        }
+      }),
+  };
 };
 
 // Aborting an Effect waiter is not completion of the raw SDK read. Keep its
@@ -195,20 +256,21 @@ export const makeEncryptedStreamsChannel = Effect.fnUntraced(function* <Input, O
           () =>
             Effect.gen(function* () {
               trace('append-start', prepared, input);
-              yield* Effect.tryPromise({
-                try: async () => {
-                  const stream = e2eeRpcRequestStream(
-                    options.workspaceId,
-                    prepared.targetMachineId
-                  );
-                  for (const frame of prepared.frames ?? [prepared.frameHex])
-                    await options.client.appendJson(
-                      stream,
-                      e2eeRpcEnvelope({ id: prepared.requestId, frame })
-                    );
-                },
+              const stream = yield* Effect.try({
+                try: () => e2eeRpcRequestStream(options.workspaceId, prepared.targetMachineId),
                 catch: () => new Error('e2ee_rpc_append'),
               });
+              for (const frame of prepared.frames ?? [prepared.frameHex])
+                yield* retryTransientGateway(
+                  Effect.tryPromise({
+                    try: () =>
+                      options.client.appendJson(
+                        stream,
+                        e2eeRpcEnvelope({ id: prepared.requestId, frame })
+                      ),
+                    catch: (cause) => cause,
+                  })
+                );
               trace('append-complete', prepared, input);
               return yield* Deferred.await(result);
             }).pipe(

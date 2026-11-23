@@ -69,8 +69,7 @@ const styles = stylex.create({
  * `:focus-within` — and fills the slot, which is already the well's height less
  * its inset, at the well's radius less that inset.
  *
- * Shared by every settings editor that has one, so an Agent Role and a Prompt
- * Shortcut cannot end up with two different emoji controls.
+ * The one emoji control in settings; today only the Agent Role editor has one.
  */
 export function EmojiField({
   value,

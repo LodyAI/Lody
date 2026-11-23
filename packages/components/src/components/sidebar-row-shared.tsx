@@ -32,6 +32,11 @@ import {
   sessionSendStatusAtomFamily,
   sessionUnsentNewConversationAtomFamily,
 } from '@/atoms/session-send-status';
+import {
+  sessionPrMergeStatusAtomFamily,
+  type SessionPrMergePhase,
+  type SessionPrMergeStatus,
+} from '@/atoms/session-pr-merge-status';
 import type { SessionSendState } from '@/lib/session-send-status';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
@@ -53,19 +58,29 @@ import { formatCompactRelativeTime, type RelativeTimeValue } from '@/lib/format-
 import { SidebarShortcutPill, useSidebarRowShortcut } from './sidebar-shortcut-pill';
 import { sidebarSurface } from './sidebar-surface';
 import { clsx } from 'clsx';
+import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeDuration, themeEasing, themeRadius, themeSpace } from '../style/theme-scale.stylex';
 
-/**
- * The parts of a sidebar row that were Tailwind. The row's own box, ink and
- * fills come from sidebarSurface; these are the pieces around it.
- */
+
 const sendSpin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
 
 const GROUP_HOVER = ':is(:where(.group):hover *)';
 const GROUP_OPEN = ':is(:where(.group)[data-menu-open] *)';
 
 const rowParts = stylex.create({
+  sectionEnd: { display: 'flex', flexShrink: 0, alignItems: 'center', marginRight: themeSpace[2] },
+  sectionEndAction: { gap: themeSpace[1] },
+  sectionEndMark: { marginRight: '9px' },
+  sectionMenu: { position: 'relative', display: 'flex', height: themeSpace[5], width: themeSpace[5], flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  sectionMenuWide: { width: themeSpace[6] },
+  sectionActivity: { display: 'inline-flex', alignItems: 'center', transitionProperty: 'opacity', transitionDuration: themeDuration[100] },
+  sectionActivityHide: {
+    opacity: { default: 1, ':is(:where(.section-header):hover *)': 0, ':is(:where(.section-menu):has(:focus-visible, [data-popup-open]) *)': 0 },
+    pointerEvents: { default: 'auto', ':is(:where(.section-header):hover *)': 'none', ':is(:where(.section-menu):has(:focus-visible, [data-popup-open]) *)': 'none' },
+  },
+  sectionMenuOverlay: { position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+
   menuButton: {
     display: 'flex',
     width: themeSpace[5],
@@ -522,7 +537,15 @@ const SEND_RING_SHIMMER_LENGTH = 5;
  * size the same ring turns with a quarter arc. The turn rides an HTML wrapper,
  * like `@lody/ui`'s Spinner: a rotating svg does not composite at DPR≠1.
  */
-export function SessionSendProgressRing({ progress }: { progress?: number }) {
+export function SessionSendProgressRing({
+  progress,
+  className,
+  xstyle,
+}: {
+  progress?: number;
+  className?: string;
+  xstyle?: stylex.StyleXStyles;
+}) {
   const known = typeof progress === 'number';
   const filled = known ? Math.min(100, Math.max(4, progress)) : 25;
   const maskId = `session-send-ring-${useId().replace(/:/g, '')}`;
@@ -538,7 +561,8 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
   };
   return (
     <span
-      {...stylex.props(rowParts.sendRing, !known && rowParts.sendSpinning)}
+{...withClassName(stylex.props(rowParts.sendRing, !known && rowParts.sendSpinning, xstyle), className)}
+
       data-session-send-ring={known ? 'determinate' : 'indeterminate'}
     >
       <svg
@@ -617,6 +641,8 @@ export function SessionRowStatusIndicator({
   sendState,
   sendProgress,
   sendLabel,
+  prMergePhase,
+  prMergeLabel,
 }: {
   isWaitingPermission?: boolean;
   /** Something Lody ran for this session stopped and needs the person (Auto delivery). */
@@ -629,6 +655,8 @@ export function SessionRowStatusIndicator({
   sendProgress?: number;
   /** Spoken name of the send mark ("Sending · 12.4 MB / 38.0 MB"). */
   sendLabel?: string;
+  prMergePhase?: Exclude<SessionPrMergePhase, 'merged'> | null;
+  prMergeLabel?: string;
 }) {
   let icon: ReactNode = null;
   let label: string | undefined;
@@ -636,6 +664,9 @@ export function SessionRowStatusIndicator({
   if (sendState === 'failed') {
     icon = <CircleAlert {...stylex.props(rowParts.destructiveGlyph)} strokeWidth={2.25} />;
     label = sendLabel;
+  } else if (prMergePhase === 'failed') {
+    icon = <CircleAlert {...stylex.props(rowParts.destructiveGlyph)} strokeWidth={2.25} />;
+    label = prMergeLabel;
   } else if (isWaitingPermission === true) {
     icon = <Hand {...stylex.props(rowParts.primaryGlyph)} />;
   } else if (needsAttention === true && isWorking !== true) {
@@ -643,6 +674,9 @@ export function SessionRowStatusIndicator({
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
+  } else if (isWorking !== true && prMergePhase === 'merging') {
+    icon = <SessionSendProgressRing xstyle={rowParts.prMerged} />;
+    label = prMergeLabel;
   } else if (isWorking === true || hasUnreadMessages === true) {
     // Working grid, the working → unread "done" transition, and the unread dot
     // are one component so it stays mounted across that change and can see it.
@@ -661,9 +695,12 @@ export function SessionRowStatusIndicator({
     <div
       data-session-row-indicator=""
       data-session-send-state={sendState ?? undefined}
+      data-session-pr-merge-phase={prMergePhase ?? undefined}
       role={label ? 'img' : undefined}
       aria-label={label}
+title={label}
       {...stylex.props(rowParts.statusMark)}
+
     >
       {icon}
     </div>
@@ -677,10 +714,37 @@ function hasSessionRowStatus({
   isWorking,
   hasUnreadMessages,
   sendState,
-}: SessionRowStatusFlags & { needsAttention?: boolean }): boolean {
+  prMergePhase,
+}: SessionRowStatusFlags & {
+  needsAttention?: boolean;
+  prMergePhase?: Exclude<SessionPrMergePhase, 'merged'> | null;
+}): boolean {
   return Boolean(
-    isWaitingPermission || needsAttention || isWorking || hasUnreadMessages || sendState
+    isWaitingPermission ||
+    needsAttention ||
+    isWorking ||
+    hasUnreadMessages ||
+    sendState ||
+    prMergePhase
   );
+}
+
+function useSessionPrMergeLabel(status: SessionPrMergeStatus | null): string | undefined {
+  const { t } = useTranslation();
+  if (!status || status.phase === 'merged') return undefined;
+  if (status.phase === 'merging') {
+    return status.prNumber
+      ? t('sessions.prMergeStatus.mergingNumber', 'Merging PR #{{number}}…', {
+          number: status.prNumber,
+        })
+      : t('sessions.prMergeStatus.merging', 'Merging PR…');
+  }
+  const base = status.prNumber
+    ? t('sessions.prMergeStatus.failedNumber', 'Failed to merge PR #{{number}}', {
+        number: status.prNumber,
+      })
+    : t('sessions.prMergeStatus.failed', 'Failed to merge PR');
+  return status.error ? `${base}: ${status.error}` : base;
 }
 
 /**
@@ -1179,8 +1243,14 @@ export function SidebarRowEndSlot({
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
+  const prMergeStatus = useAtomValue(sessionPrMergeStatusAtomFamily(sessionId ?? ''));
   const shortcut = useSidebarRowShortcut(sessionId);
   const sendLabel = useSessionSendLabel(sendStatus);
+  const prMergeLabel = useSessionPrMergeLabel(prMergeStatus);
+  const activePrMergePhase =
+    prMergeStatus?.phase === 'merging' || prMergeStatus?.phase === 'failed'
+      ? prMergeStatus.phase
+      : null;
   const showStatus =
     !shortcut &&
     hasSessionRowStatus({
@@ -1189,6 +1259,7 @@ export function SidebarRowEndSlot({
       isWorking: drawWorking,
       hasUnreadMessages,
       sendState: sendStatus?.state,
+      prMergePhase: activePrMergePhase,
     });
   const restContent = shortcut ? (
     <SidebarShortcutPill index={shortcut.index} platform={shortcut.platform} selected={selected} />
@@ -1201,7 +1272,11 @@ export function SidebarRowEndSlot({
       sendState={sendStatus?.state}
       sendProgress={sendStatus && sendStatus.totalBytes > 0 ? sendStatus.progress : undefined}
       sendLabel={sendLabel}
+      prMergePhase={activePrMergePhase}
+      prMergeLabel={prMergeLabel}
     />
+  ) : prMergeStatus?.phase === 'merged' ? (
+    <SessionPrIcon compact prStatus="merged" />
   ) : (
     restIcon
   );
@@ -1576,6 +1651,7 @@ export function SidebarSectionHeader({
   icon,
   label,
   collapsed,
+  menu,
   action,
   activity,
   describeActivity = true,
@@ -1587,6 +1663,7 @@ export function SidebarSectionHeader({
   icon?: ReactNode;
   label: ReactNode;
   collapsed?: boolean;
+  menu?: ReactNode;
   action?: ReactNode;
   /**
    * Status of the Sessions this section hides. Drawn only while collapsed, as
@@ -1608,6 +1685,13 @@ export function SidebarSectionHeader({
   const handleToggle = () => {
     if (canToggle) onToggleCollapsed?.();
   };
+  const activityMark =
+    collapsed && activity ? (
+      <SidebarGroupActivityMark activity={activity} describe={describeActivity} />
+    ) : null;
+  const trailingActivityMark = menu && activityMark ? activityMark : null;
+  const toggleActivityMark = !menu && activityMark ? activityMark : null;
+  const overlayMenuOnHover = Boolean(menu) && !isMobile;
   const toggle = (
     <div
       role={canToggle ? 'button' : undefined}
@@ -1649,15 +1733,47 @@ export function SidebarSectionHeader({
         />
       ) : null}
       <span {...stylex.props(rowParts.spacer)} aria-hidden="true" />
-      {collapsed && activity ? (
-        <SidebarGroupActivityMark activity={activity} describe={describeActivity} />
-      ) : null}
+      {toggleActivityMark}
     </div>
   );
   return (
-    <div className={clsx('group', stylex.props(rowParts.treeRow, rowParts.treeFocus).className)}>
+    <div {...withClassName(stylex.props(rowParts.treeRow, rowParts.treeFocus), 'group section-header')}>
       {wrapToggle ? wrapToggle(toggle) : toggle}
-      {action ? <div {...stylex.props(rowParts.treeAction)}>{action}</div> : null}
+      {menu || trailingActivityMark || action ? (
+        <div
+          {...stylex.props(rowParts.sectionEnd, Boolean(action) && rowParts.sectionEndAction, !action && (overlayMenuOnHover || trailingActivityMark) && rowParts.sectionEndMark)}
+        >
+          {overlayMenuOnHover ? (
+            <span
+              {...withClassName(stylex.props(rowParts.sectionMenu, Boolean(action) && rowParts.sectionMenuWide), 'section-menu')}
+            >
+              {trailingActivityMark ? (
+                <span
+                  onClick={canToggle ? handleToggle : undefined}
+                  {...stylex.props(rowParts.sectionActivity, canToggle && rowParts.clickable, rowParts.sectionActivityHide)}
+                >
+                  {trailingActivityMark}
+                </span>
+              ) : null}
+              <span {...stylex.props(rowParts.sectionMenuOverlay)}>{menu}</span>
+            </span>
+          ) : (
+            <>
+              {menu}
+              {trailingActivityMark ? (
+                <span
+                  onClick={canToggle ? handleToggle : undefined}
+                  {...stylex.props(rowParts.sectionActivity, canToggle && rowParts.clickable)}
+                >
+                  {trailingActivityMark}
+                </span>
+              ) : null}
+            </>
+          )}
+          {action}
+        </div>
+      ) : null}
+
     </div>
   );
 }

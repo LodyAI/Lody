@@ -23,7 +23,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { machineOnlineStatusAtomFamily } from '@/atoms/presence';
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { downloadBytesAsFile } from '@/lib/download-file';
+import { saveBytesAsFile } from '@/lib/download-file';
 import {
   getIosSimulatorScreenshotFileName,
   type IosSimulatorCaptureError,
@@ -138,10 +138,12 @@ function SessionIosSimulatorPanelController({
   const isLocalMachine = localMachineId === session.machineId;
   const availability =
     platform === 'android'
-      ? machineSupportsAndroidEmulatorProtocol(machine)
-        ? 'available'
-        : 'upgrade-required'
-      : getIosSimulatorPanelAvailability(machine);
+      ? runtime?.contentMode === 'e2ee' && !isLocalMachine
+        ? 'hidden'
+        : machineSupportsAndroidEmulatorProtocol(machine)
+          ? 'available'
+          : 'upgrade-required'
+      : getIosSimulatorPanelAvailability(machine, runtime?.contentMode);
   // Same-machine Electron talks to the local daemon directly, so cloud presence
   // going offline does not cut it off.
   const blocker: IosSimulatorPanelBlocker | null =
@@ -300,7 +302,7 @@ function SessionIosSimulatorPanelController({
   );
 
   const connected = Boolean(runtime && requesterUserId);
-  const live = active && blocker === null && connected;
+  const live = active && availability !== 'hidden' && blocker === null && connected;
   const loadedRef = useRef(initialSnapshot?.catalog.phase === 'ready');
   useEffect(() => {
     if (!live) return;
@@ -666,7 +668,7 @@ function SessionIosSimulatorPanelController({
           new Date()
         );
         if (target === 'save') {
-          downloadBytesAsFile(fileName, new Uint8Array(result.bytes));
+          await saveBytesAsFile(fileName, new Uint8Array(result.bytes));
           return;
         }
         const file = new File([result.bytes], fileName, { type: 'image/png' });
@@ -688,6 +690,8 @@ function SessionIosSimulatorPanelController({
             )
           );
         }
+      } catch {
+        toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
       } finally {
         setCapturing(false);
       }
@@ -800,6 +804,8 @@ function SessionIosSimulatorPanelController({
     viewerState,
     viewerDiagnostics,
   ]);
+
+  if (availability === 'hidden') return null;
 
   return (
     <>

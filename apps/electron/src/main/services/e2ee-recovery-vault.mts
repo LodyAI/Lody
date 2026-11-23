@@ -40,6 +40,10 @@ import {
   replaceAccountVault,
   type VaultReplacementWorkspace
 } from '@lody/e2ee-client/vault-replacement'
+import {
+  removeVaultPasswordGuarded,
+  setVaultPasswordVerified
+} from '@lody/e2ee-client/recovery-password'
 import { sqliteRecoveryVaultLocalStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/services'
 import { createHash, randomUUID } from 'node:crypto'
@@ -52,6 +56,20 @@ export const RECOVERY_VAULT_ENV = 'LODY_E2EE_RECOVERY_VAULT'
 export const recoveryVaultEnabled = (env: NodeJS.ProcessEnv = process.env) => {
   const value = env[RECOVERY_VAULT_ENV]
   return value === undefined || value.trim() === 'on'
+}
+
+/**
+ * The locator a desktop recovery file names: this build's Convex deployment URL.
+ * Cloud builds require it at build time (`electron.cloud.config.ts`); a build without
+ * it has no recovery service, so every recovery entry refuses as `disabled` before a
+ * passkey ceremony, save dialog or vault write rather than failing later in core or
+ * leaving an orphaned platform passkey. The value is returned unchanged: existing
+ * files carry it verbatim.
+ */
+export const recoveryVaultLocator = (configured: string | undefined): string => {
+  if (typeof configured !== 'string' || configured.trim() === '')
+    throw new Error('e2ee_recovery_disabled')
+  return configured
 }
 
 /** A canonical vault-v1 file is about 150 bytes; anything larger is not one. */
@@ -685,16 +703,10 @@ export const setRecoveryPassword = (
       const vault = yield* openVault(io.unlock)
       const { current } = yield* io.replacement.state()
       if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
-      yield* vault.setPassword({
+      const reopened = yield* setVaultPasswordVerified(vault, {
         password: io.password,
         ...(io.kdf ? { kdf: io.kdf } : {})
       })
-      const reopened = yield* (yield* RecoveryVaults).openWithPassword({
-        vaultId: vault.vaultId,
-        locator: vault.locator,
-        password: io.password
-      })
-      if (reopened.vaultId !== vault.vaultId) return yield* Effect.fail({ code: 'authentication' })
       yield* syncVaultMethodsSummary(reopened)
       return { hasPassword: true as const }
     }).pipe(Effect.provide(vaults(io)))
@@ -712,15 +724,9 @@ export const removeRecoveryPassword = (
       const vault = yield* openVault(io.unlock)
       const { current } = yield* io.replacement.state()
       if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
-      const hasFile = yield* vault.hasRecoveryFile()
-      const passkeys = yield* vault.listPasskeys()
-      if (!hasFile && passkeys.length === 0) return yield* Effect.fail({ code: 'conflict' })
-      const removed = yield* Effect.exit(vault.removePassword())
-      const pending = yield* vault.pendingPasswordRemovals()
-      yield* syncVaultMethodsSummary(vault)
-      if (Exit.isFailure(removed) && pending.length === 0)
-        return yield* Effect.failCause(removed.cause)
-      return { removed: Exit.isSuccess(removed), pending: pending.length > 0 }
+      return yield* removeVaultPasswordGuarded(vault).pipe(
+        Effect.tap(() => syncVaultMethodsSummary(vault))
+      )
     }).pipe(Effect.provide(vaults(io)))
   )
 

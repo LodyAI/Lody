@@ -1033,8 +1033,9 @@ import { ScrollArea } from '@lody/ui/scroll-area';
 </ScrollArea>
 ```
 
-`axis` is `vertical` (default), `horizontal` or `both`. `visibility` is `hover`
-(default), `scroll` or `always`; bars still require overflow. `compact` provides
+`axis` is `vertical` (default), `horizontal` or `both`. `visibility` is `scroll`
+(default), `hover` or `always`; bars still require overflow. The track is a 12px
+hit area whose thumb widens from 4px to 8px while the track is hovered or dragged. `compact` provides
 a narrow track for tab strips. The viewport ref remains the real native scroll
 element for virtualization, keyboard handling and scroll restoration. Root and
 viewport classes/styles carry caller layout, not thumb appearance.
@@ -1052,6 +1053,21 @@ text controls and the popup lists that own keyboard selection. Product-wide CSS
 may use the variables supplied by `scrollbarNativeTheme` from
 `@lody/ui/scroll-area/scroll-area.tokens.stylex`; apply it with
 `scrollbarPaletteTheme` on the palette scope. `ThemeRoot` includes both.
+
+Native thumbs are transparent until the element carries `data-scrollbar-scrolling`
+or `data-scrollbar-hover`. Install the publisher once at the app root, next to the
+focus modality tracker:
+
+```ts
+import { installScrollbarPresence } from '@lody/ui/scrollbar-presence';
+
+useEffect(() => installScrollbarPresence(), []);
+```
+
+It marks a scroll that follows the person's wheel, touch, scroll-key or
+scrollbar-press input for 500ms (Base UI's pause), so app-driven scrolls stay
+hidden. It also marks an element while the pointer is in its own scrollbar gutter,
+which widens the thumb. Rationale: [UI scroll area note](../../.agents/notes/implemented/feature/2026-10-21-ui-scroll-area.md).
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the

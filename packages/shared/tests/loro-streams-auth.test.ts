@@ -114,6 +114,47 @@ describe('loro streams auth helpers', () => {
     await expect(provider.getToken()).resolves.toBe('jwt-after-recovery');
   });
 
+  it.each([401, 403])(
+    'rejects callback auth at %s without repeating the issuer request',
+    async (status) => {
+      let login: string | null = null;
+      const issuedFor: string[] = [];
+      const provider = createLoroStreamsTokenProviderLegacy({
+        endpoint: 'https://convex.example.com/api/loro-streams/token',
+        workspaceId: 'workspace-1',
+        authToken: () => login,
+        fetchImpl: async (_url, init) => {
+          const credential = new Headers(init?.headers).get('Authorization')!;
+          issuedFor.push(credential);
+          return credential === 'Bearer rejected'
+            ? new Response(null, { status })
+            : new Response(JSON.stringify({ token: 'recovered-jwt', expiresIn: 900 }));
+        },
+      });
+      const auth = provider.createAuthCallback();
+      try {
+        await expect(auth()).rejects.toBeInstanceOf(LoroStreamsTokenAuthError);
+        expect(issuedFor).toEqual([]);
+        login = 'rejected';
+        for (let i = 0; i < 3; i++) {
+          await expect(auth({ reason: 'request' })).rejects.toMatchObject({
+            name: 'LoroStreamsTokenAuthError',
+            status,
+          });
+        }
+        expect(issuedFor).toEqual(['Bearer rejected']);
+        provider.invalidate();
+        await expect(auth()).rejects.toBeInstanceOf(LoroStreamsTokenAuthError);
+        expect(issuedFor).toEqual(['Bearer rejected', 'Bearer rejected']);
+        login = 'recovered';
+        await expect(auth()).resolves.toBe('recovered-jwt');
+        expect(issuedFor).toEqual(['Bearer rejected', 'Bearer rejected', 'Bearer recovered']);
+      } finally {
+        await provider.close();
+      }
+    }
+  );
+
   it('reads an encrypted cached token from localStorage on initialization and avoids fetching', async () => {
     const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
     const firstFetchImpl = vi.fn(
@@ -310,7 +351,7 @@ describe('loro streams auth helpers', () => {
     login = 'bob';
     expect(await provider.getToken()).toBe('Bearer bob');
     login = null;
-    expect(await provider.createAuthCallback()()).toBeUndefined();
+    await expect(provider.createAuthCallback()()).rejects.toBeInstanceOf(LoroStreamsTokenAuthError);
   });
 
   it('retires the old login raw response before populating the new login cache', async () => {

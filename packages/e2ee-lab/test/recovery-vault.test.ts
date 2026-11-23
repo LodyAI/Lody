@@ -1796,7 +1796,6 @@ describe('encrypted recovery vault and genuine workflow', () => {
                 workspaceId: 'workspace',
                 name: 'Workspace',
                 outcome: 'Committed',
-                partialEpochKey: false,
               },
             ]);
             expect(adoptions).toBe(2);
@@ -1865,7 +1864,6 @@ describe('encrypted recovery vault and genuine workflow', () => {
                 workspaceId: 'workspace',
                 name: 'Workspace',
                 outcome: 'Committed',
-                partialEpochKey: false,
               },
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
@@ -1888,7 +1886,6 @@ describe('encrypted recovery vault and genuine workflow', () => {
                 workspaceId: 'workspace',
                 name: 'Workspace',
                 outcome: 'Committed',
-                partialEpochKey: false,
               },
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
@@ -1986,7 +1983,6 @@ describe('encrypted recovery vault and genuine workflow', () => {
                 workspaceId: 'workspace',
                 name: 'Workspace',
                 outcome: 'Committed',
-                partialEpochKey: false,
               },
             ]);
             expect(connected).toBe(1);

@@ -152,10 +152,14 @@ export function BaseHeader({
         {title}
       </h2>
 
-      {isMobile && <E2eeDeviceRequestsButton className="ml-2 shrink-0" />}
+      {isMobile && <E2eeDeviceRequestsButton {...stylex.props(themeStyles.layout)} />}
 
       {/* Actions */}
       {actions && <div {...stylex.props(styles.actions)}>{actions}</div>}
     </div>
   );
 }
+
+const themeStyles = stylex.create({
+  layout: { marginLeft: 'calc(var(--spacing) * 2)', flexShrink: 0 },
+});

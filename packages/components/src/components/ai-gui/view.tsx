@@ -1,9 +1,7 @@
 import { clsx } from 'clsx';
 import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
-import { downloadBytesAsFile } from '@/lib/download-file';
-import { shareFileBytesNatively } from '@/lib/session-file-native-save';
-import { isNativeAppShell } from '@/lib/native-platform';
+import { saveBytesAsFile } from '@/lib/download-file';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import type { SessionLocalAttachment } from '@lody/shared';
@@ -800,7 +798,7 @@ const viewStyles = stylex.create({
   noticeStack: { paddingBlock: themeSpace[1] },
   /** A notice that sits on its own row is indented to sit apart from the
    *  conversation; inside a turn that same indent is a broken left edge. */
-  noticeStackIndented: {
+  noticeStackIndented: { default: null,
     '@container (min-width: 640px)': { paddingLeft: themeSpace[3] },
   },
 
@@ -5435,7 +5433,7 @@ const UserMessageRowView = ({
                 isEditing ? viewStyles.userBubbleFrameEditing : viewStyles.userBubbleFrameFitted
               )}
             >
-              {showSendingSpinner && <Spinner xstyle={viewStyles.sendingSpinner} />}
+              {showSendingSpinner && <Spinner className={stylex.props(viewStyles.sendingSpinner).className} />}
               <div
                 {...stylex.props(
                   viewStyles.userTextFrame,
@@ -8422,7 +8420,7 @@ function LocalAttachmentImage({
           ? t('sessions.localAttachmentUnavailable', 'Local attachment unavailable')
           : t('sessions.markdownImage.loading', 'Loading image…')
       }
-      actionIcon={failed ? null : <Spinner xstyle={localAttachmentStyles.actionGlyph} />}
+      actionIcon={failed ? null : <Spinner className={stylex.props(localAttachmentStyles.actionGlyph).className} />}
       failed={failed}
       isInteractive={failed}
       onClick={() => setAttempt((value) => value + 1)}
@@ -8488,7 +8486,7 @@ export const LocalAttachmentCard = ({
       actionIcon={
         remote ? (
           opening ? (
-            <Spinner xstyle={localAttachmentStyles.actionGlyph} />
+            <Spinner className={stylex.props(localAttachmentStyles.actionGlyph).className} />
           ) : (
             <ArrowDown {...stylex.props(localAttachmentStyles.actionGlyph)} />
           )
@@ -8516,8 +8514,7 @@ export const LocalAttachmentCard = ({
             .then(async (bytes) => {
               if (currentBinding.current !== binding) return;
               if (!bytes) throw new Error('Attachment download unavailable');
-              if (isNativeAppShell()) await shareFileBytesNatively(attachment.fileName, bytes);
-              else downloadBytesAsFile(attachment.fileName, bytes);
+              await saveBytesAsFile(attachment.fileName, bytes);
             })
             .catch(() => {
               if (currentBinding.current === binding)

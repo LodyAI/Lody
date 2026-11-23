@@ -49,6 +49,13 @@ import {
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  keyGroupTrigger: { display: 'flex', width: '100%', alignItems: 'center', gap: themeSpace[3], paddingInline: themeSpace[4], paddingBlock: themeSpace[3], textAlign: 'start', fontSize: themeFontSize.sm, lineHeight: themeLineHeight.sm },
+  keyGroupBody: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 0%', gap: themeSpace[1] },
+  keyGroupTitle: { display: 'block', fontSize: themeFontSize.sm, fontWeight: themeFontWeight.medium },
+  keyGroupHelp: { display: 'block', fontSize: themeFontSize.xs, color: themeColors.mutedForeground },
+  keyGroupChevron: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0, color: themeColors.mutedForeground, transitionProperty: 'transform', transitionDuration: '150ms' },
+  keyGroupExpanded: { transform: 'rotate(180deg)' },
+
   foldColumn: { display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column' },
   foldScroll: { minHeight: 0, overflowY: 'auto' },
   foldDetails: { minHeight: 0, flex: '1 1 0%', overflowY: 'auto' },
@@ -321,7 +328,8 @@ const styles = stylex.create({
   workspaceInset: { marginInline: themeSpace[3] },
 });
 import { useMobileSettingsFold } from './mobile-settings-fold-context';
-import { describeCliApiKey } from '../settings/cli-api-key-display';
+import { describeCliApiKey, partitionCliApiKeys } from '../settings/cli-api-key-display';
+import { Collapsible } from '@lody/ui/collapsible';
 
 const EMPTY_MACHINE_NAMES: ReadonlyMap<string, string> = new Map();
 
@@ -414,6 +422,53 @@ export function MobileAccountSettings({
       t,
     });
   const cliApiKeyToRevokeDisplay = cliApiKeyToRevoke ? describeApiKey(cliApiKeyToRevoke) : null;
+  const { listed: listedCliApiKeys, signIn: signInCliApiKeys } = partitionCliApiKeys(cliApiKeys);
+  const [signInCliApiKeysOpen, setSignInCliApiKeysOpen] = useState(false);
+  const renderCliApiKeyRow = (apiKey: CliApiKeyRecord, ruled: boolean) => {
+    const display = describeApiKey(apiKey);
+    const details = [display.lifetime, display.createdAt, display.lastUsed].filter(Boolean);
+
+    return (
+      <div
+        key={apiKey.id}
+        {...stylex.props(styles.listStack, ruled && styles.listRowDivider)}
+      >
+        <div {...stylex.props(styles.keyBody)}>
+          <div {...stylex.props(styles.keyTitleLine)}>
+            <p {...stylex.props(styles.keyNote)}>{display.title}</p>
+            {display.isCurrentMachine && (
+              <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+            )}
+            {display.sourceLabel && <Badge>{display.sourceLabel}</Badge>}
+          </div>
+          {(apiKey.keyPreview || details.length > 0) && (
+            <div {...stylex.props(styles.keyDetails)}>
+              {apiKey.keyPreview && <span {...stylex.props(styles.keyPreview)}>{apiKey.keyPreview}</span>}
+              {details.map((detail) => (
+                <span key={detail}>{detail}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <Button
+            variant="secondary"
+            size="small"
+            xstyle={styles.destructiveOutline}
+            onClick={() => setCliApiKeyToRevoke(apiKey)}
+            disabled={revokingCliApiKeyId === apiKey.id}
+          >
+            {revokingCliApiKeyId === apiKey.id ? (
+              <Spinner diameter="calc(var(--spacing) * 3.5)" className={stylex.props(styles.pendingActionSpacing).className} />
+            ) : (
+              <Trash2 {...stylex.props(styles.buttonIcon)} />
+            )}
+            {t('settings.account.cliAuth.revokeButton')}
+          </Button>
+        </div>
+      </div>
+    );
+  };
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   const [userNameDraft, setUserNameDraft] = useState(currentUser?.name ?? '');
@@ -1010,60 +1065,42 @@ export function MobileAccountSettings({
                   {t('settings.account.cliAuth.noRecords')}
                 </div>
               ) : (
-                cliApiKeys.map((apiKey, index) => {
-                  const display = describeApiKey(apiKey);
-                  const details = [display.lifetime, display.createdAt, display.lastUsed].filter(
-                    Boolean
-                  );
-
-                  return (
-                    <div
-                      key={apiKey.id}
-                      {...stylex.props(styles.listStack, index > 0 && styles.listRowDivider)}
+                <>
+                  {listedCliApiKeys.map((apiKey, index) => renderCliApiKeyRow(apiKey, index > 0))}
+                  {signInCliApiKeys.length > 0 ? (
+                    <Collapsible.Root
+                      open={signInCliApiKeysOpen}
+                      onOpenChange={setSignInCliApiKeysOpen}
+                      {...stylex.props(listedCliApiKeys.length > 0 && styles.listRowDivider)}
                     >
-                      <div {...stylex.props(styles.keyBody)}>
-                        <div {...stylex.props(styles.keyTitleLine)}>
-                          <p {...stylex.props(styles.keyNote)}>
-                            {display.title}
-                          </p>
-                          {display.isCurrentMachine && (
-                            <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
-                          )}
-                          {display.sourceLabel && <Badge>{display.sourceLabel}</Badge>}
-                        </div>
-                        {(apiKey.keyPreview || details.length > 0) && (
-                          <div {...stylex.props(styles.keyDetails)}>
-                            {apiKey.keyPreview && (
-                              <span {...stylex.props(styles.keyPreview)}>{apiKey.keyPreview}</span>
-                            )}
-                            {details.map((detail) => (
-                              <span key={detail}>{detail}</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <Button
-                          variant="secondary"
-                          size="small"
-                          xstyle={styles.destructiveOutline}
-                          onClick={() => setCliApiKeyToRevoke(apiKey)}
-                          disabled={revokingCliApiKeyId === apiKey.id}
-                        >
-                          {revokingCliApiKeyId === apiKey.id ? (
-                            <Spinner
-                              diameter="calc(var(--spacing) * 3.5)"
-                              className={stylex.props(styles.pendingActionSpacing).className}
-                            />
-                          ) : (
-                            <Trash2 {...stylex.props(styles.buttonIcon)} />
-                          )}
-                          {t('settings.account.cliAuth.revokeButton')}
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })
+                      <Collapsible.Trigger {...stylex.props(styles.keyGroupTrigger)}>
+                        <span {...stylex.props(styles.keyGroupBody)}>
+                          <span {...stylex.props(styles.keyGroupTitle)}>
+                            {t('settings.account.cliAuth.signInGroup')}
+                          </span>
+                          <span {...stylex.props(styles.keyGroupHelp)}>
+                            {t('settings.account.cliAuth.signInGroupHelper', {
+                              count: signInCliApiKeys.length,
+                            })}
+                          </span>
+                        </span>
+                        {signInCliApiKeys.some(
+                          (apiKey) => describeApiKey(apiKey).isCurrentMachine
+                        ) ? (
+                          <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+                        ) : null}
+                        <ChevronDown
+                          aria-hidden="true"
+                          {...stylex.props(styles.keyGroupChevron, signInCliApiKeysOpen && styles.keyGroupExpanded)}
+                        />
+                      </Collapsible.Trigger>
+                      <Collapsible.Panel>
+                        {signInCliApiKeys.map((apiKey) => renderCliApiKeyRow(apiKey, true))}
+                      </Collapsible.Panel>
+                    </Collapsible.Root>
+                  ) : null}
+                </>
+
               )}
             </MobileSettingsSection>
           ) : null}

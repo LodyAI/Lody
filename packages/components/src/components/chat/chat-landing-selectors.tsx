@@ -176,6 +176,14 @@ export interface BranchSelectorProps {
   xstyle?: stylex.StyleXStyles;
   contentClassName?: string;
   contentXstyle?: stylex.StyleXStyles;
+  hasMore?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onSearchQueryChange?: (query: string) => void;
+  remoteSearchable?: boolean;
+  disableClientFilter?: boolean;
+  onReachEnd?: () => void;
+  footer?: ReactNode;
+
 }
 
 /**
@@ -195,21 +203,35 @@ export function BranchSelector({
   xstyle,
   contentClassName,
   contentXstyle,
+  hasMore = false,
+  onOpenChange,
+  onSearchQueryChange,
+  remoteSearchable = false,
+  disableClientFilter = false,
+  onReachEnd,
+  footer,
+
 }: BranchSelectorProps) {
+  const showTriggerLoading = loading && options.length === 0 && !value;
   return (
     <OptionSelector
       value={value}
       onSelect={(option) => onChange(option.value)}
       options={options}
       placeholder={placeholder}
-      disabled={disabled || loading || options.length === 0}
+      disabled={disabled || showTriggerLoading || (!remoteSearchable && options.length === 0)}
       align="start"
       side="top"
       avoidCollisions={false}
       placeholderIcon={GitBranch}
-      searchable={!loading && options.length > 6}
+      searchable={remoteSearchable || (!showTriggerLoading && (hasMore || options.length > 6))}
       searchPlaceholder={searchPlaceholder}
-      emptyText={emptyText}
+      emptyText={loading && options.length === 0 ? loadingText : emptyText}
+      onOpenChange={onOpenChange}
+      onQueryChange={onSearchQueryChange}
+      disableClientFilter={disableClientFilter}
+      onReachEnd={hasMore ? onReachEnd : undefined}
+      footer={footer}
       appearance="toolbar"
       size="sm"
       className={className}
@@ -220,13 +242,13 @@ export function BranchSelector({
       contentMaxWidth="min(36rem, calc(100vw - 2rem))"
       renderTriggerValue={(option) => (
         <>
-          {loading ? (
+          {showTriggerLoading ? (
             <Spinner size="small" label={null} />
           ) : (
             <GitBranch {...stylex.props(composerSurface.glyph16)} aria-hidden="true" />
           )}
           <span {...stylex.props(composerSurface.truncate)}>
-            {loading ? loadingText : (option?.label ?? placeholder ?? '')}
+            {showTriggerLoading ? loadingText : (option?.label ?? value ?? placeholder ?? '')}
           </span>
         </>
       )}
