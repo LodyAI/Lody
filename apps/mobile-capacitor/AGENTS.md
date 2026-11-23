@@ -5,8 +5,8 @@ Root `AGENTS.md` also applies.
 
 ## Minimum iOS compatibility
 
-- Minimum: **iOS / iPadOS 16.4 (WKWebView)**, matching Tailwind 4, including
-  shared code and Workers. Guard or polyfill newer APIs, syntax and CSS.
+- Minimum: **iOS / iPadOS 16.4 (WKWebView)**, including shared code and
+  Workers. Guard or polyfill newer APIs, syntax and CSS.
 - Keep Podfile, Xcode targets and Vite Safari target at 16.4.
   [Audit and device checks](BUILDING.md#build-compatibility).
 - Newer APIs need an early, tested polyfill or capability-gated fallback.

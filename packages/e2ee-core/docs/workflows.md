@@ -400,3 +400,5 @@ keys and membership. It installs through the caller's normal installed-key bound
 without another admission; a revoked or mismatched identity gains no authority.
 
 New `WorkspaceControl.execute` ownership transfers require an active personal device of the successor. Revoking a member's last personal device requires `confirmedRecoveryOnly: true`; this acknowledgement is workflow metadata and never enters signed v1 bytes. Existing v1 records still replay under their original rules, including the owner governance check.
+
+An unconfirmed submission may retain the failed append as `SubmissionError.cause` for allowlisted diagnostics. It remains pending and retries the original signed bytes; the cause never proves rejection or commitment.

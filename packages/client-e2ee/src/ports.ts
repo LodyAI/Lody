@@ -1,3 +1,4 @@
+import { remoteMachineStore } from './remote-machine-store';
 import { Context, Effect, Layer } from 'effect';
 import {
   personalLedgerControl,
@@ -58,8 +59,10 @@ export function personalCloudDatabases(
     ledger: root + ':ledger',
     custody: root + ':custody',
     submission: (binding: ClientCustodyBinding) => root + ':submission:' + binding.installationId,
-    /** Policy pins and request originals of one installation; a replacement identity
-     * never reads another incarnation's sharing state. */
+    /** Remote command and approval originals, isolated from replacement installations. */
+    remoteMachine: (binding: ClientCustodyBinding) =>
+      root + ':remote-machine:' + binding.installationId,
+    /** Policy pins and request originals of one installation. */
     machineSharing: (binding: ClientCustodyBinding) =>
       root + ':machine-sharing:' + binding.installationId,
   });
@@ -258,6 +261,23 @@ export function personalCloudHostPorts(
         contentToken: (binding, credential, request) =>
           guard(binding).pipe(Effect.andThen(network.contentToken(hex(credential), request))),
         members: network.members,
+        ...(options.remoteMachineEndpoints
+          ? {
+              remoteMachine: (binding: ClientCustodyBinding) => ({
+                endpoints: { ...options.remoteMachineEndpoints! },
+                store: remoteMachineStore(names.remoteMachine(binding)),
+                relay: network.remoteMachine,
+                records: (view: import('@lody/e2ee-core/protocol').LedgerView) =>
+                  Effect.map(
+                    feed.load(16384),
+                    (stored) =>
+                      stored?.records
+                        .filter((_, index) => stored.originCount + index < view.length)
+                        .map((record) => new Uint8Array(record)) ?? []
+                  ),
+              }),
+            }
+          : {}),
         // The shared machine-sharing host: core verifies policy signatures, pins and
         // generations exactly as on desktop; this host supplies only IndexedDB storage,
         // the device-authenticated transport and its own local ledger originals.

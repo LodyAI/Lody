@@ -417,3 +417,15 @@ Other-device approval remains a separate choice.
 The personal-device session exposes `abandonEpoch(baseEpoch)` through the same Owner-only staged publisher after declaring capability 2, without requiring the current epoch key. Callers own evidence display and explicit confirmation; exact-original retries and history recovery remain in core.
 
 Management rechecks the verified ledger before signing: ownership transfer requires a personal device of the target, and removing the last personal device requires `{ confirmedRecoveryOnly: true }`. The management view exposes `requiresRecoveryConfirmation` for the device dialog; an unconfirmed programmatic call fails with `recovery-only-confirmation-required`.
+
+## Remote CLI pairing
+
+The optional `PersonalHostPlatform.remoteMachine` supplies persistent originals,
+bounded authenticated relay calls and local verified records for one installation.
+Official cloud composition advertises the four platform methods explicitly through
+`remoteMachinePairing`. The session retains its signer/credential and native-call
+lifetime; the workflow serializes pairing operations separately, using the existing
+session permit only for local signing/storage and ledger/key rounds. Interrupted
+network work preserves its signed originals. Guests and lost personal devices fail
+before signing; key delivery follows verified admission, and terminal cancellation
+archives rather than deletes evidence. See the [shared cloud composition](../client-e2ee/README.md#remote-cli-machines).

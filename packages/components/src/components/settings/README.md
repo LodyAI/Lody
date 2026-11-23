@@ -163,3 +163,5 @@ user's live member-workspace list. It selects an active workspace only from that
 list, otherwise using the existing member-list preference. Unsigned callback
 parameters never select the workspace or a desktop target. Anonymous returns use
 the existing login flow; retry capabilities are never placed in its redirect query.
+
+Ordinary and encrypted ownership-transfer dialogs map active auto-renewing subscriptions and unpaid balances to localized Billing advice. Native adapters retain only the two allowlisted billing refusal codes; unknown submission outcomes keep their original signed record for reconciliation.

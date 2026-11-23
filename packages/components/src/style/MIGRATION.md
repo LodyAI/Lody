@@ -247,8 +247,11 @@ and `outlineOffset`; verify the real forced-colors viewport and focused input.
 
 Semantic theme variables already follow light/dark mode and VS Code themes.
 A hard-coded dark variant needs the app's exact selector contract before removal.
-The current Tailwind variant matches `.dark` and `.dark-scope`, including descendants,
-and excludes `.light-scope` and its descendants even beneath another dark scope.
+The app's dark selector is the `:where(.dark, .dark *, .dark-scope, .dark-scope
+*):not(:where(.light-scope, .light-scope *))` predicate every StyleX file
+repeats as a `DARK` constant — it matches `.dark` and `.dark-scope` including
+descendants, and excludes `.light-scope` and its descendants even beneath
+another dark scope.
 For owned elements, the filter pill uses that complete self-element predicate in
 its local StyleX property conditions. Preserve the compiler's fallback colours and
 `@supports` values together, including local `--color-white` overrides. A light

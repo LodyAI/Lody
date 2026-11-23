@@ -185,6 +185,38 @@ describe('settings usage day cache', () => {
     });
   });
 
+  it('loads encrypted numeric timelines, calendar and day details while keeping GitHub blocked', async () => {
+    store.set(workspaceContentModeAtom, {
+      ...store.get(workspaceContentModeAtom)!,
+      descriptor: {
+        workspaceId: 'workspace-1',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: 'crypto-org',
+        genesisHash: '11'.repeat(32),
+        activation: 'control-only',
+      },
+    });
+    result = usageDay();
+    await render(FIRST_DAY);
+    expect(snapshot()).toMatchObject({
+      workspaceId: 'workspace-1',
+      day: usageDay(),
+      loading: false,
+      workspaceReposLoading: false,
+    });
+    const reads = mocks.useQuery.mock.calls.filter(([, args]) => args !== 'skip');
+    expect(
+      reads
+        .filter(([query]) => getFunctionName(query) === 'usage:getWorkspaceUsageTimeline')
+        .map(([, args]) => args.range)
+    ).toEqual(expect.arrayContaining(['day', 'week', 'month', 'total']));
+    expect(
+      reads.some(([query]) => getFunctionName(query) === 'usage:getWorkspaceUsageCalendar')
+    ).toBe(true);
+    expect(reads.some(([query]) => getFunctionName(query).startsWith('github:'))).toBe(false);
+  });
+
   it('persists zero-usage results across closing settings and recreating the app store', async () => {
     result = usageDay(FIRST_DAY, 0);
     await render(FIRST_DAY);
