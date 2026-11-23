@@ -1,3 +1,4 @@
+import { roostHistoryDatabase } from '../lib/roost-history-cache';
 import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { onIpcEvent } from '@/lib/electron-ipc-client';
@@ -11,6 +12,7 @@ import {
   retryRetiredEncryptedWorkspaceCleanup,
 } from '@/lib/e2ee-member-removal';
 import {
+  encryptedLocalInstance,
   readEncryptedLocalIdentity,
   retainEncryptedLocalIdentity,
   type E2eeLocalDataIdentity,
@@ -1095,6 +1097,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             };
             await retirementOwners.drain({ native: targetNative });
             if (disposed || retired) return;
+            // Retire the previous projection even when the next native open is offline.
+            if (removalScope) {
+              await resumeEncryptedWorkspaceCleanup(removalScope);
+              if (disposed || retired) return;
+            }
             nativeResource = targetNative;
             const requestedReader =
               native.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
@@ -1221,6 +1228,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // lody* IndexedDB + Cache Storage now — before the runtime opens the repo
         // DB, while nothing holds those databases open. No-op on normal boots.
         await maybeClearLodyCacheOnBoot([
+          ...(localIdentity ? [roostHistoryDatabase(encryptedLocalInstance(localIdentity))] : []),
           `lody-loro-repo-db-${effectiveWorkspaceId}`,
           `lody-loro-stream-cursors-${effectiveWorkspaceId}`,
         ]);

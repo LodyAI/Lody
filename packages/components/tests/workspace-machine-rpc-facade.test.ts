@@ -28,6 +28,90 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('binds protected history retries to the owner, operation and turn on either plane', async () => {
+    let version: number | undefined;
+    let failure: 'outer' | 'inner' | undefined;
+    const ids: string[] = [];
+    const entry = {
+      id: 'turn-1',
+      role: 'user',
+      userId: 'account',
+      e2eeIntent: 'test-signature',
+      inputConfig: { inputBlocks: [] },
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineProtocolCapabilities: async () =>
+        version === undefined ? {} : { e2eeRoostHistory: version },
+      getMachineRpcClient: async () => {
+        throw new Error('unexpected plaintext RPC');
+      },
+      requestEncryptedFeature: async (request, options) => {
+        expect(request.machineId).toBe(remoteMachineId);
+        expect(request.workspaceId).toBe(workspaceId);
+        if (failure === 'outer') return { ok: false, error: 'denied' };
+        if (request.method === 'session/history-read')
+          return {
+            ok: true,
+            result: {
+              type: 'session/history-read_response',
+              sessionId,
+              success: failure !== 'inner',
+              result: [],
+              historyRevision: 1,
+              historyCount: 0,
+            },
+          };
+        if (request.method !== 'session/history-write') throw new Error('unexpected method');
+        expect(request.params.payload.entry).toEqual(entry);
+        ids.push(options!.requestId);
+        return {
+          ok: true,
+          result: {
+            type: 'session/history-write_response',
+            sessionId,
+            operation: request.params.operation,
+            success: failure !== 'inner',
+            result: { status: 'accepted', turnId: entry.id, active: true },
+            historyRevision: 1,
+            historyCount: 1,
+            historyChange: null,
+          },
+        };
+      },
+    });
+    const read = () =>
+      facade.requestSessionHistoryRead(remoteMachineId, sessionId, { kind: 'readMetadata' });
+    const write = (operation: 'accept_input' | 'accept_input_and_dispatch') =>
+      facade.requestSessionHistoryWrite(remoteMachineId, {
+        sessionId,
+        operation,
+        payload: { entry },
+      });
+    for (version of [undefined, 0]) {
+      await expect(read()).rejects.toThrow();
+      await expect(write('accept_input')).rejects.toThrow();
+    }
+    version = 2;
+    await expect(read()).resolves.toMatchObject({ success: true, result: [] });
+    for (const operation of ['accept_input', 'accept_input', 'accept_input_and_dispatch'] as const)
+      await expect(write(operation)).resolves.toMatchObject({
+        result: { status: 'accepted', turnId: 'turn-1', active: true },
+      });
+    expect(ids[0]).toMatch(/^[0-9a-f]{32}$/);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
+    for (failure of ['inner', 'outer'] as const) {
+      await expect(read()).rejects.toThrow();
+      await expect(write('accept_input')).rejects.toThrow();
+    }
+  });
+
   it('negotiates blob persistence and read-classified encrypted diff calls', async () => {
     for (const [plane, protectedContent, supported, persist] of [
       ['local', false, true, false],
