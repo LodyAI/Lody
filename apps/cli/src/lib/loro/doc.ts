@@ -556,7 +556,14 @@ export class LoroDocumentManager {
   private startRoostCloudHistory(): void {
     const machineId = this.roostCloudHistoryMachineId;
     const cloud = this.roostCloudHistoryCloud;
-    if (!machineId || !cloud || !this.remoteStreamsAttached || this.roostCloudHistory) return;
+    if (
+      this.cleaningUp ||
+      !machineId ||
+      !cloud ||
+      !this.remoteStreamsAttached ||
+      this.roostCloudHistory
+    )
+      return;
     const target = (sessionId: SessionId) => ({
       workspaceId: this.workspaceId,
       machineId,
@@ -668,8 +675,11 @@ export class LoroDocumentManager {
     const current = this.roostCloudHistory;
     this.roostCloudHistory = undefined;
     if (!current) return;
-    current.unsubscribe();
-    await current.publisher.close();
+    try {
+      current.unsubscribe();
+    } finally {
+      await current.publisher.close();
+    }
   }
 
   /** Reader interest belongs to the daemon, never to a discovery request. */
@@ -2498,11 +2508,15 @@ export class LoroDocumentManager {
         )
       );
     };
+    const stopRoostHistory = this.closeRoostCloudHistory().catch((error) => {
+      recordFailure('Roost cloud history', error);
+    });
     try {
       await this.catalogSync?.close();
     } catch (error) {
       recordFailure('Catalog subscriptions', error);
     }
+    await stopRoostHistory;
     this.localDocRoomBridgeGeneration += 1;
     for (const docId of [...this.localDocRoomBridges.keys()]) {
       this.cancelLocalDocRoomBridge(docId);
