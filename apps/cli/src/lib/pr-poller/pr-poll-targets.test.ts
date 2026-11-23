@@ -1,3 +1,5 @@
+import { encryptedRuntimeCloudPort } from '../e2ee/runtime-cloud-port';
+import type { CloudPort, CloudGithubTokenManager } from '@lody/platform';
 import { LoroRepo } from 'loro-repo';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
@@ -347,7 +349,7 @@ describe('createLodyPrPollerWorkspace', () => {
     await workspace.dispose();
   });
 
-  it('publishes lifecycle as local metadata and projects independent remote observations through the real Repo', async () => {
+  it('publishes E2EE lifecycle through the real Repo with managed tokens and no hosted association', async () => {
     const repo = await LoroRepo.create({});
     const owner = sid('owner');
     const room = getSessionRoomId(owner);
@@ -357,16 +359,42 @@ describe('createLodyPrPollerWorkspace', () => {
       { url, status: 'open' },
       { url: other, status: 'draft' },
     ];
+    const manager = {
+      getWriteTokenInfoForRepo: async () => ({
+        token: 'synthetic-operation-token',
+        tokenSource: 'app',
+        rateLimitScope: 'github:installation:7',
+      }),
+      shutdown: async () => {},
+    } as unknown as CloudGithubTokenManager;
+    const port = encryptedRuntimeCloudPort(
+      {
+        githubTokens: { createTokenManager: () => manager },
+        prAssociation: {
+          associatePullRequest: async () => {
+            throw new Error('decrypted PR must never reach cloud');
+          },
+        },
+      } as unknown as CloudPort,
+      'user-1'
+    );
     const workspace = createLodyPrPollerWorkspace({
       documentManager: { repo } as unknown as LoroDocumentManager,
       workspaceId: 'workspace-1',
-      githubTokens: null,
-      prAssociation: null,
+      githubTokens: port.githubTokens,
+      prAssociation: port.prAssociation,
       userId: 'user-1',
       machineId: machineId('machine-1'),
       logger: createTestLogger(),
     });
     try {
+      expect(workspace.associatePullRequest).toBeNull();
+      await expect(workspace.resolveCredential('example/api')).resolves.toEqual({
+        token: 'synthetic-operation-token',
+        source: 'managed',
+        credentialScope: 'github:installation:7',
+      });
+
       await repo.upsertDocMeta(room, { machineId: 'machine-1', pullRequests: prs });
       const observed = planPullRequestLifecycle({
         url,

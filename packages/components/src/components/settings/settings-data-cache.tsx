@@ -1,6 +1,6 @@
 import { userAtom } from '@/atoms';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
@@ -152,13 +152,17 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
     'contentMode' in mode.descriptor &&
     mode.descriptor.contentMode === 'e2ee';
   const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
+  const githubStatus = useGithubWorkspaceStatus(currentWorkspaceId);
+  const githubManageStatus = useGithubWorkspaceStatus(currentWorkspaceId, true);
   const workspaceId =
     (legacyQueriesEnabled || encryptedUsageEnabled) && activeOrganization?.id === currentWorkspaceId
       ? currentWorkspaceId
       : null;
-  const canManageGithub = legacyQueriesEnabled && Boolean(workspaceId) && hasAdminPermission;
-
-  const githubWorkspaceId = legacyQueriesEnabled ? workspaceId : null;
+  const githubWorkspaceId = githubStatus === 'allowed' ? workspaceId : null;
+  const canManageGithub =
+    Boolean(githubWorkspaceId) &&
+    githubManageStatus === 'allowed' &&
+    (legacyQueriesEnabled ? hasAdminPermission : true);
   const canQuery = canRunAuthedWorkspaceQuery(githubWorkspaceId, isConvexAuthenticated);
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(githubWorkspaceId));
   const setWorkspaceReposCache = useSetAtom(setWorkspaceReposCacheAtom);
@@ -186,14 +190,14 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   ) as SettingsUsageCalendarData | undefined;
 
   // Preload GitHub workspace state once at settings-root level.
-  const repositories = useLegacyWorkspaceQuery(
+  const repositories = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   ) as SettingsWorkspaceRepository[] | undefined;
 
   // Reactive query for all repos with enabled status (used by settings integrations page).
   // Any workspace member can view; mutations (toggle) still require admin.
-  const workspaceReposWithStatus = useLegacyWorkspaceQuery(
+  const workspaceReposWithStatus = useGithubWorkspaceQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
     workspaceId ? { workspaceId } : 'skip'
   ) as SettingsWorkspaceRepoWithStatus[] | undefined | null;
@@ -204,7 +208,7 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   // repo list comes back. The shared helper waits on `isConvexAuthLoading`
   // so the spinner stays up across the reconnect window.
   const workspaceReposLoading =
-    (Boolean(currentWorkspaceId) && legacyQueryStatus === 'pending') ||
+    (Boolean(currentWorkspaceId) && githubStatus === 'pending') ||
     isAuthedWorkspaceQueryLoading({
       workspaceId: githubWorkspaceId,
       isConvexAuthLoading,
@@ -213,7 +217,7 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
     });
 
   useEffect(() => {
-    if (!workspaceId || !legacyQueriesEnabled) return;
+    if (!workspaceId || githubStatus !== 'allowed') return;
     if (workspaceReposWithStatus) {
       setWorkspaceReposCache({
         workspaceId,
@@ -233,13 +237,7 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
         })),
       });
     }
-  }, [
-    legacyQueriesEnabled,
-    repositories,
-    setWorkspaceReposCache,
-    workspaceId,
-    workspaceReposWithStatus,
-  ]);
+  }, [githubStatus, repositories, setWorkspaceReposCache, workspaceId, workspaceReposWithStatus]);
 
   const workspaceReposWithStatusOrCache = useMemo(() => {
     if (workspaceReposWithStatus) return workspaceReposWithStatus;
@@ -281,7 +279,7 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
     [
       canManageGithub,
       currentWorkspaceId,
-      legacyQueryStatus,
+      githubStatus,
       repositories,
       usageTimelineByRange,
       usageCalendar,

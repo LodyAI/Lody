@@ -1,9 +1,9 @@
-import { GitHubInstallationNotice } from '@/components/settings/github-installation-notice';
 import {
-  useLegacyWorkspaceAction,
-  useLegacyWorkspaceMutation,
-  useLegacyWorkspaceQuery,
-} from '@/hooks/use-legacy-workspace-query';
+  useGithubWorkspaceQuery,
+  useGithubWorkspaceMutation,
+  useGithubWorkspaceAction,
+} from '@/hooks/use-github-workspace';
+import { GitHubInstallationNotice } from '@/components/settings/github-installation-notice';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Badge } from '@lody/ui/badge';
@@ -183,18 +183,18 @@ function MobileCloudIntegrationsSettings() {
   const canAuthorizePersonalGitHub = Boolean(currentWorkspaceSlug);
 
   const [repoSearch, setRepoSearch] = useState('');
-  const personalOperationSettings = useLegacyWorkspaceQuery(
+  const personalOperationSettings = useGithubWorkspaceQuery(
     cloudOperations.github.getPersonalOperationSettings,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );
-  const createGitHubInstallState = useLegacyWorkspaceAction(
+  const createGitHubInstallState = useGithubWorkspaceAction(
     cloudOperations.github.createGitHubInstallState
   );
-  const setRepoEnabled = useLegacyWorkspaceMutation(cloudOperations.github.setRepoEnabled);
-  const setPersonalOperationPreference = useLegacyWorkspaceMutation(
+  const setRepoEnabled = useGithubWorkspaceMutation(cloudOperations.github.setRepoEnabled);
+  const setPersonalOperationPreference = useGithubWorkspaceMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useLegacyWorkspaceAction(
+  const refreshPersonalGitHubProfile = useGithubWorkspaceAction(
     cloudOperations.github.refreshPersonalGitHubProfile
   );
   const [installNeedsAuthorization, setInstallNeedsAuthorization] = useState(false);
@@ -441,10 +441,7 @@ function MobileCloudIntegrationsSettings() {
   ]);
 
   return (
-    <div
-      id="github"
-      {...stylex.props(styles.page, fold ? styles.foldPage : styles.unfoldPage)}
-    >
+    <div id="github" {...stylex.props(styles.page, fold ? styles.foldPage : styles.unfoldPage)}>
       <GitHubInstallationNotice
         needsAuthorization={
           installNeedsAuthorization && personalAuthorizationState !== 'authorized'

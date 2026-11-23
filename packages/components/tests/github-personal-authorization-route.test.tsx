@@ -42,10 +42,13 @@ vi.mock('../src/atoms', () => ({
 }));
 // The route fixture represents an admitted ordinary workspace; admission behavior
 // is exercised by workspace-legacy-queries.test.tsx, not the OAuth handoff assertions.
-vi.mock('../src/hooks/use-workspace-feature', () => ({
-  useLegacyWorkspaceQueryStatus: () => 'allowed',
-  useAssertLegacyWorkspaceAccess: () => () => 'synthetic-ordinary-admission',
-}));
+vi.mock('../src/hooks/use-github-workspace', async () => {
+  const platform = await import('@lody/platform/react');
+  return {
+    useGithubWorkspaceStatus: () => 'allowed',
+    useGithubWorkspaceAction: platform.useCloudAction,
+  };
+});
 vi.mock('../src/hooks/use-mobile', () => ({ useIsMobile: () => false }));
 vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: () => false }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));

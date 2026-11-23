@@ -20,6 +20,7 @@ import {
 import type { AutomationSessionAdmission } from '@/session/session-automation-authority';
 import type { SessionTurnInputConfig } from '@lody/shared';
 import { providerBindingFingerprint } from '@/session/automation-observations';
+import { pullRequestCheckpointId } from './sources/pull-requests';
 import { internalPolicy } from './policies/session';
 import { createRpcSecretRecipient, encryptRpcSecret } from '@lody/loro-streams-rpc';
 import {
@@ -59,7 +60,8 @@ async function workspaceFixture(
   quota?: {
     config: Parameters<typeof providerBindingFingerprint>[0];
     refresh: () => Promise<unknown>;
-  }
+  },
+  contentMode: 'plaintext' | 'e2ee' = 'plaintext'
 ) {
   const root = existingRoot ?? mkdtempSync(path.join(os.tmpdir(), 'lody-automation-owner-'));
   if (!existingRoot) roots.push(root);
@@ -123,7 +125,7 @@ async function workspaceFixture(
     lody: {
       documentManager: {
         repo,
-        isEncryptedWorkspace: () => false,
+        isEncryptedWorkspace: () => contentMode === 'e2ee',
         signMachineInput: async () => undefined,
         getOrCreateSessionDoc: async () => doc,
         getAgentConfigForMachineLaunch: async () => quota?.config,
@@ -132,7 +134,12 @@ async function workspaceFixture(
       resolveAutomationWorkdir: async () => root,
       getAutomationSessionAuthority: () => authority,
     } as unknown as Lody,
-    workspace: { id: 'workspace', name: 'synthetic', slug: 'synthetic' } as WorkspaceSummary,
+    workspace: {
+      id: 'workspace',
+      name: 'synthetic',
+      slug: 'synthetic',
+      contentMode,
+    } as WorkspaceSummary,
     auth: {
       machineId: 'machine',
       userId: 'user',
@@ -255,6 +262,41 @@ describe('Automation control authority', () => {
     await vi.advanceTimersByTimeAsync(1);
     await refreshed.promise;
     expect(host.ledger.receipt(receipt.id)?.state).not.toBe('settled');
+  });
+  it('enables local Auto delivery settings in an encrypted workspace', async () => {
+    const host = await workspaceFixture(undefined, undefined, undefined, undefined, 'e2ee');
+    const result = await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: { fixCi: true, resolveConflicts: true, merge: true } },
+    });
+    expect(result).toMatchObject({
+      autoDeliver: { fixCi: true, resolveConflicts: true, merge: true },
+    });
+    const url = 'https://github.com/owner/repo/pull/7';
+    await host.recordObservations(
+      { id: 'session-a' } as never,
+      'owner/repo',
+      [
+        {
+          number: 7,
+          url,
+          status: 'open',
+          headRefName: 'feature',
+          headSha: 'abc',
+          updatedAt: '2026-01-01T00:00:00Z',
+          ciState: 's',
+          mergeState: 'c',
+        },
+      ],
+      1
+    );
+    expect(host.ledger.checkpoint(pullRequestCheckpointId('session-a', url))?.data).toMatchObject({
+      prNumber: 7,
+      prUrl: url,
+      headSha: 'abc',
+      ciState: 's',
+    });
   });
   it('clears a finished Auto delivery status when it is dismissed after the merge', async () => {
     const meta = {

@@ -188,12 +188,13 @@ export function createE2eeContent(input: {
   // machine still applies its own ledger check to every signed request.
   let memberRole: E2eeRuntimeStatus['memberRole'] = null;
   const roleListeners = new Set<() => void>();
+  const verifiedMemberRole = () => (!closed && !lost ? (memberRole ?? null) : null);
   const codeCollabRole = (): 'read' | 'write' =>
     !closed && !lost && memberRole && memberRole !== 'guest' ? 'write' : 'read';
   const setMemberRole = (next: E2eeRuntimeStatus['memberRole']) => {
-    const before = codeCollabRole();
+    const before = verifiedMemberRole();
     memberRole = next;
-    if (codeCollabRole() === before) return;
+    if (verifiedMemberRole() === before) return;
     for (const listener of [...roleListeners]) {
       try {
         listener();
@@ -474,6 +475,15 @@ export function createE2eeContent(input: {
               ),
           }
         : {}),
+      memberRole: {
+        get: verifiedMemberRole,
+        subscribe: (listener: () => void) => {
+          roleListeners.add(listener);
+          return () => {
+            roleListeners.delete(listener);
+          };
+        },
+      },
       codeCollabRole: {
         get: codeCollabRole,
         subscribe: (listener: () => void) => {

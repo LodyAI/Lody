@@ -1,3 +1,4 @@
+import { assertGithubWorkspaceAccess } from '@/lib/github-workspace-admission';
 import i18next from 'i18next';
 import { Effect } from 'effect';
 import { makeAutomaticPairingRuntime } from '@lody/e2ee-client/automatic-pairing';
@@ -186,16 +187,19 @@ export function CloudPlatformProvider({
   const [uninstallGitHubTokenPort] = useState(() =>
     installGitHubTokenPort(
       createCloudGitHubTokenPort((workspaceId) =>
-        assertLegacyWorkspaceAccess({
-          workspaceId,
-          platformKind: 'cloud',
-          mode: atomStore.get(workspaceContentModeAtom),
-          runtime: atomStore.get(activeWorkspaceRuntimeAtom),
-          accountId: atomStore.get(userAtom)?.id ?? null,
-          currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
-          routeSlug: atomStore.get(currentWorkspaceSlugAtom),
-          workspacesState: workspacesStore.get(),
-        })
+        assertGithubWorkspaceAccess(
+          {
+            workspaceId,
+            platformKind: 'cloud',
+            mode: atomStore.get(workspaceContentModeAtom),
+            runtime: atomStore.get(activeWorkspaceRuntimeAtom),
+            accountId: atomStore.get(userAtom)?.id ?? null,
+            currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
+            routeSlug: atomStore.get(currentWorkspaceSlugAtom),
+            workspacesState: workspacesStore.get(),
+          },
+          'github:getOperationAccessTokenByRepoNameForClient'
+        )
       )
     )
   );
