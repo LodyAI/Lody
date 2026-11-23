@@ -111,7 +111,8 @@ export type TodayOutline = {
   getSubtree(rootId: TodayNodeId): TodayPageSnapshot | null;
   getNode(id: TodayNodeId): TodayNodeView | undefined;
   getText(id: TodayNodeId): LoroText | undefined;
-  insertFirst(text?: string): FocusIntent;
+  /** The first line of an empty page, or with `parentId` the first child of that node. */
+  insertFirst(text?: string, parentId?: TodayNodeId): FocusIntent;
   /** `intoChildren`: the new line becomes the first child (a zoomed root's title). */
   split(id: TodayNodeId, offset: number, options?: { intoChildren?: boolean }): FocusIntent;
   /** `within`: a zoomed root; its empty last child gets a sibling instead of leaving it. */
@@ -806,8 +807,12 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return node ? textOf(node) : undefined;
     },
 
-    insertFirst: (text = '') => {
-      const node = create(undefined, tree.roots().length, { text });
+    insertFirst: (text = '', parentId) => {
+      const parent = parentId ? live(parentId) : undefined;
+      if (parentId && !parent) return null;
+      const node = parent
+        ? create(parent, 0, { text })
+        : create(undefined, tree.roots().length, { text });
       commit();
       return { nodeId: node.id, offset: text.length };
     },
