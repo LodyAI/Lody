@@ -8,17 +8,35 @@ import { createRoostDirectoryRow, type SessionEntry } from '@lody/shared/session
 export const ROOST_HISTORY_CACHE_DB = 'lody:roost-history-v3';
 const HEADS = 'heads';
 const ROWS = 'rows';
+const MAX_RECENT_CHANGES = 16;
+
+type RoostCachedChange = {
+  checkpoint: string;
+  baseCheckpoint: string;
+  previousCount: number;
+  from: number | undefined;
+  ids: readonly string[];
+};
 
 export type RoostCachedHead = {
   checkpoint?: string;
   /** A covered change interval, usable only with complete bodies, never patches. */
   recoveryCheckpoint?: string;
+  /** Adjacent, verified changes ending at this head. A replacement clears coverage. */
+  changes?: readonly RoostCachedChange[];
   directoryRevision?: number;
   revision: number;
   count: number;
   start: number;
   slot: number;
 };
+export function roostCachedChangesSince(head: RoostCachedHead, checkpoint: string) {
+  const changes = head.changes;
+  if (!changes || changes.at(-1)?.checkpoint !== head.checkpoint) return undefined;
+  const start = changes.findIndex((change) => change.baseCheckpoint === checkpoint);
+  return start < 0 ? undefined : changes.slice(start);
+}
+
 const sameHead = (left: RoostCachedHead, right: RoostCachedHead) =>
   left.slot === right.slot &&
   left.count === right.count &&
@@ -153,6 +171,7 @@ export function createRoostHistoryCache(scope: string) {
             head,
             turns: rows.map((row) => row.turn),
             page: {
+              ...(head.checkpoint ? { checkpoint: head.checkpoint } : {}),
               startPosition: start,
               totalCount: head.count,
               rows: rows.map((row) => row.row),
@@ -167,6 +186,74 @@ export function createRoostHistoryCache(scope: string) {
       };
     });
 
+  const putPage = (
+    rows: IDBObjectStore,
+    slot: number,
+    page: SessionHistoryDirectoryPage,
+    turns: readonly SessionHistoryInput[]
+  ) => {
+    page.rows.forEach((row, i) =>
+      rows.put({
+        scope,
+        slot,
+        position: row.position,
+        turnId: turns[i]!.id,
+        row,
+        turn: turns[i]!,
+      } satisfies CachedRow)
+    );
+  };
+
+  const retainOlderPage = (
+    base: RoostCachedHead,
+    from: number,
+    turns: readonly SessionHistoryInput[]
+  ) =>
+    transact<SessionHistoryDirectoryPage | undefined>('readwrite', (tx, done) => {
+      const heads = tx.objectStore(HEADS);
+      const request = heads.get(key('head'));
+      request.onsuccess = () => {
+        const head = request.result as RoostCachedHead | undefined;
+        const end = from + turns.length;
+        if (
+          !head?.checkpoint ||
+          !base.checkpoint ||
+          head.slot !== base.slot ||
+          end < head.start ||
+          end > head.count
+        )
+          return done(undefined);
+        if (head.checkpoint !== base.checkpoint) {
+          const changes = roostCachedChangesSince(head, base.checkpoint);
+          if (!changes) return done(undefined);
+          const ids = new Set(turns.map((turn) => turn.id));
+          // A changed suffix before this page can shift its positions. Body
+          // changes also apply to turns that neither reader has loaded yet.
+          if (
+            changes.some(
+              (change) =>
+                (change.from !== undefined && change.from < end) ||
+                change.ids.some((id) => ids.has(id))
+            )
+          )
+            return done(undefined);
+        }
+        const page: SessionHistoryDirectoryPage = {
+          checkpoint: head.checkpoint,
+          startPosition: from,
+          totalCount: head.count,
+          rows: turns.map((turn, offset) =>
+            createRoostDirectoryRow(from + offset, turn as SessionEntry)
+          ),
+          hasMoreOlder: from > 0,
+          cursor: from > 0 ? roostCacheCursor(head.revision, from) : null,
+        };
+        putPage(tx.objectStore(ROWS), head.slot, page, turns);
+        if (from < head.start) heads.put({ ...head, start: from }, key('head'));
+        done(page);
+      };
+    });
+
   /** Commit a coherent window atomically. A reset replaces only the latest
    * window; invalidated older pages are fetched when a reader needs them. */
   const acceptPage = (
@@ -174,7 +261,8 @@ export function createRoostHistoryCache(scope: string) {
     turns: readonly SessionHistoryInput[],
     revision: number,
     change?: SessionHistoryChange | null,
-    replaceHead?: RoostCachedHead
+    replaceHead?: RoostCachedHead,
+    ownerReset = false
   ) =>
     transact<boolean>('readwrite', (tx, done) => {
       if (
@@ -187,22 +275,12 @@ export function createRoostHistoryCache(scope: string) {
       const heads = tx.objectStore(HEADS);
       const store = tx.objectStore(ROWS);
       const request = heads.get(key('head'));
-      const put = (slot: number) => {
-        page.rows.forEach((row, i) =>
-          store.put({
-            scope,
-            slot,
-            position: row.position,
-            turnId: turns[i]!.id,
-            row,
-            turn: turns[i]!,
-          } satisfies CachedRow)
-        );
-      };
+      const put = (slot: number) => putPage(store, slot, page, turns);
       request.onsuccess = () => {
         const head = request.result as RoostCachedHead | undefined;
         if (replaceHead && (!head || !sameHead(head, replaceHead))) return done(false);
-        if (head && head.revision > revision) return done(false);
+        if (head && head.revision > revision && !(ownerReset && replaceHead && page.checkpoint))
+          return done(false);
         if (!replaceHead && head?.revision === revision && head.count !== page.totalCount) {
           tx.abort();
           return;
@@ -245,6 +323,7 @@ export function createRoostHistoryCache(scope: string) {
               {
                 ...head,
                 checkpoint,
+                changes: checkpoint === head.checkpoint ? head.changes : undefined,
                 recoveryCheckpoint: checkpoint
                   ? undefined
                   : (head.checkpoint ?? head.recoveryCheckpoint),
@@ -286,6 +365,7 @@ export function createRoostHistoryCache(scope: string) {
             {
               ...head,
               revision,
+              changes: undefined,
               directoryRevision:
                 change?.kind === 'structure' ? revision : (head.directoryRevision ?? head.revision),
               checkpoint,
@@ -327,6 +407,7 @@ export function createRoostHistoryCache(scope: string) {
     getHead,
     readPage,
     readRows,
+    retainOlderPage,
     readCompleteDirectory: (expected: RoostCachedHead) =>
       transact<SessionDirectoryRow[] | undefined>('readonly', (tx, done) => {
         const request = tx.objectStore(HEADS).get(key('head'));
@@ -373,7 +454,7 @@ export function createRoostHistoryCache(scope: string) {
       checkpoint: string,
       from: number | undefined,
       replacements: readonly { position: number; turn: SessionHistoryInput }[],
-      completeBodies = false
+      options: { completeBodies?: boolean; changedIds?: readonly string[] } = {}
     ) =>
       transact<boolean>('readwrite', (tx, done) => {
         const heads = tx.objectStore(HEADS);
@@ -383,7 +464,7 @@ export function createRoostHistoryCache(scope: string) {
           const head = request.result as RoostCachedHead | undefined;
           if (
             !head ||
-            !(head.checkpoint || (completeBodies && head.recoveryCheckpoint)) ||
+            !(head.checkpoint || (options.completeBodies && head.recoveryCheckpoint)) ||
             !sameHead(head, expected) ||
             revision < head.revision
           )
@@ -429,6 +510,19 @@ export function createRoostHistoryCache(scope: string) {
               start,
               checkpoint,
               recoveryCheckpoint: undefined,
+              changes:
+                head.checkpoint && options.changedIds && options.changedIds.length <= 500
+                  ? [
+                      ...(head.changes ?? []).slice(1 - MAX_RECENT_CHANGES),
+                      {
+                        checkpoint,
+                        baseCheckpoint: head.checkpoint,
+                        previousCount: head.count,
+                        from,
+                        ids: options.changedIds,
+                      },
+                    ]
+                  : undefined,
               directoryRevision:
                 from === undefined ? (head.directoryRevision ?? head.revision) : revision,
             },
@@ -463,6 +557,7 @@ export function createRoostHistoryCache(scope: string) {
               ...head,
               revision,
               checkpoint: undefined,
+              changes: undefined,
               recoveryCheckpoint: head.checkpoint ?? head.recoveryCheckpoint,
               directoryRevision: head.directoryRevision ?? head.revision,
             },

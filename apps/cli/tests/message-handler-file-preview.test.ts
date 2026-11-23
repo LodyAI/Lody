@@ -179,10 +179,7 @@ describe('MessageHandler file preview workspace lifecycle', () => {
     ['local-project/git-state', { localProjectId: 'synthetic', requestedByUserId: 'user-1' }],
     ['local-project/list-branches', { localProjectId: 'synthetic', requestedByUserId: 'user-1' }],
     ['session/history-read', { sessionId, query: { kind: 'count' } }],
-    [
-      'session/history-watch',
-      { sessionId, query: { kind: 'watchChanges', checkpoint: 'synthetic', waitMs: 100 } },
-    ],
+    ['session/history-subscribe', { sessionId, subscription: { action: 'open', id: 'synthetic' } }],
     ['code-collab/open-current-diff', { sessionId, path: 'artifact.txt' }],
     ['code-collab/open-all-changes-diff', { sessionId }],
     ['code-collab/open-turn-diff', { sessionId, path: 'artifact.txt', turnId: 'synthetic' }],

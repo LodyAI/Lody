@@ -62,9 +62,9 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
   ordinary admission (default 128); overload replies are separately bounded.
   History writes and `CONTROL_METHODS` have reserved pools, independent of reads.
   Serialize mutations in their owner service, not the request loop.
-  `session/history-watch` retains owner encryption and readiness checks. Bound its
-  separate admission at 128; checkpoint waits hold no ordinary read permit. Acquire
-  that permit only for the subsequent body/change read. Stop aborts parked waits.
+  Subscriptions verify owner encryption and current read authorization per frame.
+  Bound their separate admission at 128. Checkpoint waits hold no read permit
+  and stop on cancellation.
 - Control handlers stay fast: `session/dispatch-turn` stashes/wakes, never executes
   an agent inline. Its TTL equals the client deadline, bounding restart replay.
   Stop fences queued handlers; retain started work until its raw completion.

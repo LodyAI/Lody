@@ -2081,6 +2081,10 @@ export const SessionPreviewEndpointReleaseResponseSchema = z
 
 export const SESSION_HISTORY_READ_MAX_RANGE = 500;
 export const SESSION_HISTORY_READ_MAX_PAGE = 500;
+export const SESSION_HISTORY_SUBSCRIPTION_LEASE_MS = 45_000;
+export const SESSION_HISTORY_SUBSCRIPTION_TIMEOUT_MS = 55_000;
+export const SESSION_HISTORY_SUBSCRIPTION_MAX_DELTA_BYTES = 16 * 1024;
+export const SESSION_HISTORY_SUBSCRIPTION_MAX_PUBLICATIONS = 64;
 
 export const SessionHistoryReadQuerySchema = z
   .discriminatedUnion('kind', [
@@ -2111,15 +2115,6 @@ export const SessionHistoryReadQuerySchema = z
       .strict(),
     z
       .object({ kind: z.literal('readReplayPrompt'), excludeTurnId: z.string().optional() })
-      .strict(),
-    z
-      .object({
-        kind: z.literal('watchChanges'),
-        checkpoint: z.string().min(1).max(1024),
-        includeBodiesFrom: z.number().int().nonnegative().optional(),
-        withPatches: z.literal(true).optional(),
-        waitMs: z.number().int().nonnegative().max(15_000),
-      })
       .strict(),
     z
       .object({
@@ -2322,6 +2317,64 @@ export const SessionHistoryReadResponseSchema = z
     }
   });
 
+export const SessionHistorySubscriptionSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('open'),
+      id: z.uuid(),
+      checkpoint: z.string().min(1).max(1024).optional(),
+      includeBodiesFrom: z.number().int().nonnegative().optional(),
+      withPatches: z.literal(true).optional(),
+    })
+    .strict(),
+  z.object({ action: z.literal('close'), id: z.uuid() }).strict(),
+]);
+
+export const SessionHistorySubscriptionRequestSchema = z
+  .object({
+    type: z.literal('session/history-subscription'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    subscription: SessionHistorySubscriptionSchema,
+  })
+  .strict();
+
+const historySubscriptionResponse = z.object({
+  type: z.literal('session/history-subscription_response'),
+  sessionId: SessionIdSchema,
+  subscriptionId: z.uuid(),
+});
+
+export const SessionHistorySubscriptionResponseSchema = z.discriminatedUnion('event', [
+  historySubscriptionResponse
+    .extend({
+      event: z.literal('publication'),
+      publication: z
+        .object({
+          checkpoint: z.string().min(1).max(1024),
+          revision: z.number().int().nonnegative(),
+          delta: z
+            .object({
+              baseCheckpoint: z.string().min(1).max(1024),
+              includeBodiesFrom: z.number().int().nonnegative(),
+              withPatches: z.literal(true).optional(),
+              response: SessionHistoryReadResponseSchema,
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  historySubscriptionResponse
+    .extend({
+      event: z.literal('closed'),
+      error: SharedOptionalStringSchema,
+    })
+    .strict(),
+]);
+
 export const SessionHistoryWriteOperationSchema = z.enum([
   'append',
   'accept_input',
@@ -2395,6 +2448,7 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionImageResolveLocalRequestSchema,
   SessionAttachmentPrepareRequestSchema,
   SessionHistoryReadRequestSchema,
+  SessionHistorySubscriptionRequestSchema,
   SessionHistoryWriteRequestSchema,
   PreviewCandidateReportRequestSchema,
   SessionPreviewCreateRequestSchema,
@@ -2434,6 +2488,7 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionImageResolveLocalResponseSchema,
   SessionAttachmentPrepareResponseSchema,
   SessionHistoryReadResponseSchema,
+  SessionHistorySubscriptionResponseSchema,
   SessionHistoryWriteResponseSchema,
   PreviewCandidateReportResponseSchema,
   SessionPreviewCreateResponseSchema,

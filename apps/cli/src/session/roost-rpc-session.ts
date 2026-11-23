@@ -7,6 +7,8 @@ import {
   type SessionHistoryInput,
   type SessionHistoryReadQuery,
   type SessionHistoryReadResponse,
+  type SessionHistoryPublication,
+  type SessionHistorySubscription,
   type SessionHistoryWriteOperation,
   type SessionHistoryWriteResponse,
 } from '@lody/shared';
@@ -29,6 +31,11 @@ import type { RoostSessionBackendServices } from './roost-session-backend';
 /** A command client has no native history owner, even when it runs on that machine. */
 export type RoostSessionRpc = {
   readonly coherentInspection?: boolean;
+  subscribe?: (
+    subscription: Extract<SessionHistorySubscription, { action: 'open' }>,
+    onPublication: (publication: SessionHistoryPublication) => void,
+    signal: AbortSignal
+  ) => Promise<void>;
   read(query: SessionHistoryReadQuery): Promise<SessionHistoryReadResponse>;
   write(
     operation: SessionHistoryWriteOperation,
@@ -171,47 +178,72 @@ export function createRoostRpcSessionServices(
   };
   let disposed = false;
   let checkpoint: string | undefined;
-  let watchRevision = -1;
-  let watching = false;
+  let observedRevision = -1;
+  let subscription: AbortController | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   const observeHead = (response: SessionHistoryReadResponse, next: string) => {
-    if ((response.historyRevision ?? -1) < watchRevision) return;
-    watchRevision = response.historyRevision ?? watchRevision;
+    if ((response.historyRevision ?? -1) < observedRevision) return;
+    observedRevision = response.historyRevision ?? observedRevision;
     checkpoint = next;
   };
-  const startWatch = () => {
-    if (disposed || !listeners.size || watching || retry || !checkpoint) return;
-    watching = true;
-    const from = checkpoint;
-    let delay = 0;
-    void (async () => {
-      const response = await readResponse({
-        kind: 'watchChanges',
-        checkpoint: from,
-        waitMs: 15_000,
-      });
-      if (disposed || !listeners.size) return;
-      const change = SessionHistoryChangesSchema.parse(response.result);
-      observeHead(response, change.checkpoint);
-      if (change.state === 'reset') {
-        notify({ kind: 'structure', from: 0, to: response.historyCount ?? 0 });
-      } else {
-        if (change.from !== undefined)
-          notify({ kind: 'structure', from: change.from, to: response.historyCount ?? 0 });
-        if (change.ids.length) notify({ kind: 'changed', ids: change.ids });
-      }
-    })()
+  const startSubscription = () => {
+    if (!rpc.subscribe || disposed || !listeners.size || subscription || retry || !checkpoint)
+      return;
+    const controller = new AbortController();
+    subscription = controller;
+    let queued = Promise.resolve();
+    let failed = false;
+    const onPublication = (publication: SessionHistoryPublication) => {
+      queued = queued
+        .then(async () => {
+          if (
+            controller.signal.aborted ||
+            disposed ||
+            !listeners.size ||
+            publication.checkpoint === checkpoint
+          )
+            return;
+          const response = await readResponse({ kind: 'readChanges', checkpoint: checkpoint! });
+          if (controller.signal.aborted || disposed || !listeners.size) return;
+          const change = SessionHistoryChangesSchema.parse(response.result);
+          if (change.state === 'reset') {
+            checkpoint = change.checkpoint;
+            observedRevision = response.historyRevision ?? -1;
+            notify({ kind: 'structure', from: 0, to: response.historyCount ?? 0 });
+          } else {
+            observeHead(response, change.checkpoint);
+            if (change.from !== undefined)
+              notify({ kind: 'structure', from: change.from, to: response.historyCount ?? 0 });
+            if (change.ids.length) notify({ kind: 'changed', ids: change.ids });
+          }
+        })
+        .catch(() => {
+          failed = true;
+          controller.abort();
+        });
+    };
+    void rpc
+      .subscribe(
+        { action: 'open', id: crypto.randomUUID(), checkpoint },
+        onPublication,
+        controller.signal
+      )
       .catch((error) => {
-        delay = 250;
-        if (!disposed && listeners.size) console.error('Owner history observation failed', error);
+        failed = true;
+        if (!controller.signal.aborted && !disposed && listeners.size)
+          console.error('Owner history subscription failed', error);
       })
-      .finally(() => {
-        watching = false;
+      .finally(async () => {
+        await queued;
+        subscription = undefined;
         if (!disposed && listeners.size)
-          retry = setTimeout(() => {
-            retry = undefined;
-            startWatch();
-          }, delay);
+          retry = setTimeout(
+            () => {
+              retry = undefined;
+              startSubscription();
+            },
+            failed ? 250 : 0
+          );
       });
   };
   const readEntries = async (query: SessionHistoryReadQuery) =>
@@ -252,7 +284,7 @@ export function createRoostRpcSessionServices(
         const page = response.result as SessionHistoryDirectoryPage;
         if (!page.checkpoint) throw new Error('Owner history checkpoint is unavailable');
         observeHead(response, page.checkpoint);
-        startWatch();
+        startSubscription();
         return page;
       });
       return {
@@ -260,6 +292,7 @@ export function createRoostRpcSessionServices(
         initialPage,
         unsubscribe: () => {
           listeners.delete(listener);
+          if (!listeners.size) subscription?.abort();
           if (!listeners.size && retry) {
             clearTimeout(retry);
             retry = undefined;
@@ -392,6 +425,7 @@ export function createRoostRpcSessionServices(
     setPlan: unsupported,
     dispose: () => {
       disposed = true;
+      subscription?.abort();
       if (retry) clearTimeout(retry);
       listeners.clear();
     },

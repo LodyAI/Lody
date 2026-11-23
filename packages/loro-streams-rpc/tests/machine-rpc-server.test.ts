@@ -141,7 +141,7 @@ const createFakeStreamClient = () => {
 describe('LoroStreamsMachineRpcServer', () => {
   it.each([
     ['read', 'metadata'],
-    ['watch', 'metadata'],
+    ['subscribe', 'metadata'],
     ['write', 'metadata'],
     ['write', 'authorization'],
     ['write', 'claim'],
@@ -191,8 +191,8 @@ describe('LoroStreamsMachineRpcServer', () => {
           operations.push('read');
           return { type: 'session/history-read_response', sessionId, success: true, result: [] };
         },
-        waitForSessionHistoryChanges: async () => {
-          operations.push('watch');
+        subscribeSessionHistory: async () => {
+          operations.push('subscribe');
         },
         authorizeSessionHistoryWrite: async () => {
           if (phase === 'authorization' || phase === 'proof') {
@@ -218,8 +218,8 @@ describe('LoroStreamsMachineRpcServer', () => {
               machineId: 'synthetic-machine',
               replyTo: 'synthetic-reply',
               method:
-                kind === 'watch'
-                  ? 'session/history-watch'
+                kind === 'subscribe'
+                  ? 'session/history-subscribe'
                   : kind === 'read'
                     ? 'session/history-read'
                     : 'session/history-write',
@@ -229,13 +229,14 @@ describe('LoroStreamsMachineRpcServer', () => {
                 'synthetic-session',
                 kind === 'read'
                   ? { sessionId: 'synthetic-session', query: { kind: 'count' } }
-                  : kind === 'watch'
+                  : kind === 'subscribe'
                     ? {
                         sessionId: 'synthetic-session',
-                        query: {
-                          kind: 'watchChanges',
+                        readProof: 'synthetic-proof',
+                        subscription: {
+                          action: 'open',
+                          id: crypto.randomUUID(),
                           checkpoint: 'synthetic-checkpoint',
-                          waitMs: 15_000,
                         },
                       }
                     : { sessionId: 'synthetic-session', operation: 'append', payload: {} }
@@ -4070,7 +4071,7 @@ it('delivers Provider quota refresh results for the exact persisted config', asy
   }
 });
 
-it('bounds checkpoint waits separately from reads, sends and controls', async () => {
+it('bounds owner subscriptions separately from reads, sends and controls', async () => {
   const fake = createFakeStreamClient();
   let enter!: () => void, releaseWait!: () => void;
   const entered = {
@@ -4098,7 +4099,7 @@ it('bounds checkpoint waits separately from reads, sends and controls', async ()
     refreshMachineAcpCapabilities: vi.fn(),
     historyRequestRejections: createHistoryRejectionStore(),
     resolveSessionHistoryOwnerSessionId: async (id) => id,
-    waitForSessionHistoryChanges: async ({ signal }) => {
+    subscribeSessionHistory: async ({ signal }) => {
       if (++active === 128) entered.resolve();
       try {
         await release.promise;
@@ -4143,25 +4144,28 @@ it('bounds checkpoint waits separately from reads, sends and controls', async ()
     sentAt: 1,
     expiresAt: 30_001,
   };
-  const watch = async (id: string) => ({
+  const subscribe = async (id: string) => ({
     ...base,
     id,
-    method: 'session/history-watch',
+    method: 'session/history-subscribe',
     params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
       sessionId: 'synthetic-session',
-      query: { kind: 'watchChanges', checkpoint: 'checkpoint-1', waitMs: 15_000 },
+      readProof: 'synthetic-proof',
+      subscription: { action: 'open', id: crypto.randomUUID(), checkpoint: 'checkpoint-1' },
     }),
   });
   await server.start();
   try {
     fake.pushBatch({
-      messages: await Promise.all(Array.from({ length: 128 }, (_, i) => watch(`watch-${i}`))),
+      messages: await Promise.all(
+        Array.from({ length: 128 }, (_, i) => subscribe(`subscription-${i}`))
+      ),
       upToDate: true,
     });
     await entered.promise;
     fake.pushBatch({
       messages: [
-        await watch('overflow'),
+        await subscribe('overflow'),
         {
           ...base,
           id: 'ordinary',
@@ -4206,11 +4210,12 @@ it('bounds checkpoint waits separately from reads, sends and controls', async ()
     release.resolve();
     await fake.waitForAppendedCount(132);
     expect(active).toBe(0);
-    const watched = fake.appended.find(({ value }) => (value as { id: string }).id === 'watch-0')!
-      .value as { result: CodeCollabV2RpcContentEnvelope };
-    expect(await decryptCodeCollabV2RpcPayload(watched.result, 'synthetic-session')).toMatchObject({
-      success: true,
-      result: { checkpoint: 'checkpoint-2', ids: ['synthetic-body'] },
+    const closed = fake.appended.find(
+      ({ value }) => (value as { id: string }).id === 'subscription-0'
+    )!.value as { result: CodeCollabV2RpcContentEnvelope };
+    expect(await decryptCodeCollabV2RpcPayload(closed.result, 'synthetic-session')).toMatchObject({
+      type: 'session/history-subscription_response',
+      event: 'closed',
     });
   } finally {
     release.resolve();
@@ -4218,94 +4223,96 @@ it('bounds checkpoint waits separately from reads, sends and controls', async ()
   }
 });
 
-it('negotiates the encrypted checkpoint watch method through the real Machine RPC client', async () => {
-  const requests = createFakeStreamClient(),
-    responses = createFakeStreamClient();
-  const forward =
-    (destination: ReturnType<typeof createFakeStreamClient>) =>
-    async (_id: string, value: unknown) => {
-      destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
-      return '1';
-    };
-  let enter!: () => void, releaseWait!: () => void;
-  const entered = {
-    promise: new Promise<void>((resolve) => {
-      enter = resolve;
-    }),
-    resolve: () => enter(),
-  };
-  const release = {
-    promise: new Promise<void>((resolve) => {
-      releaseWait = resolve;
-    }),
-    resolve: () => releaseWait(),
-  };
-  const workspaceId = 'synthetic-workspace' as WorkspaceId,
-    machineId = 'synthetic-machine' as MachineId;
-  const sessionId = 'synthetic-session' as SessionId;
-  const wire: unknown[] = [];
-  const server = new LoroStreamsMachineRpcServer({
-    workspaceId,
-    machineId,
-    logger: createSilentLogger(),
-    streamClient: { ...requests.streamClient, appendJson: forward(responses) },
-    getMachineStatus: vi.fn(),
-    refreshMachineAcpCapabilities: vi.fn(),
-    historyRequestRejections: createHistoryRejectionStore(),
-    resolveSessionHistoryOwnerSessionId: async (id) => id,
-    waitForSessionHistoryChanges: async ({ checkpoint }) => {
-      expect(checkpoint).toBe('checkpoint-1');
-      entered.resolve();
-      await release.promise;
-    },
-    authorizeSessionHistoryRead: async () => true,
-    readSessionHistory: async ({ sessionId: targetSessionId, query }) => {
-      expect(query.kind).toBe('readChanges');
-      return {
-        type: 'session/history-read_response',
-        sessionId: targetSessionId,
-        success: true,
-        historyRevision: 3,
-        historyCount: 1,
-        result: { state: 'ready', checkpoint: 'checkpoint-3', ids: ['synthetic-body'] },
+it.each([true, false])(
+  'streams owner checkpoints and checks the current read grant before delivery (allowed: %s)',
+  async (allowed) => {
+    const requests = createFakeStreamClient();
+    const responses = createFakeStreamClient();
+    const forward =
+      (destination: ReturnType<typeof createFakeStreamClient>) =>
+      async (_id: string, value: unknown) => {
+        destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+        return '1';
       };
-    },
-  });
-  const client = new LoroStreamsMachineRpcClient({
-    workspaceId,
-    machineId,
-    streamClient: {
-      ...responses.streamClient,
-      appendJson: async (id, value) => {
-        wire.push(value);
-        return forward(requests)(id, value);
+    let release!: () => void;
+    let first!: () => void;
+    const waitForRelease = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waitForFirst = new Promise<void>((resolve) => {
+      first = resolve;
+    });
+    const workspaceId = 'synthetic-workspace' as WorkspaceId;
+    const machineId = 'synthetic-machine' as MachineId;
+    const sessionId = 'synthetic-session' as SessionId;
+    const subscriptionId = crypto.randomUUID();
+    const wire: unknown[] = [];
+    const checkpoints: string[] = [];
+    let current = true;
+    const server = new LoroStreamsMachineRpcServer({
+      workspaceId,
+      machineId,
+      logger: createSilentLogger(),
+      streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      historyRequestRejections: createHistoryRejectionStore(),
+      resolveSessionHistoryOwnerSessionId: async (id) => id,
+      authorizeSessionHistoryRead: async ({ readProof }) =>
+        current && readProof === 'synthetic-proof',
+      subscribeSessionHistory: async ({ subscription, signal, publish }) => {
+        if (subscription.action !== 'open') throw new Error('Unexpected close');
+        await publish({ checkpoint: subscription.checkpoint!, revision: 1 }, signal);
+        await waitForRelease;
+        await publish({ checkpoint: 'owner-2', revision: 2 }, signal);
       },
-    },
-  });
-  await server.start();
-  try {
-    const result = client.requestSessionHistoryRead({
-      sessionId,
-      query: { kind: 'watchChanges', checkpoint: 'checkpoint-1', waitMs: 15_000 },
     });
-    await entered.promise;
-    expect(wire[0]).toMatchObject({
-      method: 'session/history-watch',
-      params: { ownerSessionId: sessionId },
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId,
+      machineId,
+      streamClient: {
+        ...responses.streamClient,
+        appendJson: async (id, value) => {
+          wire.push(value);
+          return forward(requests)(id, value);
+        },
+      },
     });
-    expect(JSON.stringify(wire)).not.toContain('checkpoint-1');
-    release.resolve();
-    expect(await result).toMatchObject({
-      success: true,
-      historyRevision: 3,
-      result: { checkpoint: 'checkpoint-3' },
-    });
-  } finally {
-    release.resolve();
-    client.stop();
-    server.stop();
+    await server.start();
+    try {
+      const subscription = client.requestSessionHistorySubscription({
+        sessionId,
+        readProof: 'synthetic-proof',
+        subscription: { action: 'open', id: subscriptionId, checkpoint: 'owner-1' },
+        onPublication: ({ checkpoint }) => {
+          checkpoints.push(checkpoint);
+          first();
+        },
+      });
+      await waitForFirst;
+      expect(checkpoints).toEqual(['owner-1']);
+      expect(wire[0]).toMatchObject({
+        method: 'session/history-subscribe',
+        params: { ownerSessionId: sessionId },
+      });
+      expect(JSON.stringify(wire)).not.toMatch(/owner-1|synthetic-proof/);
+      current = allowed;
+      release();
+      const result = await subscription;
+      if (allowed) {
+        expect(result).toMatchObject({ event: 'closed', subscriptionId });
+        expect(checkpoints).toEqual(['owner-1', 'owner-2']);
+      } else {
+        expect(result).toMatchObject({ event: 'closed', error: 'session_history_read_denied' });
+        expect(checkpoints).toEqual(['owner-1']);
+      }
+    } finally {
+      release();
+      client.stop();
+      server.stop();
+    }
   }
-});
+);
 
 it('keeps stop and steer responsive while automation proof verification is blocked', async () => {
   const fake = createFakeStreamClient();
@@ -4724,7 +4731,7 @@ it('admits a session-only read proof without lending it to another session or wr
   }
 });
 
-it('preserves encrypted history watch semantics through the real feature adapter without entering writes', async () => {
+it('preserves encrypted point-in-time history semantics through the real feature adapter without entering writes', async () => {
   const observed: string[] = [];
   const server = new LoroStreamsMachineRpcServer({
     workspaceId: 'workspace' as WorkspaceId,
@@ -4734,9 +4741,6 @@ it('preserves encrypted history watch semantics through the real feature adapter
     getMachineStatus: vi.fn(),
     refreshMachineAcpCapabilities: vi.fn(),
     resolveSessionHistoryOwnerSessionId: async (id) => id,
-    waitForSessionHistoryChanges: async () => {
-      observed.push('wait');
-    },
     readSessionHistory: async ({ sessionId, query }) => {
       observed.push(query.kind);
       return {
@@ -4760,7 +4764,7 @@ it('preserves encrypted history watch semantics through the real feature adapter
         workspaceId: 'workspace',
         params: {
           sessionId: 'root' as SessionId,
-          query: { kind: 'watchChanges', checkpoint: 'previous', waitMs: 100 },
+          query: { kind: 'readChanges', checkpoint: 'previous' },
         },
       },
       {
@@ -4778,68 +4782,61 @@ it('preserves encrypted history watch semantics through the real feature adapter
         result: { checkpoint: 'next' },
       },
     });
-    expect(observed).toEqual(['wait', 'readChanges']);
+    expect(observed).toEqual(['readChanges']);
   } finally {
     server.stop();
   }
 });
 
-it.each(['wait', 'read'] as const)(
-  'drops encrypted history when authority is withdrawn during %s',
-  async (phase) => {
-    let current = true;
-    const observed: string[] = [];
-    const server = new LoroStreamsMachineRpcServer({
-      workspaceId: 'workspace' as WorkspaceId,
-      machineId: 'machine' as MachineId,
-      now: () => 1,
-      logger: createSilentLogger(),
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-      resolveSessionHistoryOwnerSessionId: async (id) => id,
-      waitForSessionHistoryChanges: async () => {
-        observed.push('wait');
-        if (phase === 'wait') current = false;
-      },
-      readSessionHistory: async ({ sessionId, query }) => {
-        observed.push(query.kind);
-        if (phase === 'read') current = false;
-        return {
-          type: 'session/history-read_response',
-          sessionId,
-          success: true,
-          historyRevision: 1,
-          historyCount: 0,
-          result: { state: 'ready', checkpoint: 'next', ids: [] },
-        };
-      },
-      writeSessionHistory: async () => {
-        throw new Error('history read started a write');
-      },
-    });
-    try {
-      const result = await server.readFeatureQuery(
-        {
-          method: 'session/history-read',
-          machineId: 'machine',
-          workspaceId: 'workspace',
-          params: {
-            sessionId: 'root' as SessionId,
-            query: { kind: 'watchChanges', checkpoint: 'previous', waitMs: 100 },
-          },
+it('drops encrypted history when authority is withdrawn during an in-flight read', async () => {
+  let current = true;
+  const observed: string[] = [];
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'workspace' as WorkspaceId,
+    machineId: 'machine' as MachineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    resolveSessionHistoryOwnerSessionId: async (id) => id,
+    readSessionHistory: async ({ sessionId, query }) => {
+      observed.push(query.kind);
+      current = false;
+      return {
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        historyRevision: 1,
+        historyCount: 0,
+        result: { state: 'ready', checkpoint: 'next', ids: [] },
+      };
+    },
+    writeSessionHistory: async () => {
+      throw new Error('history read started a write');
+    },
+  });
+  try {
+    const result = await server.readFeatureQuery(
+      {
+        method: 'session/history-read',
+        machineId: 'machine',
+        workspaceId: 'workspace',
+        params: {
+          sessionId: 'root' as SessionId,
+          query: { kind: 'readChanges', checkpoint: 'previous' },
         },
-        {
-          requestId: 'synthetic',
-          expiresAt: 1000,
-          signal: new AbortController().signal,
-          authority: { isCurrent: () => current, signal: new AbortController().signal },
-        }
-      );
-      expect(result).toMatchObject({ ok: false, code: 'session_history_read_denied' });
-      expect(JSON.stringify(result)).not.toContain('checkpoint');
-      expect(observed).toEqual(phase === 'wait' ? ['wait'] : ['wait', 'readChanges']);
-    } finally {
-      server.stop();
-    }
+      },
+      {
+        requestId: 'synthetic',
+        expiresAt: 1000,
+        signal: new AbortController().signal,
+        authority: { isCurrent: () => current, signal: new AbortController().signal },
+      }
+    );
+    expect(result).toMatchObject({ ok: false, code: 'session_history_read_denied' });
+    expect(JSON.stringify(result)).not.toContain('checkpoint');
+    expect(observed).toEqual(['readChanges']);
+  } finally {
+    server.stop();
   }
-);
+});

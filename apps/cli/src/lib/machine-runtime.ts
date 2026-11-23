@@ -333,7 +333,7 @@ export class MachineRuntime {
 
     this.messageProcessor.stop();
     this.handler?.cancelPendingPermissionRequests();
-    this.handler?.cancelPendingHistoryWatches();
+    this.handler?.cancelPendingHistorySubscriptions();
     await this.prepareForShutdown();
     await this.messageProcessor.drainWithTimeout(5000);
 
