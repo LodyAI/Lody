@@ -95,6 +95,15 @@ function updatePersistedState(
   return write;
 }
 
+function trackerApiKey(
+  config:
+    | Readonly<Record<string, string | number | boolean | null | undefined>>
+    | undefined,
+): string | undefined {
+  const raw = config?.TRACKER_API_KEY;
+  return typeof raw === "string" ? raw : undefined;
+}
+
 async function fetchTrackerIssues(
   apiKey: string | undefined,
   pinnedIds: ReadonlySet<string>,
@@ -131,7 +140,7 @@ export default defineMachinePlugin((machine) => {
         ctx.project ? state.pinnedByProject[ctx.project.projectId] ?? [] : [],
       );
       const items = await fetchTrackerIssues(
-        ctx.env.TRACKER_API_KEY,
+        trackerApiKey(ctx.config),
         pinned,
         query,
         ctx.signal,
@@ -145,7 +154,7 @@ export default defineMachinePlugin((machine) => {
     },
     async resolve(ctx, itemId) {
       const items = await fetchTrackerIssues(
-        ctx.env.TRACKER_API_KEY,
+        trackerApiKey(ctx.config),
         new Set(),
         "",
         ctx.signal,
@@ -165,7 +174,7 @@ export default defineMachinePlugin((machine) => {
     const state = await readPersistedState(ctx.dataDir);
     const pinned = new Set(state.pinnedByProject[ctx.target.projectId] ?? []);
     return fetchTrackerIssues(
-      ctx.env.TRACKER_API_KEY,
+      trackerApiKey(ctx.config),
       pinned,
       input.query,
       ctx.signal,

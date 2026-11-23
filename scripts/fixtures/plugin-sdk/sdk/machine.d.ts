@@ -77,14 +77,10 @@ export interface MachineHostPort {
   };
 }
 
-export interface MachineContext<
-  S extends MachinePluginScope = MachinePluginScope,
-> {
-  readonly target: ScopeTarget<S>;
-  readonly machine: MachineRef;
+export interface MachineBaseContext {
   readonly workspace: WorkspaceRef;
+  readonly machine: MachineRef;
   readonly dataDir: string;
-  readonly env: Readonly<Record<string, string | undefined>>;
   readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
   readonly signal: AbortSignal;
   readonly lody: MachineHostPort;
@@ -94,40 +90,24 @@ export interface MachineContext<
   ): void;
 }
 
-export interface ToolExecutionContext {
+export interface MachineContext<
+  S extends MachinePluginScope = MachinePluginScope,
+> extends MachineBaseContext {
+  readonly target: ScopeTarget<S>;
+}
+
+export interface ToolExecutionContext extends MachineBaseContext {
   readonly toolCallId: string;
   readonly session: SessionRef;
   readonly project?: ProjectRef;
-  readonly machine: MachineRef;
-  readonly workspace: WorkspaceRef;
-  readonly dataDir: string;
-  readonly env: Readonly<Record<string, string | undefined>>;
-  readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
-  readonly signal: AbortSignal;
-  readonly lody: MachineHostPort;
-  invalidate<QS extends MachinePluginScope>(
-    descriptor: QueryDescriptor<QS, z.ZodType, z.ZodType>,
-    target?: ScopeTarget<QS>,
-  ): void;
 }
 
 export interface MachineEventContext<
   K extends MachineHostEventType = MachineHostEventType,
-> {
+> extends MachineBaseContext {
   readonly eventType: K;
-  readonly workspace: WorkspaceRef;
-  readonly machine: MachineRef;
   readonly session?: SessionRef;
   readonly project?: ProjectRef;
-  readonly dataDir: string;
-  readonly env: Readonly<Record<string, string | undefined>>;
-  readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
-  readonly signal: AbortSignal;
-  readonly lody: MachineHostPort;
-  invalidate<QS extends MachinePluginScope>(
-    descriptor: QueryDescriptor<QS, z.ZodType, z.ZodType>,
-    target?: ScopeTarget<QS>,
-  ): void;
 }
 
 /**
@@ -135,29 +115,11 @@ export interface MachineEventContext<
  * a daemon restart or `reload`), enabling workflow plugins to reconcile durable `ctx.dataDir`
  * progress journals against live `lodyQueries.sessions` and resume unfinished steps idempotently.
  */
-export interface MachineStartupContext {
-  readonly workspace: WorkspaceRef;
-  readonly machine: MachineRef;
-  readonly dataDir: string;
-  readonly env: Readonly<Record<string, string | undefined>>;
-  readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
-  readonly signal: AbortSignal;
-  readonly lody: MachineHostPort;
-  invalidate<QS extends MachinePluginScope>(
-    descriptor: QueryDescriptor<QS, z.ZodType, z.ZodType>,
-    target?: ScopeTarget<QS>,
-  ): void;
-}
+export interface MachineStartupContext extends MachineBaseContext {}
 
-export interface AttachmentContext {
+export interface AttachmentContext extends MachineBaseContext {
   readonly session?: SessionRef;
   readonly project?: ProjectRef;
-  readonly machine: MachineRef;
-  readonly workspace: WorkspaceRef;
-  readonly dataDir: string;
-  readonly env: Readonly<Record<string, string | undefined>>;
-  readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
-  readonly signal: AbortSignal;
 }
 
 export interface MachinePluginRegistry {

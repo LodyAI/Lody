@@ -21,7 +21,7 @@ Verification and implementation compliance are divided into four profiles (Secti
 
 - **Core Conformance (`REQUIRED`):** Mandatory across **Desktop (`Electron`)**, **Web Browser (`web`)**, **Headless CLI (`headless`)**, and **Mobile Capacitor (`apps/mobile-capacitor` inline cards, events, and declarative config)**. Covers package validation, per-plugin subprocess isolation, `Drain-Before-Respawn`, single-layer IPC, remote `client.js` bundle streaming (`<= 4 MiB` paged chunks + `clientDigest` trust gate), Host Events (`client` + `machine`), Universal Tool & Message Block Renderers, Three-Layer Sidebars, Two-Tier Themes + Managed CSS, Workflow `agentRoles` + `skills` + `mcpServers`, Typed `lodyQueries` + Raw Read-Only Snapshots (`useLodySnapshot` / `readSnapshot`), Declarative `manifest.config` + `onboarding`, Agent-Assisted `lody_plugin` `propose_*` approval cards, and E2EE security gates.
 - **Workflow Provider Conformance (`Conditional`):** **REQUIRED** when enabling `manifest.acpProviders` (custom bundled ACP Agent runtimes such as Sorbet Super Assistant launched via `acp-session-start-gate.ts`). Specified in full in v1 so workflow contracts are unified from day one.
-- **Mobile Extended UI Conformance (`Conditional`):** **REQUIRED** when a mobile host advertises `HostCapabilities.surfaces.fullScreenViews`, `customSidebars`, or `sessionPanels` (`true`) to mount full-screen plugin views inside mobile drawers/sheets.
+- **Mobile Extended UI Conformance (`Conditional`):** **REQUIRED** when a mobile host advertises `HostCapabilities.containers.sidebarViews`, `sessionPanels`, `screens`, or `projectPages` (`true`) to mount shell container views inside mobile drawers/sheets.
 - **Real Integration Profile (`REQUIRED` for Production Release):** Mandatory unmocked OS subprocess (`SIGTERM`/`SIGKILL`, OOM/crash, `--dev` compiler reaping) and real multi-client (Electron + headless Web + mobile viewport) E2E acceptance suite (Section 16.8).
 
 ### 1.2 Implementation-Defined Items
@@ -118,12 +118,12 @@ flowchart TB
 
 ### 3.3 Cross-Device Execution Topologies
 
-| Topology                                                    | Client Bundle Delivery                                                                  | UI Surfaces Active                                                                                                                                                                                                               | Machine Execution                                                              |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **`desktop` (`Electron`)**                                  | Local verified bundle or remote `MachineRpc` paged chunks (`Core`)                      | All surfaces (`inlineCards`, `declarativeConfig`, `fullScreenViews`, `customSidebars`, `sessionPanels`, `audioPlayback`)                                                                                                         | Local or remote daemon via `WorkspaceMachineRpcFacade`                         |
-| **`web` (`Browser`)**                                       | Remote `MachineRpc` `plugin/bundle-chunk` (`<= 4 MiB`, `clientDigest`-verified, `Core`) | **Exact parity with `desktop`** (`fullScreenViews`, `customSidebars`, `sessionPanels`, `inlineCards`, `declarativeConfig`, `audioPlayback`)                                                                                      | Remote daemon via `WorkspaceMachineRpcFacade`                                  |
-| **`mobile` (`apps/mobile-capacitor`, iOS 16.4+ / Android)** | Remote `MachineRpc` `plugin/bundle-chunk` (`Core`)                                      | `Core`: `inlineCards` (`tools.render`, `tools.matchRender`, `messages.renderBlock`), `events`, `declarativeConfig`. `Conditional`: `fullScreenViews` / `customSidebars` / `sessionPanels` negotiated via `useHostCapabilities()` | Remote daemon via `WorkspaceMachineRpcFacade`                                  |
-| **`headless` (`CLI`)**                                      | skipped (`client` not evaluated)                                                        | N/A                                                                                                                                                                                                                              | Full `machine`, `events`, `agentRoles`, `skills`, `mcpServers`, `acpProviders` |
+| Topology                                                    | Client Bundle Delivery                                                                  | UI Surfaces Active                                                                                                                                                                                                                                             | Machine Execution                                                              |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **`desktop` (`Electron`)**                                  | Local verified bundle or remote `MachineRpc` paged chunks (`Core`)                      | All Core inline contributions + all shell `containers` (`sidebarViews`, `sessionPanels`, `screens`, `projectPages`)                                                                                                                                            | Local or remote daemon via `WorkspaceMachineRpcFacade`                         |
+| **`web` (`Browser`)**                                       | Remote `MachineRpc` `plugin/bundle-chunk` (`<= 4 MiB`, `clientDigest`-verified, `Core`) | **Exact parity with `desktop`** (all Core inline contributions + all shell `containers`: `sidebarViews`, `sessionPanels`, `screens`, `projectPages`)                                                                                                           | Remote daemon via `WorkspaceMachineRpcFacade`                                  |
+| **`mobile` (`apps/mobile-capacitor`, iOS 16.4+ / Android)** | Remote `MachineRpc` `plugin/bundle-chunk` (`Core`)                                      | `Core`: inline session/composer contributions (`tools`, `messages`, `composer`, `sidebar.sessionRow`), `events`, `manifest.config`. `Conditional`: shell `containers` (`sidebarViews`, `sessionPanels`, `screens`, `projectPages`) via `useHostCapabilities()` | Remote daemon via `WorkspaceMachineRpcFacade`                                  |
+| **`headless` (`CLI`)**                                      | skipped (`client` not evaluated)                                                        | N/A                                                                                                                                                                                                                                                            | Full `machine`, `events`, `agentRoles`, `skills`, `mcpServers`, `acpProviders` |
 
 ---
 
@@ -166,7 +166,7 @@ flowchart TB
 - **Declarative `config` & `onboarding`:**
   - Supports `string`, `secret`, `number`, `boolean`, and `select` fields with `scope: "client" | "machine" | "both"`.
   - Any field with `type: "secret"` MUST have `scope: "machine"` (or omit `scope`, defaulting to `"machine"`); manifests declaring a `"client"` or `"both"` secret MUST be rejected at validation time (`manifest_invalid`).
-  - `onboarding` lists `config` / `env` keys surfaced in Lody's native First-Run Setup Sheet when enabling the plugin.
+  - `onboarding` lists `config` keys surfaced in Lody's native First-Run Setup Sheet when enabling the plugin (consolidating legacy separate `env` declarations into `manifest.config`).
 - **Workflow Fields:** `skills` (`skills/<name>/SKILL.md`), `agentRoles` (Role metadata + `promptPath` + `skills` + `mcpServers` + `defaultProvider`), `mcpServers` (`stdio` | `http` out-of-daemon entrypoints), and `acpProviders` (bundled ACP server entrypoints).
 
 ### 5.3 Normative Byte & Resource Budgets
@@ -198,9 +198,9 @@ Conforming hosts MUST provide a first-class, push-based event bus on both `Clien
    - Event delivery is **non-blocking observer fan-out**: a slow or throwing listener in Plugin A MUST NOT delay Session execution, block UI interaction, or prevent Plugin B from receiving the event.
    - Machine event handlers have a `30_000 ms` execution deadline (`ctx.signal` aborts on timeout or plugin shutdown); unhandled rejections log to `logs_ring` and record a diagnostic without crashing sibling plugins.
    - All client event listeners registered by an instance MUST be automatically detached when `abort_controller.abort()` fires on disablement or `clientDigest` replacement.
-4. **Managed Client Assets & Audio (`lody.assets.url`, `lody.audio.play`):**
-   - `lody.assets.url(relativePath)` resolves packaged `assets/*` across Electron local protocols, Web `plugin/bundle-chunk` caches, and Mobile Capacitor WebViews.
-   - `lody.audio.play(relativePath, { volume })` plays packaged audio cues through Lody's shared Web Audio controller, respecting global user mute settings, browser autoplay unlock, and `lody --safe-mode`.
+4. **Orthogonal Asset & Lifecycle Primitives (`lody.assets.url`, `lody.signal`):**
+   - `lody.assets.url(relativePath)` resolves packaged `assets/*` uniformly across Electron local protocols, Web `plugin/bundle-chunk` caches, and Mobile Capacitor WebViews.
+   - `lody.signal: AbortSignal` aborts automatically on plugin disablement or `clientDigest` hot-swap so plugins compose standard Web Platform APIs (`AudioContext` / `HTMLAudioElement`, `Canvas`, `fetch`, timers) directly without inventing scenario-specific SDK namespaces (such as `lody.audio`).
 
 ### 6.2 Universal Tool Call Matchers & Structured Message Block Renderers
 
@@ -228,8 +228,8 @@ Plugins MUST NOT be restricted to rendering only their own `defineTool` descript
    - `sidebar.headerItems` / `footerItems`: Navigation rows using `<SidebarRow />` paired with `screens.add`.
    - `sidebar.views.add`: Selectable sidebar bodies alongside Lody's built-in `"Default"` view; disabling the active view reverts immediately to `"Default"`.
 2. **Cross-Device Capability Negotiation (`useHostCapabilities()`):**
-   - Plugins write **one unified client codebase** against `@lody/plugin-sdk/client` and inspect `useHostCapabilities()` (`platform: "desktop" | "web" | "mobile"`, `formFactor: "wide" | "compact"`, `surfaces`).
-   - In `Core Conformance`, **both `desktop` and `web` MUST enable all client surfaces (`inlineCards`, `declarativeConfig`, `fullScreenViews`, `customSidebars`, `sessionPanels`, `audioPlayback`)**; `mobile` (`apps/mobile-capacitor`) MUST enable `inlineCards`, `events`, and `declarativeConfig` in Core, and exposes `fullScreenViews` / `customSidebars` / `sessionPanels` when `Mobile Extended UI Conformance` is active. Registering an unsupported surface on a compact host MUST NOT throw — the host records `capability_unavailable_on_platform` in diagnostics while keeping supported surfaces (`inlineCards`, `events`, `config`) active.
+   - Plugins write **one unified client codebase** against `@lody/plugin-sdk/client` and inspect `useHostCapabilities()` (`platform: "desktop" | "web" | "mobile"`, `formFactor: "wide" | "compact"`, `containers: { sidebarViews, sessionPanels, screens, projectPages }`), where `containers` maps 1:1 to `ClientPluginRegistry` shell mount namespaces rather than mixing feature flags or machine presence.
+   - Inline session/composer contributions (`tools`, `messages`, `composer`, `sidebar.sessionRow`), `events`, and `manifest.config` are `Core Conformance` invariants across `desktop`, `web`, and `mobile`. Both `desktop` and `web` MUST also enable all shell `containers` (`sidebarViews`, `sessionPanels`, `screens`, `projectPages`) in Core; `mobile` (`apps/mobile-capacitor`) exposes them when `Mobile Extended UI Conformance` is active. Registering an unmounted shell container on a compact host MUST NOT throw — the host records `capability_unavailable_on_platform` in diagnostics while keeping inline contributions, `events`, and `config` active.
 
 ### 6.4 Two-Tier Appearance System
 
@@ -242,7 +242,7 @@ A single plugin package MAY ship an end-to-end multi-Agent workflow:
 
 1. **Skills (`manifest.skills`):** Exposed to Agent Role pickers and `CreateSessionRequest.skillIds` while enabled.
 2. **Agent Roles (`manifest.agentRoles` — `Core Conformance`):** Registered as `plugin:<plugin_id>:<role_id>`, binding system prompt markdown (`promptPath`), bundled `skills`, bundled `mcpServers`, and optional `defaultProvider`. Shown in Lody's Role selector with plugin provenance badge; editing creates a user Role override without mutating the plugin package.
-3. **Out-of-Daemon MCP Servers (`manifest.mcpServers` — `Core Conformance`):** Spawned per Agent Session through Lody's standard MCP harness ([`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md) invariant: **MCP tools MUST NOT run inside the daemon process**), receiving only minimal OS env plus declared `envKeys` from the plugin's `env`/`config`.
+3. **Out-of-Daemon MCP Servers (`manifest.mcpServers` — `Core Conformance`):** Spawned per Agent Session through Lody's standard MCP harness ([`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md) invariant: **MCP tools MUST NOT run inside the daemon process**), receiving only minimal OS env plus `envKeys` resolved from the plugin's declared `manifest.config`.
 4. **Custom ACP Agent Providers (`manifest.acpProviders` — `Workflow Provider Conformance`):** Launched through `acp-session-start-gate.ts` (`LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`) as `plugin:<plugin_id>:<provider_id>`, speaking Lody's standard ACP protocol (`newSession`, `loadSession`, `subagentEvents`, `configOptions`, permission/elicitation bridges). Enables Sorbet Super Assistant and domain-specific harnesses to run as native Lody Session drivers without forking `apps/cli/src/agent`.
 
 ---
@@ -319,7 +319,7 @@ Source-linked `--dev` plugins compile inside `DevPluginCompiler`, which exits au
 
 `PluginHost` and the `machine` subprocess communicate over `stdio: ['ignore', 'pipe', 'pipe', 'ipc']`:
 
-- **Host -> Child:** `init` (`pluginId`, `instanceId`, `dataDir`, `env`, `config`), `start` (dispatched once after `ready` to invoke `machine.onStart`), `invoke` (`callId`, `kind`, `descriptorId`, `scope`, `target`, `input`), `event` (`eventId`, `eventType`, `payload`, `rootUserTurnId?`), `cancel` (`callId`), `host_result` (`hostCallId`, `ok`, `data`/`error`), `shutdown` (`graceMs`).
+- **Host -> Child:** `init` (`pluginId`, `instanceId`, `dataDir`, `config`), `start` (dispatched once after `ready` to invoke `machine.onStart`), `invoke` (`callId`, `kind`, `descriptorId`, `scope`, `target`, `input`), `event` (`eventId`, `eventType`, `payload`, `rootUserTurnId?`), `cancel` (`callId`), `host_result` (`hostCallId`, `ok`, `data`/`error`), `shutdown` (`graceMs`).
 - **Child -> Host:** `ready` (`handlers`, `subscribedEvents`), `result` (`callId`, `ok`, `data`/`error`), `invalidate` (`descriptorId`, `scope`, `target?`), `host_call` (`hostCallId`, `op`: `"lody.read" | "lody.readSnapshot" | "sessions.create" | "sessions.send" | "sessions.requestStop" | "sessions.requestArchive"`, `payload`).
 - `stdout` and `stderr` are strictly diagnostic pipes captured into `logs_ring`; malformed IPC frames kill the child and transition to `Faulted`.
 
@@ -410,7 +410,7 @@ Before enabling an untrusted plugin or a new remote `clientDigest`, Lody MUST pr
 - `Provides Agent Role / MCP / ACP Runtime` (`agentRoles`, `mcpServers`, `acpProviders`)
 - `Customizes Tool / Message Rendering` (`client`)
 - `Applies Theme / Custom Stylesheet` (`themes`, `styles`)
-- `Requires Secret Credentials` (`config` / `env` secrets)
+- `Requires Secret Credentials` (`manifest.config` `secret` fields)
 
 ### 12.2 Agent-Assisted Plugin Authoring & Propose-Confirm Workflow (`lody_plugin` MCP)
 
@@ -423,7 +423,7 @@ Users MUST be able to ask any Lody Agent _"Build me a plugin that..."_ and go fr
 ### 12.3 Declarative Settings UI & First-Run Onboarding
 
 - Plugins declaring `manifest.config` automatically get a native Lody Settings panel (text inputs, masked keychain secret inputs, numeric sliders/steppers, switches, and select dropdowns) on Desktop, Web, and Mobile without writing custom Settings React code.
-- If `manifest.onboarding` is present or any `required: true` `config` / `env` field is unset when enabling the plugin, Lody automatically opens the **First-Run Setup Sheet** and transitions the plugin to `Running` immediately upon submission. Plugins MAY additionally register `lody.settings.pages.add` for advanced custom views.
+- If `manifest.onboarding` is present or any `required: true` `manifest.config` field is unset when enabling the plugin, Lody automatically opens the **First-Run Setup Sheet** and transitions the plugin to `Running` immediately upon submission. Plugins MAY additionally register `lody.settings.pages.add` for advanced custom views.
 
 ### 12.4 Cross-Device Continuity & Recovery UX
 
@@ -438,12 +438,12 @@ Users MUST be able to ask any Lody Agent _"Build me a plugin that..."_ and go fr
 ### 13.1 Human-Confirmed Lifecycle Gate & Subprocess Environment Minimization
 
 - Only interactive human UI actions (Settings / `plugin_proposal` Approve button) or authenticated human CLI commands (`LODY_AGENT_SESSION_ID` absent) MAY activate or reload plugin code.
-- Spawned `machine`, `mcpServers`, and `acpProviders` child processes MUST receive a scrubbed environment (`PATH`, `HOME`, `TMPDIR`, `LANG`, `TZ`, `NODE_ENV`) plus ONLY keys declared in that plugin's own `manifest.env` / `manifest.config`. Daemon E2EE signing keys, KEKs, cloud auth tokens, and sibling plugins' secrets MUST NEVER enter child `process.env`.
+- Spawned `machine`, `mcpServers`, and `acpProviders` child processes MUST receive a scrubbed environment (`PATH`, `HOME`, `TMPDIR`, `LANG`, `TZ`, `NODE_ENV`) plus ONLY `envKeys` explicitly referencing that plugin's own declared `manifest.config`. Daemon E2EE signing keys, KEKs, cloud auth tokens, and sibling plugins' secrets MUST NEVER enter child `process.env`.
 
 ### 13.2 Client Bundle Trust & `lody --safe-mode`
 
 - Remote `clientDigest` bundles on Web, Mobile, and collaborator Desktops require explicit per-`(workspace_id, plugin_id, clientDigest)` trust approval before evaluating `client.js`.
-- Launching with `lody --safe-mode` (or `?safeMode=1` on Web) MUST skip all `client.js` evaluation, `themes`, `styles`, and `audio` while keeping core Session viewing, permissions, and `Stop` operational.
+- Launching with `lody --safe-mode` (or `?safeMode=1` on Web) MUST skip all `client.js` evaluation, `themes`, and `styles` while keeping core Session viewing, permissions, and `Stop` operational.
 
 ### 13.3 E2EE Guest (`read`) vs Non-Guest Execution Gate
 
@@ -500,7 +500,7 @@ Per [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee
 
 ### 14.4 Operator Intervention Points
 
-1. `lody --safe-mode` / `?safeMode=1` (bypasses all client plugin JS, themes, styles, and audio).
+1. `lody --safe-mode` / `?safeMode=1` (bypasses all client plugin JS, themes, and styles).
 2. Host header `"View Raw Output"` / `"View Raw Markdown"` toggle on every matched tool/message block.
 3. `lody plugin disable <id>`, `lody plugin reload <id>`, `lody plugin rollback <id>`, `lody plugin doctor <path>`, and `lody plugin logs <id>`.
 
@@ -708,7 +708,7 @@ Validation profiles follow Section 1.1: Sections 16.1–16.6 are `Core Conforman
 
 ### 16.3 Core Conformance — Extensibility: Events, Universal Renderers, Sidebars & Themes
 
-- **Product Scenario — Sound Effect Plugin:** Client-only plugin subscribes to `ui.message.submitted`, `session.turn.completed`, and `session.waiting_input`, reads declarative `config` (`pack`, `volume`), plays packaged cues via `lody.audio.play`, and detaches `100%` of listeners upon disablement.
+- **Product Scenario — Sound Effect Plugin:** Client-only plugin composes `lody.events.on` (`ui.message.submitted`, `session.turn.completed`, `session.waiting_input`), declarative `config` (`pack`, `volume`), `lody.assets.url`, `lody.signal`, and standard Web Audio (`AudioContext` / `HTMLAudioElement`) with zero audio-specific SDK wrappers, pausing active clips on `signal` abort and detaching `100%` of listeners upon disablement.
 - **Product Scenario — Universal Tool & Block Renderers:** `tools.matchRender` matches Claude/Codex/MCP `execute` test runs by priority, renders interactive failure triage cards, records `matcher_shadowed` for lower-priority contenders, always exposes the host `"View Raw Output"` toggle, falls back cleanly via `SurfaceErrorBoundary` on throw, and preserves `ai-gui` prose-only search and turn-folding invariants; `messages.renderBlock` streams and settles fenced artifact blocks identically.
 - **Sidebars & Two-Tier Appearance:** Three-layer sidebars compose across `"Default"` and custom views; `--*` theme tokens and disposable `<style>` sheets apply and revert cleanly; `lody --safe-mode` bypasses all client plugin execution and stylesheets.
 
@@ -731,7 +731,7 @@ Validation profiles follow Section 1.1: Sections 16.1–16.6 are `Core Conforman
 ### 16.7 Conditional Conformance — Workflow ACP Providers & Mobile Extended UI
 
 - **`Workflow Provider Conformance`:** Bundled `manifest.acpProviders` (e.g., Sorbet Super Assistant) launch via `acp-session-start-gate.ts`, support `newSession` / `loadSession` / `subagentEvents` / `configOptions`, obey per-session stop/cancel, and run strictly outside the daemon process.
-- **`Mobile Extended UI Conformance`:** Mobile hosts advertising `surfaces.fullScreenViews` / `customSidebars` / `sessionPanels` mount plugin views inside mobile drawer/sheet containers respecting `--safe-area-bottom` and `--native-keyboard-height` ([`apps/mobile-capacitor/AGENTS.md`](../apps/mobile-capacitor/AGENTS.md)).
+- **`Mobile Extended UI Conformance`:** Mobile hosts advertising `containers.sidebarViews` / `sessionPanels` / `screens` / `projectPages` mount plugin views inside mobile drawer/sheet containers respecting `--safe-area-bottom` and `--native-keyboard-height` ([`apps/mobile-capacitor/AGENTS.md`](../apps/mobile-capacitor/AGENTS.md)).
 
 ### 16.8 Real Integration Profile — Unmocked OS Subprocess & Multi-Client E2E Suite
 

@@ -1,9 +1,3 @@
-export interface PluginEnvField {
-  readonly description: string;
-  readonly required?: boolean;
-  readonly secret?: boolean;
-}
-
 export interface PluginSelectOption {
   readonly value: string;
   readonly label: string;
@@ -58,7 +52,7 @@ export type PluginConfigField = {
 export interface PluginOnboardingSpec {
   readonly title: string;
   readonly summary?: string;
-  /** Keys from `config` or `env` prompted in Lody's native first-run setup sheet upon enablement. */
+  /** Keys from `config` prompted in Lody's native first-run setup sheet upon enablement. */
   readonly fields: readonly string[];
 }
 
@@ -91,7 +85,7 @@ export interface PluginMcpServerContribution {
   /** Relative path to the bundled Node MCP server entrypoint inside the plugin package. */
   readonly entry: string;
   readonly args?: readonly string[];
-  /** Declared `env` / `config` keys forwarded to this MCP server subprocess. */
+  /** Declared `config` keys (`string` or `secret`) forwarded as environment variables to this MCP server subprocess. */
   readonly envKeys?: readonly string[];
 }
 
@@ -106,6 +100,7 @@ export interface PluginAcpProviderContribution {
   readonly description?: string;
   /** Relative path to the bundled ACP server entrypoint inside the plugin package. */
   readonly entry: string;
+  /** Declared `config` keys (`string` or `secret`) forwarded as environment variables to this ACP provider subprocess. */
   readonly envKeys?: readonly string[];
   readonly capabilities?: {
     readonly loadSession?: boolean;
@@ -178,5 +173,4 @@ export interface PluginManifest {
   readonly styles?: readonly string[];
   /** Optional packaged static assets (audio cues, icons, fonts) served across Desktop, Web, and Mobile. */
   readonly assets?: readonly string[];
-  readonly env?: Readonly<Record<string, PluginEnvField>>;
 }

@@ -39,6 +39,8 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
     void ctx.target.projectId;
     // @ts-expect-error Separate `sessionDataDir` was collapsed into `ctx.dataDir` keyed by immutable IDs.
     void ctx.sessionDataDir;
+    // @ts-expect-error Duplicate `ctx.env` was unified into `ctx.config`.
+    void ctx.env;
     return { count: limit };
   });
 

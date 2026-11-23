@@ -21,7 +21,7 @@ Translation: current
 
 - **Core Conformance（`REQUIRED` 必选核心合规）：** 同时强制覆盖 **桌面端（`Electron`）**、**Web 浏览器端（`web`）**、**无头守护进程端（`headless`）** 以及 **移动端 Capacitor（`apps/mobile-capacitor` 的内联卡片、事件与声明式配置）**。涵盖包校验、单插件子进程隔离、`Drain-Before-Respawn`、单层 IPC、远程 `client.js` 产物分页流式传输（`<= 4 MiB` 分片 + `clientDigest` 信任门禁）、宿主事件总线（`client` + `machine`）、通用工具与结构化消息块渲染器、三层侧边栏、双层主题与托管 CSS、Workflow `agentRoles` + `skills` + `mcpServers`、类型化 `lodyQueries` + 只读原始状态树快照（`useLodySnapshot` / `readSnapshot`）、声明式 `manifest.config` + 首次启用 `onboarding`、Agent 辅助创建与 `lody_plugin` `propose_*` 人类确认卡片，以及 E2EE 安全门禁。
 - **Workflow Provider Conformance（`Conditional` 条件合规）：** 当启用 `manifest.acpProviders`（如 Sorbet Super Assistant 这类打包自定义 ACP Agent 运行时、经 `acp-session-start-gate.ts` 拉起的能力）时 **REQUIRED**。在 v1 规范与 SDK 中完整定义，保证工作流契约从第一天起高度统一。
-- **Mobile Extended UI Conformance（`Conditional` 条件合规）：** 当移动端宿主声明 `HostCapabilities.surfaces.fullScreenViews`、`customSidebars` 或 `sessionPanels` 为 `true`（在移动端抽屉/半屏面板中挂载全屏插件视图）时 **REQUIRED**。
+- **Mobile Extended UI Conformance（`Conditional` 条件合规）：** 当移动端宿主声明 `HostCapabilities.containers.sidebarViews`、`sessionPanels`、`screens` 或 `projectPages` 为 `true`（在移动端抽屉/半屏容器中挂载外壳视图）时 **REQUIRED**。
 - **Real Integration Profile（投产发布 `REQUIRED` 必选真实集成验证）：** 零 Mock 的真实 OS 子进程（`SIGTERM`/`SIGKILL`、崩溃与 `--dev` 编译器回收）以及跨端（Electron + 无头 Web + 移动视口）真实 E2E 验收套件（第 16.8 节）。
 
 ### 1.2 实现自定义项（Implementation-Defined Items）
@@ -118,12 +118,12 @@ flowchart TB
 
 ### 3.3 跨设备运行拓扑规范
 
-| 运行拓扑                                                     | 前端产物分发方式                                                                               | 激活的 UI 扩展面                                                                                                                                                                                                                 | 机器侧执行路径                                                                     |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| **`desktop`（`Electron`）**                                  | 本地已校验产物或远程 `MachineRpc` 分页流（`Core`）                                             | 全部扩展面（`inlineCards`、`declarativeConfig`、`fullScreenViews`、`customSidebars`、`sessionPanels`、`audioPlayback`）                                                                                                          | 本地或远程 `WorkspaceMachineRpcFacade`                                             |
-| **`web`（浏览器）**                                          | 远程 `MachineRpc` `plugin/bundle-chunk`（`<= 4 MiB`，经 `clientDigest` 校验，**纳入 `Core`**） | **与 `desktop` 100% 对等**（`fullScreenViews`、`customSidebars`、`sessionPanels`、`inlineCards`、`declarativeConfig`、`audioPlayback`）                                                                                          | 远程 `WorkspaceMachineRpcFacade`                                                   |
-| **`mobile`（`apps/mobile-capacitor`，iOS 16.4+ / Android）** | 远程 `MachineRpc` `plugin/bundle-chunk`（`Core`）                                              | `Core`：`inlineCards`（`tools.render`、`tools.matchRender`、`messages.renderBlock`）、`events`、`declarativeConfig`。`Conditional`：通过 `useHostCapabilities()` 协商开放 `fullScreenViews` / `customSidebars` / `sessionPanels` | 远程 `WorkspaceMachineRpcFacade`                                                   |
-| **`headless`（`CLI`）**                                      | 跳过前端产物加载                                                                               | 不适用                                                                                                                                                                                                                           | 完整支持 `machine`、`events`、`agentRoles`、`skills`、`mcpServers`、`acpProviders` |
+| 运行拓扑                                                     | 前端产物分发方式                                                                               | 激活的 UI 扩展面                                                                                                                                                                                                                                           | 机器侧执行路径                                                                     |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **`desktop`（`Electron`）**                                  | 本地已校验产物或远程 `MachineRpc` 分页流（`Core`）                                             | 全部 Core 内联扩展 + 全部外壳容器 `containers`（`sidebarViews`、`sessionPanels`、`screens`、`projectPages`）                                                                                                                                               | 本地或远程 `WorkspaceMachineRpcFacade`                                             |
+| **`web`（浏览器）**                                          | 远程 `MachineRpc` `plugin/bundle-chunk`（`<= 4 MiB`，经 `clientDigest` 校验，**纳入 `Core`**） | **与 `desktop` 100% 对等**（全部 Core 内联扩展 + 全部外壳容器 `containers`：`sidebarViews`、`sessionPanels`、`screens`、`projectPages`）                                                                                                                   | 远程 `WorkspaceMachineRpcFacade`                                                   |
+| **`mobile`（`apps/mobile-capacitor`，iOS 16.4+ / Android）** | 远程 `MachineRpc` `plugin/bundle-chunk`（`Core`）                                              | `Core`：会话/输入栏内联扩展（`tools`、`messages`、`composer`、`sidebar.sessionRow`）、`events`、`manifest.config`。`Conditional`：通过 `useHostCapabilities()` 协商开放外壳容器 `containers`（`sidebarViews`、`sessionPanels`、`screens`、`projectPages`） | 远程 `WorkspaceMachineRpcFacade`                                                   |
+| **`headless`（`CLI`）**                                      | 跳过前端产物加载                                                                               | 不适用                                                                                                                                                                                                                                                     | 完整支持 `machine`、`events`、`agentRoles`、`skills`、`mcpServers`、`acpProviders` |
 
 ---
 
@@ -166,7 +166,7 @@ flowchart TB
 - **声明式 `config` 与首次引导 `onboarding`：**
   - 支持 `string`、`secret`、`number`、`boolean` 与 `select` 五种字段类型，以及 `scope: "client" | "machine" | "both"`。
   - 凡是 `type: "secret"` 的字段，`scope` **MUST** 为 `"machine"`（省略时默认为 `"machine"`）；任何将 `secret` 声明为 `"client"` 或 `"both"` 的清单 **MUST** 在校验阶段直接拒绝（`manifest_invalid`）。
-  - `onboarding` 列出首次启用时由宿主原生首次配置引导抽屉收集的 `config` / `env` 键名。
+  - `onboarding` 列出首次启用时由宿主原生首次配置引导抽屉收集的 `config` 键名（统一收敛至 `manifest.config`，不再并存重复的 `manifest.env`）。
 - **工作流字段：** `skills`（`skills/<name>/SKILL.md`）、`agentRoles`（绑定 `promptPath`、`skills`、`mcpServers` 与 `defaultProvider`）、`mcpServers`（`stdio` | `http` 进程外入口）与 `acpProviders`（打包 ACP 服务入口）。
 
 ### 5.3 规范性字节与资源预算上限
@@ -198,9 +198,9 @@ flowchart TB
    - 事件投递采用**非阻塞观察者扇出（Observer Fan-out）**：插件 A 的慢回调或抛错 **MUST NOT** 延迟宿主 Session 执行、阻塞 UI 交互或影响插件 B 接收同一事件。
    - 机器侧事件处理器受 `30_000 ms` 超时约束（超时或关闭时触发 `ctx.signal` 中止）；未捕获异常写入 `logs_ring` 与 `diagnostics`，绝不波及兄弟插件。
    - 客户端插件禁用或 `clientDigest` 热替换时，`abort_controller.abort()` **MUST** 自动摘除该实例注册的全部事件监听器。
-4. **托管静态资源与音频播放（`lody.assets.url`、`lody.audio.play`）：**
+4. **正交静态资源寻址与生命周期信号原语（`lody.assets.url`、`lody.signal`）：**
    - `lody.assets.url(relativePath)` 在 Electron 本地协议、Web `plugin/bundle-chunk` 缓存与 Mobile Capacitor WebView 下统一解析打包在 `assets/*` 内的静态资源。
-   - `lody.audio.play(relativePath, { volume })` 通过宿主共享 Web Audio 控制器播放音效，自动遵守全局静音开关、浏览器自动播放解锁与 `lody --safe-mode`。
+   - `lody.signal: AbortSignal` 在插件禁用或 `clientDigest` 热替换时自动中止，使插件可直接组合标准 Web 平台原语（`AudioContext` / `HTMLAudioElement`、`Canvas`、`fetch`、定时器等）并在卸载时确定性回收资源，无需在 SDK 中为具体业务场景堆砌非原语命名空间（如 `lody.audio`）。
 
 ### 6.2 通用工具调用匹配渲染与结构化消息块渲染
 
@@ -228,8 +228,8 @@ flowchart TB
    - `sidebar.headerItems` / `footerItems`：使用 `<SidebarRow />` 的顶/底导航项，联动 `screens.add`。
    - `sidebar.views.add`：与宿主内置 `"Default"` 视图并列可选的自定义侧边栏主体；禁用当前视图时立即回退至 `"Default"`。
 2. **跨设备统一 API 与能力协商（`useHostCapabilities()`）：**
-   - 开发者面向单一 `@lody/plugin-sdk/client` 编写跨端代码，通过 `useHostCapabilities()` 读取 `{ platform: "desktop" | "web" | "mobile", formFactor: "wide" | "compact", surfaces }`。
-   - 在 `Core Conformance` 下，**`desktop` 与 `web` 均 MUST 完整开启全部前端扩展面**；`mobile`（`apps/mobile-capacitor`）在 Core 中开启 `inlineCards`、`events` 与 `declarativeConfig`，并在支持 `Mobile Extended UI Conformance` 时开放全屏视图。在紧凑端注册未开放的宽屏槽位 **MUST NOT** 抛错崩溃——宿主记录 `capability_unavailable_on_platform` 诊断并继续正常运行内联卡片、事件与配置能力。
+   - 开发者面向单一 `@lody/plugin-sdk/client` 编写跨端代码，通过 `useHostCapabilities()` 读取 `{ platform: "desktop" | "web" | "mobile", formFactor: "wide" | "compact", containers: { sidebarViews, sessionPanels, screens, projectPages } }`；其中 `containers` 与 `ClientPluginRegistry` 的外壳挂载命名空间严格 **1:1 对齐**，绝不混入具体业务特性开关或机器在线状态。
+   - 会话与输入栏内联扩展（`tools`、`messages`、`composer`、`sidebar.sessionRow`）、`events` 与 `manifest.config` 在 `desktop`、`web` 与 `mobile` 三端均属 `Core Conformance` 必有基线；`desktop` 与 `web` 在 Core 中同时开启全部外壳容器 `containers`（`sidebarViews`、`sessionPanels`、`screens`、`projectPages`），`mobile`（`apps/mobile-capacitor`）在启用 `Mobile Extended UI Conformance` 时开放上述外壳容器。在紧凑端注册未挂载的外壳容器 **MUST NOT** 抛错崩溃——宿主记录 `capability_unavailable_on_platform` 诊断并继续正常运行内联扩展、事件与配置能力。
 
 ### 6.4 双层外观体系（SemVer 主题令牌 + 宿主托管 CSS）
 
@@ -242,7 +242,7 @@ flowchart TB
 
 1. **Skills（`manifest.skills`）：** 启用期间注入 Agent Role 选择器与 `CreateSessionRequest.skillIds`。
 2. **Agent Roles（`manifest.agentRoles` —— `Core Conformance`）：** 注册为 `plugin:<plugin_id>:<role_id>`，整合系统提示词（`promptPath`）、内置 `skills`、内置 `mcpServers` 与默认 `defaultProvider`。在 Role 选择器中展示插件来源徽章；用户修改时生成用户侧覆盖副本，不污染原插件目录。
-3. **进程外 MCP 服务（`manifest.mcpServers` —— `Core Conformance`）：** 按会话通过 Lody 标准 MCP 底座拉起独立子进程（遵循 [`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md) 核心铁律：**MCP 工具绝不在守护进程主进程内运行**），仅注入最小系统环境变量及 `envKeys` 显式声明的本插件键值。
+3. **进程外 MCP 服务（`manifest.mcpServers` —— `Core Conformance`）：** 按会话通过 Lody 标准 MCP 底座拉起独立子进程（遵循 [`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md) 核心铁律：**MCP 工具绝不在守护进程主进程内运行**），仅注入最小系统环境变量及 `envKeys` 显式引用的本插件 `manifest.config` 键值。
 4. **自定义 ACP Agent 运行时（`manifest.acpProviders` —— `Workflow Provider Conformance`）：** 经 `acp-session-start-gate.ts` 受控并发门禁拉起，注册为 `plugin:<plugin_id>:<provider_id>`，完整对接 `newSession`、`loadSession`、`subagentEvents`、`configOptions` 与问答/权限桥接——使 Sorbet Super Assistant 等深度定制 Agent 无需修改 Lody 源码即可成为原生会话驱动引擎。
 
 ---
@@ -319,7 +319,7 @@ flowchart TB
 
 `PluginHost` 与 `machine` 子进程通过 `stdio: ['ignore', 'pipe', 'pipe', 'ipc']` 通信：
 
-- **Host -> Child：** `init`（`pluginId`、`instanceId`、`dataDir`、`env`、`config`）、`start`（`ready` 后派发一次以触发 `machine.onStart`）、`invoke`（`callId`、`kind`、`descriptorId`、`scope`、`target`、`input`）、`event`（`eventId`、`eventType`、`payload`、`rootUserTurnId?`）、`cancel`（`callId`）、`host_result`、`shutdown`（`graceMs`）。
+- **Host -> Child：** `init`（`pluginId`、`instanceId`、`dataDir`、`config`）、`start`（`ready` 后派发一次以触发 `machine.onStart`）、`invoke`（`callId`、`kind`、`descriptorId`、`scope`、`target`、`input`）、`event`（`eventId`、`eventType`、`payload`、`rootUserTurnId?`）、`cancel`（`callId`）、`host_result`、`shutdown`（`graceMs`）。
 - **Child -> Host：** `ready`（`handlers`、`subscribedEvents`）、`result`（`callId`、`ok`、`data`/`error`）、`invalidate`、`host_call`（`op`: `"lody.read" | "lody.readSnapshot" | "sessions.create" | "sessions.send" | "sessions.requestStop" | "sessions.requestArchive"`）。
 - `stdout` 与 `stderr` 仅作诊断日志写入 `logs_ring`；畸形 IPC 帧立即终止子进程并置为 `Faulted`。
 
@@ -410,7 +410,7 @@ flowchart TB
 - `提供 Agent Role / MCP / ACP 运行时`（`agentRoles`、`mcpServers`、`acpProviders`）
 - `接管工具或消息块渲染`（`client`）
 - `应用主题或自定义 CSS 样式`（`themes`、`styles`）
-- `需要配置敏感密钥`（`config` / `env` 密钥）
+- `需要配置敏感密钥`（`manifest.config` `secret` 字段）
 
 ### 12.2 Agent 辅助创建插件与人类确认审批流（`lody_plugin` MCP）
 
@@ -423,7 +423,7 @@ flowchart TB
 ### 12.3 声明式配置表单与首次使用引导抽屉
 
 - 凡声明 `manifest.config` 的插件，Lody 在 Desktop、Web 与 Mobile 端自动渲染原生设置表单（文本框、掩码钥匙串输入框、数值步进/滑块、开关与下拉单选），90% 的插件无需手写任何设置 UI。
-- 启用插件时若声明了 `manifest.onboarding` 或存在未填写的 `required: true` 配置/密钥，宿主自动弹出**首次使用引导抽屉（First-Run Setup Sheet）**，用户提交后立即拉起进入 `Running`。插件仍可按需通过 `lody.settings.pages.add` 挂载高级自定义设置页。
+- 启用插件时若声明了 `manifest.onboarding` 或存在未填写的 `required: true` `manifest.config` 字段，宿主自动弹出**首次使用引导抽屉（First-Run Setup Sheet）**，用户提交后立即拉起进入 `Running`。插件仍可按需通过 `lody.settings.pages.add` 挂载高级自定义设置页。
 
 ### 12.4 跨设备无缝体验与故障自愈 UX
 
@@ -438,12 +438,12 @@ flowchart TB
 ### 13.1 人类确认门禁与子进程环境变量最小化
 
 - 仅限宿主可信 UI 的人类确认操作或清除了 `LODY_AGENT_SESSION_ID` 的人类终端命令可激活或重载插件。
-- 派生的 `machine`、`mcpServers` 与 `acpProviders` 子进程环境变量仅保留最小系统变量（`PATH`、`HOME`、`TMPDIR`、`LANG`、`TZ`、`NODE_ENV`）及该插件自身声明的 `env`/`config` 键；守护进程 E2EE 签名密钥、KEK、云端令牌与兄弟插件密钥 **MUST NEVER** 注入子进程。
+- 派生的 `machine`、`mcpServers` 与 `acpProviders` 子进程环境变量仅保留最小系统变量（`PATH`、`HOME`、`TMPDIR`、`LANG`、`TZ`、`NODE_ENV`）及 `envKeys` 显式引用的本插件 `manifest.config` 键；守护进程 E2EE 签名密钥、KEK、云端令牌与兄弟插件密钥 **MUST NEVER** 注入子进程。
 
 ### 13.2 前端产物信任门控与 `lody --safe-mode`
 
 - Web、Mobile 与协作者桌面端对远程 `clientDigest` 产物执行逐 `(workspace_id, plugin_id, clientDigest)` 显式信任门控。
-- `lody --safe-mode`（Web 端为 `?safeMode=1`）跳过全部 `client.js`、`themes`、`styles` 与 `audio`，确保核心会话查看、权限审批与 `Stop` 始终可用。
+- `lody --safe-mode`（Web 端为 `?safeMode=1`）跳过全部 `client.js`、`themes` 与 `styles`，确保核心会话查看、权限审批与 `Stop` 始终可用。
 
 ### 13.3 E2EE 访客（`read`）与非访客执行门控
 
@@ -500,7 +500,7 @@ flowchart TB
 
 ### 14.4 操作员干预控制点
 
-1. `lody --safe-mode` / `?safeMode=1`（旁路全部客户端插件 JS、主题、样式与音效）。
+1. `lody --safe-mode` / `?safeMode=1`（旁路全部客户端插件 JS、主题与样式）。
 2. 每个通用工具/消息块卡片头部的宿主原生“查看原始输出 / 原始 Markdown”切换开关。
 3. `lody plugin disable <id>`、`lody plugin reload <id>`、`lody plugin rollback <id>`、`lody plugin doctor <path>` 与 `lody plugin logs <id>`。
 
@@ -708,7 +708,7 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
 
 ### 16.3 Core Conformance — 扩展性验收：事件总线、通用渲染器、侧边栏与双层外观
 
-- **产品验收场景 —— 音效插件（Sound Effect Plugin）：** 纯前端插件订阅 `ui.message.submitted`、`session.turn.completed` 与 `session.waiting_input`，读取声明式 `config`（`pack`、`volume`），通过 `lody.audio.play` 播放打包音效，禁用后 `100%` 摘除事件监听。
+- **产品验收场景 —— 音效插件（Sound Effect Plugin）：** 纯前端插件仅组合 `lody.events.on`（`ui.message.submitted`、`session.turn.completed`、`session.waiting_input`）、声明式 `config`（`pack`、`volume`）、`lody.assets.url`、`lody.signal` 与标准 Web Audio（`AudioContext` / `HTMLAudioElement`），零音频专用 SDK 槽位；`signal` 中止时立即暂停活跃音频，禁用后 `100%` 摘除事件监听。
 - **产品验收场景 —— 跨工具与消息块通用渲染：** `tools.matchRender` 按优先级匹配 Claude/Codex/MCP 的测试执行命令并渲染为交互式排障卡片，为低优先级竞争者记录 `matcher_shadowed`，始终暴露宿主头部“查看原始输出”开关，抛错时经 `SurfaceErrorBoundary` 自动回退，且不破坏 `ai-gui` 正文搜索与回合折叠不变量；`messages.renderBlock` 流式渲染并结算自定义 fenced 消息块。
 - **侧边栏与双层外观：** 三层侧边栏在 `"Default"` 与自定义视图上确定性叠加；`--*` 主题令牌与可销毁 `<style>` 干净挂载与还原；`lody --safe-mode` 旁路全部前端插件。
 
@@ -731,7 +731,7 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
 ### 16.7 条件扩展合规 — Workflow ACP Provider 与移动端全屏扩展 UI
 
 - **`Workflow Provider Conformance`：** 打包的 `manifest.acpProviders`（如 Sorbet Super Assistant）经 `acp-session-start-gate.ts` 受控拉起，支持 `newSession` / `loadSession` / `subagentEvents` / `configOptions`、会话级停止/取消，且严格运行在守护进程之外。
-- **`Mobile Extended UI Conformance`：** 声明支持 `surfaces.fullScreenViews` / `customSidebars` / `sessionPanels` 的移动端宿主在抽屉/半屏容器中安全挂载插件视图，严格遵守 `--safe-area-bottom` 与 `--native-keyboard-height`（[`apps/mobile-capacitor/AGENTS.md`](../apps/mobile-capacitor/AGENTS.md)）。
+- **`Mobile Extended UI Conformance`：** 声明支持 `containers.sidebarViews` / `sessionPanels` / `screens` / `projectPages` 的移动端宿主在抽屉/半屏容器中安全挂载插件视图，严格遵守 `--safe-area-bottom` 与 `--native-keyboard-height`（[`apps/mobile-capacitor/AGENTS.md`](../apps/mobile-capacitor/AGENTS.md)）。
 
 ### 16.8 Real Integration Profile — 真实操作系统子进程与跨端 E2E 套件
 

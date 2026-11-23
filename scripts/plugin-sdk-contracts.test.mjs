@@ -265,62 +265,97 @@ test("issue plugin preserves committed data and remains usable after failed temp
   }
 });
 
-test("sound-effects client plugin subscribes to host events, plays configured cues, and cleans up subscriptions", async () => {
+test("sound-effects client plugin composes events, assets.url, signal, and standard Web Audio without bespoke SDK slots", async () => {
   const listeners = new Map();
   const played = [];
-  const source = readFileSync(
-    path.join(fixtureDir, "examples/sound-effects/client.tsx"),
-    "utf8",
-  );
-  const compiled = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2023,
-    },
-  }).outputText;
-  const mod = { exports: {} };
-  new Function("require", "module", "exports", compiled)(
-    (id) => {
-      if (id === "@lody/plugin-sdk/client") {
-        return { defineClientPlugin: (register) => ({ register }) };
-      }
-      throw new Error(`Unexpected import: ${id}`);
-    },
-    mod,
-    mod.exports,
-  );
+  const createdClips = [];
+  const prevAudio = globalThis.Audio;
+  globalThis.Audio = class MockAudio {
+    constructor(src) {
+      this.src = src;
+      this.volume = 1;
+      this.paused = false;
+      createdClips.push(this);
+    }
+    addEventListener() {}
+    pause() {
+      this.paused = true;
+    }
+    async play() {
+      played.push({ src: this.src, volume: this.volume });
+    }
+  };
 
-  let currentConfig = { pack: "soft-wood", volume: 0.5, playOnSend: true };
-  const cleanup = mod.exports.default.register({
-    events: {
-      on(type, fn) {
-        listeners.set(type, fn);
-        return () => listeners.delete(type);
+  try {
+    const source = readFileSync(
+      path.join(fixtureDir, "examples/sound-effects/client.tsx"),
+      "utf8",
+    );
+    const compiled = ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2023,
       },
-    },
-    config: {
-      get: () => currentConfig,
-    },
-    audio: {
-      async play(asset, opts) {
-        played.push({ asset, ...opts });
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("require", "module", "exports", compiled)(
+      (id) => {
+        if (id === "@lody/plugin-sdk/client") {
+          return { defineClientPlugin: (register) => ({ register }) };
+        }
+        throw new Error(`Unexpected import: ${id}`);
       },
-    },
-  });
+      mod,
+      mod.exports,
+    );
 
-  await listeners.get("ui.message.submitted")({});
-  await listeners.get("session.turn.completed")({ stopReason: "cancelled" });
-  await listeners.get("session.turn.completed")({ stopReason: "end_turn" });
-  await listeners.get("session.waiting_input")({});
+    const abortController = new AbortController();
+    const currentConfig = { pack: "soft-wood", volume: 0.5, playOnSend: true };
+    const cleanup = mod.exports.default.register({
+      signal: abortController.signal,
+      events: {
+        on(type, fn) {
+          listeners.set(type, fn);
+          return () => listeners.delete(type);
+        },
+      },
+      config: {
+        get: () => currentConfig,
+      },
+      assets: {
+        url: (relPath) =>
+          `lody-plugin://sound-effects/${relPath.replace(/^\.\//, "")}`,
+      },
+    });
 
-  assert.deepEqual(played, [
-    { asset: "./assets/soft-wood-send.mp3", volume: 0.5 },
-    { asset: "./assets/soft-wood-complete.mp3", volume: 0.5 },
-    { asset: "./assets/soft-wood-question.mp3", volume: 0.5 },
-  ]);
+    await listeners.get("ui.message.submitted")({});
+    await listeners.get("session.turn.completed")({ stopReason: "cancelled" });
+    await listeners.get("session.turn.completed")({ stopReason: "end_turn" });
+    await listeners.get("session.waiting_input")({});
 
-  cleanup();
-  assert.equal(listeners.size, 0);
+    assert.deepEqual(played, [
+      {
+        src: "lody-plugin://sound-effects/assets/soft-wood-send.mp3",
+        volume: 0.5,
+      },
+      {
+        src: "lody-plugin://sound-effects/assets/soft-wood-complete.mp3",
+        volume: 0.5,
+      },
+      {
+        src: "lody-plugin://sound-effects/assets/soft-wood-question.mp3",
+        volume: 0.5,
+      },
+    ]);
+
+    abortController.abort();
+    assert.ok(createdClips.every((clip) => clip.paused));
+
+    cleanup();
+    assert.equal(listeners.size, 0);
+  } finally {
+    globalThis.Audio = prevAudio;
+  }
 });
 
 test("sorbet-workflow persists task progress to ctx.dataDir and recovers unfinished verifier sessions across daemon restart via machine.onStart", async (t) => {

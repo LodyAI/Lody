@@ -86,10 +86,12 @@ export const validManifest: PluginManifest = {
     },
   ],
   styles: ["./assets/war-room-snippet.css"],
-  env: {
+  config: {
     TRACKER_API_KEY: {
+      type: "secret",
+      scope: "machine",
+      label: "Tracker API Key",
       description: "API token for issue lookup on the daemon.",
-      secret: true,
     },
   },
 };
@@ -126,12 +128,28 @@ export const quarantinedPluginCode: PluginCallErrorCode = "plugin_faulted";
 // @ts-expect-error Whole-package revision_mismatch was removed in favor of clientDigest + runtime instanceId.
 export const removedRevisionCode: PluginCallErrorCode = "revision_mismatch";
 
+export const legacyEnvManifest: PluginManifest = {
+  id: "legacy-env",
+  version: "0.1.0",
+  sdk: "^1.0.0",
+  title: "Legacy Env",
+  client: "./dist/client.js",
+  // @ts-expect-error Legacy `manifest.env` was unified into `manifest.config` (`type: "secret"`, `scope: "machine"`).
+  env: { TRACKER_API_KEY: { description: "legacy", secret: true } },
+};
+
 export const minimalShellPlugin = defineClientPlugin((lody) => {
+  const signal: AbortSignal = lody.signal;
+  void signal;
+
   // @ts-expect-error Singleton `sidebar.replace` was unified into selectable `sidebar.views.add` + `sessionRow.decorate`.
   void lody.sidebar.replace;
 
   // @ts-expect-error Speculative `results.add` MIME renderer was removed because history stores structured `tool_call` outputs.
   void lody.results;
+
+  // @ts-expect-error Non-primitive `lody.audio` was removed in favor of `assets.url` + `signal` + standard Web Audio.
+  void lody.audio;
 
   lody.themes.add({
     id: "live-ocean",
@@ -379,7 +397,15 @@ export async function verifyExtensibilityAndRawSnapshots(
   const lody = useLody();
   const caps = useHostCapabilities();
   const platform: "desktop" | "web" | "mobile" = caps.platform;
+  const hasScreens: boolean = caps.containers.screens;
   void platform;
+  void hasScreens;
+  // @ts-expect-error Non-primitive `surfaces` (with `audioPlayback` / `declarativeConfig`) was replaced by 1:1 `containers`.
+  void caps.surfaces;
+  // @ts-expect-error Machine execution is per-MachineRef presence, never a client UI host boolean.
+  void caps.machineExecution;
+  // @ts-expect-error Non-primitive `lody.audio` was removed from `LodyClient`.
+  void lody.audio;
 
   const cfg = usePluginConfig<{ readonly volume: number }>();
   await cfg.set("volume", 0.8);

@@ -24,7 +24,7 @@ Translation: current
 
 简化进程生命周期绝不等于阉割平台扩展能力：
 
-- **规范化宿主事件总线（`lody.events.on` 与 `machine.events.on`）+ 托管音频/静态资源：** 插件可直接订阅类型化 Session/Turn/Tool 状态跃迁及本地 UI 交互事件（`ui.message.submitted`、`ui.session.switched`、`ui.interaction.resolved`、`ui.command.invoked`），无需监听 DOM 或轮询状态即可实现零后端进程的音效插件（`lody.audio.play`）与事件驱动编排器（配合 `machine.onStart(ctx)` 在守护进程重启后恢复未完结的工作流日志步骤）。
+- **规范化宿主事件总线（`lody.events.on` 与 `machine.events.on`）+ 正交静态资源与生命周期原语（`lody.assets.url`、`lody.signal`）：** 插件可直接订阅类型化 Session/Turn/Tool 状态跃迁及本地 UI 交互事件（`ui.message.submitted`、`ui.session.switched`、`ui.interaction.resolved`、`ui.command.invoked`），直接组合标准 Web Audio + `assets.url` + `signal` 实现零后端进程的音效插件而不在 SDK 中制造非原语 `audio` 槽位与事件驱动编排器（配合 `machine.onStart(ctx)` 在守护进程重启后恢复未完结的工作流日志步骤）。
 - **通用工具调用匹配渲染与结构化消息块渲染：** 在自有工具 `tools.render` 之外，新增 `tools.matchRender` 支持按工具名、MCP 服务、`acpKinds`、命令正则或谓词匹配内置/Claude/Codex/Antigravity/MCP 工具并按确定性优先级接管展示；新增 `messages.renderBlock` 渲染自定义 fenced 代码块/结构化产物。宿主在卡片头部强制保留不可伪造的“查看原始输出 / 原始 Markdown”切换开关与 `SurfaceErrorBoundary`，确保绝不遮蔽真实输出或破坏 [`ai-gui`](../../../../packages/components/src/components/ai-gui/AGENTS.md) 搜索与折叠不变量。
 - **完整 Workflow 插件组合（`agentRoles`、`skills`、`mcpServers`、`acpProviders`）：** 支持像 Sorbet Super Assistant 一样在同一插件包中交付 Roles、Skills、守护进程外标准 MCP 服务（[`apps/cli/src/agent/AGENTS.md`](../../../../apps/cli/src/agent/AGENTS.md)）以及自定义 ACP Agent 运行时（`Workflow Provider Conformance Profile`，经 `acp-session-start-gate.ts` 受控拉起）。
 - **扩展类型化 `lodyQueries` + 脱离底层句柄的只读原始状态快照（`useLodySnapshot` / `readSnapshot`）：** 在 18 个类型化查询（含 `sessionTurns`、`subagentRun`、`agentConfigs`、`automations`、`plugins`）之外，直接复用现有 Loro/Flock 与 [`session-data`](../../../../packages/shared/src/session-data/AGENTS.md) / Roost 读取及增量订阅基础设施，按需懒物化授权范围内的深度冻结（`Object.freeze`）脱敏只读快照（零平行 Domain Store、不在每次提交或流式 Token 时重建整棵状态树），同时保持 `HistoryWriter` 与内核命令作为唯一写入口。
@@ -32,7 +32,7 @@ Translation: current
 
 ### 3. 一等公民的 DX、UX、Agent 提议-人类确认工作流与跨端 Core 一致性
 
-- **Electron + Web 同属 `Core Conformance`，Mobile Capacitor 渐进协商：** 远程 `client.js` 分页流式加载（`<= 4 MiB` + `clientDigest` 信任门禁）升格为 `Core Conformance`，保证 Web 与桌面端体验完全一致；[`apps/mobile-capacitor`](../../../../apps/mobile-capacitor/AGENTS.md) 在 Core 中原生支持工具/消息内联卡片、客户端事件与声明式配置，并通过 `useHostCapabilities()` 协商全屏自定义视图。
+- **Electron + Web 同属 `Core Conformance`，Mobile Capacitor 渐进协商：** 远程 `client.js` 分页流式加载（`<= 4 MiB` + `clientDigest` 信任门禁）升格为 `Core Conformance`，保证 Web 与桌面端体验完全一致；[`apps/mobile-capacitor`](../../../../apps/mobile-capacitor/AGENTS.md) 在 Core 中原生支持工具/消息内联卡片、客户端事件与声明式配置，并通过 `useHostCapabilities()` 协商与注册表 1:1 对齐的外壳 `containers`（`sidebarViews`、`sessionPanels`、`screens`、`projectPages`）。
 - **声明式 `manifest.config` + `onboarding`：** 自动生成原生插件设置表单与首次启用配置引导抽屉，免除手写设置面板负担，且 `secret` 字段仅落盘守护进程系统钥匙串。
 - **Agent 辅助开发与 `lody_plugin` 提议-确认门禁：** 复用 [`schedules/AGENTS.md`](../../../../apps/cli/src/lib/schedules/AGENTS.md)（`schedule_proposal.ts`）与 `lody_agent_role` 的成熟范式，Agent 可脚手架生成插件并通过 `propose_install` / `propose_enable` / `propose_reload` 发送幂等聊天审批卡片，可执行代码的启用始终必须经人类点击确认（人类终端清除 `LODY_AGENT_SESSION_ID`）。
 

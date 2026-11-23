@@ -146,15 +146,18 @@ export interface MutationHandle<TInput, TOutput> {
 export interface HostCapabilities {
   readonly platform: "desktop" | "web" | "mobile";
   readonly formFactor: "wide" | "compact";
-  readonly surfaces: {
-    readonly inlineCards: boolean;
-    readonly declarativeConfig: boolean;
-    readonly fullScreenViews: boolean;
-    readonly customSidebars: boolean;
+  /**
+   * Structural shell containers mounted by the current client host, named 1:1 after their
+   * `ClientPluginRegistry` namespaces. Inline session/composer contributions (`tools`,
+   * `messages`, `composer`, `sidebar.sessionRow`) and `manifest.config` are Core invariants
+   * on every host.
+   */
+  readonly containers: {
+    readonly sidebarViews: boolean;
     readonly sessionPanels: boolean;
-    readonly audioPlayback: boolean;
+    readonly screens: boolean;
+    readonly projectPages: boolean;
   };
-  readonly machineExecution: boolean;
 }
 
 export type DraftItem =
@@ -286,6 +289,8 @@ export interface PluginConfigHandle<
 }
 
 export interface ClientPluginRegistry {
+  /** Aborts automatically when this client plugin instance disables or hot-reloads. */
+  readonly signal: AbortSignal;
   /**
    * Subscribes to canonical host lifecycle & UI interaction events without DOM scraping or polling.
    * Subscriptions are automatically torn down when the plugin disables or hot-reloads.
@@ -305,12 +310,6 @@ export interface ClientPluginRegistry {
   };
   readonly assets: {
     url(relativePath: string): string;
-  };
-  readonly audio: {
-    play(
-      relativePath: string,
-      options?: { readonly volume?: number },
-    ): Promise<void>;
   };
   readonly tools: {
     render<TInput extends z.ZodType, TOutput extends z.ZodType>(
@@ -458,12 +457,6 @@ export interface LodyClient {
   readSnapshot(target: RawSnapshotTarget): Promise<RawDocumentSnapshot>;
   readonly assets: {
     url(relativePath: string): string;
-  };
-  readonly audio: {
-    play(
-      relativePath: string,
-      options?: { readonly volume?: number },
-    ): Promise<void>;
   };
   readonly sessions: {
     open(session: SessionRef): void;
