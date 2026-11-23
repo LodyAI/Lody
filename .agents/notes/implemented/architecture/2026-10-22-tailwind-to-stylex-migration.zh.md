@@ -3,7 +3,7 @@
 Status: implemented
 Translation: current
 
-PR: [#1875](https://github.com/LodyAI/Lody/pull/1875)（草稿）
+PR: [#1875](https://github.com/LodyAI/Lody/pull/1875)
 
 [English](2026-10-22-tailwind-to-stylex-migration.md)
 

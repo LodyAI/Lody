@@ -40,7 +40,7 @@ export function applyPasskeyPackaging({ config, plan, repoRoot, generatedDirecto
   if (!plan) return
   for (const { arch, file } of plan.addons) {
     if (!existsSync(file)) throw new Error(`Missing passkey addon for ${arch}: ${file}`)
-    execFileSync('lipo', ['-verify_arch', arch === 'x64' ? 'x86_64' : arch, file])
+    execFileSync('lipo', [file, '-verify_arch', arch === 'x64' ? 'x86_64' : arch])
   }
   if (!existsSync(plan.provisioningProfile)) throw new Error('Missing passkey provisioning profile')
   const entitlements = path.join(generatedDirectory, 'entitlements.passkey.plist')

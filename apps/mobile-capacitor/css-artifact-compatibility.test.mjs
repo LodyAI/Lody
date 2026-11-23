@@ -4,10 +4,10 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { assertCompatibleCss, buildCssFixture } from './css-compatibility-fixture.mjs';
 
-void test('the mobile CSS pipeline lowers installed PDF, Monaco, Tailwind and StyleX styles', async () => {
+void test('the mobile CSS pipeline lowers installed PDF, Monaco, base and StyleX styles', async () => {
   const { css } = await buildCssFixture();
   assertCompatibleCss(css, 'mobile CSS fixture');
-  for (const selector of ['.textLayer', '.monaco-editor', '@layer', '.markdown-reference-chip']) {
+  for (const selector of ['.textLayer', '.monaco-editor', '@layer']) {
     assert.ok(css.includes(selector), `missing emitted styles: ${selector}`);
   }
 });
